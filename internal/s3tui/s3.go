@@ -11,10 +11,12 @@ import (
 	"time"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
-	awsconfig "github.com/aws/aws-sdk-go-v2/config"
 	"github.com/aws/aws-sdk-go-v2/service/s3"
 	s3types "github.com/aws/aws-sdk-go-v2/service/s3/types"
 	"github.com/aws/smithy-go"
+
+	"github.com/user/aws_explorer/internal/auth"
+	"github.com/user/aws_explorer/internal/config"
 )
 
 const awsRequestTimeout = 30 * time.Second
@@ -24,16 +26,8 @@ type S3Client struct {
 	ctx    context.Context
 }
 
-func NewS3Client(ctx context.Context, profile, region, endpointURL string) (*S3Client, error) {
-	opts := []func(*awsconfig.LoadOptions) error{}
-	if region != "" {
-		opts = append(opts, awsconfig.WithRegion(region))
-	}
-	if profile != "" {
-		opts = append(opts, awsconfig.WithSharedConfigProfile(profile))
-	}
-
-	cfg, err := awsconfig.LoadDefaultConfig(ctx, opts...)
+func NewS3Client(ctx context.Context, awsCfg *config.AWSConfig, region, endpointURL string) (*S3Client, error) {
+	cfg, err := auth.BuildAWSConfig(ctx, awsCfg, region)
 	if err != nil {
 		return nil, fmt.Errorf("unable to load AWS SDK config: %w", err)
 	}

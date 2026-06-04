@@ -8,6 +8,7 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/spf13/cobra"
+	"github.com/user/aws_explorer/internal/config"
 	"github.com/user/aws_explorer/internal/s3tui"
 	"github.com/user/aws_explorer/internal/tui"
 )
@@ -16,6 +17,8 @@ var (
 	s3Bucket      string
 	s3Prefix      string
 	s3Profile     string
+	s3AuthMethod  string
+	s3RoleARN     string
 	s3Region      string
 	s3Theme       string
 	s3AllowDelete bool
@@ -30,13 +33,29 @@ var s3Cmd = &cobra.Command{
 		ctx, cancel := context.WithCancel(context.Background())
 		defer cancel()
 
-		// Get region/profile from global flags or local flags
-		profile := awsProfile
+		// Build auth config, preferring local s3 flags over global ones.
+		s3Cfg := &config.AWSConfig{
+			Profile:    awsProfile,
+			AuthMethod: awsAuthMethod,
+		}
 		if s3Profile != "" {
-			profile = s3Profile
+			s3Cfg.Profile = s3Profile
+		}
+		if s3AuthMethod != "" {
+			s3Cfg.AuthMethod = s3AuthMethod
+		}
+		roleARN := awsRoleARN
+		if s3RoleARN != "" {
+			roleARN = s3RoleARN
+		}
+		if roleARN != "" {
+			s3Cfg.STS.RoleARN = roleARN
+			if s3Cfg.AuthMethod == "" || s3Cfg.AuthMethod == "auto" {
+				s3Cfg.AuthMethod = "sts"
+			}
 		}
 
-		m, err := s3tui.NewModel(ctx, profile, s3Region, s3Bucket, s3Prefix, s3Theme, s3AllowDelete, s3EndpointURL)
+		m, err := s3tui.NewModel(ctx, s3Cfg, s3Region, s3Bucket, s3Prefix, s3Theme, s3AllowDelete, s3EndpointURL)
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "Error initializing S3 TUI: %v\n", err)
 			os.Exit(1)
@@ -54,7 +73,9 @@ var s3Cmd = &cobra.Command{
 func init() {
 	s3Cmd.Flags().StringVarP(&s3Bucket, "bucket", "b", "", "S3 bucket to explore")
 	s3Cmd.Flags().StringVarP(&s3Prefix, "prefix", "p", "", "Initial S3 prefix")
-	s3Cmd.Flags().StringVar(&s3Profile, "profile", "", "AWS profile (overrides global)")
+	s3Cmd.Flags().StringVar(&s3Profile, "profile", "", "AWS named profile (overrides global --profile)")
+	s3Cmd.Flags().StringVar(&s3AuthMethod, "auth-method", "", "Auth method: auto, profile, env, static, sts (overrides global --auth-method)")
+	s3Cmd.Flags().StringVar(&s3RoleARN, "role-arn", "", "IAM role ARN to assume via STS (overrides global --role-arn)")
 	s3Cmd.Flags().StringVar(&s3Region, "region", "us-east-1", "AWS region")
 	s3Cmd.Flags().StringVar(&s3Theme, "theme", "spotted-pardalote", "Color theme ("+strings.Join(tui.ThemeNames(), ", ")+")")
 	s3Cmd.Flags().BoolVar(&s3AllowDelete, "allow-delete", false, "Enable delete operations (guarded by confirmation)")

@@ -8,10 +8,10 @@ import (
 	"strings"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
-	awsconfig "github.com/aws/aws-sdk-go-v2/config"
 	awsec2 "github.com/aws/aws-sdk-go-v2/service/ec2"
 	"golang.org/x/sync/errgroup"
 
+	"github.com/user/aws_explorer/internal/auth"
 	"github.com/user/aws_explorer/internal/awserr"
 	"github.com/user/aws_explorer/internal/config"
 	"github.com/user/aws_explorer/internal/model"
@@ -42,13 +42,16 @@ type Engine struct {
 }
 
 // NewEngine creates a new scanning engine.
-func NewEngine(ctx context.Context, cfg *config.Config, profile string) (*Engine, error) {
-	slog.Info("Initializing AWS configuration", "profile", profile)
+func NewEngine(ctx context.Context, cfg *config.Config) (*Engine, error) {
+	slog.Info("Initializing AWS configuration",
+		"authMethod", cfg.AWS.AuthMethod,
+		"profile", cfg.AWS.Profile,
+	)
 
 	// Resolve regions from config or default
 	regions := cfg.AWS.Regions
 	if len(regions) == 0 {
-		regions = []string{"us-east-1"} // Default fallback if not provided
+		regions = []string{"us-east-1"}
 	}
 
 	// Check if "all" is in the regions list
@@ -62,16 +65,7 @@ func NewEngine(ctx context.Context, cfg *config.Config, profile string) (*Engine
 		}
 	}
 
-	opts := []func(*awsconfig.LoadOptions) error{
-		awsconfig.WithRegion(bootstrapRegion),
-	}
-	if profile != "" {
-		opts = append(opts, awsconfig.WithSharedConfigProfile(profile))
-	} else if cfg.AWS.Profile != "" && cfg.AWS.Profile != "default" {
-		opts = append(opts, awsconfig.WithSharedConfigProfile(cfg.AWS.Profile))
-	}
-
-	awscfg, err := awsconfig.LoadDefaultConfig(ctx, opts...)
+	awscfg, err := auth.BuildAWSConfig(ctx, &cfg.AWS, bootstrapRegion)
 	if err != nil {
 		return nil, fmt.Errorf("unable to load AWS config: %w", err)
 	}

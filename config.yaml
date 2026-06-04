@@ -5,8 +5,31 @@ app:
   maxConcurrency: 8
 
 aws:
-  profile: default
+  # authMethod controls how credentials are obtained. Valid values:
+  #   auto    - AWS SDK default chain (env vars → ~/.aws → EC2/ECS metadata)  [default]
+  #   profile - named profile from ~/.aws/credentials or ~/.aws/config
+  #   env     - only AWS_ACCESS_KEY_ID + AWS_SECRET_ACCESS_KEY env vars
+  #   static  - plaintext credentials in this file (see aws.static below)
+  #   sts     - assume an IAM role via STS (see aws.sts below)
   authMethod: auto
+  profile: default
+
+  # STS AssumeRole — used when authMethod is "sts".
+  # Base credentials (profile / env / default chain) are used to call sts:AssumeRole.
+  sts:
+    roleArn: ""           # required, e.g. arn:aws:iam::123456789012:role/MyRole
+    sessionName: ""       # optional; defaults to "aws-explorer"
+    externalId: ""        # optional; required by some cross-account trust policies
+    mfaSerial: ""         # optional; ARN of your MFA device
+    durationSeconds: 0    # optional; 0 means AWS default (3600 s)
+
+  # Static credentials — used when authMethod is "static".
+  # Avoid committing real keys; prefer environment variables or profiles instead.
+  static:
+    accessKeyId: ""
+    secretAccessKey: ""
+    sessionToken: ""      # optional; needed for temporary credentials
+
   # Set to true to scan all available AWS regions, or list specific regions below
   allRegions: false
   regions:

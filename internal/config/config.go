@@ -17,10 +17,28 @@ type AppConfig struct {
 }
 
 type AWSConfig struct {
-	Profile    string   `mapstructure:"profile"`
-	AuthMethod string   `mapstructure:"authMethod"`
-	Regions    []string `mapstructure:"regions"`
-	AllRegions bool     `mapstructure:"allRegions"`
+	Profile    string           `mapstructure:"profile"`
+	AuthMethod string           `mapstructure:"authMethod"` // auto, profile, env, static, sts
+	Regions    []string         `mapstructure:"regions"`
+	AllRegions bool             `mapstructure:"allRegions"`
+	STS        STSConfig        `mapstructure:"sts"`
+	Static     StaticCredentials `mapstructure:"static"`
+}
+
+// STSConfig holds settings for the "sts" auth method (AssumeRole).
+type STSConfig struct {
+	RoleARN     string `mapstructure:"roleArn"`
+	SessionName string `mapstructure:"sessionName"`
+	ExternalID  string `mapstructure:"externalId"`
+	MFASerial   string `mapstructure:"mfaSerial"`
+	Duration    int    `mapstructure:"durationSeconds"` // 0 means use AWS default (1 hour)
+}
+
+// StaticCredentials holds plaintext credentials for the "static" auth method.
+type StaticCredentials struct {
+	AccessKeyID     string `mapstructure:"accessKeyId"`
+	SecretAccessKey string `mapstructure:"secretAccessKey"`
+	SessionToken    string `mapstructure:"sessionToken"`
 }
 
 type ServiceConfig struct {
