@@ -69,7 +69,7 @@ func (c *Collector) mapRole(role types.Role, detail services.DetailLevel) model.
 	}
 
 	if detail == services.DetailLevelDetailed || detail == services.DetailLevelRaw {
-		res.Details = map[string]interface{}{
+		res.Details = map[string]any{
 			"assumeRolePolicyDocument": aws.ToString(role.AssumeRolePolicyDocument),
 			"description":              aws.ToString(role.Description),
 			"maxSessionDuration":       aws.ToInt32(role.MaxSessionDuration),

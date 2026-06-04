@@ -1,6 +1,9 @@
 package services
 
-import "sync"
+import (
+	"sort"
+	"sync"
+)
 
 // Registry holds the registered collectors.
 type Registry struct {
@@ -30,13 +33,16 @@ func (r *Registry) Get(name string) (Collector, bool) {
 	return c, ok
 }
 
-// GetAll returns all registered collectors.
+// GetAll returns all registered collectors in deterministic (name-sorted) order.
 func (r *Registry) GetAll() []Collector {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
-	var all []Collector
+	all := make([]Collector, 0, len(r.collectors))
 	for _, c := range r.collectors {
 		all = append(all, c)
 	}
+	sort.Slice(all, func(i, j int) bool {
+		return all[i].Name() < all[j].Name()
+	})
 	return all
 }

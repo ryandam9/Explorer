@@ -73,7 +73,7 @@ func (c *Collector) mapAlarm(region string, alarm types.MetricAlarm, detail serv
 	}
 
 	if detail == services.DetailLevelDetailed || detail == services.DetailLevelRaw {
-		res.Details = map[string]interface{}{
+		res.Details = map[string]any{
 			"alarmDescription":        aws.ToString(alarm.AlarmDescription),
 			"actionsEnabled":          aws.ToBool(alarm.ActionsEnabled),
 			"insufficientDataActions": alarm.InsufficientDataActions,

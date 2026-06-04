@@ -74,7 +74,7 @@ func (c *Collector) mapCluster(region string, cluster *types.Cluster, detail ser
 	}
 
 	if detail == services.DetailLevelDetailed || detail == services.DetailLevelRaw {
-		res.Details = map[string]interface{}{
+		res.Details = map[string]any{
 			"roleArn":         aws.ToString(cluster.RoleArn),
 			"platformVersion": aws.ToString(cluster.PlatformVersion),
 		}

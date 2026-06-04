@@ -72,7 +72,7 @@ func (c *Collector) mapInstance(region string, instance types.DBInstance, detail
 	}
 
 	if detail == services.DetailLevelDetailed || detail == services.DetailLevelRaw {
-		res.Details = map[string]interface{}{
+		res.Details = map[string]any{
 			"allocatedStorage":   aws.ToInt32(instance.AllocatedStorage),
 			"multiAZ":            aws.ToBool(instance.MultiAZ),
 			"publiclyAccessible": aws.ToBool(instance.PubliclyAccessible),

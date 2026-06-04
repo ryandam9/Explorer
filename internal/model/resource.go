@@ -15,5 +15,5 @@ type Resource struct {
 	CreatedAt *time.Time             `json:"createdAt,omitempty"`
 	Tags      map[string]string      `json:"tags,omitempty"`
 	Summary   map[string]string      `json:"summary,omitempty"`
-	Details   map[string]interface{} `json:"details,omitempty"`
+	Details   map[string]any `json:"details,omitempty"`
 }

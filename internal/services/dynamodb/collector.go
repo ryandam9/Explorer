@@ -83,7 +83,7 @@ func (c *Collector) mapTable(region string, table *types.TableDescription, detai
 		for _, ks := range table.KeySchema {
 			keySchemas = append(keySchemas, fmt.Sprintf("%s (%s)", aws.ToString(ks.AttributeName), string(ks.KeyType)))
 		}
-		res.Details = map[string]interface{}{
+		res.Details = map[string]any{
 			"keySchema":          keySchemas,
 			"attributeCount":     len(table.AttributeDefinitions),
 			"deletionProtection": aws.ToBool(table.DeletionProtectionEnabled),
