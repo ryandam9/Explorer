@@ -6,11 +6,13 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"sort"
 	"strings"
 	"sync"
 	"time"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
+	awsec2 "github.com/aws/aws-sdk-go-v2/service/ec2"
 	"github.com/aws/aws-sdk-go-v2/service/s3"
 	s3types "github.com/aws/aws-sdk-go-v2/service/s3/types"
 	"github.com/aws/smithy-go"
@@ -46,6 +48,66 @@ func NewS3Client(ctx context.Context, awsCfg *config.AWSConfig, region, endpoint
 		client: client,
 		ctx:    ctx,
 	}, nil
+}
+
+// fallbackRegions is used when EC2 DescribeRegions is unavailable.
+var fallbackRegions = []string{
+	"af-south-1",
+	"ap-east-1", "ap-northeast-1", "ap-northeast-2", "ap-northeast-3",
+	"ap-south-1", "ap-south-2",
+	"ap-southeast-1", "ap-southeast-2", "ap-southeast-3", "ap-southeast-4",
+	"ca-central-1", "ca-west-1",
+	"eu-central-1", "eu-central-2",
+	"eu-north-1", "eu-south-1", "eu-south-2",
+	"eu-west-1", "eu-west-2", "eu-west-3",
+	"il-central-1",
+	"me-central-1", "me-south-1",
+	"mx-central-1",
+	"sa-east-1",
+	"us-east-1", "us-east-2", "us-west-1", "us-west-2",
+}
+
+// ListRegions returns all available AWS regions. It queries EC2 DescribeRegions
+// and falls back to a hardcoded list if that call fails.
+func ListRegions(ctx context.Context, awsCfg *config.AWSConfig) []string {
+	cfg, err := auth.BuildAWSConfig(ctx, awsCfg, "")
+	if err != nil {
+		return fallbackRegions
+	}
+	client := awsec2.NewFromConfig(cfg)
+	output, err := client.DescribeRegions(ctx, &awsec2.DescribeRegionsInput{})
+	if err != nil {
+		return fallbackRegions
+	}
+	regions := make([]string, 0, len(output.Regions))
+	for _, r := range output.Regions {
+		if r.RegionName != nil {
+			regions = append(regions, *r.RegionName)
+		}
+	}
+	sort.Strings(regions)
+	if len(regions) == 0 {
+		return fallbackRegions
+	}
+	return regions
+}
+
+// ListBucketsInRegion creates a region-scoped S3 client and returns the bucket list.
+// Returns (nil, nil) for access-denied errors so callers can skip silently.
+func ListBucketsInRegion(ctx context.Context, awsCfg *config.AWSConfig, region, endpointURL string) ([]s3types.Bucket, error) {
+	client, err := NewS3Client(ctx, awsCfg, region, endpointURL)
+	if err != nil {
+		return nil, err
+	}
+	buckets, err := client.ListBuckets()
+	if err != nil {
+		if hasAPIErrorCode(err, "AccessDenied", "AccessDeniedException",
+			"UnauthorizedOperation", "AuthorizationError") {
+			return nil, nil
+		}
+		return nil, err
+	}
+	return buckets, nil
 }
 
 func (c *S3Client) requestContext() (context.Context, context.CancelFunc) {
