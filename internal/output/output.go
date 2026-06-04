@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"encoding/json"
 	"fmt"
+	"io"
 	"os"
 	"strings"
 	"text/tabwriter"
@@ -14,11 +15,7 @@ import (
 // PrintResult takes an ExploreResult and formats it according to the given format.
 func PrintResult(result model.ExploreResult, format string) {
 	if len(result.Errors) > 0 {
-		fmt.Fprintf(os.Stderr, "Errors encountered during collection:\n")
-		for _, err := range result.Errors {
-			fmt.Fprintf(os.Stderr, "  [%s|%s] %s: %s\n", err.Service, err.Region, err.Code, err.Message)
-		}
-		fmt.Fprintln(os.Stderr)
+		printErrors(os.Stderr, result.Errors)
 	}
 
 	if len(result.Resources) == 0 {
@@ -54,8 +51,8 @@ func streamTable(chunks <-chan model.ResultChunk) {
 
 	anyOutput := false
 	for chunk := range chunks {
-		for _, err := range chunk.Errors {
-			fmt.Fprintf(os.Stderr, "[%s|%s] %s: %s\n", err.Service, err.Region, err.Code, err.Message)
+		if len(chunk.Errors) > 0 {
+			printErrors(os.Stderr, chunk.Errors)
 		}
 
 		for _, r := range chunk.Resources {
@@ -78,8 +75,8 @@ func streamJSON(chunks <-chan model.ResultChunk) {
 	first := true
 	bw.WriteString("[")
 	for chunk := range chunks {
-		for _, err := range chunk.Errors {
-			fmt.Fprintf(os.Stderr, "[%s|%s] %s: %s\n", err.Service, err.Region, err.Code, err.Message)
+		if len(chunk.Errors) > 0 {
+			printErrors(os.Stderr, chunk.Errors)
 		}
 
 		for _, r := range chunk.Resources {
@@ -103,6 +100,57 @@ func printJSON(resources []model.Resource) {
 	enc.SetIndent("", "  ")
 	if err := enc.Encode(resources); err != nil {
 		fmt.Fprintf(os.Stderr, "Failed to marshal JSON: %v\n", err)
+	}
+}
+
+// printErrors writes errors to w, grouping access-denied errors into a distinct
+// "Insufficient Privileges" section so users know exactly what permissions to add.
+func printErrors(w io.Writer, errs []model.ExploreError) {
+	var authErrs, otherErrs []model.ExploreError
+	for _, e := range errs {
+		if e.Code == "AccessDenied" {
+			authErrs = append(authErrs, e)
+		} else {
+			otherErrs = append(otherErrs, e)
+		}
+	}
+
+	if len(authErrs) > 0 {
+		fmt.Fprintln(w, "")
+		fmt.Fprintln(w, "  +--------------------------------------------------------------+")
+		fmt.Fprintln(w, "  |              INSUFFICIENT PRIVILEGES                         |")
+		fmt.Fprintln(w, "  +--------------------------------------------------------------+")
+		for _, e := range authErrs {
+			fmt.Fprintf(w, "  | Service : %-50s |\n", e.Service+" ("+e.Region+")")
+			// Word-wrap the message at 50 chars so it fits the box
+			words := strings.Fields(e.Message)
+			line := ""
+			for _, word := range words {
+				if len(line)+1+len(word) > 50 {
+					fmt.Fprintf(w, "  | %-52s |\n", line)
+					line = word
+				} else {
+					if line == "" {
+						line = word
+					} else {
+						line += " " + word
+					}
+				}
+			}
+			if line != "" {
+				fmt.Fprintf(w, "  | %-52s |\n", line)
+			}
+			fmt.Fprintln(w, "  +--------------------------------------------------------------+")
+		}
+		fmt.Fprintln(w, "")
+	}
+
+	if len(otherErrs) > 0 {
+		fmt.Fprintln(w, "Errors encountered during collection:")
+		for _, e := range otherErrs {
+			fmt.Fprintf(w, "  [%s|%s] %s: %s\n", e.Service, e.Region, e.Code, e.Message)
+		}
+		fmt.Fprintln(w, "")
 	}
 }
 

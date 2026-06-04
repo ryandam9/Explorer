@@ -285,9 +285,56 @@ func (m tuiModel) renderDetail(r model.Resource) string {
 	return b.String()
 }
 
+var privilegeErrorStyle = lipgloss.NewStyle().
+	Border(lipgloss.RoundedBorder()).
+	BorderForeground(lipgloss.Color("#FF5555")).
+	Padding(0, 1)
+
+var privilegeTitleStyle = lipgloss.NewStyle().
+	Bold(true).
+	Foreground(lipgloss.Color("#FF5555"))
+
+var privilegeHintStyle = lipgloss.NewStyle().
+	Foreground(lipgloss.Color("#FFAA00"))
+
+func (m tuiModel) renderPrivilegeErrors() string {
+	var authErrs, otherErrs []model.ExploreError
+	for _, e := range m.errors {
+		if e.Code == "AccessDenied" {
+			authErrs = append(authErrs, e)
+		} else {
+			otherErrs = append(otherErrs, e)
+		}
+	}
+
+	var b strings.Builder
+
+	if len(authErrs) > 0 {
+		b.WriteString(privilegeTitleStyle.Render("INSUFFICIENT PRIVILEGES") + "\n\n")
+		for _, e := range authErrs {
+			b.WriteString(detailKeyStyle.Render(fmt.Sprintf("%-12s", "Service")) +
+				" " + strings.ToUpper(e.Service) + " (" + e.Region + ")\n")
+			b.WriteString(privilegeHintStyle.Render(e.Message) + "\n\n")
+		}
+		b.WriteString("Attach the missing permissions to your IAM user or role.\n")
+	}
+
+	if len(otherErrs) > 0 {
+		if len(authErrs) > 0 {
+			b.WriteString("\n")
+		}
+		b.WriteString("Other errors:\n")
+		for _, e := range otherErrs {
+			b.WriteString(fmt.Sprintf("  [%s|%s] %s: %s\n", e.Service, e.Region, e.Code, e.Message))
+		}
+	}
+
+	return privilegeErrorStyle.Render(b.String())
+}
+
 func (m tuiModel) View() string {
 	if len(m.errors) > 0 && len(m.results) == 0 && m.done {
-		return fmt.Sprintf("Error: %v\nPress q to quit.", m.errors[0].Message)
+		return m.renderPrivilegeErrors() + "\nPress q to quit."
 	}
 	if m.loading && len(m.results) == 0 {
 		return "Loading AWS resources...\n"

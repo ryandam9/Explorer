@@ -12,6 +12,7 @@ import (
 	awsec2 "github.com/aws/aws-sdk-go-v2/service/ec2"
 	"golang.org/x/sync/errgroup"
 
+	"github.com/user/aws_explorer/internal/awserr"
 	"github.com/user/aws_explorer/internal/config"
 	"github.com/user/aws_explorer/internal/model"
 	"github.com/user/aws_explorer/internal/services"
@@ -206,12 +207,18 @@ func (e *Engine) StreamRun(ctx context.Context, chunks chan<- model.ResultChunk)
 
 				res, err := s.Collect(gCtx, input)
 				if err != nil {
+					code := "CollectionError"
+					msg := err.Error()
+					if awserr.IsAuthError(err) {
+						code = "AccessDenied"
+						msg = awserr.FriendlyMessage(err, s.Name())
+					}
 					chunks <- model.ResultChunk{
 						Errors: []model.ExploreError{{
 							Service: s.Name(),
 							Region:  r,
-							Code:    "CollectionError",
-							Message: err.Error(),
+							Code:    code,
+							Message: msg,
 						}},
 					}
 					return nil
