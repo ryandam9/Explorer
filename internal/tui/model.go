@@ -368,7 +368,13 @@ func (m tuiModel) View() string {
 			detailWidth = 30
 		}
 		detailContent := m.renderDetail(*m.detail)
-		detailView := detailPanelStyle.Width(detailWidth).Height(m.tableHeight() + 2).Render(detailContent)
+		detailHeight := m.tableHeight() + 2
+		detailView := detailPanelStyle.
+			Width(detailWidth).
+			Height(detailHeight).
+			MaxWidth(detailWidth + 2).
+			MaxHeight(detailHeight + 2).
+			Render(detailContent)
 		body := lipgloss.JoinHorizontal(lipgloss.Top, tableView, "  ", detailView)
 		return fmt.Sprintf("%s\n%s\n\n%s\n\n%s", header, tabs, body, helpLine)
 	}
