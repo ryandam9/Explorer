@@ -3,9 +3,12 @@ package s3tui
 import (
 	"context"
 	"fmt"
+	"path/filepath"
 	"sort"
 	"strings"
+	"time"
 
+	"github.com/atotto/clipboard"
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/charmbracelet/bubbles/spinner"
 	"github.com/charmbracelet/bubbles/table"
@@ -14,18 +17,28 @@ import (
 	"github.com/charmbracelet/lipgloss"
 )
 
+// ---------------------------------------------------------------------------
+// Themes
+// ---------------------------------------------------------------------------
+
 type Theme struct {
 	Name   string
 	Colors []string
 }
 
 var themes = []Theme{
-	{Name: "theme1", Colors: []string{"#6260FF", "#E4E4FF"}},
-	{Name: "theme2", Colors: []string{"#9FE870", "#163300"}},
-	{Name: "theme3", Colors: []string{"#BDD9D7", "#03363D"}},
-	{Name: "theme4", Colors: []string{"#3447AA", "#FBEAEB"}},
-	{Name: "theme5", Colors: []string{"#FCDB32", "#141D38"}},
-	{Name: "theme6", Colors: []string{"#34E0A1", "#000000"}},
+	{Name: "spotted pardalote", Colors: []string{"#6260FF", "#E4E4FF"}},
+	{Name: "plains wanderer", Colors: []string{"#9FE870", "#163300"}},
+	{Name: "bee-eater", Colors: []string{"#BDD9D7", "#03363D"}},
+	{Name: "rose-crowned fruit dove", Colors: []string{"#3447AA", "#FBEAEB"}},
+	{Name: "eastern rosella", Colors: []string{"#FCDB32", "#141D38"}},
+	{Name: "oriole", Colors: []string{"#34E0A1", "#000000"}},
+	{Name: "princess parrot", Colors: []string{"#FF69B4", "#006400"}},
+	{Name: "superb fairy-wren", Colors: []string{"#1E90FF", "#8B4513"}},
+	{Name: "cassowary", Colors: []string{"#191970", "#DC143C"}},
+	{Name: "yellow robin", Colors: []string{"#FFD700", "#696969"}},
+	{Name: "galah", Colors: []string{"#FF69B4", "#808080"}},
+	{Name: "blue-winged kookaburra", Colors: []string{"#4169E1", "#D2691E"}},
 }
 
 var activeTheme int
@@ -46,6 +59,10 @@ func lookupTheme(name string) (int, bool) {
 	}
 	return 0, false
 }
+
+// ---------------------------------------------------------------------------
+// Styles
+// ---------------------------------------------------------------------------
 
 func featherColor(shade int) string {
 	colors := themes[activeTheme].Colors
@@ -114,11 +131,30 @@ func loadingBoxStyle() lipgloss.Style {
 		Align(lipgloss.Center)
 }
 
+func boldStyle() lipgloss.Style {
+	return lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color(featherColor(0)))
+}
+
+func modalStyle(width, height int) lipgloss.Style {
+	return lipgloss.NewStyle().
+		Width(width).
+		Height(height).
+		BorderStyle(lipgloss.RoundedBorder()).
+		BorderForeground(lipgloss.Color(featherColor(0))).
+		Foreground(lipgloss.Color(featherColor(0))).
+		Padding(1, 2)
+}
+
+// ---------------------------------------------------------------------------
+// State / Focus enumerations
+// ---------------------------------------------------------------------------
+
 type state int
 
 const (
-	stateBucketList state = iota
+	stateBucketList  state = iota
 	stateObjectList
+	stateBucketDetail
 )
 
 type focus int
@@ -127,7 +163,12 @@ const (
 	focusBuckets focus = iota
 	focusObjects
 	focusPrefixInput
+	focusBucketSearch
 )
+
+// ---------------------------------------------------------------------------
+// BucketDetails struct
+// ---------------------------------------------------------------------------
 
 type BucketDetails struct {
 	Versioning        string
@@ -136,17 +177,92 @@ type BucketDetails struct {
 	Policy            string
 	LifecycleRules    int
 	PublicAccessBlock string
+	// Extended fields
+	ACLSummary         string
+	OwnershipControls  string
+	PolicyStatus       string
+	CORS               string
+	Website            string
+	Logging            string
+	Notifications      string
+	RequestPayment     string
+	Acceleration       string
+	ObjectLock         string
+	Replication        string
+	MultipartUploads   int
+	IntelligentTiering string
 }
+
+// ---------------------------------------------------------------------------
+// Message types
+// ---------------------------------------------------------------------------
+
+type bucketsLoadedMsg struct {
+	rows []table.Row
+}
+
+type objectsLoadedMsg struct {
+	rows  []table.Row
+	count int
+	size  int64
+}
+
+type objectDetailsMsg struct {
+	key     string
+	details *ObjectDetails
+	err     error
+}
+
+type objectPreviewMsg struct {
+	key     string
+	content string
+	err     error
+}
+
+type bucketDetailsMsg struct {
+	bucket  string
+	details *BucketDetails
+	err     error
+}
+
+type bucketRegionMsg struct {
+	idx    int
+	region string
+}
+
+type presignedURLMsg struct {
+	key string
+	url string
+	err error
+}
+
+type downloadDoneMsg struct {
+	key  string
+	path string
+	err  error
+}
+
+type deleteObjectDoneMsg struct {
+	key string
+	err error
+}
+
+type errMsg struct{ err error }
+
+// ---------------------------------------------------------------------------
+// Model
+// ---------------------------------------------------------------------------
 
 type Model struct {
 	client *S3Client
 	state  state
 	focus  focus
 
-	profile string
-	region  string
-	bucket  string
-	prefix  string
+	profile     string
+	region      string
+	bucket      string
+	prefix      string
+	endpointURL string
 
 	width   int
 	height  int
@@ -177,10 +293,41 @@ type Model struct {
 	previewErr            error
 	bucketRegionCache     map[string]string
 	themeIdx              int
+
+	// Bucket search overlay
+	inBucketSearch bool
+	bucketSearch   textinput.Model
+	allBucketRows  []table.Row
+
+	// Bucket detail full-screen view
+	detailBucket string
+	detailTabIdx int
+
+	// Object browser extras
+	flatMode    bool
+	showVersions bool
+
+	// Actions
+	allowDelete      bool
+	confirmingDelete bool
+	deleteConfirm    textinput.Model
+	deleteKey        string
+
+	copyMenuActive bool
+	copyContent    string
+
+	presignedURL  string
+	showPresigned bool
+
+	statusMsg string // transient status shown in footer
 }
 
-func NewModel(ctx context.Context, profile, region, bucket, prefix, themeName string) (*Model, error) {
-	client, err := NewS3Client(ctx, profile, region)
+// ---------------------------------------------------------------------------
+// NewModel
+// ---------------------------------------------------------------------------
+
+func NewModel(ctx context.Context, profile, region, bucket, prefix, themeName string, allowDelete bool, endpointURL string) (*Model, error) {
+	client, err := NewS3Client(ctx, profile, region, endpointURL)
 	if err != nil {
 		return nil, err
 	}
@@ -197,9 +344,11 @@ func NewModel(ctx context.Context, profile, region, bucket, prefix, themeName st
 		region:            region,
 		bucket:            bucket,
 		prefix:            prefix,
+		endpointURL:       endpointURL,
 		sortAsc:           true,
 		bucketRegionCache: make(map[string]string),
 		themeIdx:          themeIdx,
+		allowDelete:       allowDelete,
 	}
 
 	m.initBucketTable()
@@ -213,6 +362,23 @@ func NewModel(ctx context.Context, profile, region, bucket, prefix, themeName st
 	m.prefixInput.TextStyle = lipgloss.NewStyle().Foreground(lipgloss.Color(featherColor(0)))
 	m.prefixInput.PlaceholderStyle = lipgloss.NewStyle().Foreground(lipgloss.Color(featherColor(1)))
 	m.prefixInput.Cursor.Style = lipgloss.NewStyle().Foreground(lipgloss.Color(featherColor(0)))
+
+	m.bucketSearch = textinput.New()
+	m.bucketSearch.Placeholder = "Filter buckets..."
+	m.bucketSearch.CharLimit = 128
+	m.bucketSearch.Width = 40
+	m.bucketSearch.PromptStyle = lipgloss.NewStyle().Foreground(lipgloss.Color(featherColor(1))).Bold(true)
+	m.bucketSearch.TextStyle = lipgloss.NewStyle().Foreground(lipgloss.Color(featherColor(0)))
+	m.bucketSearch.PlaceholderStyle = lipgloss.NewStyle().Foreground(lipgloss.Color(featherColor(1)))
+	m.bucketSearch.Cursor.Style = lipgloss.NewStyle().Foreground(lipgloss.Color(featherColor(0)))
+
+	m.deleteConfirm = textinput.New()
+	m.deleteConfirm.Placeholder = "Type 'delete' to confirm"
+	m.deleteConfirm.CharLimit = 32
+	m.deleteConfirm.Width = 30
+	m.deleteConfirm.PromptStyle = lipgloss.NewStyle().Foreground(lipgloss.Color(featherColor(0))).Bold(true)
+	m.deleteConfirm.TextStyle = lipgloss.NewStyle().Foreground(lipgloss.Color(featherColor(0)))
+	m.deleteConfirm.Cursor.Style = lipgloss.NewStyle().Foreground(lipgloss.Color(featherColor(0)))
 
 	m.spinner = spinner.New(
 		spinner.WithSpinner(spinner.MiniDot),
@@ -230,58 +396,9 @@ func NewModel(ctx context.Context, profile, region, bucket, prefix, themeName st
 	return m, nil
 }
 
-func (m *Model) sortObjects(rows []table.Row) {
-	if len(rows) <= 1 {
-		return
-	}
-
-	var dirs []table.Row
-	var objs []table.Row
-	for _, r := range rows {
-		if len(r) > 3 && r[3] == "DIR" {
-			dirs = append(dirs, r)
-		} else {
-			objs = append(objs, r)
-		}
-	}
-
-	sort.SliceStable(objs, func(i, j int) bool {
-		if m.sortCol == 1 {
-			left := parseSize(objs[i][1])
-			right := parseSize(objs[j][1])
-			if m.sortAsc {
-				return left < right
-			}
-			return left > right
-		}
-
-		left := objs[i][m.sortCol]
-		right := objs[j][m.sortCol]
-		if m.sortCol == 0 {
-			left = strings.ToLower(left)
-			right = strings.ToLower(right)
-		}
-		if m.sortAsc {
-			return left < right
-		}
-		return left > right
-	})
-
-	copy(rows, dirs)
-	copy(rows[len(dirs):], objs)
-}
-
-func (m *Model) updateObjectColumns() {
-	objectWidth := max(40, m.width-10)
-	nameWidth := max(18, objectWidth-89)
-	m.objectTable.SetColumns([]table.Column{
-		{Title: sortTitle("Name", 0, m.sortCol, m.sortAsc), Width: nameWidth},
-		{Title: sortTitle("Size", 1, m.sortCol, m.sortAsc), Width: 10},
-		{Title: sortTitle("Last Modified", 2, m.sortCol, m.sortAsc), Width: 19},
-		{Title: sortTitle("Storage Class", 3, m.sortCol, m.sortAsc), Width: 14},
-		{Title: sortTitle("ETag", 4, m.sortCol, m.sortAsc), Width: 32},
-	})
-}
+// ---------------------------------------------------------------------------
+// Table initialization
+// ---------------------------------------------------------------------------
 
 func (m *Model) initBucketTable() {
 	columns := []table.Column{
@@ -341,38 +458,66 @@ func (m *Model) initObjectTable() {
 	m.objectTable.SetStyles(s)
 }
 
-type bucketsLoadedMsg struct {
-	rows []table.Row
+// ---------------------------------------------------------------------------
+// Sort
+// ---------------------------------------------------------------------------
+
+func (m *Model) sortObjects(rows []table.Row) {
+	if len(rows) <= 1 {
+		return
+	}
+
+	var dirs []table.Row
+	var objs []table.Row
+	for _, r := range rows {
+		if len(r) > 3 && r[3] == "DIR" {
+			dirs = append(dirs, r)
+		} else {
+			objs = append(objs, r)
+		}
+	}
+
+	sort.SliceStable(objs, func(i, j int) bool {
+		if m.sortCol == 1 {
+			left := parseSize(objs[i][1])
+			right := parseSize(objs[j][1])
+			if m.sortAsc {
+				return left < right
+			}
+			return left > right
+		}
+
+		left := objs[i][m.sortCol]
+		right := objs[j][m.sortCol]
+		if m.sortCol == 0 {
+			left = strings.ToLower(left)
+			right = strings.ToLower(right)
+		}
+		if m.sortAsc {
+			return left < right
+		}
+		return left > right
+	})
+
+	copy(rows, dirs)
+	copy(rows[len(dirs):], objs)
 }
 
-type objectsLoadedMsg struct {
-	rows  []table.Row
-	count int
-	size  int64
+func (m *Model) updateObjectColumns() {
+	objectWidth := max(40, m.width-10)
+	nameWidth := max(18, objectWidth-89)
+	m.objectTable.SetColumns([]table.Column{
+		{Title: sortTitle("Name", 0, m.sortCol, m.sortAsc), Width: nameWidth},
+		{Title: sortTitle("Size", 1, m.sortCol, m.sortAsc), Width: 10},
+		{Title: sortTitle("Last Modified", 2, m.sortCol, m.sortAsc), Width: 19},
+		{Title: sortTitle("Storage Class", 3, m.sortCol, m.sortAsc), Width: 14},
+		{Title: sortTitle("ETag", 4, m.sortCol, m.sortAsc), Width: 32},
+	})
 }
 
-type objectDetailsMsg struct {
-	key     string
-	details *ObjectDetails
-	err     error
-}
-
-type objectPreviewMsg struct {
-	key     string
-	content string
-	err     error
-}
-
-type bucketDetailsMsg struct {
-	bucket  string
-	details *BucketDetails
-	err     error
-}
-
-type bucketRegionMsg struct {
-	idx    int
-	region string
-}
+// ---------------------------------------------------------------------------
+// Commands
+// ---------------------------------------------------------------------------
 
 func (m *Model) fetchBucketDetails(bucket string) tea.Cmd {
 	m.detailsLoading = true
@@ -408,8 +553,6 @@ func (m *Model) fetchObjectPreview(key string) tea.Cmd {
 		return objectPreviewMsg{key: key, content: content, err: err}
 	}
 }
-
-type errMsg struct{ err error }
 
 func (m *Model) loadBuckets() tea.Cmd {
 	m.loading = true
@@ -459,7 +602,6 @@ func (m *Model) fetchBucketRegions() tea.Cmd {
 		idx := i
 		bucketName := name
 		cmds = append(cmds, func() tea.Msg {
-			// Double-check cache in case another goroutine resolved it
 			if region, ok := m.bucketRegionCache[bucketName]; ok {
 				return bucketRegionMsg{idx: idx, region: region}
 			}
@@ -475,8 +617,15 @@ func (m *Model) fetchBucketRegions() tea.Cmd {
 
 func (m *Model) loadObjects() tea.Cmd {
 	m.loading = true
+	flat := m.flatMode
 	return func() tea.Msg {
-		res, err := m.client.ListObjects(m.bucket, m.prefix)
+		var res *ListObjectsResult
+		var err error
+		if flat {
+			res, err = m.client.ListObjectsFlat(m.bucket, m.prefix)
+		} else {
+			res, err = m.client.ListObjects(m.bucket, m.prefix)
+		}
 		if err != nil {
 			return errMsg{fmt.Errorf("access denied or region mismatch for bucket '%s': %w", m.bucket, err)}
 		}
@@ -485,18 +634,19 @@ func (m *Model) loadObjects() tea.Cmd {
 		var count int
 		var totalSize int64
 
-		// Add ".." navigation if we are inside a prefix
-		if m.prefix != "" {
+		// Add ".." navigation if we are inside a prefix (non-flat mode only)
+		if m.prefix != "" && !flat {
 			rows = append(rows, table.Row{"..", "-", "-", "DIR", "-"})
 		}
 
-		for _, p := range res.Prefixes {
-			name := aws.ToString(p.Prefix)
-			// Remove the current prefix from the displayed name
-			if m.prefix != "" && strings.HasPrefix(name, m.prefix) {
-				name = strings.TrimPrefix(name, m.prefix)
+		if !flat {
+			for _, p := range res.Prefixes {
+				name := aws.ToString(p.Prefix)
+				if m.prefix != "" && strings.HasPrefix(name, m.prefix) {
+					name = strings.TrimPrefix(name, m.prefix)
+				}
+				rows = append(rows, table.Row{name, "-", "-", "DIR", "-"})
 			}
-			rows = append(rows, table.Row{name, "-", "-", "DIR", "-"})
 		}
 
 		for _, o := range res.Objects {
@@ -504,7 +654,7 @@ func (m *Model) loadObjects() tea.Cmd {
 			if m.prefix != "" && strings.HasPrefix(name, m.prefix) {
 				name = strings.TrimPrefix(name, m.prefix)
 			}
-			if name == "" { // Ignore the prefix folder object itself
+			if name == "" {
 				continue
 			}
 
@@ -535,6 +685,36 @@ func (m *Model) loadObjects() tea.Cmd {
 	}
 }
 
+func (m *Model) generatePresignCmd(key string) tea.Cmd {
+	bucket := m.bucket
+	return func() tea.Msg {
+		url, err := m.client.PresignGetObject(bucket, key, time.Hour)
+		return presignedURLMsg{key: key, url: url, err: err}
+	}
+}
+
+func (m *Model) downloadObjectCmd(key string) tea.Cmd {
+	bucket := m.bucket
+	return func() tea.Msg {
+		// Download to current directory with the base filename
+		localPath := filepath.Base(key)
+		err := m.client.DownloadObject(bucket, key, localPath)
+		return downloadDoneMsg{key: key, path: localPath, err: err}
+	}
+}
+
+func (m *Model) deleteObjectCmd(key string) tea.Cmd {
+	bucket := m.bucket
+	return func() tea.Msg {
+		err := m.client.DeleteObject(bucket, key)
+		return deleteObjectDoneMsg{key: key, err: err}
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Init / spinner helpers
+// ---------------------------------------------------------------------------
+
 func (m *Model) Init() tea.Cmd {
 	if m.state == stateBucketList {
 		return tea.Batch(m.loadBuckets(), m.startSpinner())
@@ -564,6 +744,7 @@ func (m *Model) loadingBox(message, detail string) string {
 	return loadingBoxStyle().Render(lipgloss.JoinVertical(lipgloss.Center, lines...))
 }
 
+// featherRail renders a decorative rail using the current theme colors.
 func featherRail(width int) string {
 	if width < 1 {
 		return ""
@@ -589,6 +770,10 @@ func (m *Model) selectedObjectKey() (string, bool) {
 	return m.prefix + row[0], true
 }
 
+// ---------------------------------------------------------------------------
+// Update
+// ---------------------------------------------------------------------------
+
 func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	var cmd tea.Cmd
 	var cmds []tea.Cmd
@@ -603,6 +788,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				spinnerTickScheduled = true
 			}
 		}
+
 	case tea.WindowSizeMsg:
 		m.width = msg.Width
 		m.height = msg.Height
@@ -619,7 +805,6 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			{Title: "Creation Date", Width: 22},
 		})
 
-		// Adjust table height
 		tableHeight := (m.height / 2) - 4
 		if tableHeight < 5 {
 			tableHeight = 5
@@ -628,67 +813,148 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.updateObjectColumns()
 
 	case tea.KeyMsg:
+		// Handle modals / overlays first
+		if m.confirmingDelete {
+			switch msg.String() {
+			case "esc":
+				m.confirmingDelete = false
+				m.deleteKey = ""
+				m.deleteConfirm.SetValue("")
+				m.deleteConfirm.Blur()
+				return m, nil
+			case "enter":
+				if m.deleteConfirm.Value() == "delete" {
+					key := m.deleteKey
+					m.confirmingDelete = false
+					m.deleteKey = ""
+					m.deleteConfirm.SetValue("")
+					m.deleteConfirm.Blur()
+					cmds = append(cmds, m.deleteObjectCmd(key))
+					return m, tea.Batch(cmds...)
+				}
+			default:
+				m.deleteConfirm, cmd = m.deleteConfirm.Update(msg)
+				cmds = append(cmds, cmd)
+				return m, tea.Batch(cmds...)
+			}
+			return m, nil
+		}
+
+		if m.showPresigned {
+			if msg.String() == "esc" {
+				m.showPresigned = false
+				return m, nil
+			}
+			return m, nil
+		}
+
+		if m.copyMenuActive {
+			if msg.String() == "esc" || msg.String() == "y" {
+				m.copyMenuActive = false
+				return m, nil
+			}
+			return m, nil
+		}
+
+		// Global keys
 		switch msg.String() {
 		case "q", "ctrl+c":
 			return m, tea.Quit
 		case "?":
 			m.showHelp = !m.showHelp
 			return m, nil
-		case "s":
-			if m.state == stateObjectList && m.focus != focusPrefixInput {
-				m.sortCol = (m.sortCol + 1) % 5
-				rows := m.objectTable.Rows()
-				m.sortObjects(rows)
-				m.objectTable.SetRows(rows)
-				m.updateObjectColumns()
-				return m, nil
-			}
-		case "r":
-			if m.state == stateObjectList && m.focus != focusPrefixInput {
-				m.sortAsc = !m.sortAsc
-				rows := m.objectTable.Rows()
-				m.sortObjects(rows)
-				m.objectTable.SetRows(rows)
-				m.updateObjectColumns()
-				return m, nil
-			}
-		case "esc":
-			m.err = nil // Clear any existing errors
-			if m.showHelp {
+		}
+
+		if m.showHelp {
+			if msg.String() == "esc" || msg.String() == "?" {
 				m.showHelp = false
-				return m, nil
 			}
-			if m.showPreview {
+			return m, nil
+		}
+		if m.showPreview {
+			if msg.String() == "esc" {
 				m.showPreview = false
 				m.previewLoading = false
-				return m, nil
 			}
-			if m.focus == focusPrefixInput {
-				m.focus = focusObjects
-				m.prefixInput.Blur()
-			} else if m.state == stateObjectList {
+			return m, nil
+		}
+
+		// Bucket search overlay
+		if m.inBucketSearch {
+			switch msg.String() {
+			case "esc":
+				m.inBucketSearch = false
+				m.bucketSearch.Blur()
+				m.bucketSearch.SetValue("")
+				// Restore full bucket list
+				if len(m.allBucketRows) > 0 {
+					m.bucketTable.SetRows(m.allBucketRows)
+				}
+				return m, nil
+			case "enter":
+				// Select the first visible row
+				rows := m.bucketTable.Rows()
+				if len(rows) > 0 {
+					name := rows[0][0]
+					m.inBucketSearch = false
+					m.bucketSearch.Blur()
+					m.bucketSearch.SetValue("")
+					m.bucket = name
+					m.region = rows[0][1]
+					// Re-initialize client for the correct bucket region
+					newClient, err := NewS3Client(m.client.ctx, m.profile, m.region, m.endpointURL)
+					if err == nil {
+						m.client = newClient
+					}
+					m.state = stateObjectList
+					m.focus = focusObjects
+					cmds = append(cmds, m.loadObjects())
+					return m, tea.Batch(cmds...)
+				}
+				m.inBucketSearch = false
+				m.bucketSearch.Blur()
+				return m, nil
+			default:
+				m.bucketSearch, cmd = m.bucketSearch.Update(msg)
+				cmds = append(cmds, cmd)
+				// Filter bucket rows
+				query := strings.ToLower(m.bucketSearch.Value())
+				var filtered []table.Row
+				for _, r := range m.allBucketRows {
+					if strings.Contains(strings.ToLower(r[0]), query) {
+						filtered = append(filtered, r)
+					}
+				}
+				m.bucketTable.SetRows(filtered)
+				return m, tea.Batch(cmds...)
+			}
+		}
+
+		// Bucket detail view
+		if m.state == stateBucketDetail {
+			switch msg.String() {
+			case "esc":
 				m.state = stateBucketList
 				m.focus = focusBuckets
-				m.bucket = ""
-				m.prefix = ""
-				cmds = append(cmds, m.loadBuckets())
-			}
-		case "/":
-			if m.state == stateObjectList && m.focus != focusPrefixInput {
-				m.focus = focusPrefixInput
-				m.prefixInput.Focus()
+				return m, nil
+			case "tab":
+				m.detailTabIdx = (m.detailTabIdx + 1) % 5
+				return m, nil
+			case "shift+tab":
+				m.detailTabIdx = (m.detailTabIdx + 4) % 5
 				return m, nil
 			}
-		case "p":
-			if m.state == stateObjectList && m.focus == focusObjects {
-				if key, ok := m.selectedObjectKey(); ok {
-					m.showPreview = true
-					m.previewKey = key
-					cmds = append(cmds, m.fetchObjectPreview(key))
-				}
-			}
-		case "enter":
-			if m.focus == focusPrefixInput {
+			return m, nil
+		}
+
+		// Prefix input handling
+		if m.focus == focusPrefixInput {
+			switch msg.String() {
+			case "esc":
+				m.focus = focusObjects
+				m.prefixInput.Blur()
+				return m, nil
+			case "enter":
 				m.focus = focusObjects
 				m.prefixInput.Blur()
 				m.prefix = m.prefixInput.Value()
@@ -697,14 +963,162 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					m.prefixInput.SetValue(m.prefix)
 				}
 				cmds = append(cmds, m.loadObjects())
-			} else if m.state == stateBucketList {
+				return m, tea.Batch(cmds...)
+			default:
+				m.prefixInput, cmd = m.prefixInput.Update(msg)
+				cmds = append(cmds, cmd)
+				return m, tea.Batch(cmds...)
+			}
+		}
+
+		// State-specific keys
+		switch msg.String() {
+		case "esc":
+			m.err = nil
+			if m.state == stateObjectList {
+				m.state = stateBucketList
+				m.focus = focusBuckets
+				m.bucket = ""
+				m.prefix = ""
+				cmds = append(cmds, m.loadBuckets())
+			}
+
+		case "/":
+			if m.state == stateBucketList {
+				m.inBucketSearch = true
+				m.focus = focusBucketSearch
+				// Save all rows for restore
+				m.allBucketRows = m.bucketTable.Rows()
+				m.bucketSearch.Focus()
+				return m, nil
+			} else if m.state == stateObjectList {
+				m.focus = focusPrefixInput
+				m.prefixInput.Focus()
+				return m, nil
+			}
+
+		case "d":
+			if m.state == stateBucketList {
+				row := m.bucketTable.SelectedRow()
+				if len(row) > 0 {
+					m.detailBucket = row[0]
+					m.detailTabIdx = 0
+					m.state = stateBucketDetail
+					// Trigger fetch if needed
+					if m.selectedBucketDetails == nil || m.bucket != row[0] {
+						m.bucket = row[0]
+						cmds = append(cmds, m.fetchBucketDetails(row[0]))
+					}
+					return m, tea.Batch(cmds...)
+				}
+			}
+
+		case "f":
+			if m.state == stateObjectList {
+				m.flatMode = !m.flatMode
+				if m.flatMode {
+					m.statusMsg = "Flat mode: ON (showing all objects recursively)"
+				} else {
+					m.statusMsg = "Flat mode: OFF (hierarchical view)"
+				}
+				cmds = append(cmds, m.loadObjects())
+			}
+
+		case "v":
+			if m.state == stateObjectList {
+				m.showVersions = !m.showVersions
+				if m.showVersions {
+					m.statusMsg = "Versions: ON (visual indicator only)"
+				} else {
+					m.statusMsg = "Versions: OFF"
+				}
+			}
+
+		case "S":
+			if m.state == stateObjectList {
+				m.sortAsc = !m.sortAsc
+				rows := m.objectTable.Rows()
+				m.sortObjects(rows)
+				m.objectTable.SetRows(rows)
+				m.updateObjectColumns()
+				return m, nil
+			}
+
+		case "s":
+			if m.state == stateObjectList {
+				m.sortCol = (m.sortCol + 1) % 5
+				rows := m.objectTable.Rows()
+				m.sortObjects(rows)
+				m.objectTable.SetRows(rows)
+				m.updateObjectColumns()
+				return m, nil
+			}
+
+		case "r":
+			// Refresh current view
+			if m.state == stateBucketList {
+				cmds = append(cmds, m.loadBuckets())
+			} else if m.state == stateObjectList {
+				cmds = append(cmds, m.loadObjects())
+			}
+
+		case "p":
+			if m.state == stateObjectList && m.focus == focusObjects {
+				if key, ok := m.selectedObjectKey(); ok {
+					m.showPreview = true
+					m.previewKey = key
+					cmds = append(cmds, m.fetchObjectPreview(key))
+				}
+			}
+
+		case "y":
+			if m.state == stateObjectList && m.focus == focusObjects {
+				if key, ok := m.selectedObjectKey(); ok {
+					uri := fmt.Sprintf("s3://%s/%s", m.bucket, key)
+					arn := fmt.Sprintf("arn:aws:s3:::%s/%s", m.bucket, key)
+					m.copyContent = uri + "\n" + arn
+					// Ignore clipboard error silently
+					_ = clipboard.WriteAll(uri)
+					m.copyMenuActive = true
+					return m, nil
+				}
+			}
+
+		case "g":
+			if m.state == stateObjectList && m.focus == focusObjects {
+				if key, ok := m.selectedObjectKey(); ok {
+					cmds = append(cmds, m.generatePresignCmd(key))
+				}
+			}
+
+		case "D":
+			if m.state == stateObjectList && m.focus == focusObjects {
+				if key, ok := m.selectedObjectKey(); ok {
+					cmds = append(cmds, m.downloadObjectCmd(key))
+					m.statusMsg = fmt.Sprintf("Downloading: %s ...", key)
+				}
+			}
+
+		case "x":
+			if m.state == stateObjectList && m.focus == focusObjects && m.allowDelete {
+				if key, ok := m.selectedObjectKey(); ok {
+					m.deleteKey = key
+					m.confirmingDelete = true
+					m.deleteConfirm.SetValue("")
+					m.deleteConfirm.Focus()
+					return m, nil
+				}
+			}
+
+		case "enter":
+			if m.state == stateBucketList {
 				row := m.bucketTable.SelectedRow()
 				if len(row) > 0 {
 					m.bucket = row[0]
 					m.region = row[1]
 
-					// Re-initialize client for the correct bucket region to avoid ListObjectsV2 InvalidRegion errors
-					newClient, err := NewS3Client(m.client.ctx, m.profile, m.region)
+					// Re-initialize client for the correct bucket region
+					newClient, err := NewS3Client(m.client.ctx, m.profile, m.region, m.endpointURL)
 					if err == nil {
 						m.client = newClient
 					}
@@ -735,10 +1149,13 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 		}
 
+	// --- Message handlers ---
+
 	case bucketsLoadedMsg:
 		m.loading = false
 		m.err = nil
 		m.bucketTable.SetRows(msg.rows)
+		m.allBucketRows = msg.rows // keep a copy for search restore
 		if len(msg.rows) > 0 {
 			m.bucket = msg.rows[0][0]
 			cmds = append(cmds, m.fetchBucketDetails(msg.rows[0][0]))
@@ -751,6 +1168,10 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			rows[msg.idx][1] = msg.region
 			m.bucketTable.SetRows(rows)
 		}
+		// Also update allBucketRows
+		if msg.idx < len(m.allBucketRows) {
+			m.allBucketRows[msg.idx][1] = msg.region
+		}
 
 	case objectsLoadedMsg:
 		m.loading = false
@@ -759,7 +1180,6 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.totalSize = msg.size
 		m.objectTable.SetRows(msg.rows)
 
-		// Reset details when loading new objects
 		m.lastSelectedKey = ""
 		m.selectedDetails = nil
 
@@ -770,7 +1190,6 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case objectDetailsMsg:
 		m.detailsLoading = false
-		// Only apply if it's still the selected object
 		if msg.key == m.lastSelectedKey {
 			if msg.err == nil {
 				m.selectedDetails = msg.details
@@ -778,7 +1197,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 
 	case bucketDetailsMsg:
-		if msg.bucket == m.bucket {
+		if msg.bucket == m.bucket || msg.bucket == m.detailBucket {
 			m.detailsLoading = false
 			if msg.err == nil {
 				m.selectedBucketDetails = msg.details
@@ -792,6 +1211,29 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.previewContent = msg.content
 		}
 
+	case presignedURLMsg:
+		if msg.err != nil {
+			m.statusMsg = fmt.Sprintf("Presign error: %s", summarizeS3Error(msg.err))
+		} else {
+			m.presignedURL = msg.url
+			m.showPresigned = true
+		}
+
+	case downloadDoneMsg:
+		if msg.err != nil {
+			m.statusMsg = fmt.Sprintf("Download error: %s", summarizeS3Error(msg.err))
+		} else {
+			m.statusMsg = fmt.Sprintf("Downloaded: %s", msg.path)
+		}
+
+	case deleteObjectDoneMsg:
+		if msg.err != nil {
+			m.statusMsg = fmt.Sprintf("Delete error: %s", summarizeS3Error(msg.err))
+		} else {
+			m.statusMsg = fmt.Sprintf("Deleted: %s", msg.key)
+			cmds = append(cmds, m.loadObjects())
+		}
+
 	case errMsg:
 		m.loading = false
 		m.detailsLoading = false
@@ -799,11 +1241,14 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.err = msg.err
 	}
 
-	// Route updates
+	// Route table updates
 	if m.focus == focusPrefixInput {
 		m.prefixInput, cmd = m.prefixInput.Update(msg)
 		cmds = append(cmds, cmd)
-	} else if m.state == stateBucketList {
+	} else if m.inBucketSearch {
+		m.bucketSearch, cmd = m.bucketSearch.Update(msg)
+		cmds = append(cmds, cmd)
+	} else if m.state == stateBucketList || m.state == stateBucketDetail {
 		m.bucketTable, cmd = m.bucketTable.Update(msg)
 		cmds = append(cmds, cmd)
 
@@ -819,14 +1264,13 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.objectTable, cmd = m.objectTable.Update(msg)
 		cmds = append(cmds, cmd)
 
-		// If cursor changed, fetch details
 		if m.focus == focusObjects && prevRow != m.objectTable.Cursor() && len(m.objectTable.SelectedRow()) > 0 {
 			row := m.objectTable.SelectedRow()
 			if row[3] != "DIR" {
 				newKey := m.prefix + row[0]
 				if newKey != m.lastSelectedKey {
 					m.lastSelectedKey = newKey
-					m.selectedDetails = nil // clear old details immediately
+					m.selectedDetails = nil
 					cmds = append(cmds, m.fetchObjectDetails(newKey))
 				}
 			} else {
@@ -843,19 +1287,34 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	return m, tea.Batch(cmds...)
 }
 
+// ---------------------------------------------------------------------------
+// View
+// ---------------------------------------------------------------------------
+
 func (m *Model) View() string {
 	if m.width == 0 {
 		return "Initializing..."
 	}
 
+	// Bucket detail full-screen view
+	if m.state == stateBucketDetail {
+		return appStyle().Render(m.bucketDetailView())
+	}
+
 	var content string
 
-	headerText := "S3 TUI v1.2.0 (READ-ONLY)"
+	headerText := "S3 TUI v1.3.0"
 	if m.profile != "" {
 		headerText += fmt.Sprintf("   Profile: %s", m.profile)
 	}
 	if m.region != "" {
 		headerText += fmt.Sprintf("   Region: %s", m.region)
+	}
+	if m.flatMode {
+		headerText += "   [FLAT]"
+	}
+	if m.showVersions {
+		headerText += "   [VERSIONS:ON]"
 	}
 	header := headerStyle().Render(headerText)
 
@@ -871,7 +1330,7 @@ func (m *Model) View() string {
 		content = lipgloss.Place(m.width-4, m.height-10, lipgloss.Center, lipgloss.Center, errBox)
 	} else if m.loading {
 		message := "Loading buckets from AWS..."
-		detail := "Resolving bucket regions and preparing the read-only explorer."
+		detail := "Resolving bucket regions and preparing the explorer."
 		if m.state == stateObjectList {
 			message = "Loading S3 objects..."
 			detail = fmt.Sprintf("Bucket: %s   Prefix: %s", m.bucket, displayPrefix(m.prefix))
@@ -879,196 +1338,481 @@ func (m *Model) View() string {
 		content = lipgloss.Place(m.width-4, m.height-10, lipgloss.Center, lipgloss.Center, m.loadingBox(message, detail))
 	} else {
 		if m.state == stateBucketList {
-			tableSection := selectedPanelStyle().Render(m.bucketTable.View())
-
-			detailsPanel := "Select a bucket to view details"
-			if len(m.bucketTable.SelectedRow()) > 0 {
-				row := m.bucketTable.SelectedRow()
-				name := row[0]
-				region := row[1]
-				date := row[2]
-
-				metaText := m.loadingLine("Loading bucket details...")
-				if !m.detailsLoading && m.selectedBucketDetails != nil {
-					tagStr := ""
-					if len(m.selectedBucketDetails.Tags) > 0 {
-						for k, v := range m.selectedBucketDetails.Tags {
-							tagStr += fmt.Sprintf("[%s: %s] ", k, v)
-						}
-					} else {
-						tagStr = "None"
-					}
-
-					metaText = lipgloss.JoinHorizontal(lipgloss.Top,
-						lipgloss.JoinVertical(lipgloss.Left,
-							fmt.Sprintf("Region:     %s", region),
-							fmt.Sprintf("Created:    %s", date),
-							fmt.Sprintf("Versioning: %s", m.selectedBucketDetails.Versioning),
-							fmt.Sprintf("Encryption: %s", m.selectedBucketDetails.Encryption),
-						),
-						"    ",
-						lipgloss.JoinVertical(lipgloss.Left,
-							fmt.Sprintf("Policy:    %s", m.selectedBucketDetails.Policy),
-							fmt.Sprintf("Lifecycle: %d rules", m.selectedBucketDetails.LifecycleRules),
-							fmt.Sprintf("PAB:       %s", m.selectedBucketDetails.PublicAccessBlock),
-							fmt.Sprintf("Tags:      %s", tagStr),
-						),
-					)
-				}
-
-				detailsPanel = lipgloss.NewStyle().
-					Width(m.width-4).
-					Height(8).
-					BorderStyle(lipgloss.RoundedBorder()).
-					BorderForeground(lipgloss.Color(featherColor(1))).
-					Foreground(lipgloss.Color(featherColor(0))).
-					Padding(0, 1).
-					Render(lipgloss.JoinVertical(lipgloss.Left,
-						panelTitleStyle().Render(fmt.Sprintf("BUCKET DETAILS: %s", name)),
-						"",
-						metaText,
-					))
-			}
-
-			content = lipgloss.JoinVertical(lipgloss.Left,
-				tableSection,
-				detailsPanel,
-			)
+			content = m.bucketListView()
 		} else {
-			sizeStr := formatSize(m.totalSize)
-
-			headerRight := mutedStyle().Render(
-				fmt.Sprintf("Objects: %d   Size: %s", m.objCount, sizeStr))
-
-			bucketHeader := lipgloss.JoinHorizontal(lipgloss.Top,
-				badgeStyle().Render(fmt.Sprintf("Bucket: %s", m.bucket)),
-				"   ",
-				headerRight,
-			)
-
-			prefixSection := lipgloss.JoinHorizontal(lipgloss.Center,
-				lipgloss.NewStyle().Foreground(lipgloss.Color(featherColor(1))).Bold(true).Render("Prefix: "),
-				m.prefixInput.View(),
-			)
-
-			tableStyle := panelStyle()
-			if m.focus == focusObjects {
-				tableStyle = selectedPanelStyle()
-			}
-			tableSection := tableStyle.Render(m.objectTable.View())
-
-			// Details Panel
-			detailsPanel := "Select an object to view details"
-			if len(m.objectTable.SelectedRow()) > 0 {
-				row := m.objectTable.SelectedRow()
-				name, size, date, class, etag := row[0], row[1], row[2], row[3], row[4]
-
-				isDir := (class == "DIR")
-
-				details := fmt.Sprintf("Key: %s%s\nSize: %s\nLast Modified: %s\nStorage Class: %s\nETag: %s",
-					m.prefix, name, size, date, class, etag)
-
-				detailsBox := lipgloss.NewStyle().
-					Width(m.width/2-4).
-					Height(8).
-					BorderStyle(lipgloss.RoundedBorder()).
-					BorderForeground(lipgloss.Color(featherColor(1))).
-					Foreground(lipgloss.Color(featherColor(0))).
-					Padding(0, 1).
-					Render(lipgloss.JoinVertical(lipgloss.Left,
-						panelTitleStyle().Render("OBJECT DETAILS"),
-						"",
-						details,
-					))
-
-				metaText := ""
-				if isDir {
-					metaText = "Status: N/A"
-				} else {
-					if m.detailsLoading || m.selectedDetails == nil {
-						metaText = m.loadingLine("Loading object metadata...")
-					} else {
-						// Build tags string
-						tagStr := ""
-						if len(m.selectedDetails.Tags) > 0 {
-							for k, v := range m.selectedDetails.Tags {
-								tagStr += fmt.Sprintf("[%s: %s] ", k, v)
-							}
-						} else {
-							tagStr = "None"
-						}
-
-						// Build meta string
-						customMetaStr := ""
-						if len(m.selectedDetails.Metadata) > 0 {
-							for k, v := range m.selectedDetails.Metadata {
-								customMetaStr += fmt.Sprintf("x-amz-meta-%s: %s\n", k, v)
-							}
-						} else {
-							customMetaStr = "None"
-						}
-
-						cType := m.selectedDetails.ContentType
-						if cType == "" {
-							cType = "unknown"
-						}
-
-						metaText = lipgloss.JoinHorizontal(lipgloss.Top,
-							lipgloss.JoinVertical(lipgloss.Left,
-								fmt.Sprintf("Content-Type: %s", cType),
-								fmt.Sprintf("SSE: %s", m.selectedDetails.SSE),
-								fmt.Sprintf("Version: %s", m.selectedDetails.VersionID),
-							),
-							"    ",
-							lipgloss.JoinVertical(lipgloss.Left,
-								fmt.Sprintf("Tags: %s", tagStr),
-								"Metadata:",
-								customMetaStr,
-							),
-						)
-					}
-				}
-
-				metadataBox := lipgloss.NewStyle().
-					Width(m.width/2-4).
-					Height(8).
-					BorderStyle(lipgloss.RoundedBorder()).
-					BorderForeground(lipgloss.Color(featherColor(1))).
-					Foreground(lipgloss.Color(featherColor(0))).
-					Padding(0, 1).
-					Render(lipgloss.JoinVertical(lipgloss.Left,
-						panelTitleStyle().Render("TAGS & METADATA"),
-						"",
-						metaText,
-					))
-
-				detailsPanel = lipgloss.JoinHorizontal(lipgloss.Top, detailsBox, "  ", metadataBox)
-			}
-
-			content = lipgloss.JoinVertical(lipgloss.Left,
-				bucketHeader,
-				"",
-				prefixSection,
-				"",
-				tableSection,
-				"",
-				detailsPanel,
-			)
+			content = m.objectListView()
 		}
 	}
 
+	// Overlays
 	if m.showHelp {
 		content = lipgloss.Place(m.width-4, max(8, m.height-8), lipgloss.Center, lipgloss.Center, m.helpView())
 	} else if m.showPreview {
 		content = lipgloss.Place(m.width-4, max(8, m.height-8), lipgloss.Center, lipgloss.Center, m.previewView())
+	} else if m.copyMenuActive {
+		content = lipgloss.Place(m.width-4, max(8, m.height-8), lipgloss.Center, lipgloss.Center, m.copyMenuView())
+	} else if m.showPresigned {
+		content = lipgloss.Place(m.width-4, max(8, m.height-8), lipgloss.Center, lipgloss.Center, m.presignedURLView())
+	} else if m.confirmingDelete {
+		content = lipgloss.Place(m.width-4, max(8, m.height-8), lipgloss.Center, lipgloss.Center, m.deleteConfirmView())
 	}
 
-	help := infoStyle().Render("[↑/↓] Move | [Enter/p] Preview | [/] Jump Prefix | [Esc] Back/Close | [s] Sort | [r] Reverse | [?] Help | [q] Quit")
+	// Bucket search overlay (drawn on top of bucket list)
+	if m.inBucketSearch {
+		searchBox := lipgloss.NewStyle().
+			BorderStyle(lipgloss.RoundedBorder()).
+			BorderForeground(lipgloss.Color(featherColor(0))).
+			Foreground(lipgloss.Color(featherColor(0))).
+			Padding(0, 1).
+			Render(lipgloss.JoinVertical(lipgloss.Left,
+				boldStyle().Render("Search buckets:"),
+				m.bucketSearch.View(),
+				mutedStyle().Render("[Enter] Select first  [Esc] Cancel"),
+			))
+		content = lipgloss.Place(m.width-4, max(8, m.height-8), lipgloss.Center, lipgloss.Top, searchBox)
+	}
 
-	return appStyle().Render(lipgloss.JoinVertical(lipgloss.Left, header, featherRail(max(12, m.width-4)), "", content, "", help))
+	// Status message
+	var statusLine string
+	if m.statusMsg != "" {
+		statusLine = "\n" + infoStyle().Render("  "+m.statusMsg)
+	}
+
+	// Help line
+	var help string
+	if m.state == stateBucketList {
+		help = infoStyle().Render("[↑/↓] Move | [Enter] Open | [d] Detail | [/] Search | [r] Refresh | [?] Help | [q] Quit")
+	} else if m.state == stateObjectList {
+		flatIndicator := ""
+		if m.flatMode {
+			flatIndicator = " | FLAT"
+		}
+		versionIndicator := ""
+		if m.showVersions {
+			versionIndicator = " | VERSIONS:ON"
+		}
+		deleteHint := ""
+		if m.allowDelete {
+			deleteHint = " | [x] Delete"
+		}
+		help = infoStyle().Render(fmt.Sprintf("[↑/↓] Move | [Enter/p] Preview | [/] Prefix | [y] Copy URI | [g] Presign | [D] Download%s | [f] Flat | [v] Versions | [s] Sort | [S] Rev.Sort | [r] Refresh | [Esc] Back | [?] Help%s%s%s",
+			deleteHint, flatIndicator, versionIndicator, ""))
+	} else {
+		help = infoStyle().Render("[↑/↓] Move | [q] Quit")
+	}
+
+	return appStyle().Render(lipgloss.JoinVertical(lipgloss.Left,
+		header,
+		featherRail(max(12, m.width-4)),
+		"",
+		content,
+		statusLine,
+		"",
+		help,
+	))
+}
+
+// ---------------------------------------------------------------------------
+// Sub-views
+// ---------------------------------------------------------------------------
+
+func (m *Model) bucketListView() string {
+	tableSection := selectedPanelStyle().Render(m.bucketTable.View())
+
+	detailsPanel := "Select a bucket to view details"
+	if len(m.bucketTable.SelectedRow()) > 0 {
+		row := m.bucketTable.SelectedRow()
+		name := row[0]
+		region := row[1]
+		date := row[2]
+
+		metaText := m.loadingLine("Loading bucket details...")
+		if !m.detailsLoading && m.selectedBucketDetails != nil {
+			tagStr := ""
+			if len(m.selectedBucketDetails.Tags) > 0 {
+				for k, v := range m.selectedBucketDetails.Tags {
+					tagStr += fmt.Sprintf("[%s: %s] ", k, v)
+				}
+			} else {
+				tagStr = "None"
+			}
+
+			metaText = lipgloss.JoinHorizontal(lipgloss.Top,
+				lipgloss.JoinVertical(lipgloss.Left,
+					fmt.Sprintf("Region:      %s", region),
+					fmt.Sprintf("Created:     %s", date),
+					fmt.Sprintf("Versioning:  %s", m.selectedBucketDetails.Versioning),
+					fmt.Sprintf("Encryption:  %s", m.selectedBucketDetails.Encryption),
+					fmt.Sprintf("Replication: %s", m.selectedBucketDetails.Replication),
+					fmt.Sprintf("Logging:     %s", m.selectedBucketDetails.Logging),
+				),
+				"    ",
+				lipgloss.JoinVertical(lipgloss.Left,
+					fmt.Sprintf("Policy:      %s", m.selectedBucketDetails.Policy),
+					fmt.Sprintf("Lifecycle:   %d rules", m.selectedBucketDetails.LifecycleRules),
+					fmt.Sprintf("PAB:         %s", m.selectedBucketDetails.PublicAccessBlock),
+					fmt.Sprintf("CORS:        %s", m.selectedBucketDetails.CORS),
+					fmt.Sprintf("Website:     %s", m.selectedBucketDetails.Website),
+					fmt.Sprintf("Tags:        %s", tagStr),
+				),
+				"    ",
+				lipgloss.JoinVertical(lipgloss.Left,
+					fmt.Sprintf("Acceleration: %s", m.selectedBucketDetails.Acceleration),
+					fmt.Sprintf("ObjectLock:   %s", m.selectedBucketDetails.ObjectLock),
+					fmt.Sprintf("ACL:          %s", m.selectedBucketDetails.ACLSummary),
+					fmt.Sprintf("Ownership:    %s", m.selectedBucketDetails.OwnershipControls),
+				),
+			)
+		}
+
+		detailsPanel = lipgloss.NewStyle().
+			Width(m.width-4).
+			Height(10).
+			BorderStyle(lipgloss.RoundedBorder()).
+			BorderForeground(lipgloss.Color(featherColor(1))).
+			Foreground(lipgloss.Color(featherColor(0))).
+			Padding(0, 1).
+			Render(lipgloss.JoinVertical(lipgloss.Left,
+				panelTitleStyle().Render(fmt.Sprintf("BUCKET DETAILS: %s  [d] Full detail view", name)),
+				"",
+				metaText,
+			))
+	}
+
+	return lipgloss.JoinVertical(lipgloss.Left,
+		tableSection,
+		detailsPanel,
+	)
+}
+
+func (m *Model) objectListView() string {
+	sizeStr := formatSize(m.totalSize)
+
+	headerRight := mutedStyle().Render(
+		fmt.Sprintf("Objects: %d   Size: %s", m.objCount, sizeStr))
+
+	bucketHeader := lipgloss.JoinHorizontal(lipgloss.Top,
+		badgeStyle().Render(fmt.Sprintf("Bucket: %s", m.bucket)),
+		"   ",
+		headerRight,
+	)
+
+	prefixSection := lipgloss.JoinHorizontal(lipgloss.Center,
+		lipgloss.NewStyle().Foreground(lipgloss.Color(featherColor(1))).Bold(true).Render("Prefix: "),
+		m.prefixInput.View(),
+	)
+
+	tableStyle := panelStyle()
+	if m.focus == focusObjects {
+		tableStyle = selectedPanelStyle()
+	}
+	tableSection := tableStyle.Render(m.objectTable.View())
+
+	// Details Panel
+	detailsPanel := "Select an object to view details"
+	if len(m.objectTable.SelectedRow()) > 0 {
+		row := m.objectTable.SelectedRow()
+		name, size, date, class, etag := row[0], row[1], row[2], row[3], row[4]
+
+		isDir := (class == "DIR")
+
+		details := fmt.Sprintf("Key: %s%s\nSize: %s\nLast Modified: %s\nStorage Class: %s\nETag: %s",
+			m.prefix, name, size, date, class, etag)
+
+		detailsBox := lipgloss.NewStyle().
+			Width(m.width/2-4).
+			Height(10).
+			BorderStyle(lipgloss.RoundedBorder()).
+			BorderForeground(lipgloss.Color(featherColor(1))).
+			Foreground(lipgloss.Color(featherColor(0))).
+			Padding(0, 1).
+			Render(lipgloss.JoinVertical(lipgloss.Left,
+				panelTitleStyle().Render("OBJECT DETAILS"),
+				"",
+				details,
+			))
+
+		metaText := ""
+		if isDir {
+			metaText = "Status: N/A"
+		} else {
+			if m.detailsLoading || m.selectedDetails == nil {
+				metaText = m.loadingLine("Loading object metadata...")
+			} else {
+				// Build tags string
+				tagStr := ""
+				if len(m.selectedDetails.Tags) > 0 {
+					for k, v := range m.selectedDetails.Tags {
+						tagStr += fmt.Sprintf("[%s: %s] ", k, v)
+					}
+				} else {
+					tagStr = "None"
+				}
+
+				// Build meta string
+				customMetaStr := ""
+				if len(m.selectedDetails.Metadata) > 0 {
+					for k, v := range m.selectedDetails.Metadata {
+						customMetaStr += fmt.Sprintf("x-amz-meta-%s: %s\n", k, v)
+					}
+				} else {
+					customMetaStr = "None"
+				}
+
+				cType := m.selectedDetails.ContentType
+				if cType == "" {
+					cType = "unknown"
+				}
+
+				encoding := m.selectedDetails.ContentEncoding
+				if encoding == "" {
+					encoding = "—"
+				}
+				disposition := m.selectedDetails.ContentDisposition
+				if disposition == "" {
+					disposition = "—"
+				}
+				cacheCtrl := m.selectedDetails.CacheControl
+				if cacheCtrl == "" {
+					cacheCtrl = "—"
+				}
+				kmsKey := m.selectedDetails.KMSKeyID
+				if kmsKey == "" {
+					kmsKey = "—"
+				} else if len(kmsKey) > 20 {
+					kmsKey = kmsKey[:20] + "..."
+				}
+				sc := m.selectedDetails.StorageClass
+				if sc == "" {
+					sc = "STANDARD"
+				}
+				restore := m.selectedDetails.RestoreStatus
+				if restore == "" {
+					restore = "—"
+				}
+				aclStr := m.selectedDetails.ACLGrants
+				if aclStr == "" {
+					aclStr = "—"
+				}
+				ret := m.selectedDetails.Retention
+				if ret == "" {
+					ret = "—"
+				}
+				lh := m.selectedDetails.LegalHold
+				if lh == "" {
+					lh = "—"
+				}
+
+				metaText = lipgloss.JoinHorizontal(lipgloss.Top,
+					lipgloss.JoinVertical(lipgloss.Left,
+						fmt.Sprintf("Content-Type:    %s", cType),
+						fmt.Sprintf("SSE:             %s", m.selectedDetails.SSE),
+						fmt.Sprintf("Version:         %s", m.selectedDetails.VersionID),
+						fmt.Sprintf("Storage Class:   %s", sc),
+						fmt.Sprintf("Encoding:        %s", encoding),
+						fmt.Sprintf("Cache-Control:   %s", cacheCtrl),
+					),
+					"    ",
+					lipgloss.JoinVertical(lipgloss.Left,
+						fmt.Sprintf("Disposition:   %s", disposition),
+						fmt.Sprintf("KMS Key:       %s", kmsKey),
+						fmt.Sprintf("Restore:       %s", restore),
+						fmt.Sprintf("ACL:           %s", aclStr),
+						fmt.Sprintf("Retention:     %s", ret),
+						fmt.Sprintf("Legal Hold:    %s", lh),
+					),
+					"    ",
+					lipgloss.JoinVertical(lipgloss.Left,
+						fmt.Sprintf("Tags: %s", tagStr),
+						"Metadata:",
+						customMetaStr,
+					),
+				)
+			}
+		}
+
+		metadataBox := lipgloss.NewStyle().
+			Width(m.width/2-4).
+			Height(10).
+			BorderStyle(lipgloss.RoundedBorder()).
+			BorderForeground(lipgloss.Color(featherColor(1))).
+			Foreground(lipgloss.Color(featherColor(0))).
+			Padding(0, 1).
+			Render(lipgloss.JoinVertical(lipgloss.Left,
+				panelTitleStyle().Render("TAGS & METADATA"),
+				"",
+				metaText,
+			))
+
+		detailsPanel = lipgloss.JoinHorizontal(lipgloss.Top, detailsBox, "  ", metadataBox)
+	}
+
+	return lipgloss.JoinVertical(lipgloss.Left,
+		bucketHeader,
+		"",
+		prefixSection,
+		"",
+		tableSection,
+		"",
+		detailsPanel,
+	)
+}
+
+// bucketDetailView renders the full-screen bucket detail view.
+func (m *Model) bucketDetailView() string {
+	bucket := m.detailBucket
+
+	// Tab bar
+	tabNames := []string{"Overview", "Access & Security", "Data Protection", "Operational", "Tags"}
+	var tabs []string
+	for i, name := range tabNames {
+		if i == m.detailTabIdx {
+			tabs = append(tabs, boldStyle().Underline(true).Render(fmt.Sprintf("[ %s ]", name)))
+		} else {
+			tabs = append(tabs, mutedStyle().Render(fmt.Sprintf("  %s  ", name)))
+		}
+	}
+	tabBar := lipgloss.JoinHorizontal(lipgloss.Top, tabs...)
+
+	title := panelTitleStyle().Render(fmt.Sprintf("BUCKET DETAIL: %s", bucket))
+
+	var body string
+	if m.detailsLoading || m.selectedBucketDetails == nil {
+		body = m.loadingLine("Loading bucket details...")
+	} else {
+		d := m.selectedBucketDetails
+		orDash := func(s string) string {
+			if s == "" {
+				return "—"
+			}
+			return s
+		}
+		switch m.detailTabIdx {
+		case 0: // Overview
+			body = lipgloss.JoinVertical(lipgloss.Left,
+				boldStyle().Render("Name:        ")+orDash(bucket),
+				boldStyle().Render("ARN:         ")+"arn:aws:s3:::"+bucket,
+				boldStyle().Render("Region:      ")+orDash(m.region),
+				boldStyle().Render("Versioning:  ")+orDash(d.Versioning),
+				boldStyle().Render("Encryption:  ")+orDash(d.Encryption),
+				boldStyle().Render("Lifecycle:   ")+fmt.Sprintf("%d rules", d.LifecycleRules),
+			)
+		case 1: // Access & Security
+			policyTrunc := d.Policy
+			if len(policyTrunc) > 80 {
+				policyTrunc = policyTrunc[:80] + "..."
+			}
+			body = lipgloss.JoinVertical(lipgloss.Left,
+				boldStyle().Render("Public Access Block: ")+orDash(d.PublicAccessBlock),
+				boldStyle().Render("ACL:                 ")+orDash(d.ACLSummary),
+				boldStyle().Render("Ownership Controls:  ")+orDash(d.OwnershipControls),
+				boldStyle().Render("Policy:              ")+orDash(policyTrunc),
+				boldStyle().Render("Policy Status:       ")+orDash(d.PolicyStatus),
+			)
+		case 2: // Data Protection
+			body = lipgloss.JoinVertical(lipgloss.Left,
+				boldStyle().Render("Versioning:   ")+orDash(d.Versioning),
+				boldStyle().Render("Encryption:   ")+orDash(d.Encryption),
+				boldStyle().Render("Object Lock:  ")+orDash(d.ObjectLock),
+				boldStyle().Render("Replication:  ")+orDash(d.Replication),
+			)
+		case 3: // Operational
+			body = lipgloss.JoinVertical(lipgloss.Left,
+				boldStyle().Render("Logging:              ")+orDash(d.Logging),
+				boldStyle().Render("CORS:                 ")+orDash(d.CORS),
+				boldStyle().Render("Website:              ")+orDash(d.Website),
+				boldStyle().Render("Notifications:        ")+orDash(d.Notifications),
+				boldStyle().Render("Request Payment:      ")+orDash(d.RequestPayment),
+				boldStyle().Render("Transfer Accel.:      ")+orDash(d.Acceleration),
+				boldStyle().Render("Intelligent Tiering:  ")+orDash(d.IntelligentTiering),
+				boldStyle().Render("Multipart Uploads:    ")+fmt.Sprintf("%d in-progress", d.MultipartUploads),
+			)
+		case 4: // Tags
+			if len(d.Tags) == 0 {
+				body = "None"
+			} else {
+				var lines []string
+				for k, v := range d.Tags {
+					lines = append(lines, fmt.Sprintf("  %s = %s", k, v))
+				}
+				sort.Strings(lines)
+				body = strings.Join(lines, "\n")
+			}
+		}
+	}
+
+	footer := mutedStyle().Render("[Tab] Next  [Shift+Tab] Prev  [Esc] Close")
+
+	width := max(60, m.width-8)
+	height := max(20, m.height-10)
+
+	return lipgloss.JoinVertical(lipgloss.Left,
+		headerStyle().Render("S3 TUI"),
+		featherRail(max(12, m.width-4)),
+		"",
+		lipgloss.NewStyle().
+			Width(width).
+			Height(height).
+			BorderStyle(lipgloss.RoundedBorder()).
+			BorderForeground(lipgloss.Color(featherColor(1))).
+			Foreground(lipgloss.Color(featherColor(0))).
+			Padding(1, 2).
+			Render(lipgloss.JoinVertical(lipgloss.Left,
+				title,
+				"",
+				tabBar,
+				strings.Repeat("─", min(width-6, 60)),
+				"",
+				body,
+			)),
+		"",
+		footer,
+	)
+}
+
+func (m *Model) copyMenuView() string {
+	width := min(80, max(40, m.width-12))
+	content := lipgloss.JoinVertical(lipgloss.Left,
+		boldStyle().Render("Copied to clipboard!"),
+		"",
+		m.copyContent,
+		"",
+		mutedStyle().Render("[y] Copy URI  [Esc] Close"),
+	)
+	return modalStyle(width, 8).Render(content)
+}
+
+func (m *Model) presignedURLView() string {
+	width := min(100, max(40, m.width-12))
+	content := lipgloss.JoinVertical(lipgloss.Left,
+		boldStyle().Render("PRESIGNED URL (1 hour)"),
+		"",
+		m.presignedURL,
+		"",
+		mutedStyle().Render("[Esc] Close"),
+	)
+	return modalStyle(width, 8).Render(content)
+}
+
+func (m *Model) deleteConfirmView() string {
+	width := min(70, max(40, m.width-12))
+	content := lipgloss.JoinVertical(lipgloss.Left,
+		boldStyle().Render(fmt.Sprintf("DELETE OBJECT: %s", m.deleteKey)),
+		"",
+		lipgloss.NewStyle().Foreground(lipgloss.Color(featherColor(0))).Render("This action is PERMANENT and cannot be undone."),
+		"",
+		m.deleteConfirm.View(),
+		"",
+		mutedStyle().Render("Type 'delete' and press Enter to confirm. Esc to cancel."),
+	)
+	return modalStyle(width, 10).Render(content)
 }
 
 func (m *Model) helpView() string {
+	deleteSection := ""
+	if m.allowDelete {
+		deleteSection = "\n  x                  Delete selected object (requires confirmation)"
+	}
 	commands := lipgloss.JoinVertical(lipgloss.Left,
 		"S3 Explorer Help",
 		"",
@@ -1077,11 +1821,22 @@ func (m *Model) helpView() string {
 		"  Enter              Open bucket, prefix, or object preview",
 		"  Esc                Back, close preview/help, or clear prefix input",
 		"",
+		"Buckets",
+		"  /                  Search/filter buckets",
+		"  d                  Full bucket detail view",
+		"  r                  Refresh bucket list",
+		"",
 		"Objects",
 		"  /                  Jump to prefix",
-		"  p                  Preview selected object (read-only, truncated)",
+		"  p                  Preview selected object",
+		"  y                  Copy S3 URI to clipboard",
+		"  g                  Generate presigned URL (1 hour)",
+		"  D                  Download object to current directory",
+		"  f                  Toggle flat mode (show all objects)",
+		"  v                  Toggle versions indicator",
 		"  s                  Cycle sort column",
-		"  r                  Reverse sort direction",
+		"  S                  Reverse sort direction",
+		"  r                  Refresh object list"+deleteSection,
 		"",
 		"Utility",
 		"  ?                  Toggle this help",
