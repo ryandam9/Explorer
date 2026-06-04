@@ -1273,14 +1273,19 @@ func (m *Model) View() string {
 func (m *Model) bucketListView() string {
 	tableSection := tui.SelectedPanelStyle().Render(m.bucketTable.View())
 
-	detailsPanel := "Select a bucket to view details"
+	const detailsHeight = 10
+	detailsWidth := max(20, m.width-4)
+
+	title := "BUCKET DETAILS"
+	metaText := tui.MutedStyle().Render("Select a bucket to view details.")
 	if len(m.bucketTable.SelectedRow()) > 0 {
 		row := m.bucketTable.SelectedRow()
 		name := row[0]
 		region := row[1]
 		date := row[2]
+		title = fmt.Sprintf("BUCKET DETAILS: %s  [d] Full detail view", name)
 
-		metaText := m.loadingLine("Loading bucket details...")
+		metaText = m.loadingLine("Loading bucket details...")
 		if !m.detailsLoading && m.selectedBucketDetails != nil {
 			tagStr := ""
 			if len(m.selectedBucketDetails.Tags) > 0 {
@@ -1318,20 +1323,14 @@ func (m *Model) bucketListView() string {
 				),
 			)
 		}
-
-		detailsPanel = lipgloss.NewStyle().
-			Width(m.width-4).
-			Height(10).
-			BorderStyle(lipgloss.RoundedBorder()).
-			BorderForeground(lipgloss.Color(tui.FeatherColor(1))).
-			Foreground(lipgloss.Color(tui.FeatherColor(0))).
-			Padding(0, 1).
-			Render(lipgloss.JoinVertical(lipgloss.Left,
-				tui.PanelTitleStyle().Render(fmt.Sprintf("BUCKET DETAILS: %s  [d] Full detail view", name)),
-				"",
-				metaText,
-			))
 	}
+
+	detailsPanel := tui.FixedPanelStyle(detailsWidth, detailsHeight).
+		Render(lipgloss.JoinVertical(lipgloss.Left,
+			tui.PanelTitleStyle().Render(title),
+			"",
+			metaText,
+		))
 
 	return lipgloss.JoinVertical(lipgloss.Left,
 		tableSection,
@@ -1362,31 +1361,21 @@ func (m *Model) objectListView() string {
 	}
 	tableSection := tableStyle.Render(m.objectTable.View())
 
-	// Details Panel
-	detailsPanel := "Select an object to view details"
+	// Details Panel — always render two fixed-size boxes so nothing below shifts.
+	const detailsHeight = 10
+	boxWidth := max(20, m.width/2-4)
+
+	detailsContent := tui.MutedStyle().Render("Select an object to view details.")
+	metaText := ""
 	if len(m.objectTable.SelectedRow()) > 0 {
 		row := m.objectTable.SelectedRow()
 		name, size, date, class, etag := row[0], row[1], row[2], row[3], row[4]
 
 		isDir := (class == "DIR")
 
-		details := fmt.Sprintf("Key: %s%s\nSize: %s\nLast Modified: %s\nStorage Class: %s\nETag: %s",
+		detailsContent = fmt.Sprintf("Key: %s%s\nSize: %s\nLast Modified: %s\nStorage Class: %s\nETag: %s",
 			m.prefix, name, size, date, class, etag)
 
-		detailsBox := lipgloss.NewStyle().
-			Width(m.width/2-4).
-			Height(10).
-			BorderStyle(lipgloss.RoundedBorder()).
-			BorderForeground(lipgloss.Color(tui.FeatherColor(1))).
-			Foreground(lipgloss.Color(tui.FeatherColor(0))).
-			Padding(0, 1).
-			Render(lipgloss.JoinVertical(lipgloss.Left,
-				tui.PanelTitleStyle().Render("OBJECT DETAILS"),
-				"",
-				details,
-			))
-
-		metaText := ""
 		if isDir {
 			metaText = "Status: N/A"
 		} else {
@@ -1484,22 +1473,23 @@ func (m *Model) objectListView() string {
 				)
 			}
 		}
-
-		metadataBox := lipgloss.NewStyle().
-			Width(m.width/2-4).
-			Height(10).
-			BorderStyle(lipgloss.RoundedBorder()).
-			BorderForeground(lipgloss.Color(tui.FeatherColor(1))).
-			Foreground(lipgloss.Color(tui.FeatherColor(0))).
-			Padding(0, 1).
-			Render(lipgloss.JoinVertical(lipgloss.Left,
-				tui.PanelTitleStyle().Render("TAGS & METADATA"),
-				"",
-				metaText,
-			))
-
-		detailsPanel = lipgloss.JoinHorizontal(lipgloss.Top, detailsBox, "  ", metadataBox)
 	}
+
+	detailsBox := tui.FixedPanelStyle(boxWidth, detailsHeight).
+		Render(lipgloss.JoinVertical(lipgloss.Left,
+			tui.PanelTitleStyle().Render("OBJECT DETAILS"),
+			"",
+			detailsContent,
+		))
+
+	metadataBox := tui.FixedPanelStyle(boxWidth, detailsHeight).
+		Render(lipgloss.JoinVertical(lipgloss.Left,
+			tui.PanelTitleStyle().Render("TAGS & METADATA"),
+			"",
+			metaText,
+		))
+
+	detailsPanel := lipgloss.JoinHorizontal(lipgloss.Top, detailsBox, "  ", metadataBox)
 
 	return lipgloss.JoinVertical(lipgloss.Left,
 		bucketHeader,
@@ -1607,6 +1597,8 @@ func (m *Model) bucketDetailView() string {
 		lipgloss.NewStyle().
 			Width(width).
 			Height(height).
+			MaxWidth(width+2).
+			MaxHeight(height+2).
 			BorderStyle(lipgloss.RoundedBorder()).
 			BorderForeground(lipgloss.Color(tui.FeatherColor(1))).
 			Foreground(lipgloss.Color(tui.FeatherColor(0))).
@@ -1722,6 +1714,8 @@ func (m *Model) previewView() string {
 	return lipgloss.NewStyle().
 		Width(width).
 		Height(height).
+		MaxWidth(width + 2).
+		MaxHeight(height + 2).
 		BorderStyle(lipgloss.RoundedBorder()).
 		BorderForeground(lipgloss.Color(tui.FeatherColor(0))).
 		Foreground(lipgloss.Color(tui.FeatherColor(0))).

@@ -155,8 +155,36 @@ func ModalStyle(width, height int) lipgloss.Style {
 	return lipgloss.NewStyle().
 		Width(width).
 		Height(height).
+		MaxWidth(width + 2).
+		MaxHeight(height + 2).
 		BorderStyle(lipgloss.RoundedBorder()).
 		BorderForeground(lipgloss.Color(FeatherColor(0))).
 		Foreground(lipgloss.Color(FeatherColor(0))).
 		Padding(1, 2)
+}
+
+// FixedPanelStyle returns a rounded-border panel locked to an exact inner width
+// and height. Content is word-wrapped to the width and any overflow (too many
+// lines or columns) is clipped, so the panel always occupies the same space
+// regardless of how much or how little data it holds. This keeps surrounding
+// panels from shifting up and down as content changes.
+//
+// In lipgloss, padding is counted inside Width/Height and the border is drawn
+// outside, so the rendered block is exactly width+2 by height+2 cells.
+func FixedPanelStyle(width, height int) lipgloss.Style {
+	if width < 1 {
+		width = 1
+	}
+	if height < 1 {
+		height = 1
+	}
+	return lipgloss.NewStyle().
+		Width(width).
+		Height(height).
+		MaxWidth(width + 2).
+		MaxHeight(height + 2).
+		BorderStyle(lipgloss.RoundedBorder()).
+		BorderForeground(lipgloss.Color(FeatherColor(1))).
+		Foreground(lipgloss.Color(FeatherColor(0))).
+		Padding(0, 1)
 }
