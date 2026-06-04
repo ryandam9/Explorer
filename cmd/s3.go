@@ -11,17 +11,19 @@ import (
 )
 
 var (
-	s3Bucket  string
-	s3Prefix  string
-	s3Profile string
-	s3Region  string
-	s3Theme   string
+	s3Bucket      string
+	s3Prefix      string
+	s3Profile     string
+	s3Region      string
+	s3Theme       string
+	s3AllowDelete bool
+	s3EndpointURL string
 )
 
 var s3Cmd = &cobra.Command{
 	Use:   "s3",
 	Short: "Start the S3 Explorer TUI",
-	Long:  `Start a highly interactive, read-only S3 TUI for exploring buckets, objects, and metadata.`,
+	Long:  `Start a highly interactive S3 TUI for exploring buckets, objects, and metadata.`,
 	Run: func(cmd *cobra.Command, args []string) {
 		ctx, cancel := context.WithCancel(context.Background())
 		defer cancel()
@@ -32,7 +34,7 @@ var s3Cmd = &cobra.Command{
 			profile = s3Profile
 		}
 
-		m, err := s3tui.NewModel(ctx, profile, s3Region, s3Bucket, s3Prefix, s3Theme)
+		m, err := s3tui.NewModel(ctx, profile, s3Region, s3Bucket, s3Prefix, s3Theme, s3AllowDelete, s3EndpointURL)
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "Error initializing S3 TUI: %v\n", err)
 			os.Exit(1)
@@ -53,5 +55,7 @@ func init() {
 	s3Cmd.Flags().StringVar(&s3Profile, "profile", "", "AWS profile (overrides global)")
 	s3Cmd.Flags().StringVar(&s3Region, "region", "us-east-1", "AWS region")
 	s3Cmd.Flags().StringVar(&s3Theme, "theme", "spotted pardalote", "Color theme (spotted pardalote, plains wanderer, bee-eater, rose-crowned fruit dove, eastern rosella, oriole, princess parrot, superb fairy-wren, cassowary, yellow robin, galah, blue-winged kookaburra)")
+	s3Cmd.Flags().BoolVar(&s3AllowDelete, "allow-delete", false, "Enable delete operations (guarded by confirmation)")
+	s3Cmd.Flags().StringVar(&s3EndpointURL, "endpoint-url", "", "Custom endpoint URL (for LocalStack/MinIO)")
 	rootCmd.AddCommand(s3Cmd)
 }
