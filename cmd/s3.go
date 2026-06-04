@@ -76,7 +76,7 @@ func init() {
 	s3Cmd.Flags().StringVar(&s3Profile, "profile", "", "AWS named profile (overrides global --profile)")
 	s3Cmd.Flags().StringVar(&s3AuthMethod, "auth-method", "", "Auth method: auto, profile, env, static, sts (overrides global --auth-method)")
 	s3Cmd.Flags().StringVar(&s3RoleARN, "role-arn", "", "IAM role ARN to assume via STS (overrides global --role-arn)")
-	s3Cmd.Flags().StringVar(&s3Region, "region", "us-east-1", "AWS region")
+	s3Cmd.Flags().StringVar(&s3Region, "region", "", "AWS region (defaults to the region in ~/.aws/config or AWS_DEFAULT_REGION)")
 	s3Cmd.Flags().StringVar(&s3Theme, "theme", "spotted-pardalote", "Color theme ("+strings.Join(tui.ThemeNames(), ", ")+")")
 	s3Cmd.Flags().BoolVar(&s3AllowDelete, "allow-delete", false, "Enable delete operations (guarded by confirmation)")
 	s3Cmd.Flags().StringVar(&s3EndpointURL, "endpoint-url", "", "Custom endpoint URL (for LocalStack/MinIO)")
