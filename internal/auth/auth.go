@@ -46,6 +46,9 @@ func BuildAWSConfig(ctx context.Context, cfg *config.AWSConfig, region string) (
 }
 
 func regionOpts(region string) []func(*awsconfig.LoadOptions) error {
+	if region == "" {
+		return nil
+	}
 	return []func(*awsconfig.LoadOptions) error{
 		awsconfig.WithRegion(region),
 	}
