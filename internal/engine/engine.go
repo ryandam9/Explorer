@@ -206,6 +206,11 @@ func (e *Engine) StreamRun(ctx context.Context, chunks chan<- model.ResultChunk)
 					if awserr.IsAuthError(err) {
 						code = "AccessDenied"
 						msg = awserr.FriendlyMessage(err, s.Name())
+						slog.Warn("Access denied, skipping region",
+							"service", s.Name(), "region", r)
+					} else {
+						slog.Warn("Collection error, skipping region",
+							"service", s.Name(), "region", r, "error", err.Error())
 					}
 					chunks <- model.ResultChunk{
 						Errors: []model.ExploreError{{
