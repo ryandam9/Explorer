@@ -4,10 +4,12 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"strings"
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/spf13/cobra"
 	"github.com/user/aws_explorer/internal/s3tui"
+	"github.com/user/aws_explorer/internal/tui"
 )
 
 var (
@@ -54,7 +56,7 @@ func init() {
 	s3Cmd.Flags().StringVarP(&s3Prefix, "prefix", "p", "", "Initial S3 prefix")
 	s3Cmd.Flags().StringVar(&s3Profile, "profile", "", "AWS profile (overrides global)")
 	s3Cmd.Flags().StringVar(&s3Region, "region", "us-east-1", "AWS region")
-	s3Cmd.Flags().StringVar(&s3Theme, "theme", "spotted pardalote", "Color theme (spotted pardalote, plains wanderer, bee-eater, rose-crowned fruit dove, eastern rosella, oriole, princess parrot, superb fairy-wren, cassowary, yellow robin, galah, blue-winged kookaburra)")
+	s3Cmd.Flags().StringVar(&s3Theme, "theme", "spotted-pardalote", "Color theme ("+strings.Join(tui.ThemeNames(), ", ")+")")
 	s3Cmd.Flags().BoolVar(&s3AllowDelete, "allow-delete", false, "Enable delete operations (guarded by confirmation)")
 	s3Cmd.Flags().StringVar(&s3EndpointURL, "endpoint-url", "", "Custom endpoint URL (for LocalStack/MinIO)")
 	rootCmd.AddCommand(s3Cmd)
