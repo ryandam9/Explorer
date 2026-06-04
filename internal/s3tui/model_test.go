@@ -69,7 +69,7 @@ func TestSortObjectsNameDescendingCaseInsensitive(t *testing.T) {
 }
 
 func TestFeatherRailRendersEveryThemeColor(t *testing.T) {
-	tui.ActiveTheme = 0
+	tui.SetActiveTheme(0)
 	const width = 10
 	// FeatherRail should render exactly `width` characters, cycling through theme colors.
 	if got := lipgloss.Width(tui.FeatherRail(width)); got != width {

@@ -115,6 +115,8 @@ func (m tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.results = append(m.results, msg.Resources...)
 		m.errors = append(m.errors, msg.Errors...)
 		m.buildTables()
+		m.showDetail = false
+		m.detail = nil
 		return m, waitForChunk(m.chunks)
 	case doneMsg:
 		m.loading = false
