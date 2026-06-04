@@ -208,9 +208,11 @@ func (c *S3Client) GetObjectDetails(bucket, key string) (*ObjectDetails, error) 
 		aclGrants          string
 		retention          string
 		legalHold          string
+		headErr            error
 	)
 
 	var wg sync.WaitGroup
+	var errMu sync.Mutex
 	wg.Add(4)
 
 	go func() {
@@ -222,37 +224,41 @@ func (c *S3Client) GetObjectDetails(bucket, key string) (*ObjectDetails, error) 
 			Bucket: aws.String(bucket),
 			Key:    aws.String(key),
 		})
-		if err == nil {
-			if head.ContentType != nil {
-				contentType = *head.ContentType
-			}
-			if head.ServerSideEncryption != "" {
-				sse = string(head.ServerSideEncryption)
-			}
-			if head.VersionId != nil && *head.VersionId != "null" {
-				versionID = *head.VersionId
-			}
-			for k, v := range head.Metadata {
-				metadata[k] = v
-			}
-			if head.ContentEncoding != nil {
-				contentEncoding = *head.ContentEncoding
-			}
-			if head.ContentDisposition != nil {
-				contentDisposition = *head.ContentDisposition
-			}
-			if head.CacheControl != nil {
-				cacheControl = *head.CacheControl
-			}
-			if head.SSEKMSKeyId != nil {
-				kmsKeyID = *head.SSEKMSKeyId
-			}
-			if head.StorageClass != "" {
-				storageClass = string(head.StorageClass)
-			}
-			if head.Restore != nil {
-				restoreStatus = *head.Restore
-			}
+		if err != nil {
+			errMu.Lock()
+			headErr = err
+			errMu.Unlock()
+			return
+		}
+		if head.ContentType != nil {
+			contentType = *head.ContentType
+		}
+		if head.ServerSideEncryption != "" {
+			sse = string(head.ServerSideEncryption)
+		}
+		if head.VersionId != nil && *head.VersionId != "null" {
+			versionID = *head.VersionId
+		}
+		for k, v := range head.Metadata {
+			metadata[k] = v
+		}
+		if head.ContentEncoding != nil {
+			contentEncoding = *head.ContentEncoding
+		}
+		if head.ContentDisposition != nil {
+			contentDisposition = *head.ContentDisposition
+		}
+		if head.CacheControl != nil {
+			cacheControl = *head.CacheControl
+		}
+		if head.SSEKMSKeyId != nil {
+			kmsKeyID = *head.SSEKMSKeyId
+		}
+		if head.StorageClass != "" {
+			storageClass = string(head.StorageClass)
+		}
+		if head.Restore != nil {
+			restoreStatus = *head.Restore
 		}
 	}()
 
@@ -368,6 +374,10 @@ func (c *S3Client) GetObjectDetails(bucket, key string) (*ObjectDetails, error) 
 	}()
 
 	wg.Wait()
+
+	if headErr != nil {
+		return nil, fmt.Errorf("HeadObject: %w", headErr)
+	}
 
 	if tags == nil {
 		tags = make(map[string]string)
@@ -635,7 +645,7 @@ func (c *S3Client) getBucketCORS(bucket string) string {
 		if hasAPIErrorCode(err, "NoSuchCORSConfiguration") {
 			return "Not configured"
 		}
-		return "Not configured"
+		return "—"
 	}
 	return fmt.Sprintf("%d rule(s)", len(out.CORSRules))
 }
@@ -725,7 +735,7 @@ func (c *S3Client) getBucketAcceleration(bucket string) string {
 		if hasAPIErrorCode(err, "AccessDenied", "MethodNotAllowed") {
 			return "Not supported"
 		}
-		return "Not supported"
+		return "—"
 	}
 	if out.Status == "" {
 		return "Not enabled"
@@ -742,7 +752,7 @@ func (c *S3Client) getObjectLockConfig(bucket string) string {
 		if hasAPIErrorCode(err, "ObjectLockConfigurationNotFoundError") {
 			return "Not configured"
 		}
-		return "Not configured"
+		return "—"
 	}
 	if out.ObjectLockConfiguration == nil {
 		return "Not configured"
@@ -767,11 +777,21 @@ func (c *S3Client) countMultipartUploads(bucket string) int {
 	ctx, cancel := c.requestContext()
 	defer cancel()
 
-	out, err := c.client.ListMultipartUploads(ctx, &s3.ListMultipartUploadsInput{Bucket: aws.String(bucket)})
-	if err != nil {
-		return 0
+	var total int
+	input := &s3.ListMultipartUploadsInput{Bucket: aws.String(bucket)}
+	for {
+		out, err := c.client.ListMultipartUploads(ctx, input)
+		if err != nil {
+			return total
+		}
+		total += len(out.Uploads)
+		if out.IsTruncated == nil || !*out.IsTruncated {
+			break
+		}
+		input.KeyMarker = out.NextKeyMarker
+		input.UploadIdMarker = out.NextUploadIdMarker
 	}
-	return len(out.Uploads)
+	return total
 }
 
 func (c *S3Client) getBucketReplication(bucket string) string {
@@ -822,7 +842,7 @@ func (c *S3Client) getBucketPolicyStatus(bucket string) string {
 		if hasAPIErrorCode(err, "NoSuchBucketPolicy") {
 			return "No policy"
 		}
-		return "No policy"
+		return "—"
 	}
 	if out.PolicyStatus != nil && out.PolicyStatus.IsPublic != nil && *out.PolicyStatus.IsPublic {
 		return "Public"
@@ -864,12 +884,13 @@ func (c *S3Client) DownloadObject(bucket, key, localPath string) error {
 	if err != nil {
 		return fmt.Errorf("create file: %w", err)
 	}
-	defer f.Close()
 
 	if _, err := io.Copy(f, out.Body); err != nil {
+		f.Close()
+		os.Remove(localPath)
 		return fmt.Errorf("write file: %w", err)
 	}
-	return nil
+	return f.Close()
 }
 
 // DeleteObject deletes bucket/key.

@@ -100,6 +100,7 @@ type bucketDetailsMsg struct {
 
 type bucketRegionMsg struct {
 	idx    int
+	name   string
 	region string
 }
 
@@ -209,7 +210,7 @@ func NewModel(ctx context.Context, profile, region, bucket, prefix, themeName st
 	if idx, ok := tui.LookupTheme(themeName); ok {
 		themeIdx = idx
 	}
-	tui.ActiveTheme = themeIdx
+	tui.SetActiveTheme(themeIdx)
 
 	m := &Model{
 		client:            client,
@@ -475,14 +476,10 @@ func (m *Model) fetchBucketRegions() tea.Cmd {
 		idx := i
 		bucketName := name
 		cmds = append(cmds, func() tea.Msg {
-			if region, ok := m.bucketRegionCache[bucketName]; ok {
-				return bucketRegionMsg{idx: idx, region: region}
-			}
 			sem <- struct{}{}
 			defer func() { <-sem }()
 			region := m.client.GetBucketRegion(bucketName, m.region)
-			m.bucketRegionCache[bucketName] = region
-			return bucketRegionMsg{idx: idx, region: region}
+			return bucketRegionMsg{idx: idx, name: bucketName, region: region}
 		})
 	}
 	return tea.Batch(cmds...)
@@ -1019,6 +1016,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		cmds = append(cmds, m.fetchBucketRegions())
 
 	case bucketRegionMsg:
+		m.bucketRegionCache[msg.name] = msg.region
 		rows := m.bucketTable.Rows()
 		if msg.idx < len(rows) {
 			rows[msg.idx][1] = msg.region

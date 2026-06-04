@@ -2,6 +2,7 @@ package tui
 
 import (
 	"strings"
+	"sync/atomic"
 
 	"github.com/charmbracelet/lipgloss"
 )
@@ -28,8 +29,18 @@ var Themes = []Theme{
 	{Name: "blue-winged kookaburra", Colors: []string{"#4169E1", "#D2691E"}},
 }
 
-// ActiveTheme is the index into Themes of the currently active theme.
-var ActiveTheme int
+// activeThemeIdx holds the index into Themes of the currently active theme.
+// All reads and writes go through SetActiveTheme / getActiveTheme.
+var activeThemeIdx atomic.Int32
+
+// SetActiveTheme atomically sets the active theme index.
+func SetActiveTheme(idx int) {
+	activeThemeIdx.Store(int32(idx))
+}
+
+func getActiveTheme() int {
+	return int(activeThemeIdx.Load())
+}
 
 // ThemeNames returns the names of all available themes.
 func ThemeNames() []string {
@@ -52,7 +63,7 @@ func LookupTheme(name string) (int, bool) {
 
 // FeatherColor returns a color from the active theme by shade index (0=primary, 1=secondary).
 func FeatherColor(shade int) string {
-	colors := Themes[ActiveTheme].Colors
+	colors := Themes[getActiveTheme()].Colors
 	return colors[shade%len(colors)]
 }
 
@@ -61,11 +72,15 @@ func FeatherRail(width int) string {
 	if width < 1 {
 		return ""
 	}
+	colors := Themes[getActiveTheme()].Colors
+	// Build one style per color (typically 2) and reuse them across the full width.
+	styles := make([]lipgloss.Style, len(colors))
+	for i, c := range colors {
+		styles[i] = lipgloss.NewStyle().Foreground(lipgloss.Color(c))
+	}
 	var b strings.Builder
-	colors := Themes[ActiveTheme].Colors
 	for i := 0; i < width; i++ {
-		color := colors[i%len(colors)]
-		b.WriteString(lipgloss.NewStyle().Foreground(lipgloss.Color(color)).Render("━"))
+		b.WriteString(styles[i%len(styles)].Render("━"))
 	}
 	return b.String()
 }
