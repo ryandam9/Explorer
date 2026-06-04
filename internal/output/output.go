@@ -1,6 +1,7 @@
 package output
 
 import (
+	"bufio"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -71,8 +72,11 @@ func streamTable(chunks <-chan model.ResultChunk) {
 }
 
 func streamJSON(chunks <-chan model.ResultChunk) {
+	bw := bufio.NewWriter(os.Stdout)
+	defer bw.Flush()
+
 	first := true
-	fmt.Print("[")
+	bw.WriteString("[")
 	for chunk := range chunks {
 		for _, err := range chunk.Errors {
 			fmt.Fprintf(os.Stderr, "[%s|%s] %s: %s\n", err.Service, err.Region, err.Code, err.Message)
@@ -80,7 +84,7 @@ func streamJSON(chunks <-chan model.ResultChunk) {
 
 		for _, r := range chunk.Resources {
 			if !first {
-				fmt.Print(",")
+				bw.WriteByte(',')
 			}
 			first = false
 			data, err := json.Marshal(r)
@@ -88,19 +92,18 @@ func streamJSON(chunks <-chan model.ResultChunk) {
 				fmt.Fprintf(os.Stderr, "Failed to marshal resource: %v\n", err)
 				continue
 			}
-			fmt.Print(string(data))
+			bw.Write(data)
 		}
 	}
-	fmt.Println("]")
+	bw.WriteString("]\n")
 }
 
 func printJSON(resources []model.Resource) {
-	data, err := json.MarshalIndent(resources, "", "  ")
-	if err != nil {
+	enc := json.NewEncoder(os.Stdout)
+	enc.SetIndent("", "  ")
+	if err := enc.Encode(resources); err != nil {
 		fmt.Fprintf(os.Stderr, "Failed to marshal JSON: %v\n", err)
-		return
 	}
-	fmt.Println(string(data))
 }
 
 func printTable(resources []model.Resource) {

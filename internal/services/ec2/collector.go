@@ -99,7 +99,7 @@ func (c *Collector) mapInstance(region string, instance types.Instance, detail s
 	}
 
 	if detail == services.DetailLevelDetailed || detail == services.DetailLevelRaw {
-		res.Details = map[string]interface{}{
+		res.Details = map[string]any{
 			"imageId": aws.ToString(instance.ImageId),
 		}
 	}

@@ -20,7 +20,7 @@ const (
 
 // CollectInput represents the input for a collector.
 type CollectInput struct {
-	Config      config.Config
+	Config      *config.Config
 	AWSConfig   aws.Config
 	Region      string
 	Filters     model.Filter

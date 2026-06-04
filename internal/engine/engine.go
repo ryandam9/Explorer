@@ -156,13 +156,13 @@ func (e *Engine) StreamRun(ctx context.Context, chunks chan<- model.ResultChunk)
 	}
 
 	if len(e.Config.Filters.Regions) > 0 {
-		filterSet := make(map[string]bool, len(e.Config.Filters.Regions))
+		filterSet := make(map[string]struct{}, len(e.Config.Filters.Regions))
 		for _, r := range e.Config.Filters.Regions {
-			filterSet[r] = true
+			filterSet[r] = struct{}{}
 		}
 		var filtered []string
 		for _, r := range regions {
-			if filterSet[r] {
+			if _, ok := filterSet[r]; ok {
 				filtered = append(filtered, r)
 			}
 		}
@@ -171,10 +171,7 @@ func (e *Engine) StreamRun(ctx context.Context, chunks chan<- model.ResultChunk)
 
 	for _, srv := range e.registry.GetAll() {
 		srvCfg, ok := e.Config.Services[srv.Name()]
-		if ok && !srvCfg.Enabled {
-			continue
-		}
-		if !ok {
+		if !ok || !srvCfg.Enabled {
 			continue
 		}
 
@@ -196,7 +193,7 @@ func (e *Engine) StreamRun(ctx context.Context, chunks chan<- model.ResultChunk)
 				}
 
 				input := services.CollectInput{
-					Config:    *e.Config,
+					Config:    e.Config,
 					AWSConfig: regionalConfig,
 					Region:    r,
 					Filters: model.Filter{
@@ -233,7 +230,10 @@ func (e *Engine) StreamRun(ctx context.Context, chunks chan<- model.ResultChunk)
 }
 
 func filterResources(resources []model.Resource, filters model.Filter) []model.Resource {
-	var filtered []model.Resource
+	if len(filters.States) == 0 && len(filters.Tags) == 0 {
+		return resources
+	}
+	filtered := make([]model.Resource, 0, len(resources))
 	for _, r := range resources {
 		// Filter by state
 		if len(filters.States) > 0 {

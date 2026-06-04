@@ -75,7 +75,7 @@ func (c *Collector) mapCluster(region string, cluster types.Cluster, detail serv
 	}
 
 	if detail == services.DetailLevelDetailed || detail == services.DetailLevelRaw {
-		res.Details = map[string]interface{}{
+		res.Details = map[string]any{
 			"registeredContainerInstances": cluster.RegisteredContainerInstancesCount,
 		}
 	}
