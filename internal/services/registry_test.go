@@ -11,8 +11,8 @@ import (
 // stubCollector is a minimal Collector for testing.
 type stubCollector struct{ name string }
 
-func (s *stubCollector) Name() string    { return s.name }
-func (s *stubCollector) IsGlobal() bool  { return false }
+func (s *stubCollector) Name() string   { return s.name }
+func (s *stubCollector) IsGlobal() bool { return false }
 func (s *stubCollector) Collect(_ context.Context, _ services.CollectInput) ([]model.Resource, error) {
 	return nil, nil
 }

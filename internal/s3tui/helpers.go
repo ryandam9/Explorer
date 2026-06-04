@@ -67,4 +67,3 @@ func displayPrefix(prefix string) string {
 	}
 	return prefix
 }
-

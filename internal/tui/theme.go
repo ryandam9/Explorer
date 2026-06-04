@@ -164,8 +164,8 @@ func ModalStyle(width, height int) lipgloss.Style {
 	return lipgloss.NewStyle().
 		Width(width).
 		Height(height).
-		MaxWidth(width + 2).
-		MaxHeight(height + 2).
+		MaxWidth(width+2).
+		MaxHeight(height+2).
 		BorderStyle(lipgloss.RoundedBorder()).
 		BorderForeground(lipgloss.Color(FeatherColor(0))).
 		Foreground(lipgloss.Color(FeatherColor(0))).
@@ -190,8 +190,8 @@ func FixedPanelStyle(width, height int) lipgloss.Style {
 	return lipgloss.NewStyle().
 		Width(width).
 		Height(height).
-		MaxWidth(width + 2).
-		MaxHeight(height + 2).
+		MaxWidth(width+2).
+		MaxHeight(height+2).
 		BorderStyle(lipgloss.RoundedBorder()).
 		BorderForeground(lipgloss.Color(FeatherColor(1))).
 		Foreground(lipgloss.Color(FeatherColor(0))).

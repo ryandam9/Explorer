@@ -25,7 +25,7 @@ import (
 type state int
 
 const (
-	stateBucketList  state = iota
+	stateBucketList state = iota
 	stateObjectList
 	stateBucketDetail
 )
@@ -178,7 +178,7 @@ type Model struct {
 	detailTabIdx int
 
 	// Object browser extras
-	flatMode    bool
+	flatMode     bool
 	showVersions bool
 
 	// Actions
@@ -613,7 +613,6 @@ func (m *Model) loadingBox(message, detail string) string {
 	}
 	return tui.LoadingBoxStyle().Render(lipgloss.JoinVertical(lipgloss.Center, lines...))
 }
-
 
 func (m *Model) selectedObjectKey() (string, bool) {
 	row := m.objectTable.SelectedRow()
@@ -1714,8 +1713,8 @@ func (m *Model) previewView() string {
 	return lipgloss.NewStyle().
 		Width(width).
 		Height(height).
-		MaxWidth(width + 2).
-		MaxHeight(height + 2).
+		MaxWidth(width+2).
+		MaxHeight(height+2).
 		BorderStyle(lipgloss.RoundedBorder()).
 		BorderForeground(lipgloss.Color(tui.FeatherColor(0))).
 		Foreground(lipgloss.Color(tui.FeatherColor(0))).
