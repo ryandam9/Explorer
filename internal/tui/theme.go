@@ -15,18 +15,18 @@ type Theme struct {
 
 // Themes is the list of built-in themes (named after Australian birds).
 var Themes = []Theme{
-	{Name: "spotted pardalote", Colors: []string{"#6260FF", "#E4E4FF"}},
-	{Name: "plains wanderer", Colors: []string{"#9FE870", "#163300"}},
+	{Name: "spotted-pardalote", Colors: []string{"#6260FF", "#E4E4FF"}},
+	{Name: "plains-wanderer", Colors: []string{"#9FE870", "#163300"}},
 	{Name: "bee-eater", Colors: []string{"#BDD9D7", "#03363D"}},
-	{Name: "rose-crowned fruit dove", Colors: []string{"#3447AA", "#FBEAEB"}},
-	{Name: "eastern rosella", Colors: []string{"#FCDB32", "#141D38"}},
+	{Name: "rose-crowned-fruit-dove", Colors: []string{"#3447AA", "#FBEAEB"}},
+	{Name: "eastern-rosella", Colors: []string{"#FCDB32", "#141D38"}},
 	{Name: "oriole", Colors: []string{"#34E0A1", "#000000"}},
-	{Name: "princess parrot", Colors: []string{"#FF69B4", "#006400"}},
-	{Name: "superb fairy-wren", Colors: []string{"#1E90FF", "#8B4513"}},
+	{Name: "princess-parrot", Colors: []string{"#FF69B4", "#006400"}},
+	{Name: "superb-fairy-wren", Colors: []string{"#1E90FF", "#8B4513"}},
 	{Name: "cassowary", Colors: []string{"#191970", "#DC143C"}},
-	{Name: "yellow robin", Colors: []string{"#FFD700", "#696969"}},
+	{Name: "yellow-robin", Colors: []string{"#FFD700", "#696969"}},
 	{Name: "galah", Colors: []string{"#FF69B4", "#808080"}},
-	{Name: "blue-winged kookaburra", Colors: []string{"#4169E1", "#D2691E"}},
+	{Name: "blue-winged-kookaburra", Colors: []string{"#4169E1", "#D2691E"}},
 }
 
 // activeThemeIdx holds the index into Themes of the currently active theme.
@@ -51,14 +51,23 @@ func ThemeNames() []string {
 	return names
 }
 
-// LookupTheme finds a theme index by name (case-insensitive).
+// LookupTheme finds a theme index by name. Matching is case-insensitive and
+// treats spaces and hyphens as equivalent, so older space-separated names
+// (e.g. "spotted pardalote") still resolve to the hyphenated theme.
 func LookupTheme(name string) (int, bool) {
+	want := normalizeThemeName(name)
 	for i, t := range Themes {
-		if strings.EqualFold(t.Name, name) {
+		if normalizeThemeName(t.Name) == want {
 			return i, true
 		}
 	}
 	return 0, false
+}
+
+// normalizeThemeName lowercases a theme name and collapses spaces to hyphens
+// so that lookups are tolerant of casing and space/hyphen differences.
+func normalizeThemeName(name string) string {
+	return strings.ReplaceAll(strings.ToLower(strings.TrimSpace(name)), " ", "-")
 }
 
 // FeatherColor returns a color from the active theme by shade index (0=primary, 1=secondary).
