@@ -506,13 +506,29 @@ func (m *Model) fetchBucketRegions() tea.Cmd {
 
 	sem := make(chan struct{}, 20)
 
+	// Apply any already-cached regions immediately so a reload doesn't
+	// leave the region column stuck at "..." for buckets we've seen before.
+	cacheApplied := false
+	for i, row := range rows {
+		if row[1] != "..." {
+			continue
+		}
+		if region, ok := m.bucketRegionCache[row[0]]; ok {
+			rows[i][1] = region
+			if i < len(m.allBucketRows) {
+				m.allBucketRows[i][1] = region
+			}
+			cacheApplied = true
+		}
+	}
+	if cacheApplied {
+		m.bucketTable.SetRows(rows)
+	}
+
 	cmds := make([]tea.Cmd, 0, len(rows))
 	for i, row := range rows {
 		name := row[0]
 		if row[1] != "..." {
-			continue
-		}
-		if _, ok := m.bucketRegionCache[name]; ok {
 			continue
 		}
 		idx := i
@@ -802,6 +818,12 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					m.bucketSearch.SetValue("")
 					m.bucket = name
 					m.region = rows[0][1]
+					// Region may still be loading; fall back to the cache.
+					if m.region == "..." {
+						if cached, ok := m.bucketRegionCache[m.bucket]; ok {
+							m.region = cached
+						}
+					}
 					// Re-initialize client for the correct bucket region
 					newClient, err := NewS3Client(m.client.ctx, m.awsCfg, m.region, m.endpointURL)
 					if err == nil {
@@ -1017,6 +1039,12 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				if len(row) > 0 {
 					m.bucket = row[0]
 					m.region = row[1]
+					// Region may still be loading; fall back to the cache.
+					if m.region == "..." {
+						if cached, ok := m.bucketRegionCache[m.bucket]; ok {
+							m.region = cached
+						}
+					}
 
 					// Re-initialize client for the correct bucket region
 					newClient, err := NewS3Client(m.client.ctx, m.awsCfg, m.region, m.endpointURL)
