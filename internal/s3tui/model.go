@@ -13,6 +13,7 @@ import (
 	"github.com/charmbracelet/bubbles/spinner"
 	"github.com/charmbracelet/bubbles/table"
 	"github.com/charmbracelet/bubbles/textinput"
+	"github.com/charmbracelet/bubbles/viewport"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/user/aws_explorer/internal/config"
@@ -72,7 +73,8 @@ type BucketDetails struct {
 // ---------------------------------------------------------------------------
 
 type bucketsLoadedMsg struct {
-	rows []table.Row
+	rows    []table.Row
+	warning string
 }
 
 type objectsLoadedMsg struct {
@@ -193,6 +195,8 @@ type Model struct {
 
 	presignedURL  string
 	showPresigned bool
+
+	previewViewport viewport.Model
 
 	statusMsg string // transient status shown in footer
 }
@@ -462,6 +466,17 @@ func (m *Model) loadBuckets() tea.Cmd {
 	return func() tea.Msg {
 		buckets, err := m.client.ListBuckets()
 		if err != nil {
+			// Access-denied errors are non-fatal: show a warning and display an
+			// empty bucket list so the user can still see the rest of the UI.
+			if hasAPIErrorCode(err, "AccessDenied", "AccessDeniedException",
+				"UnauthorizedOperation", "AuthorizationError") {
+				return bucketsLoadedMsg{
+					warning: fmt.Sprintf(
+						"WARNING: Access denied for s3:ListBuckets in region %s — no buckets available. Check IAM permissions.",
+						m.region,
+					),
+				}
+			}
 			return errMsg{err}
 		}
 
@@ -481,7 +496,7 @@ func (m *Model) loadBuckets() tea.Cmd {
 			rows[i] = table.Row{name, region, dateStr}
 		}
 
-		return bucketsLoadedMsg{rows}
+		return bucketsLoadedMsg{rows: rows}
 	}
 }
 
@@ -756,8 +771,15 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if msg.String() == "esc" {
 				m.showPreview = false
 				m.previewLoading = false
+				return m, nil
 			}
-			return m, nil
+			// Forward all other keys to the preview viewport for scrolling.
+			var vpCmd tea.Cmd
+			m.previewViewport, vpCmd = m.previewViewport.Update(msg)
+			if vpCmd != nil {
+				cmds = append(cmds, vpCmd)
+			}
+			return m, tea.Batch(cmds...)
 		}
 
 		// Bucket search overlay
@@ -1037,6 +1059,9 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.err = nil
 		m.bucketTable.SetRows(msg.rows)
 		m.allBucketRows = msg.rows // keep a copy for search restore
+		if msg.warning != "" {
+			m.statusMsg = msg.warning
+		}
 		if len(msg.rows) > 0 {
 			m.bucket = msg.rows[0][0]
 			cmds = append(cmds, m.fetchBucketDetails(msg.rows[0][0]))
@@ -1091,6 +1116,21 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.previewLoading = false
 			m.previewErr = msg.err
 			m.previewContent = msg.content
+			// Initialise the scrollable viewport for this preview.
+			panelW := min(100, max(40, m.width-12))
+			panelH := min(28, max(10, m.height-10))
+			vpW := panelW - 6 // subtract border + padding
+			vpH := panelH - 8 // subtract title, blank lines, help text, border
+			if vpW < 10 {
+				vpW = 10
+			}
+			if vpH < 2 {
+				vpH = 2
+			}
+			m.previewViewport = viewport.New(vpW, vpH)
+			if msg.err == nil && msg.content != "" {
+				m.previewViewport.SetContent(msg.content)
+			}
 		}
 
 	case presignedURLMsg:
@@ -1201,11 +1241,16 @@ func (m *Model) View() string {
 	header := tui.HeaderStyle().Render(headerText)
 
 	if m.err != nil {
+		maxErrW := m.width - 20
+		if maxErrW < 40 {
+			maxErrW = 40
+		}
 		errBox := lipgloss.NewStyle().
 			BorderStyle(lipgloss.RoundedBorder()).
 			BorderForeground(lipgloss.Color(tui.FeatherColor(0))).
 			Foreground(lipgloss.Color(tui.FeatherColor(0))).
 			Padding(1, 2).
+			Width(maxErrW).
 			Align(lipgloss.Center).
 			Render(fmt.Sprintf("Failed to access bucket: %s\n\n%s\n\nPress [Esc] to return to the bucket list.", m.bucket, tui.ErrorStyle().Render(m.err.Error())))
 
@@ -1726,14 +1771,15 @@ func (m *Model) helpView() string {
 }
 
 func (m *Model) previewView() string {
-	body := m.loadingLine("Loading preview...")
+	var body string
 	if m.previewErr != nil {
 		body = "Preview failed: " + summarizeS3Error(m.previewErr)
-	} else if !m.previewLoading {
-		body = m.previewContent
-		if body == "" {
-			body = "Object is empty."
-		}
+	} else if m.previewLoading {
+		body = m.loadingLine("Loading preview...")
+	} else if m.previewContent == "" {
+		body = "Object is empty."
+	} else {
+		body = m.previewViewport.View()
 	}
 
 	width := min(100, max(40, m.width-12))
@@ -1748,5 +1794,5 @@ func (m *Model) previewView() string {
 		BorderForeground(lipgloss.Color(tui.FeatherColor(0))).
 		Foreground(lipgloss.Color(tui.FeatherColor(0))).
 		Padding(1, 2).
-		Render(lipgloss.JoinVertical(lipgloss.Left, title, "", body, "", tui.MutedStyle().Render("Esc closes preview")))
+		Render(lipgloss.JoinVertical(lipgloss.Left, title, "", body, "", tui.MutedStyle().Render("[↑/↓/PgUp/PgDn] Scroll  [Esc] Close")))
 }

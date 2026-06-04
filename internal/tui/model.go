@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/charmbracelet/bubbles/table"
+	"github.com/charmbracelet/bubbles/viewport"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/user/aws_explorer/internal/engine"
@@ -26,21 +27,22 @@ var detailKeyStyle = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("#
 var detailSectionStyle = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("#6260FF")).Underline(true)
 
 type tuiModel struct {
-	ctx          context.Context
-	engine       *engine.Engine
-	results      []model.Resource
-	errors       []model.ExploreError
-	loading      bool
-	activeTab    int
-	tables       []table.Model
-	tabNames     []string
-	tabResources [][]model.Resource
-	chunks       chan model.ResultChunk
-	done         bool
-	width        int
-	height       int
-	showDetail   bool
-	detail       *model.Resource
+	ctx            context.Context
+	engine         *engine.Engine
+	results        []model.Resource
+	errors         []model.ExploreError
+	loading        bool
+	activeTab      int
+	tables         []table.Model
+	tabNames       []string
+	tabResources   [][]model.Resource
+	chunks         chan model.ResultChunk
+	done           bool
+	width          int
+	height         int
+	showDetail     bool
+	detail         *model.Resource
+	detailViewport viewport.Model
 }
 
 type chunkMsg model.ResultChunk
@@ -80,6 +82,9 @@ func (m tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.width = msg.Width
 		m.height = msg.Height
 		m.updateTableLayout()
+		if m.showDetail && m.detail != nil {
+			m.syncDetailViewport()
+		}
 	case tea.KeyMsg:
 		switch msg.String() {
 		case "q", "ctrl+c":
@@ -95,7 +100,18 @@ func (m tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					r := rows[cursor]
 					m.detail = &r
 					m.showDetail = true
+					m.syncDetailViewport()
 				}
+			}
+		case "[":
+			if m.showDetail {
+				m.detailViewport.LineUp(3)
+				return m, nil
+			}
+		case "]":
+			if m.showDetail {
+				m.detailViewport.LineDown(3)
+				return m, nil
 			}
 		case "tab":
 			if len(m.tables) > 0 {
@@ -232,8 +248,27 @@ func tableStyles() table.Styles {
 	return s
 }
 
-func (m tuiModel) renderDetail(r model.Resource) string {
+// renderDetail formats resource details for the detail viewport.
+// width is the inner display width so long values are wrapped before they
+// reach the panel border.
+func (m tuiModel) renderDetail(r model.Resource, width int) string {
 	var b strings.Builder
+
+	// fieldVal wraps value v at maxW characters, indenting continuation lines.
+	fieldVal := func(v string, keyWidth, maxW int) string {
+		if maxW <= 0 || len(v) <= maxW {
+			return v
+		}
+		indent := strings.Repeat(" ", keyWidth+1)
+		chunks := chunkString(v, maxW)
+		return chunks[0] + "\n" + indent + strings.Join(chunks[1:], "\n"+indent)
+	}
+
+	const keyW = 9  // width of "%-9s" key field
+	valW := width - keyW - 1
+	if valW < 10 {
+		valW = 10
+	}
 
 	b.WriteString(detailSectionStyle.Render("RESOURCE") + "\n\n")
 
@@ -248,11 +283,18 @@ func (m tuiModel) renderDetail(r model.Resource) string {
 	}
 	for _, f := range fields {
 		if f.v != "" {
-			b.WriteString(detailKeyStyle.Render(fmt.Sprintf("%-9s", f.k)) + " " + f.v + "\n")
+			b.WriteString(detailKeyStyle.Render(fmt.Sprintf("%-9s", f.k)) + " " + fieldVal(f.v, keyW, valW) + "\n")
 		}
 	}
 	if r.ARN != "" {
-		b.WriteString(detailKeyStyle.Render("ARN") + "\n  " + r.ARN + "\n")
+		arnW := width - 2
+		if arnW < 10 {
+			arnW = 10
+		}
+		b.WriteString(detailKeyStyle.Render("ARN") + "\n")
+		for _, chunk := range chunkString(r.ARN, arnW) {
+			b.WriteString("  " + chunk + "\n")
+		}
 	}
 	if r.CreatedAt != nil {
 		b.WriteString(detailKeyStyle.Render("Created") + "  " + r.CreatedAt.Format("2006-01-02 15:04:05") + "\n")
@@ -265,8 +307,13 @@ func (m tuiModel) renderDetail(r model.Resource) string {
 			keys = append(keys, k)
 		}
 		sort.Strings(keys)
+		const sumKeyW = 20
+		sumValW := width - sumKeyW - 1
+		if sumValW < 10 {
+			sumValW = 10
+		}
 		for _, k := range keys {
-			b.WriteString(detailKeyStyle.Render(fmt.Sprintf("%-20s", k)) + " " + r.Summary[k] + "\n")
+			b.WriteString(detailKeyStyle.Render(fmt.Sprintf("%-20s", k)) + " " + fieldVal(r.Summary[k], sumKeyW, sumValW) + "\n")
 		}
 	}
 
@@ -277,8 +324,13 @@ func (m tuiModel) renderDetail(r model.Resource) string {
 			keys = append(keys, k)
 		}
 		sort.Strings(keys)
+		const tagKeyW = 20
+		tagValW := width - tagKeyW - 1
+		if tagValW < 10 {
+			tagValW = 10
+		}
 		for _, k := range keys {
-			b.WriteString(detailKeyStyle.Render(fmt.Sprintf("%-20s", k)) + " " + r.Tags[k] + "\n")
+			b.WriteString(detailKeyStyle.Render(fmt.Sprintf("%-20s", k)) + " " + fieldVal(r.Tags[k], tagKeyW, tagValW) + "\n")
 		}
 	}
 
@@ -357,7 +409,7 @@ func (m tuiModel) View() string {
 
 	var helpLine string
 	if m.showDetail {
-		helpLine = "[Tab/Shift+Tab] Switch service | [↑/↓] Move | [Enter] Select | [Esc] Close detail | [q] Quit"
+		helpLine = "[Tab/Shift+Tab] Switch service | [↑/↓] Move | [[/]] Scroll detail | [Esc] Close detail | [q] Quit"
 	} else {
 		helpLine = "[Tab/Shift+Tab] Switch service | [↑/↓] Move | [Enter] Detail | [q] Quit"
 	}
@@ -367,14 +419,13 @@ func (m tuiModel) View() string {
 		if detailWidth < 30 {
 			detailWidth = 30
 		}
-		detailContent := m.renderDetail(*m.detail)
 		detailHeight := m.tableHeight() + 2
 		detailView := detailPanelStyle.
 			Width(detailWidth).
 			Height(detailHeight).
 			MaxWidth(detailWidth + 2).
 			MaxHeight(detailHeight + 2).
-			Render(detailContent)
+			Render(m.detailViewport.View())
 		body := lipgloss.JoinHorizontal(lipgloss.Top, tableView, "  ", detailView)
 		return fmt.Sprintf("%s\n%s\n\n%s\n\n%s", header, tabs, body, helpLine)
 	}
@@ -410,4 +461,43 @@ func maxInt(a, b int) int {
 		return a
 	}
 	return b
+}
+
+// chunkString splits s into substrings of at most n characters each,
+// which allows long values (like ARNs) to wrap within a fixed-width panel.
+func chunkString(s string, n int) []string {
+	if n <= 0 || len(s) <= n {
+		return []string{s}
+	}
+	var out []string
+	for len(s) > n {
+		out = append(out, s[:n])
+		s = s[n:]
+	}
+	if s != "" {
+		out = append(out, s)
+	}
+	return out
+}
+
+// syncDetailViewport rebuilds the detail viewport to match the current terminal
+// size and re-renders the selected resource's detail content into it.
+func (m *tuiModel) syncDetailViewport() {
+	if m.detail == nil || m.width == 0 {
+		return
+	}
+	detailWidth := m.width - m.tableWidth() - 12
+	if detailWidth < 30 {
+		detailWidth = 30
+	}
+	vpWidth := detailWidth - 2 // subtract panel horizontal padding
+	vpHeight := m.tableHeight()
+	if vpWidth < 10 {
+		vpWidth = 10
+	}
+	if vpHeight < 4 {
+		vpHeight = 4
+	}
+	m.detailViewport = viewport.New(vpWidth, vpHeight)
+	m.detailViewport.SetContent(m.renderDetail(*m.detail, vpWidth))
 }
