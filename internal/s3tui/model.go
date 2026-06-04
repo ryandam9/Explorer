@@ -15,6 +15,7 @@ import (
 	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
+	"github.com/user/aws_explorer/internal/config"
 	"github.com/user/aws_explorer/internal/tui"
 )
 
@@ -132,7 +133,7 @@ type Model struct {
 	state  state
 	focus  focus
 
-	profile     string
+	awsCfg      *config.AWSConfig
 	region      string
 	bucket      string
 	prefix      string
@@ -196,12 +197,40 @@ type Model struct {
 	statusMsg string // transient status shown in footer
 }
 
+// authDisplayInfo returns a short human-readable label for the active auth method.
+func authDisplayInfo(cfg *config.AWSConfig) string {
+	if cfg == nil {
+		return ""
+	}
+	switch cfg.AuthMethod {
+	case "sts":
+		if cfg.STS.RoleARN != "" {
+			// Show only the role name portion of the ARN for brevity.
+			parts := strings.Split(cfg.STS.RoleARN, "/")
+			return "Role: " + parts[len(parts)-1]
+		}
+	case "static":
+		return "Auth: static"
+	case "env":
+		return "Auth: env"
+	case "profile":
+		if cfg.Profile != "" {
+			return "Profile: " + cfg.Profile
+		}
+	default:
+		if cfg.Profile != "" && cfg.Profile != "default" {
+			return "Profile: " + cfg.Profile
+		}
+	}
+	return ""
+}
+
 // ---------------------------------------------------------------------------
 // NewModel
 // ---------------------------------------------------------------------------
 
-func NewModel(ctx context.Context, profile, region, bucket, prefix, themeName string, allowDelete bool, endpointURL string) (*Model, error) {
-	client, err := NewS3Client(ctx, profile, region, endpointURL)
+func NewModel(ctx context.Context, awsCfg *config.AWSConfig, region, bucket, prefix, themeName string, allowDelete bool, endpointURL string) (*Model, error) {
+	client, err := NewS3Client(ctx, awsCfg, region, endpointURL)
 	if err != nil {
 		return nil, err
 	}
@@ -214,7 +243,7 @@ func NewModel(ctx context.Context, profile, region, bucket, prefix, themeName st
 
 	m := &Model{
 		client:            client,
-		profile:           profile,
+		awsCfg:            awsCfg,
 		region:            region,
 		bucket:            bucket,
 		prefix:            prefix,
@@ -754,7 +783,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					m.bucket = name
 					m.region = rows[0][1]
 					// Re-initialize client for the correct bucket region
-					newClient, err := NewS3Client(m.client.ctx, m.profile, m.region, m.endpointURL)
+					newClient, err := NewS3Client(m.client.ctx, m.awsCfg, m.region, m.endpointURL)
 					if err == nil {
 						m.client = newClient
 					}
@@ -970,7 +999,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					m.region = row[1]
 
 					// Re-initialize client for the correct bucket region
-					newClient, err := NewS3Client(m.client.ctx, m.profile, m.region, m.endpointURL)
+					newClient, err := NewS3Client(m.client.ctx, m.awsCfg, m.region, m.endpointURL)
 					if err == nil {
 						m.client = newClient
 					}
@@ -1157,8 +1186,8 @@ func (m *Model) View() string {
 	var content string
 
 	headerText := "S3 TUI v1.3.0"
-	if m.profile != "" {
-		headerText += fmt.Sprintf("   Profile: %s", m.profile)
+	if info := authDisplayInfo(m.awsCfg); info != "" {
+		headerText += "   " + info
 	}
 	if m.region != "" {
 		headerText += fmt.Sprintf("   Region: %s", m.region)

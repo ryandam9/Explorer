@@ -18,6 +18,8 @@ import (
 
 var cfgFile string
 var awsProfile string
+var awsAuthMethod string
+var awsRoleARN string
 var outputFormat string
 var allRegions bool
 var AppConfig *config.Config
@@ -32,11 +34,25 @@ to monitor and list various AWS resources such as EC2, S3, RDS, etc.`,
 		if allRegions {
 			AppConfig.AWS.AllRegions = true
 		}
+		// CLI flags override config file values.
+		if awsProfile != "" {
+			AppConfig.AWS.Profile = awsProfile
+		}
+		if awsAuthMethod != "" {
+			AppConfig.AWS.AuthMethod = awsAuthMethod
+		}
+		if awsRoleARN != "" {
+			AppConfig.AWS.STS.RoleARN = awsRoleARN
+			if AppConfig.AWS.AuthMethod == "" || AppConfig.AWS.AuthMethod == "auto" {
+				AppConfig.AWS.AuthMethod = "sts"
+			}
+		}
+
 		slog.Info("Starting AWS Explorer", "regions", AppConfig.AWS.Regions)
 
 		ctx := context.Background()
 
-		eng, err := engine.NewEngine(ctx, AppConfig, awsProfile)
+		eng, err := engine.NewEngine(ctx, AppConfig)
 		if err != nil {
 			slog.Error("Failed to initialize engine", "error", err)
 			os.Exit(1)
@@ -58,7 +74,9 @@ func init() {
 
 	// Define global flags
 	rootCmd.PersistentFlags().StringVar(&cfgFile, "config", "", "config file (default is ./config.yaml)")
-	rootCmd.PersistentFlags().StringVar(&awsProfile, "profile", "", "AWS profile to use for authentication")
+	rootCmd.PersistentFlags().StringVar(&awsProfile, "profile", "", "AWS named profile (overrides aws.profile in config)")
+	rootCmd.PersistentFlags().StringVar(&awsAuthMethod, "auth-method", "", "Auth method: auto, profile, env, static, sts (overrides aws.authMethod in config)")
+	rootCmd.PersistentFlags().StringVar(&awsRoleARN, "role-arn", "", "IAM role ARN to assume via STS (sets auth method to sts)")
 	rootCmd.PersistentFlags().StringVarP(&outputFormat, "output", "o", "table", "Output format (table, json, csv)")
 	rootCmd.PersistentFlags().BoolVar(&allRegions, "all-regions", false, "Scan all available AWS regions")
 }

@@ -20,7 +20,21 @@ var tuiCmd = &cobra.Command{
 		ctx, cancel := context.WithCancel(context.Background())
 		defer cancel()
 
-		eng, err := engine.NewEngine(ctx, AppConfig, awsProfile)
+		// Apply persistent CLI flag overrides (same as root command).
+		if awsProfile != "" {
+			AppConfig.AWS.Profile = awsProfile
+		}
+		if awsAuthMethod != "" {
+			AppConfig.AWS.AuthMethod = awsAuthMethod
+		}
+		if awsRoleARN != "" {
+			AppConfig.AWS.STS.RoleARN = awsRoleARN
+			if AppConfig.AWS.AuthMethod == "" || AppConfig.AWS.AuthMethod == "auto" {
+				AppConfig.AWS.AuthMethod = "sts"
+			}
+		}
+
+		eng, err := engine.NewEngine(ctx, AppConfig)
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "Failed to initialize engine: %v\n", err)
 			os.Exit(1)
