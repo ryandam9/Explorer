@@ -1,0 +1,269 @@
+package engine
+
+import (
+	"context"
+	"fmt"
+	"log/slog"
+	"sort"
+	"strings"
+
+	"github.com/aws/aws-sdk-go-v2/aws"
+	awsconfig "github.com/aws/aws-sdk-go-v2/config"
+	awsec2 "github.com/aws/aws-sdk-go-v2/service/ec2"
+	"golang.org/x/sync/errgroup"
+
+	"github.com/user/aws_explorer/internal/config"
+	"github.com/user/aws_explorer/internal/model"
+	"github.com/user/aws_explorer/internal/services"
+	"github.com/user/aws_explorer/internal/services/cloudwatch"
+	"github.com/user/aws_explorer/internal/services/dynamodb"
+	"github.com/user/aws_explorer/internal/services/ec2"
+	"github.com/user/aws_explorer/internal/services/ecs"
+	"github.com/user/aws_explorer/internal/services/eks"
+	"github.com/user/aws_explorer/internal/services/elbv2"
+	"github.com/user/aws_explorer/internal/services/emr"
+	"github.com/user/aws_explorer/internal/services/iam"
+	"github.com/user/aws_explorer/internal/services/lambda"
+	"github.com/user/aws_explorer/internal/services/rds"
+	"github.com/user/aws_explorer/internal/services/route53"
+	"github.com/user/aws_explorer/internal/services/s3"
+	"github.com/user/aws_explorer/internal/services/secretsmanager"
+	"github.com/user/aws_explorer/internal/services/sns"
+	"github.com/user/aws_explorer/internal/services/sqs"
+)
+
+// Engine is responsible for orchestrating the scans.
+type Engine struct {
+	Config          *config.Config
+	AWSConfig       aws.Config
+	registry        *services.Registry
+	ResolvedRegions []string
+}
+
+// NewEngine creates a new scanning engine.
+func NewEngine(ctx context.Context, cfg *config.Config, profile string) (*Engine, error) {
+	slog.Info("Initializing AWS configuration", "profile", profile)
+
+	// Resolve regions from config or default
+	regions := cfg.AWS.Regions
+	if len(regions) == 0 {
+		regions = []string{"us-east-1"} // Default fallback if not provided
+	}
+
+	// Check if "all" is in the regions list
+	allRegions := cfg.AWS.AllRegions
+	bootstrapRegion := regions[0]
+	for _, r := range regions {
+		if strings.ToLower(r) == "all" {
+			allRegions = true
+			bootstrapRegion = "us-east-1"
+			break
+		}
+	}
+
+	opts := []func(*awsconfig.LoadOptions) error{
+		awsconfig.WithRegion(bootstrapRegion),
+	}
+	if profile != "" {
+		opts = append(opts, awsconfig.WithSharedConfigProfile(profile))
+	} else if cfg.AWS.Profile != "" && cfg.AWS.Profile != "default" {
+		opts = append(opts, awsconfig.WithSharedConfigProfile(cfg.AWS.Profile))
+	}
+
+	awscfg, err := awsconfig.LoadDefaultConfig(ctx, opts...)
+	if err != nil {
+		return nil, fmt.Errorf("unable to load AWS config: %w", err)
+	}
+
+	// Resolve all regions if requested
+	resolvedRegions := regions
+	if allRegions {
+		resolvedRegions, err = resolveAllRegions(ctx, awscfg)
+		if err != nil {
+			return nil, fmt.Errorf("unable to resolve all AWS regions: %w", err)
+		}
+		slog.Info("Resolved all AWS regions", "count", len(resolvedRegions))
+	}
+
+	registry := services.NewRegistry()
+	registry.Register(ec2.NewCollector())
+	registry.Register(s3.NewCollector())
+	registry.Register(rds.NewCollector())
+	registry.Register(iam.NewCollector())
+	registry.Register(dynamodb.NewCollector())
+	registry.Register(lambda.NewCollector())
+	registry.Register(emr.NewCollector())
+	registry.Register(ecs.NewCollector())
+	registry.Register(eks.NewCollector())
+	registry.Register(elbv2.NewCollector())
+	registry.Register(secretsmanager.NewCollector())
+	registry.Register(sqs.NewCollector())
+	registry.Register(sns.NewCollector())
+	registry.Register(cloudwatch.NewCollector())
+	registry.Register(route53.NewCollector())
+
+	return &Engine{
+		Config:          cfg,
+		AWSConfig:       awscfg,
+		registry:        registry,
+		ResolvedRegions: resolvedRegions,
+	}, nil
+}
+
+func resolveAllRegions(ctx context.Context, awscfg aws.Config) ([]string, error) {
+	client := awsec2.NewFromConfig(awscfg)
+	result, err := client.DescribeRegions(ctx, &awsec2.DescribeRegionsInput{})
+	if err != nil {
+		return nil, fmt.Errorf("failed to describe regions: %w", err)
+	}
+	regions := make([]string, 0, len(result.Regions))
+	for _, region := range result.Regions {
+		if region.RegionName != nil {
+			regions = append(regions, *region.RegionName)
+		}
+	}
+	sort.Strings(regions)
+	return regions, nil
+}
+
+// Run executes all configured scanners concurrently and returns the combined results.
+func (e *Engine) Run(ctx context.Context) (model.ExploreResult, error) {
+	chunks := make(chan model.ResultChunk, 64)
+	go e.StreamRun(ctx, chunks)
+
+	var result model.ExploreResult
+	for chunk := range chunks {
+		result.Resources = append(result.Resources, chunk.Resources...)
+		result.Errors = append(result.Errors, chunk.Errors...)
+	}
+	return result, nil
+}
+
+// StreamRun emits results to the channel as they arrive, then closes it.
+func (e *Engine) StreamRun(ctx context.Context, chunks chan<- model.ResultChunk) {
+	defer close(chunks)
+
+	g, gCtx := errgroup.WithContext(ctx)
+	maxConcurrency := e.Config.App.MaxConcurrency
+	if maxConcurrency <= 0 {
+		maxConcurrency = 8
+	}
+	g.SetLimit(maxConcurrency)
+
+	regions := e.ResolvedRegions
+	if len(regions) == 0 {
+		regions = []string{"us-east-1"}
+	}
+
+	if len(e.Config.Filters.Regions) > 0 {
+		filterSet := make(map[string]bool, len(e.Config.Filters.Regions))
+		for _, r := range e.Config.Filters.Regions {
+			filterSet[r] = true
+		}
+		var filtered []string
+		for _, r := range regions {
+			if filterSet[r] {
+				filtered = append(filtered, r)
+			}
+		}
+		regions = filtered
+	}
+
+	for _, srv := range e.registry.GetAll() {
+		srvCfg, ok := e.Config.Services[srv.Name()]
+		if ok && !srvCfg.Enabled {
+			continue
+		}
+		if !ok {
+			continue
+		}
+
+		serviceRegions := regions
+		if srv.IsGlobal() {
+			serviceRegions = []string{"global"}
+		}
+
+		for _, region := range serviceRegions {
+			s := srv
+			r := region
+
+			g.Go(func() error {
+				slog.Debug("Starting collector", "service", s.Name(), "region", r)
+
+				regionalConfig := e.AWSConfig
+				if r != "global" {
+					regionalConfig.Region = r
+				}
+
+				input := services.CollectInput{
+					Config:    *e.Config,
+					AWSConfig: regionalConfig,
+					Region:    r,
+					Filters: model.Filter{
+						Regions: e.Config.Filters.Regions,
+						States:  e.Config.Filters.States,
+						Tags:    e.Config.Filters.Tags,
+					},
+					DetailLevel: services.DetailLevelSummary,
+				}
+
+				res, err := s.Collect(gCtx, input)
+				if err != nil {
+					chunks <- model.ResultChunk{
+						Errors: []model.ExploreError{{
+							Service: s.Name(),
+							Region:  r,
+							Code:    "CollectionError",
+							Message: err.Error(),
+						}},
+					}
+					return nil
+				}
+
+				filteredRes := filterResources(res, input.Filters)
+				if len(filteredRes) > 0 {
+					chunks <- model.ResultChunk{Resources: filteredRes}
+				}
+				return nil
+			})
+		}
+	}
+
+	g.Wait()
+}
+
+func filterResources(resources []model.Resource, filters model.Filter) []model.Resource {
+	var filtered []model.Resource
+	for _, r := range resources {
+		// Filter by state
+		if len(filters.States) > 0 {
+			matchState := false
+			for _, s := range filters.States {
+				if strings.EqualFold(r.State, s) {
+					matchState = true
+					break
+				}
+			}
+			if !matchState {
+				continue
+			}
+		}
+
+		// Filter by tag
+		if len(filters.Tags) > 0 {
+			matchTag := true
+			for tk, tv := range filters.Tags {
+				if val, ok := r.Tags[tk]; !ok || val != tv {
+					matchTag = false
+					break
+				}
+			}
+			if !matchTag {
+				continue
+			}
+		}
+
+		filtered = append(filtered, r)
+	}
+	return filtered
+}

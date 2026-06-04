@@ -1,0 +1,54 @@
+app:
+  defaultOutput: table
+  defaultMode: cli
+  timeoutSeconds: 30
+  maxConcurrency: 8
+
+aws:
+  profile: default
+  authMethod: auto
+  # Set to true to scan all available AWS regions, or list specific regions below
+  allRegions: false
+  regions:
+    - us-east-1
+
+services:
+  ec2:
+    enabled: true
+  s3:
+    enabled: true
+  rds:
+    enabled: true
+  iam:
+    enabled: true
+  dynamodb:
+    enabled: true
+  lambda:
+    enabled: true
+  emr:
+    enabled: true
+  ecs:
+    enabled: true
+  eks:
+    enabled: true
+  elbv2:
+    enabled: true
+  secretsmanager:
+    enabled: true
+  sqs:
+    enabled: true
+  sns:
+    enabled: true
+  cloudwatch:
+    enabled: true
+  route53:
+    enabled: true
+
+filters:
+  regions: []
+  tags: {}
+  states: []
+
+output:
+  format: table
+  includeDetails: false
