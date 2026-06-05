@@ -3,7 +3,7 @@ package s3tui
 import (
 	"testing"
 
-	"github.com/charmbracelet/bubbles/table"
+	"github.com/user/aws_explorer/internal/table"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/user/aws_explorer/internal/tui"
 )

@@ -5,7 +5,7 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/charmbracelet/bubbles/table"
+	"github.com/user/aws_explorer/internal/table"
 )
 
 func formatSize(size int64) string {
