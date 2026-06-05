@@ -23,11 +23,11 @@ func TestMapCluster_BasicFields(t *testing.T) {
 	c := NewCollector()
 	created := time.Date(2024, 2, 15, 14, 0, 0, 0, time.UTC)
 	cluster := &types.Cluster{
-		Arn:      aws.String("arn:aws:eks:us-east-1:123456789012:cluster/my-k8s"),
-		Name:     aws.String("my-k8s"),
-		Status:   types.ClusterStatusActive,
-		Version:  aws.String("1.29"),
-		Endpoint: aws.String("https://ABCDEF.gr7.us-east-1.eks.amazonaws.com"),
+		Arn:       aws.String("arn:aws:eks:us-east-1:123456789012:cluster/my-k8s"),
+		Name:      aws.String("my-k8s"),
+		Status:    types.ClusterStatusActive,
+		Version:   aws.String("1.29"),
+		Endpoint:  aws.String("https://ABCDEF.gr7.us-east-1.eks.amazonaws.com"),
 		CreatedAt: &created,
 	}
 

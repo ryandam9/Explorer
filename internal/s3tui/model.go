@@ -12,12 +12,12 @@ import (
 	"github.com/aws/aws-sdk-go-v2/aws"
 	s3types "github.com/aws/aws-sdk-go-v2/service/s3/types"
 	"github.com/charmbracelet/bubbles/spinner"
-	"github.com/user/aws_explorer/internal/table"
 	"github.com/charmbracelet/bubbles/textinput"
 	"github.com/charmbracelet/bubbles/viewport"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/user/aws_explorer/internal/config"
+	"github.com/user/aws_explorer/internal/table"
 	"github.com/user/aws_explorer/internal/tui"
 )
 

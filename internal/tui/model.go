@@ -9,8 +9,8 @@ import (
 
 	"github.com/charmbracelet/bubbles/spinner"
 	"github.com/charmbracelet/bubbles/viewport"
-	"github.com/charmbracelet/huh"
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/huh"
 	"github.com/charmbracelet/lipgloss"
 	btable "github.com/evertras/bubble-table/table"
 	zone "github.com/lrstanley/bubblezone"
@@ -958,4 +958,3 @@ func chunkString(s string, n int) []string {
 	}
 	return out
 }
-

@@ -24,10 +24,10 @@ func TestMapSecret_BasicFields(t *testing.T) {
 	c := NewCollector()
 	arn := "arn:aws:secretsmanager:us-east-1:123456789012:secret:my-db-password-AbCdEf"
 	secret := types.SecretListEntry{
-		ARN:              aws.String(arn),
-		Name:             aws.String("my-db-password"),
-		KmsKeyId:         aws.String("arn:aws:kms:us-east-1:123:key/abc-def"),
-		RotationEnabled:  aws.Bool(true),
+		ARN:             aws.String(arn),
+		Name:            aws.String("my-db-password"),
+		KmsKeyId:        aws.String("arn:aws:kms:us-east-1:123:key/abc-def"),
+		RotationEnabled: aws.Bool(true),
 		SecretVersionsToStages: map[string][]string{
 			"v1": {"AWSCURRENT"},
 			"v2": {"AWSPREVIOUS"},

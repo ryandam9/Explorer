@@ -21,8 +21,8 @@ func TestCollector_Metadata(t *testing.T) {
 func TestMapZone_BasicFields(t *testing.T) {
 	c := NewCollector()
 	zone := types.HostedZone{
-		Id:                   aws.String("/hostedzone/Z1PA6795UKMFR9"),
-		Name:                 aws.String("example.com."),
+		Id:                     aws.String("/hostedzone/Z1PA6795UKMFR9"),
+		Name:                   aws.String("example.com."),
 		ResourceRecordSetCount: aws.Int64(42),
 		Config: &types.HostedZoneConfig{
 			PrivateZone: false,
@@ -57,8 +57,8 @@ func TestMapZone_BasicFields(t *testing.T) {
 func TestMapZone_PrivateZone(t *testing.T) {
 	c := NewCollector()
 	zone := types.HostedZone{
-		Id:   aws.String("/hostedzone/ZPRIVATE123"),
-		Name: aws.String("internal.example.com."),
+		Id:                     aws.String("/hostedzone/ZPRIVATE123"),
+		Name:                   aws.String("internal.example.com."),
 		ResourceRecordSetCount: aws.Int64(10),
 		Config: &types.HostedZoneConfig{
 			PrivateZone: true,
@@ -75,8 +75,8 @@ func TestMapZone_PrivateZone(t *testing.T) {
 func TestMapZone_WithComment(t *testing.T) {
 	c := NewCollector()
 	zone := types.HostedZone{
-		Id:   aws.String("/hostedzone/ZWITHCOMMENT"),
-		Name: aws.String("commented.example.com."),
+		Id:                     aws.String("/hostedzone/ZWITHCOMMENT"),
+		Name:                   aws.String("commented.example.com."),
 		ResourceRecordSetCount: aws.Int64(5),
 		Config: &types.HostedZoneConfig{
 			Comment:     aws.String("production zone"),
@@ -94,8 +94,8 @@ func TestMapZone_WithComment(t *testing.T) {
 func TestMapZone_WithoutComment(t *testing.T) {
 	c := NewCollector()
 	zone := types.HostedZone{
-		Id:   aws.String("/hostedzone/ZNOCOMMENT"),
-		Name: aws.String("no-comment.example.com."),
+		Id:                     aws.String("/hostedzone/ZNOCOMMENT"),
+		Name:                   aws.String("no-comment.example.com."),
 		ResourceRecordSetCount: aws.Int64(3),
 		Config: &types.HostedZoneConfig{
 			PrivateZone: false,
@@ -113,10 +113,10 @@ func TestMapZone_WithoutComment(t *testing.T) {
 func TestMapZone_ZeroRecordCount(t *testing.T) {
 	c := NewCollector()
 	zone := types.HostedZone{
-		Id:                   aws.String("/hostedzone/ZEMPTY"),
-		Name:                 aws.String("empty.example.com."),
+		Id:                     aws.String("/hostedzone/ZEMPTY"),
+		Name:                   aws.String("empty.example.com."),
 		ResourceRecordSetCount: aws.Int64(0),
-		Config:               &types.HostedZoneConfig{},
+		Config:                 &types.HostedZoneConfig{},
 	}
 
 	res := c.mapZone(zone, services.DetailLevelSummary)

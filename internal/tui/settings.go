@@ -45,10 +45,10 @@ type settingsModel struct {
 	width, height int
 
 	// Theme list navigation.
-	themeIdx  int // index into Themes
-	fieldIdx  int // which color role is being edited (0-based)
-	editMode  bool
-	editBuf   string // in-progress text while editing
+	themeIdx int // index into Themes
+	fieldIdx int // which color role is being edited (0-based)
+	editMode bool
+	editBuf  string // in-progress text while editing
 
 	// Path to the config file — needed for saving.
 	configPath string
@@ -285,7 +285,7 @@ func (s settingsModel) View() string {
 	)
 
 	panel := ModalStyle(panelW, panelH).Render(body)
-	hintBar := StatusBarStyle(s.width-4).Render(hints)
+	hintBar := StatusBarStyle(s.width - 4).Render(hints)
 	return lipgloss.JoinVertical(lipgloss.Left, panel, hintBar)
 }
 

@@ -24,11 +24,11 @@ func TestMapTable_BasicFields(t *testing.T) {
 	c := NewCollector()
 	created := time.Date(2024, 1, 20, 9, 0, 0, 0, time.UTC)
 	table := &types.TableDescription{
-		TableId:         aws.String("abc-123"),
-		TableName:       aws.String("orders"),
-		TableStatus:     types.TableStatusActive,
-		ItemCount:       aws.Int64(500),
-		TableSizeBytes:  aws.Int64(2097152), // 2 MB
+		TableId:          aws.String("abc-123"),
+		TableName:        aws.String("orders"),
+		TableStatus:      types.TableStatusActive,
+		ItemCount:        aws.Int64(500),
+		TableSizeBytes:   aws.Int64(2097152), // 2 MB
 		CreationDateTime: &created,
 		BillingModeSummary: &types.BillingModeSummary{
 			BillingMode: types.BillingModePayPerRequest,

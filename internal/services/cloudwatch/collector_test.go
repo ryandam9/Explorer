@@ -105,9 +105,9 @@ func TestMapAlarm_WithStateUpdatedTimestamp(t *testing.T) {
 	c := NewCollector()
 	updated := time.Date(2024, 5, 10, 15, 30, 0, 0, time.UTC)
 	alarm := types.MetricAlarm{
-		AlarmArn:             aws.String("arn:aws:cloudwatch:us-east-1:123:alarm:ts-alarm"),
-		AlarmName:            aws.String("ts-alarm"),
-		StateValue:           types.StateValueOk,
+		AlarmArn:              aws.String("arn:aws:cloudwatch:us-east-1:123:alarm:ts-alarm"),
+		AlarmName:             aws.String("ts-alarm"),
+		StateValue:            types.StateValueOk,
 		StateUpdatedTimestamp: &updated,
 	}
 
@@ -135,12 +135,12 @@ func TestMapAlarm_NoDetailsAtSummaryLevel(t *testing.T) {
 func TestMapAlarm_DetailLevel(t *testing.T) {
 	c := NewCollector()
 	alarm := types.MetricAlarm{
-		AlarmArn:        aws.String("arn:aws:cloudwatch:eu-central-1:123:alarm:detail-alarm"),
-		AlarmName:       aws.String("detail-alarm"),
-		StateValue:      types.StateValueInsufficientData,
+		AlarmArn:         aws.String("arn:aws:cloudwatch:eu-central-1:123:alarm:detail-alarm"),
+		AlarmName:        aws.String("detail-alarm"),
+		StateValue:       types.StateValueInsufficientData,
 		AlarmDescription: aws.String("triggers on high latency"),
-		ActionsEnabled:  aws.Bool(true),
-		AlarmActions:    []string{"arn:aws:sns:eu-central-1:123:alert-topic"},
+		ActionsEnabled:   aws.Bool(true),
+		AlarmActions:     []string{"arn:aws:sns:eu-central-1:123:alert-topic"},
 	}
 
 	res := c.mapAlarm("eu-central-1", alarm, services.DetailLevelDetailed)

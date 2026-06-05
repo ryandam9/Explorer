@@ -90,9 +90,9 @@ func TestMapCluster_NoDetailsAtSummaryLevel(t *testing.T) {
 func TestMapCluster_DetailLevel(t *testing.T) {
 	c := NewCollector()
 	cluster := types.Cluster{
-		ClusterArn:                         aws.String("arn:aws:ecs:eu-central-1:123:cluster/detail-cluster"),
-		ClusterName:                        aws.String("detail-cluster"),
-		Status:                             aws.String("ACTIVE"),
+		ClusterArn:                        aws.String("arn:aws:ecs:eu-central-1:123:cluster/detail-cluster"),
+		ClusterName:                       aws.String("detail-cluster"),
+		Status:                            aws.String("ACTIVE"),
 		RegisteredContainerInstancesCount: 10,
 	}
 
