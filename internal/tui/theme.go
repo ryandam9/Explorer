@@ -172,6 +172,20 @@ func ModalStyle(width, height int) lipgloss.Style {
 		Padding(1, 2)
 }
 
+// StatusBarStyle returns a full-width bar style with the theme's primary colour
+// as background and secondary colour as foreground, suitable for a footer status bar.
+func StatusBarStyle(width int) lipgloss.Style {
+	if width < 1 {
+		width = 1
+	}
+	return lipgloss.NewStyle().
+		Width(width).
+		MaxWidth(width+2).
+		Background(lipgloss.Color(FeatherColor(0))).
+		Foreground(lipgloss.Color(FeatherColor(1))).
+		Padding(0, 1)
+}
+
 // FixedPanelStyle returns a rounded-border panel locked to an exact inner width
 // and height. Content is word-wrapped to the width and any overflow (too many
 // lines or columns) is clipped, so the panel always occupies the same space

@@ -169,7 +169,7 @@ func (m *tuiModel) buildTables() {
 		var resources []model.Resource
 		for _, r := range m.results {
 			if tab == "All" || r.Service == tab {
-				rows = append(rows, table.Row{r.Service, r.Type, r.Region, r.ID, r.Name, r.State})
+				rows = append(rows, table.Row{fmt.Sprintf("%d", len(rows)+1), r.Service, r.Type, r.Region, r.ID, r.Name, r.State})
 				resources = append(resources, r)
 			}
 		}
@@ -217,10 +217,11 @@ func (m tuiModel) tableWidth() int {
 func (m tuiModel) columns() []table.Column {
 	width := m.tableWidth()
 	return []table.Column{
+		{Title: "#", Width: 4},
 		{Title: "Service", Width: 10},
 		{Title: "Type", Width: 12},
 		{Title: "Region", Width: 14},
-		{Title: "ID", Width: maxInt(18, width-82)},
+		{Title: "ID", Width: maxInt(18, width-86)},
 		{Title: "Name", Width: 22},
 		{Title: "State", Width: 10},
 	}
@@ -407,13 +408,6 @@ func (m tuiModel) View() string {
 	tabs := m.tabView()
 	tableView := baseStyle.Render(m.tables[m.activeTab].View())
 
-	var helpLine string
-	if m.showDetail {
-		helpLine = "[Tab/Shift+Tab] Switch service | [↑/↓] Move | [[/]] Scroll detail | [Esc] Close detail | [q] Quit"
-	} else {
-		helpLine = "[Tab/Shift+Tab] Switch service | [↑/↓] Move | [Enter] Detail | [q] Quit"
-	}
-
 	if m.showDetail && m.detail != nil {
 		detailWidth := m.width - m.tableWidth() - 12
 		if detailWidth < 30 {
@@ -427,10 +421,47 @@ func (m tuiModel) View() string {
 			MaxHeight(detailHeight + 2).
 			Render(m.detailViewport.View())
 		body := lipgloss.JoinHorizontal(lipgloss.Top, tableView, "  ", detailView)
-		return fmt.Sprintf("%s\n%s\n\n%s\n\n%s", header, tabs, body, helpLine)
+		return fmt.Sprintf("%s\n%s\n\n%s\n\n%s", header, tabs, body, m.statusBar())
 	}
 
-	return fmt.Sprintf("%s\n%s\n\n%s\n\n%s", header, tabs, tableView, helpLine)
+	return fmt.Sprintf("%s\n%s\n\n%s\n\n%s", header, tabs, tableView, m.statusBar())
+}
+
+func (m tuiModel) statusBar() string {
+	width := m.width - 4
+	if width < 12 {
+		width = 12
+	}
+
+	status := "streaming..."
+	if m.done {
+		status = "complete"
+	}
+
+	tabName := ""
+	if len(m.tabNames) > 0 && m.activeTab < len(m.tabNames) {
+		tabName = m.tabNames[m.activeTab]
+	}
+
+	left := fmt.Sprintf("Service: %s  |  Resources: %d  |  Errors: %d  |  %s", tabName, len(m.results), len(m.errors), status)
+
+	var hints string
+	if m.showDetail {
+		hints = "Tab/Shift+Tab  ↑/↓  [/]Scroll  Esc  q"
+	} else {
+		hints = "Tab/Shift+Tab  ↑/↓  Enter  q"
+	}
+
+	lw := lipgloss.Width(left)
+	rw := lipgloss.Width(hints)
+	inner := width - 2
+	gap := inner - lw - rw
+	if gap < 2 {
+		gap = 2
+	}
+
+	content := left + strings.Repeat(" ", gap) + hints
+	return StatusBarStyle(width).Render(content)
 }
 
 func (m tuiModel) tabView() string {

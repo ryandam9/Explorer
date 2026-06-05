@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"strconv"
 	"strings"
+
+	"github.com/charmbracelet/bubbles/table"
 )
 
 func formatSize(size int64) string {
@@ -66,4 +68,17 @@ func displayPrefix(prefix string) string {
 		return "<root>"
 	}
 	return prefix
+}
+
+// seqRows returns a new slice of rows where the first element of each row is
+// replaced with its 1-based sequence number. The source rows are not modified.
+func seqRows(rows []table.Row) []table.Row {
+	out := make([]table.Row, len(rows))
+	for i, r := range rows {
+		nr := make(table.Row, len(r))
+		copy(nr, r)
+		nr[0] = fmt.Sprintf("%d", i+1)
+		out[i] = nr
+	}
+	return out
 }

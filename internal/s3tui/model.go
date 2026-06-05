@@ -327,6 +327,7 @@ func NewModel(ctx context.Context, awsCfg *config.AWSConfig, region, bucket, pre
 
 func (m *Model) initBucketTable() {
 	columns := []table.Column{
+		{Title: "#", Width: 4},
 		{Title: "Name", Width: 40},
 		{Title: "Region", Width: 20},
 		{Title: "Creation Date", Width: 25},
@@ -355,6 +356,7 @@ func (m *Model) initBucketTable() {
 
 func (m *Model) initObjectTable() {
 	columns := []table.Column{
+		{Title: "#", Width: 4},
 		{Title: sortTitle("Name", 0, m.sortCol, m.sortAsc), Width: 40},
 		{Title: sortTitle("Size", 1, m.sortCol, m.sortAsc), Width: 10},
 		{Title: sortTitle("Last Modified", 2, m.sortCol, m.sortAsc), Width: 20},
@@ -395,7 +397,7 @@ func (m *Model) sortObjects(rows []table.Row) {
 	var dirs []table.Row
 	var objs []table.Row
 	for _, r := range rows {
-		if len(r) > 3 && r[3] == "DIR" {
+		if len(r) > 4 && r[4] == "DIR" {
 			dirs = append(dirs, r)
 		} else {
 			objs = append(objs, r)
@@ -404,16 +406,16 @@ func (m *Model) sortObjects(rows []table.Row) {
 
 	sort.SliceStable(objs, func(i, j int) bool {
 		if m.sortCol == 1 {
-			left := parseSize(objs[i][1])
-			right := parseSize(objs[j][1])
+			left := parseSize(objs[i][2])
+			right := parseSize(objs[j][2])
 			if m.sortAsc {
 				return left < right
 			}
 			return left > right
 		}
 
-		left := objs[i][m.sortCol]
-		right := objs[j][m.sortCol]
+		left := objs[i][m.sortCol+1]
+		right := objs[j][m.sortCol+1]
 		if m.sortCol == 0 {
 			left = strings.ToLower(left)
 			right = strings.ToLower(right)
@@ -430,8 +432,9 @@ func (m *Model) sortObjects(rows []table.Row) {
 
 func (m *Model) updateObjectColumns() {
 	objectWidth := max(40, m.width-10)
-	nameWidth := max(18, objectWidth-89)
+	nameWidth := max(18, objectWidth-93)
 	m.objectTable.SetColumns([]table.Column{
+		{Title: "#", Width: 4},
 		{Title: sortTitle("Name", 0, m.sortCol, m.sortAsc), Width: nameWidth},
 		{Title: sortTitle("Size", 1, m.sortCol, m.sortAsc), Width: 10},
 		{Title: sortTitle("Last Modified", 2, m.sortCol, m.sortAsc), Width: 19},
@@ -510,25 +513,25 @@ func (m *Model) fetchBucketRegions() tea.Cmd {
 	// leave the region column stuck at "..." for buckets we've seen before.
 	cacheApplied := false
 	for i, row := range rows {
-		if row[1] != "..." {
+		if row[2] != "..." {
 			continue
 		}
-		if region, ok := m.bucketRegionCache[row[0]]; ok {
-			rows[i][1] = region
+		if region, ok := m.bucketRegionCache[row[1]]; ok {
+			rows[i][2] = region
 			if i < len(m.allBucketRows) {
-				m.allBucketRows[i][1] = region
+				m.allBucketRows[i][2] = region
 			}
 			cacheApplied = true
 		}
 	}
 	if cacheApplied {
-		m.bucketTable.SetRows(rows)
+		m.bucketTable.SetRows(seqRows(rows))
 	}
 
 	cmds := make([]tea.Cmd, 0, len(rows))
 	for i, row := range rows {
-		name := row[0]
-		if row[1] != "..." {
+		name := row[1]
+		if row[2] != "..." {
 			continue
 		}
 		idx := i
@@ -564,7 +567,7 @@ func (m *Model) loadObjects() tea.Cmd {
 
 		// Add ".." navigation if we are inside a prefix (non-flat mode only)
 		if m.prefix != "" && !flat {
-			rows = append(rows, table.Row{"..", "-", "-", "DIR", "-"})
+			rows = append(rows, table.Row{"", "..", "-", "-", "DIR", "-"})
 		}
 
 		if !flat {
@@ -573,7 +576,7 @@ func (m *Model) loadObjects() tea.Cmd {
 				if m.prefix != "" && strings.HasPrefix(name, m.prefix) {
 					name = strings.TrimPrefix(name, m.prefix)
 				}
-				rows = append(rows, table.Row{name, "-", "-", "DIR", "-"})
+				rows = append(rows, table.Row{"", name, "-", "-", "DIR", "-"})
 			}
 		}
 
@@ -605,7 +608,7 @@ func (m *Model) loadObjects() tea.Cmd {
 			etag := aws.ToString(o.ETag)
 			etag = strings.Trim(etag, "\"")
 
-			rows = append(rows, table.Row{name, size, date, class, etag})
+			rows = append(rows, table.Row{"", name, size, date, class, etag})
 		}
 
 		m.sortObjects(rows)
@@ -674,10 +677,10 @@ func (m *Model) loadingBox(message, detail string) string {
 
 func (m *Model) selectedObjectKey() (string, bool) {
 	row := m.objectTable.SelectedRow()
-	if len(row) == 0 || row[3] == "DIR" {
+	if len(row) == 0 || row[4] == "DIR" {
 		return "", false
 	}
-	return m.prefix + row[0], true
+	return m.prefix + row[1], true
 }
 
 // ---------------------------------------------------------------------------
@@ -710,7 +713,8 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.bucketTable.SetHeight(bucketTableHeight)
 		bucketWidth := max(30, m.width-10)
 		m.bucketTable.SetColumns([]table.Column{
-			{Title: "Name", Width: max(20, bucketWidth-50)},
+			{Title: "#", Width: 4},
+			{Title: "Name", Width: max(20, bucketWidth-54)},
 			{Title: "Region", Width: 16},
 			{Title: "Creation Date", Width: 22},
 		})
@@ -805,19 +809,19 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.bucketSearch.SetValue("")
 				// Restore full bucket list
 				if len(m.allBucketRows) > 0 {
-					m.bucketTable.SetRows(m.allBucketRows)
+					m.bucketTable.SetRows(seqRows(m.allBucketRows))
 				}
 				return m, nil
 			case "enter":
 				// Select the first visible row
 				rows := m.bucketTable.Rows()
 				if len(rows) > 0 {
-					name := rows[0][0]
+					name := rows[0][1]
 					m.inBucketSearch = false
 					m.bucketSearch.Blur()
 					m.bucketSearch.SetValue("")
 					m.bucket = name
-					m.region = rows[0][1]
+					m.region = rows[0][2]
 					// Region may still be loading; fall back to the cache.
 					if m.region == "..." {
 						if cached, ok := m.bucketRegionCache[m.bucket]; ok {
@@ -844,11 +848,11 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				query := strings.ToLower(m.bucketSearch.Value())
 				var filtered []table.Row
 				for _, r := range m.allBucketRows {
-					if strings.Contains(strings.ToLower(r[0]), query) {
+					if strings.Contains(strings.ToLower(r[1]), query) {
 						filtered = append(filtered, r)
 					}
 				}
-				m.bucketTable.SetRows(filtered)
+				m.bucketTable.SetRows(seqRows(filtered))
 				return m, tea.Batch(cmds...)
 			}
 		}
@@ -924,13 +928,13 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if m.state == stateBucketList {
 				row := m.bucketTable.SelectedRow()
 				if len(row) > 0 {
-					m.detailBucket = row[0]
+					m.detailBucket = row[1]
 					m.detailTabIdx = 0
 					m.state = stateBucketDetail
 					// Trigger fetch if needed
-					if m.selectedBucketDetails == nil || m.bucket != row[0] {
-						m.bucket = row[0]
-						cmds = append(cmds, m.fetchBucketDetails(row[0]))
+					if m.selectedBucketDetails == nil || m.bucket != row[1] {
+						m.bucket = row[1]
+						cmds = append(cmds, m.fetchBucketDetails(row[1]))
 					}
 					return m, tea.Batch(cmds...)
 				}
@@ -962,7 +966,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.sortAsc = !m.sortAsc
 				rows := m.objectTable.Rows()
 				m.sortObjects(rows)
-				m.objectTable.SetRows(rows)
+				m.objectTable.SetRows(seqRows(rows))
 				m.updateObjectColumns()
 				return m, nil
 			}
@@ -972,7 +976,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.sortCol = (m.sortCol + 1) % 5
 				rows := m.objectTable.Rows()
 				m.sortObjects(rows)
-				m.objectTable.SetRows(rows)
+				m.objectTable.SetRows(seqRows(rows))
 				m.updateObjectColumns()
 				return m, nil
 			}
@@ -1037,8 +1041,8 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if m.state == stateBucketList {
 				row := m.bucketTable.SelectedRow()
 				if len(row) > 0 {
-					m.bucket = row[0]
-					m.region = row[1]
+					m.bucket = row[1]
+					m.region = row[2]
 					// Region may still be loading; fall back to the cache.
 					if m.region == "..." {
 						if cached, ok := m.bucketRegionCache[m.bucket]; ok {
@@ -1059,8 +1063,8 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			} else if m.state == stateObjectList && m.focus == focusObjects {
 				row := m.objectTable.SelectedRow()
 				if len(row) > 0 {
-					name := row[0]
-					class := row[3]
+					name := row[1]
+					class := row[4]
 					if class == "DIR" {
 						if name == ".." {
 							m.prefix = parentPrefix(m.prefix)
@@ -1113,11 +1117,11 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				if b.CreationDate != nil {
 					dateStr = b.CreationDate.Format("2006-01-02 15:04:05")
 				}
-				m.allBucketRows = append(m.allBucketRows, table.Row{name, "...", dateStr})
+				m.allBucketRows = append(m.allBucketRows, table.Row{"", name, "...", dateStr})
 			}
-			m.bucketTable.SetRows(m.allBucketRows)
+			m.bucketTable.SetRows(seqRows(m.allBucketRows))
 			if firstBucket && m.bucket == "" && len(m.allBucketRows) > 0 {
-				m.bucket = m.allBucketRows[0][0]
+				m.bucket = m.allBucketRows[0][1]
 				cmds = append(cmds, m.fetchBucketDetails(m.bucket))
 			}
 		} else if msg.err != nil {
@@ -1140,14 +1144,14 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case bucketsLoadedMsg:
 		m.loading = false
 		m.err = nil
-		m.bucketTable.SetRows(msg.rows)
+		m.bucketTable.SetRows(seqRows(msg.rows))
 		m.allBucketRows = msg.rows // keep a copy for search restore
 		if msg.warning != "" {
 			m.statusMsg = msg.warning
 		}
 		if len(msg.rows) > 0 {
-			m.bucket = msg.rows[0][0]
-			cmds = append(cmds, m.fetchBucketDetails(msg.rows[0][0]))
+			m.bucket = msg.rows[0][1]
+			cmds = append(cmds, m.fetchBucketDetails(msg.rows[0][1]))
 		}
 		cmds = append(cmds, m.fetchBucketRegions())
 
@@ -1155,12 +1159,12 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.bucketRegionCache[msg.name] = msg.region
 		rows := m.bucketTable.Rows()
 		if msg.idx < len(rows) {
-			rows[msg.idx][1] = msg.region
-			m.bucketTable.SetRows(rows)
+			rows[msg.idx][2] = msg.region
+			m.bucketTable.SetRows(seqRows(rows))
 		}
 		// Also update allBucketRows
 		if msg.idx < len(m.allBucketRows) {
-			m.allBucketRows[msg.idx][1] = msg.region
+			m.allBucketRows[msg.idx][2] = msg.region
 		}
 
 	case objectsLoadedMsg:
@@ -1168,13 +1172,13 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.err = nil
 		m.objCount = msg.count
 		m.totalSize = msg.size
-		m.objectTable.SetRows(msg.rows)
+		m.objectTable.SetRows(seqRows(msg.rows))
 
 		m.lastSelectedKey = ""
 		m.selectedDetails = nil
 
-		if len(msg.rows) > 0 && msg.rows[0][3] != "DIR" {
-			m.lastSelectedKey = m.prefix + msg.rows[0][0]
+		if len(msg.rows) > 0 && msg.rows[0][4] != "DIR" {
+			m.lastSelectedKey = m.prefix + msg.rows[0][1]
 			cmds = append(cmds, m.fetchObjectDetails(m.lastSelectedKey))
 		}
 
@@ -1259,9 +1263,9 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 		if m.state == stateBucketList {
 			row := m.bucketTable.SelectedRow()
-			if len(row) > 0 && (m.selectedBucketDetails == nil || m.bucket != row[0]) {
-				m.bucket = row[0]
-				cmds = append(cmds, m.fetchBucketDetails(row[0]))
+			if len(row) > 0 && (m.selectedBucketDetails == nil || m.bucket != row[1]) {
+				m.bucket = row[1]
+				cmds = append(cmds, m.fetchBucketDetails(row[1]))
 			}
 		}
 	} else if m.state == stateObjectList {
@@ -1271,8 +1275,8 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 		if m.focus == focusObjects && prevRow != m.objectTable.Cursor() && len(m.objectTable.SelectedRow()) > 0 {
 			row := m.objectTable.SelectedRow()
-			if row[3] != "DIR" {
-				newKey := m.prefix + row[0]
+			if row[4] != "DIR" {
+				newKey := m.prefix + row[1]
 				if newKey != m.lastSelectedKey {
 					m.lastSelectedKey = newKey
 					m.selectedDetails = nil
@@ -1384,49 +1388,76 @@ func (m *Model) View() string {
 		content = lipgloss.Place(m.width-4, max(8, m.height-8), lipgloss.Center, lipgloss.Top, searchBox)
 	}
 
-	// Status message
-	var statusLine string
-	if m.statusMsg != "" {
-		statusLine = "\n" + tui.InfoStyle().Render("  "+m.statusMsg)
-	}
-
-	// Help line
-	var help string
-	if m.state == stateBucketList {
-		help = tui.InfoStyle().Render("[↑/↓] Move | [Enter] Open | [d] Detail | [/] Search | [r] Refresh | [?] Help | [q] Quit")
-	} else if m.state == stateObjectList {
-		flatIndicator := ""
-		if m.flatMode {
-			flatIndicator = " | FLAT"
-		}
-		versionIndicator := ""
-		if m.showVersions {
-			versionIndicator = " | VERSIONS:ON"
-		}
-		deleteHint := ""
-		if m.allowDelete {
-			deleteHint = " | [x] Delete"
-		}
-		help = tui.InfoStyle().Render(fmt.Sprintf("[↑/↓] Move | [Enter/p] Preview | [/] Prefix | [y] Copy URI | [g] Presign | [D] Download%s | [f] Flat | [v] Versions | [s] Sort | [S] Rev.Sort | [r] Refresh | [Esc] Back | [?] Help%s%s%s",
-			deleteHint, flatIndicator, versionIndicator, ""))
-	} else {
-		help = tui.InfoStyle().Render("[↑/↓] Move | [q] Quit")
-	}
-
 	return tui.AppStyle().Render(lipgloss.JoinVertical(lipgloss.Left,
 		header,
 		tui.FeatherRail(max(12, m.width-4)),
 		"",
 		content,
-		statusLine,
 		"",
-		help,
+		m.renderStatusBar(),
 	))
 }
 
 // ---------------------------------------------------------------------------
 // Sub-views
 // ---------------------------------------------------------------------------
+
+func (m *Model) renderStatusBar() string {
+	barWidth := max(12, m.width-4)
+
+	var left string
+	var hints string
+
+	switch m.state {
+	case stateBucketDetail:
+		tabNames := []string{"Overview", "Access & Security", "Data Protection", "Operational", "Tags"}
+		left = fmt.Sprintf("Bucket: %s  |  %s", m.detailBucket, tabNames[m.detailTabIdx])
+		hints = "Tab  Shift+Tab  Esc"
+	case stateBucketList:
+		switch {
+		case m.statusMsg != "":
+			left = m.statusMsg
+		case m.scanning:
+			left = fmt.Sprintf("Scanning: %d / %d  |  Buckets: %d", m.scanDone, m.scanTotal, len(m.allBucketRows))
+		default:
+			left = fmt.Sprintf("Buckets: %d", len(m.allBucketRows))
+		}
+		hints = "↑/↓ Enter  d  /  r  ?  q"
+	case stateObjectList:
+		if m.statusMsg != "" {
+			left = m.statusMsg
+		} else {
+			left = fmt.Sprintf("Bucket: %s  |  Objects: %d  |  Size: %s", m.bucket, m.objCount, formatSize(m.totalSize))
+			if m.prefix != "" {
+				left += fmt.Sprintf("  |  Prefix: %s", m.prefix)
+			}
+			if m.flatMode {
+				left += "  [FLAT]"
+			}
+			if m.showVersions {
+				left += "  [VERSIONS]"
+			}
+		}
+		hints = "↑/↓ Enter  /  p  y  g  D  f  s  r  Esc  ?  q"
+		if m.allowDelete {
+			hints = "↑/↓ Enter  /  p  y  g  D  x Delete  f  s  r  Esc  ?  q"
+		}
+	default:
+		left = m.statusMsg
+		hints = "↑/↓  q"
+	}
+
+	lw := lipgloss.Width(left)
+	rw := lipgloss.Width(hints)
+	inner := barWidth - 2
+	gap := inner - lw - rw
+	if gap < 2 {
+		gap = 2
+	}
+
+	content := left + strings.Repeat(" ", gap) + hints
+	return tui.StatusBarStyle(barWidth).Render(content)
+}
 
 func (m *Model) bucketListView() string {
 	tableSection := tui.SelectedPanelStyle().Render(m.bucketTable.View())
@@ -1438,9 +1469,9 @@ func (m *Model) bucketListView() string {
 	metaText := tui.MutedStyle().Render("Select a bucket to view details.")
 	if len(m.bucketTable.SelectedRow()) > 0 {
 		row := m.bucketTable.SelectedRow()
-		name := row[0]
-		region := row[1]
-		date := row[2]
+		name := row[1]
+		region := row[2]
+		date := row[3]
 		title = fmt.Sprintf("BUCKET DETAILS: %s  [d] Full detail view", name)
 
 		metaText = m.loadingLine("Loading bucket details...")
@@ -1527,7 +1558,7 @@ func (m *Model) objectListView() string {
 	metaText := ""
 	if len(m.objectTable.SelectedRow()) > 0 {
 		row := m.objectTable.SelectedRow()
-		name, size, date, class, etag := row[0], row[1], row[2], row[3], row[4]
+		name, size, date, class, etag := row[1], row[2], row[3], row[4], row[5]
 
 		isDir := (class == "DIR")
 
@@ -1743,8 +1774,6 @@ func (m *Model) bucketDetailView() string {
 		}
 	}
 
-	footer := tui.MutedStyle().Render("[Tab] Next  [Shift+Tab] Prev  [Esc] Close")
-
 	width := max(60, m.width-8)
 	height := max(20, m.height-10)
 
@@ -1770,7 +1799,7 @@ func (m *Model) bucketDetailView() string {
 				body,
 			)),
 		"",
-		footer,
+		m.renderStatusBar(),
 	)
 }
 
