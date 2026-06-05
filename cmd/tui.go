@@ -41,7 +41,7 @@ var tuiCmd = &cobra.Command{
 		}
 
 		m := tui.NewModel(ctx, eng)
-		p := tea.NewProgram(m, tea.WithAltScreen(), tea.WithContext(ctx))
+		p := tea.NewProgram(m, tea.WithAltScreen(), tea.WithMouseCellMotion(), tea.WithContext(ctx))
 
 		if _, err := p.Run(); err != nil {
 			fmt.Fprintf(os.Stderr, "Error running TUI: %v\n", err)
