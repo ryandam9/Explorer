@@ -55,7 +55,14 @@ var s3Cmd = &cobra.Command{
 			}
 		}
 
-		m, err := s3tui.NewModel(ctx, s3Cfg, s3Region, s3Bucket, s3Prefix, s3Theme, s3AllowDelete, s3EndpointURL)
+		// Theme: CLI flag overrides config; config overrides built-in default.
+		activeTheme := s3Theme
+		if AppConfig != nil && AppConfig.UI.Theme != "" && s3Theme == "spotted-pardalote" {
+			activeTheme = AppConfig.UI.Theme
+		}
+		tui.InitFromConfig(AppConfig.UI)
+
+		m, err := s3tui.NewModel(ctx, s3Cfg, s3Region, s3Bucket, s3Prefix, activeTheme, s3AllowDelete, s3EndpointURL)
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "Error initializing S3 TUI: %v\n", err)
 			os.Exit(1)

@@ -15,6 +15,7 @@ import (
 	btable "github.com/evertras/bubble-table/table"
 	zone "github.com/lrstanley/bubblezone"
 
+	"github.com/user/aws_explorer/internal/config"
 	"github.com/user/aws_explorer/internal/engine"
 	"github.com/user/aws_explorer/internal/model"
 )
@@ -59,17 +60,26 @@ type chunkMsg model.ResultChunk
 type doneMsg struct{}
 type clearToastMsg struct{}
 
-// ── Styles ───────────────────────────────────────────────────────────────────
+// ── Styles (theme-aware; resolved at render time via color accessors) ─────────
 
-var detailKeyStyle = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("#E4E4FF"))
-var detailSectionStyle = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("#6260FF")).Underline(true)
-
-var privilegeErrorStyle = lipgloss.NewStyle().
-	Border(lipgloss.RoundedBorder()).
-	BorderForeground(lipgloss.Color("#FF5555")).
-	Padding(0, 1)
-var privilegeTitleStyle = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("#FF5555"))
-var privilegeHintStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("#FFAA00"))
+func detailKeyStyle() lipgloss.Style {
+	return lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color(ColorText()))
+}
+func detailSectionStyle() lipgloss.Style {
+	return lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color(ColorHeading())).Underline(true)
+}
+func privilegeErrorStyle() lipgloss.Style {
+	return lipgloss.NewStyle().
+		Border(lipgloss.RoundedBorder()).
+		BorderForeground(lipgloss.Color(ColorError())).
+		Padding(0, 1)
+}
+func privilegeTitleStyle() lipgloss.Style {
+	return lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color(ColorError()))
+}
+func privilegeHintStyle() lipgloss.Style {
+	return lipgloss.NewStyle().Foreground(lipgloss.Color(ColorWarning()))
+}
 
 // ── Model ─────────────────────────────────────────────────────────────────────
 
@@ -119,11 +129,18 @@ type tuiModel struct {
 
 	// Zone manager for mouse support
 	zones *zone.Manager
+
+	// Settings panel
+	showSettings bool
+	settings     settingsModel
 }
 
 // ── Constructor ───────────────────────────────────────────────────────────────
 
-func NewModel(ctx context.Context, eng *engine.Engine) tea.Model {
+// NewModel creates the TUI model.  configPath is the path to the YAML config
+// file on disk (used by the settings panel to persist changes); cfg is the
+// already-loaded config struct.
+func NewModel(ctx context.Context, eng *engine.Engine, configPath string, cfg *config.Config) tea.Model {
 	chunks := make(chan model.ResultChunk, 64)
 	sp := spinner.New()
 	sp.Spinner = spinner.MiniDot
@@ -140,6 +157,7 @@ func NewModel(ctx context.Context, eng *engine.Engine) tea.Model {
 		zones:   zoneM,
 		allRows: make(map[string][]btable.Row),
 	}
+	m.settings = newSettingsModel(0, 0, configPath, cfg)
 	m.table = m.makeTable()
 	return m
 }
@@ -153,6 +171,34 @@ func (m tuiModel) Init() tea.Cmd {
 
 func (m tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	var cmds []tea.Cmd
+
+	// Route all events to the settings panel when it is open.
+	if m.showSettings {
+		switch msg := msg.(type) {
+		case tea.KeyMsg:
+			if msg.String() == "esc" && !m.settings.editMode {
+				m.showSettings = false
+				return m, nil
+			}
+		case settingsSavedMsg:
+			m.showSettings = false
+			m.setToast("Theme saved: " + msg.theme)
+			cmds = append(cmds, toastCmd(3*time.Second))
+			// Rebuild table styles to pick up new theme colors.
+			rows := m.currentRows()
+			m.table = m.makeTable().WithRows(rows)
+			return m, tea.Batch(cmds...)
+		case settingsErrMsg:
+			m.showSettings = false
+			m.setToast("Save failed: " + msg.err.Error())
+			cmds = append(cmds, toastCmd(4*time.Second))
+			return m, tea.Batch(cmds...)
+		}
+		var cmd tea.Cmd
+		m.settings, cmd = m.settings.Update(msg)
+		cmds = append(cmds, cmd)
+		return m, tea.Batch(cmds...)
+	}
 
 	// Route all events to the filter form when it is open.
 	if m.showFilter && m.filterForm != nil {
@@ -265,6 +311,10 @@ func (m tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.updateTableRows()
 			m.setToast("Filters cleared")
 			cmds = append(cmds, toastCmd(3*time.Second))
+
+		case "S":
+			m.settings = newSettingsModel(m.width, m.height, m.settings.configPath, m.settings.fullConfig)
+			m.showSettings = true
 		}
 
 	case tea.MouseMsg:
@@ -404,13 +454,13 @@ func (m tuiModel) makeTable() btable.Model {
 	}
 
 	hlStyle := lipgloss.NewStyle().
-		Foreground(lipgloss.Color(FeatherColor(1))).
-		Background(lipgloss.Color(FeatherColor(0))).
+		Foreground(lipgloss.Color(ColorHighlightText())).
+		Background(lipgloss.Color(ColorHighlight())).
 		Bold(true)
 
 	hdrStyle := lipgloss.NewStyle().
 		Bold(true).
-		Foreground(lipgloss.Color(FeatherColor(1)))
+		Foreground(lipgloss.Color(ColorMuted()))
 
 	return btable.New(m.columns(w)).
 		WithPageSize(pageRows).
@@ -559,7 +609,11 @@ func (m tuiModel) View() string {
 	header := m.renderHeader()
 	status := m.statusBar()
 
-	if m.showFilter && m.filterForm != nil {
+	if m.showSettings {
+		settingsView := m.settings.View()
+		centered := lipgloss.Place(m.width, m.height-4, lipgloss.Center, lipgloss.Center, settingsView)
+		output = lipgloss.JoinVertical(lipgloss.Left, header, centered, status)
+	} else if m.showFilter && m.filterForm != nil {
 		formW := 52
 		formH := 14
 		formView := ModalStyle(formW, formH).Render(m.filterForm.View())
@@ -573,8 +627,8 @@ func (m tuiModel) View() string {
 	// Overlay the toast at top-right if active.
 	if m.toast != "" && time.Now().Before(m.toastExp) {
 		toastRendered := lipgloss.NewStyle().
-			Foreground(lipgloss.Color(FeatherColor(1))).
-			Background(lipgloss.Color(FeatherColor(0))).
+			Foreground(lipgloss.Color(ColorHighlightText())).
+			Background(lipgloss.Color(ColorHighlight())).
 			Padding(0, 1).
 			Bold(true).
 			Render("✓ " + m.toast)
@@ -642,13 +696,13 @@ func (m tuiModel) renderSidebar() string {
 		var line string
 		if i == m.activeService {
 			line = lipgloss.NewStyle().
-				Foreground(lipgloss.Color(FeatherColor(1))).
-				Background(lipgloss.Color(FeatherColor(0))).
+				Foreground(lipgloss.Color(ColorHighlightText())).
+				Background(lipgloss.Color(ColorHighlight())).
 				Width(sidebarInner - 2).
 				Render("▶ " + label)
 		} else {
 			line = lipgloss.NewStyle().
-				Foreground(lipgloss.Color(FeatherColor(0))).
+				Foreground(lipgloss.Color(ColorText())).
 				Width(sidebarInner - 2).
 				Render("  " + label)
 		}
@@ -730,11 +784,11 @@ func (m tuiModel) statusBar() string {
 	var hints string
 	switch m.focus {
 	case focusSidebar:
-		hints = "↑↓:service  Tab:panel  Enter:select  q:quit"
+		hints = "↑↓:service  Tab:panel  Enter:select  S:settings  q:quit"
 	case focusTable:
-		hints = "↑↓:nav  Enter:detail  /:filter  f:adv-filter  r:reset  Tab:panel  q"
+		hints = "↑↓:nav  Enter:detail  /:filter  f:adv-filter  r:reset  S:settings  Tab:panel  q"
 	case focusDetail:
-		hints = "[]:scroll  Esc:close  Tab:panel  q:quit"
+		hints = "[]:scroll  Esc:close  S:settings  Tab:panel  q:quit"
 	}
 
 	lw := lipgloss.Width(left)
@@ -768,7 +822,10 @@ func (m tuiModel) renderDetail(r model.Resource, width int) string {
 		valW = 10
 	}
 
-	b.WriteString(detailSectionStyle.Render("RESOURCE") + "\n\n")
+	dKey := detailKeyStyle()
+	dSec := detailSectionStyle()
+
+	b.WriteString(dSec.Render("RESOURCE") + "\n\n")
 
 	fields := []struct{ k, v string }{
 		{"Service", r.Service},
@@ -781,7 +838,7 @@ func (m tuiModel) renderDetail(r model.Resource, width int) string {
 	}
 	for _, f := range fields {
 		if f.v != "" {
-			b.WriteString(detailKeyStyle.Render(fmt.Sprintf("%-9s", f.k)) + " " +
+			b.WriteString(dKey.Render(fmt.Sprintf("%-9s", f.k)) + " " +
 				fieldVal(f.v, keyW, valW) + "\n")
 		}
 	}
@@ -791,19 +848,19 @@ func (m tuiModel) renderDetail(r model.Resource, width int) string {
 		if arnW < 10 {
 			arnW = 10
 		}
-		b.WriteString(detailKeyStyle.Render("ARN") + "\n")
+		b.WriteString(dKey.Render("ARN") + "\n")
 		for _, chunk := range chunkString(r.ARN, arnW) {
 			b.WriteString("  " + chunk + "\n")
 		}
 	}
 
 	if r.CreatedAt != nil {
-		b.WriteString(detailKeyStyle.Render("Created") + "  " +
+		b.WriteString(dKey.Render("Created") + "  " +
 			r.CreatedAt.Format("2006-01-02 15:04:05") + "\n")
 	}
 
 	if len(r.Summary) > 0 {
-		b.WriteString("\n" + detailSectionStyle.Render("SUMMARY") + "\n\n")
+		b.WriteString("\n" + dSec.Render("SUMMARY") + "\n\n")
 		keys := make([]string, 0, len(r.Summary))
 		for k := range r.Summary {
 			keys = append(keys, k)
@@ -815,13 +872,13 @@ func (m tuiModel) renderDetail(r model.Resource, width int) string {
 			sumValW = 10
 		}
 		for _, k := range keys {
-			b.WriteString(detailKeyStyle.Render(fmt.Sprintf("%-20s", k)) + " " +
+			b.WriteString(dKey.Render(fmt.Sprintf("%-20s", k)) + " " +
 				fieldVal(r.Summary[k], sumKeyW, sumValW) + "\n")
 		}
 	}
 
 	if len(r.Tags) > 0 {
-		b.WriteString("\n" + detailSectionStyle.Render("TAGS") + "\n\n")
+		b.WriteString("\n" + dSec.Render("TAGS") + "\n\n")
 		keys := make([]string, 0, len(r.Tags))
 		for k := range r.Tags {
 			keys = append(keys, k)
@@ -833,7 +890,7 @@ func (m tuiModel) renderDetail(r model.Resource, width int) string {
 			tagValW = 10
 		}
 		for _, k := range keys {
-			b.WriteString(detailKeyStyle.Render(fmt.Sprintf("%-20s", k)) + " " +
+			b.WriteString(dKey.Render(fmt.Sprintf("%-20s", k)) + " " +
 				fieldVal(r.Tags[k], tagKeyW, tagValW) + "\n")
 		}
 	}
@@ -855,11 +912,11 @@ func (m tuiModel) renderPrivilegeErrors() string {
 
 	var b strings.Builder
 	if len(authErrs) > 0 {
-		b.WriteString(privilegeTitleStyle.Render("INSUFFICIENT PRIVILEGES") + "\n\n")
+		b.WriteString(privilegeTitleStyle().Render("INSUFFICIENT PRIVILEGES") + "\n\n")
 		for _, e := range authErrs {
-			b.WriteString(detailKeyStyle.Render(fmt.Sprintf("%-12s", "Service")) +
+			b.WriteString(detailKeyStyle().Render(fmt.Sprintf("%-12s", "Service")) +
 				" " + strings.ToUpper(e.Service) + " (" + e.Region + ")\n")
-			b.WriteString(privilegeHintStyle.Render(e.Message) + "\n\n")
+			b.WriteString(privilegeHintStyle().Render(e.Message) + "\n\n")
 		}
 		b.WriteString("Attach the missing permissions to your IAM user or role.\n")
 	}
@@ -872,7 +929,7 @@ func (m tuiModel) renderPrivilegeErrors() string {
 			b.WriteString(fmt.Sprintf("  [%s|%s] %s: %s\n", e.Service, e.Region, e.Code, e.Message))
 		}
 	}
-	return privilegeErrorStyle.Render(b.String())
+	return privilegeErrorStyle().Render(b.String())
 }
 
 // ── Helpers ───────────────────────────────────────────────────────────────────

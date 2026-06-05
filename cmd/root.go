@@ -23,6 +23,10 @@ var awsRoleARN string
 var outputFormat string
 var allRegions bool
 var AppConfig *config.Config
+var resolvedCfgFile string // absolute path after viper resolves it
+
+// configFilePath returns the resolved path to the active config file.
+func configFilePath() string { return resolvedCfgFile }
 
 // rootCmd represents the base command when called without any subcommands
 var rootCmd = &cobra.Command{
@@ -104,6 +108,7 @@ func initConfig() {
 		fmt.Fprintf(os.Stderr, "Error reading config file: %s\n", err)
 		os.Exit(1)
 	}
+	resolvedCfgFile = viper.ConfigFileUsed()
 
 	// Unmarshal into strongly typed config struct
 	AppConfig = &config.Config{}
