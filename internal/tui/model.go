@@ -18,6 +18,7 @@ import (
 	"github.com/user/aws_explorer/internal/config"
 	"github.com/user/aws_explorer/internal/engine"
 	"github.com/user/aws_explorer/internal/model"
+	"github.com/user/aws_explorer/internal/ui"
 )
 
 // ── Column keys ──────────────────────────────────────────────────────────────
@@ -63,22 +64,22 @@ type clearToastMsg struct{}
 // ── Styles (theme-aware; resolved at render time via color accessors) ─────────
 
 func detailKeyStyle() lipgloss.Style {
-	return lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color(ColorText()))
+	return lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color(ui.ColorText()))
 }
 func detailSectionStyle() lipgloss.Style {
-	return lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color(ColorHeading())).Underline(true)
+	return lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color(ui.ColorHeading())).Underline(true)
 }
 func privilegeErrorStyle() lipgloss.Style {
 	return lipgloss.NewStyle().
 		Border(lipgloss.RoundedBorder()).
-		BorderForeground(lipgloss.Color(ColorError())).
+		BorderForeground(lipgloss.Color(ui.ColorError())).
 		Padding(0, 1)
 }
 func privilegeTitleStyle() lipgloss.Style {
-	return lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color(ColorError()))
+	return lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color(ui.ColorError()))
 }
 func privilegeHintStyle() lipgloss.Style {
-	return lipgloss.NewStyle().Foreground(lipgloss.Color(ColorWarning()))
+	return lipgloss.NewStyle().Foreground(lipgloss.Color(ui.ColorWarning()))
 }
 
 // ── Model ─────────────────────────────────────────────────────────────────────
@@ -130,9 +131,14 @@ type tuiModel struct {
 	// Zone manager for mouse support
 	zones *zone.Manager
 
-	// Settings panel
+	// Help & settings overlays
+	showHelp     bool
 	showSettings bool
-	settings     settingsModel
+	settings     ui.SettingsModel
+
+	// Config (path + loaded struct) needed to (re)build the settings panel.
+	configPath string
+	cfg        *config.Config
 }
 
 // ── Constructor ───────────────────────────────────────────────────────────────
@@ -148,16 +154,18 @@ func NewModel(ctx context.Context, eng *engine.Engine, configPath string, cfg *c
 	zoneM := zone.New()
 
 	m := tuiModel{
-		ctx:     ctx,
-		engine:  eng,
-		loading: true,
-		chunks:  chunks,
-		focus:   focusTable,
-		spinner: sp,
-		zones:   zoneM,
-		allRows: make(map[string][]btable.Row),
+		ctx:        ctx,
+		engine:     eng,
+		loading:    true,
+		chunks:     chunks,
+		focus:      focusTable,
+		spinner:    sp,
+		zones:      zoneM,
+		allRows:    make(map[string][]btable.Row),
+		configPath: configPath,
+		cfg:        cfg,
 	}
-	m.settings = newSettingsModel(0, 0, configPath, cfg)
+	m.settings = ui.NewSettingsModel(0, 0, configPath, cfg)
 	m.table = m.makeTable()
 	return m
 }
@@ -176,21 +184,21 @@ func (m tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	if m.showSettings {
 		switch msg := msg.(type) {
 		case tea.KeyMsg:
-			if msg.String() == "esc" && !m.settings.editMode {
+			if msg.String() == "esc" && !m.settings.EditMode() {
 				m.showSettings = false
 				return m, nil
 			}
-		case settingsSavedMsg:
+		case ui.SettingsSavedMsg:
 			m.showSettings = false
-			m.setToast("Theme saved: " + msg.theme)
+			m.setToast("Theme saved: " + msg.Theme)
 			cmds = append(cmds, toastCmd(3*time.Second))
 			// Rebuild table styles to pick up new theme colors.
 			rows := m.currentRows()
 			m.table = m.makeTable().WithRows(rows)
 			return m, tea.Batch(cmds...)
-		case settingsErrMsg:
+		case ui.SettingsErrMsg:
 			m.showSettings = false
-			m.setToast("Save failed: " + msg.err.Error())
+			m.setToast("Save failed: " + msg.Err.Error())
 			cmds = append(cmds, toastCmd(4*time.Second))
 			return m, tea.Batch(cmds...)
 		}
@@ -198,6 +206,16 @@ func (m tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.settings, cmd = m.settings.Update(msg)
 		cmds = append(cmds, cmd)
 		return m, tea.Batch(cmds...)
+	}
+
+	// Swallow keys while the help overlay is open; Esc or ? closes it.
+	if m.showHelp {
+		if key, ok := msg.(tea.KeyMsg); ok {
+			if s := key.String(); s == "esc" || s == ui.KeyHelp || s == "q" {
+				m.showHelp = false
+			}
+		}
+		return m, nil
 	}
 
 	// Route all events to the filter form when it is open.
@@ -312,9 +330,12 @@ func (m tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.setToast("Filters cleared")
 			cmds = append(cmds, toastCmd(3*time.Second))
 
-		case "S":
-			m.settings = newSettingsModel(m.width, m.height, m.settings.configPath, m.settings.fullConfig)
+		case ui.KeySettings:
+			m.settings = ui.NewSettingsModel(m.width, m.height, m.configPath, m.cfg)
 			m.showSettings = true
+
+		case ui.KeyHelp:
+			m.showHelp = true
 		}
 
 	case tea.MouseMsg:
@@ -454,13 +475,13 @@ func (m tuiModel) makeTable() btable.Model {
 	}
 
 	hlStyle := lipgloss.NewStyle().
-		Foreground(lipgloss.Color(ColorHighlightText())).
-		Background(lipgloss.Color(ColorHighlight())).
+		Foreground(lipgloss.Color(ui.ColorHighlightText())).
+		Background(lipgloss.Color(ui.ColorHighlight())).
 		Bold(true)
 
 	hdrStyle := lipgloss.NewStyle().
 		Bold(true).
-		Foreground(lipgloss.Color(ColorMuted()))
+		Foreground(lipgloss.Color(ui.ColorMuted()))
 
 	return btable.New(m.columns(w)).
 		WithPageSize(pageRows).
@@ -593,6 +614,36 @@ func (m *tuiModel) syncDetailViewport() {
 
 // ── View ──────────────────────────────────────────────────────────────────────
 
+// helpView renders the keybinding help overlay for the summary explorer,
+// using the shared themed renderer so it matches the S3 browser's help.
+func (m tuiModel) helpView() string {
+	body := lipgloss.JoinVertical(lipgloss.Left,
+		"Navigation",
+		"  ↑/↓, [ ]           Move selection / scroll detail",
+		"  Tab / Shift+Tab    Switch panel focus",
+		"  Enter              Select service / open detail",
+		"  Esc                Close detail or overlay",
+		"",
+		"Resources",
+		"  /                  Filter",
+		"  f                  Advanced filter",
+		"  r                  Reset filters",
+		"",
+		"Utility",
+		"  S                  Settings (theme & colors)",
+		"  ?                  Toggle this help",
+		"  q, Ctrl+C          Quit",
+	)
+	w := m.width - 12
+	if w > 72 {
+		w = 72
+	}
+	if w < 32 {
+		w = 32
+	}
+	return ui.HelpView("AWS Explorer Help", body, w)
+}
+
 func (m tuiModel) View() string {
 	var output string
 
@@ -609,14 +660,17 @@ func (m tuiModel) View() string {
 	header := m.renderHeader()
 	status := m.statusBar()
 
-	if m.showSettings {
+	if m.showHelp {
+		centered := lipgloss.Place(m.width, m.height-4, lipgloss.Center, lipgloss.Center, m.helpView())
+		output = lipgloss.JoinVertical(lipgloss.Left, header, centered, status)
+	} else if m.showSettings {
 		settingsView := m.settings.View()
 		centered := lipgloss.Place(m.width, m.height-4, lipgloss.Center, lipgloss.Center, settingsView)
 		output = lipgloss.JoinVertical(lipgloss.Left, header, centered, status)
 	} else if m.showFilter && m.filterForm != nil {
 		formW := 52
 		formH := 14
-		formView := ModalStyle(formW, formH).Render(m.filterForm.View())
+		formView := ui.ModalStyle(formW, formH).Render(m.filterForm.View())
 		modal := lipgloss.Place(m.width, m.height-4, lipgloss.Center, lipgloss.Center, formView)
 		output = lipgloss.JoinVertical(lipgloss.Left, header, modal, status)
 	} else {
@@ -627,8 +681,8 @@ func (m tuiModel) View() string {
 	// Overlay the toast at top-right if active.
 	if m.toast != "" && time.Now().Before(m.toastExp) {
 		toastRendered := lipgloss.NewStyle().
-			Foreground(lipgloss.Color(ColorHighlightText())).
-			Background(lipgloss.Color(ColorHighlight())).
+			Foreground(lipgloss.Color(ui.ColorHighlightText())).
+			Background(lipgloss.Color(ui.ColorHighlight())).
 			Padding(0, 1).
 			Bold(true).
 			Render("✓ " + m.toast)
@@ -670,7 +724,7 @@ func (m tuiModel) renderHeader() string {
 	if w < 10 {
 		w = 10
 	}
-	return HeaderStyle().Width(w).Render(title)
+	return ui.HeaderStyle().Width(w).Render(title)
 }
 
 func (m tuiModel) renderBody() string {
@@ -685,7 +739,7 @@ func (m tuiModel) renderBody() string {
 
 func (m tuiModel) renderSidebar() string {
 	var b strings.Builder
-	b.WriteString(PanelTitleStyle().Render("SERVICES") + "\n\n")
+	b.WriteString(ui.PanelTitleStyle().Render("SERVICES") + "\n\n")
 
 	for i, svc := range m.services {
 		zID := fmt.Sprintf("%s%d", zoneSvc, i)
@@ -696,23 +750,23 @@ func (m tuiModel) renderSidebar() string {
 		var line string
 		if i == m.activeService {
 			line = lipgloss.NewStyle().
-				Foreground(lipgloss.Color(ColorHighlightText())).
-				Background(lipgloss.Color(ColorHighlight())).
+				Foreground(lipgloss.Color(ui.ColorHighlightText())).
+				Background(lipgloss.Color(ui.ColorHighlight())).
 				Width(sidebarInner - 2).
 				Render("▶ " + label)
 		} else {
 			line = lipgloss.NewStyle().
-				Foreground(lipgloss.Color(ColorText())).
+				Foreground(lipgloss.Color(ui.ColorText())).
 				Width(sidebarInner - 2).
 				Render("  " + label)
 		}
 		b.WriteString(m.zones.Mark(zID, line) + "\n")
 	}
 
-	style := PanelStyle()
+	style := ui.PanelStyle()
 	if m.focus == focusSidebar {
-		style = SelectedPanelStyle().
-			BorderForeground(lipgloss.Color(FeatherColor(0)))
+		style = ui.SelectedPanelStyle().
+			BorderForeground(lipgloss.Color(ui.FeatherColor(0)))
 	}
 	h := m.tableHeight() + 2
 	if h < 6 {
@@ -733,9 +787,9 @@ func (m tuiModel) renderTablePanel() string {
 		WithTargetWidth(w).
 		WithPageSize(pageRows)
 
-	borderColor := lipgloss.Color(FeatherColor(1))
+	borderColor := lipgloss.Color(ui.FeatherColor(1))
 	if m.focus == focusTable {
-		borderColor = lipgloss.Color(FeatherColor(0))
+		borderColor = lipgloss.Color(ui.FeatherColor(0))
 	}
 	_ = borderColor // evertras draws its own border; we note focus via highlight style
 
@@ -743,10 +797,10 @@ func (m tuiModel) renderTablePanel() string {
 }
 
 func (m tuiModel) renderDetailPanel() string {
-	style := PanelStyle()
+	style := ui.PanelStyle()
 	if m.focus == focusDetail {
-		style = SelectedPanelStyle().
-			BorderForeground(lipgloss.Color(FeatherColor(0)))
+		style = ui.SelectedPanelStyle().
+			BorderForeground(lipgloss.Color(ui.FeatherColor(0)))
 	}
 	h := m.tableHeight() + 2
 	if h < 6 {
@@ -784,11 +838,11 @@ func (m tuiModel) statusBar() string {
 	var hints string
 	switch m.focus {
 	case focusSidebar:
-		hints = "↑↓:service  Tab:panel  Enter:select  S:settings  q:quit"
+		hints = "↑↓:service  Tab:panel  Enter:select  S:settings  ?:help  q:quit"
 	case focusTable:
-		hints = "↑↓:nav  Enter:detail  /:filter  f:adv-filter  r:reset  S:settings  Tab:panel  q"
+		hints = "↑↓:nav  Enter:detail  /:filter  r:reset  S:settings  ?:help  Tab  q"
 	case focusDetail:
-		hints = "[]:scroll  Esc:close  S:settings  Tab:panel  q:quit"
+		hints = "[]:scroll  Esc:close  S:settings  ?:help  Tab:panel  q:quit"
 	}
 
 	lw := lipgloss.Width(left)
@@ -799,7 +853,7 @@ func (m tuiModel) statusBar() string {
 		gap = 2
 	}
 	content := left + strings.Repeat(" ", gap) + hints
-	return StatusBarStyle(w).Render(content)
+	return ui.StatusBarStyle(w).Render(content)
 }
 
 // ── Detail renderer ───────────────────────────────────────────────────────────
