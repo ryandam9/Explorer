@@ -34,13 +34,15 @@ var tuiCmd = &cobra.Command{
 			}
 		}
 
+		tui.InitFromConfig(AppConfig.UI)
+
 		eng, err := engine.NewEngine(ctx, AppConfig)
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "Failed to initialize engine: %v\n", err)
 			os.Exit(1)
 		}
 
-		m := tui.NewModel(ctx, eng)
+		m := tui.NewModel(ctx, eng, configFilePath(), AppConfig)
 		p := tea.NewProgram(m, tea.WithAltScreen(), tea.WithMouseCellMotion(), tea.WithContext(ctx))
 
 		if _, err := p.Run(); err != nil {

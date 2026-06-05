@@ -7,6 +7,7 @@ type Config struct {
 	Services map[string]ServiceConfig `mapstructure:"services"`
 	Filters  FilterConfig             `mapstructure:"filters"`
 	Output   OutputConfig             `mapstructure:"output"`
+	UI       UIConfig                 `mapstructure:"ui"`
 }
 
 type AppConfig struct {
@@ -17,11 +18,11 @@ type AppConfig struct {
 }
 
 type AWSConfig struct {
-	Profile    string           `mapstructure:"profile"`
-	AuthMethod string           `mapstructure:"authMethod"` // auto, profile, env, static, sts
-	Regions    []string         `mapstructure:"regions"`
-	AllRegions bool             `mapstructure:"allRegions"`
-	STS        STSConfig        `mapstructure:"sts"`
+	Profile    string            `mapstructure:"profile"`
+	AuthMethod string            `mapstructure:"authMethod"` // auto, profile, env, static, sts
+	Regions    []string          `mapstructure:"regions"`
+	AllRegions bool              `mapstructure:"allRegions"`
+	STS        STSConfig         `mapstructure:"sts"`
 	Static     StaticCredentials `mapstructure:"static"`
 }
 
@@ -61,4 +62,36 @@ type OutputConfig struct {
 	Format         string   `mapstructure:"format"`
 	IncludeDetails bool     `mapstructure:"includeDetails"`
 	Fields         []string `mapstructure:"fields"`
+}
+
+// UIConfig holds all UI/theme configuration.
+type UIConfig struct {
+	// Theme is the name of the active theme.
+	Theme string `mapstructure:"theme"`
+	// Themes holds per-theme color role overrides. The map key is the theme name.
+	// Any roles not specified fall back to the built-in defaults.
+	Themes map[string]ThemeColorConfig `mapstructure:"themes"`
+}
+
+// ThemeColorConfig holds the full color palette for a single theme.
+// Each field is a hex color string (e.g. "#FF5555") or empty to use the default.
+type ThemeColorConfig struct {
+	// Heading is used for titles and section headers.
+	Heading string `mapstructure:"heading"`
+	// Text is used for body / foreground text.
+	Text string `mapstructure:"text"`
+	// Background is used for panel backgrounds (empty = terminal default).
+	Background string `mapstructure:"background"`
+	// Border is used for panel borders.
+	Border string `mapstructure:"border"`
+	// Highlight is the background color for selected / highlighted items.
+	Highlight string `mapstructure:"highlight"`
+	// HighlightText is the foreground color on selected / highlighted items.
+	HighlightText string `mapstructure:"highlightText"`
+	// Muted is used for de-emphasised / secondary text.
+	Muted string `mapstructure:"muted"`
+	// Error is used for error messages and indicators.
+	Error string `mapstructure:"error"`
+	// Warning is used for warning messages and indicators.
+	Warning string `mapstructure:"warning"`
 }
