@@ -34,17 +34,17 @@ func TestFormatAndParseSize(t *testing.T) {
 func TestSortObjectsKeepsDirectoriesFirstAndSortsSize(t *testing.T) {
 	m := &Model{sortCol: 1, sortAsc: true}
 	rows := []table.Row{
-		{"z.txt", "2.0 MB", "2026-01-01", "STANDARD", "etag-z"},
-		{"photos/", "-", "-", "DIR", "-"},
-		{"a.txt", "10 B", "2026-01-01", "STANDARD", "etag-a"},
-		{"b.txt", "1.5 KB", "2026-01-01", "STANDARD", "etag-b"},
+		{"", "z.txt", "2.0 MB", "2026-01-01", "STANDARD", "etag-z"},
+		{"", "photos/", "-", "-", "DIR", "-"},
+		{"", "a.txt", "10 B", "2026-01-01", "STANDARD", "etag-a"},
+		{"", "b.txt", "1.5 KB", "2026-01-01", "STANDARD", "etag-b"},
 	}
 
 	m.sortObjects(rows)
 
 	wantNames := []string{"photos/", "a.txt", "b.txt", "z.txt"}
 	for i, want := range wantNames {
-		if got := rows[i][0]; got != want {
+		if got := rows[i][1]; got != want {
 			t.Fatalf("row %d name = %q, want %q; rows=%v", i, got, want, rows)
 		}
 	}
@@ -53,16 +53,16 @@ func TestSortObjectsKeepsDirectoriesFirstAndSortsSize(t *testing.T) {
 func TestSortObjectsNameDescendingCaseInsensitive(t *testing.T) {
 	m := &Model{sortCol: 0, sortAsc: false}
 	rows := []table.Row{
-		{"alpha.txt", "1 B", "", "STANDARD", ""},
-		{"Bravo.txt", "1 B", "", "STANDARD", ""},
-		{"charlie.txt", "1 B", "", "STANDARD", ""},
+		{"", "alpha.txt", "1 B", "", "STANDARD", ""},
+		{"", "Bravo.txt", "1 B", "", "STANDARD", ""},
+		{"", "charlie.txt", "1 B", "", "STANDARD", ""},
 	}
 
 	m.sortObjects(rows)
 
 	wantNames := []string{"charlie.txt", "Bravo.txt", "alpha.txt"}
 	for i, want := range wantNames {
-		if got := rows[i][0]; got != want {
+		if got := rows[i][1]; got != want {
 			t.Fatalf("row %d name = %q, want %q", i, got, want)
 		}
 	}
