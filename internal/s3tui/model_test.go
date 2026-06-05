@@ -5,7 +5,7 @@ import (
 
 	"github.com/charmbracelet/lipgloss"
 	"github.com/user/aws_explorer/internal/table"
-	"github.com/user/aws_explorer/internal/tui"
+	"github.com/user/aws_explorer/internal/ui"
 )
 
 func TestFormatAndParseSize(t *testing.T) {
@@ -69,10 +69,10 @@ func TestSortObjectsNameDescendingCaseInsensitive(t *testing.T) {
 }
 
 func TestFeatherRailRendersEveryThemeColor(t *testing.T) {
-	tui.SetActiveTheme(0)
+	ui.SetActiveTheme(0)
 	const width = 10
 	// FeatherRail should render exactly `width` characters, cycling through theme colors.
-	if got := lipgloss.Width(tui.FeatherRail(width)); got != width {
+	if got := lipgloss.Width(ui.FeatherRail(width)); got != width {
 		t.Fatalf("FeatherRail width = %d, want %d", got, width)
 	}
 }

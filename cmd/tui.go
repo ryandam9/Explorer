@@ -10,6 +10,7 @@ import (
 
 	"github.com/user/aws_explorer/internal/engine"
 	"github.com/user/aws_explorer/internal/tui"
+	"github.com/user/aws_explorer/internal/ui"
 )
 
 var tuiCmd = &cobra.Command{
@@ -34,7 +35,7 @@ var tuiCmd = &cobra.Command{
 			}
 		}
 
-		tui.InitFromConfig(AppConfig.UI)
+		ui.InitFromConfig(AppConfig.UI)
 
 		eng, err := engine.NewEngine(ctx, AppConfig)
 		if err != nil {

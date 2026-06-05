@@ -1,4 +1,4 @@
-package tui
+package ui
 
 import (
 	"fmt"
@@ -12,11 +12,11 @@ import (
 	"github.com/user/aws_explorer/internal/config"
 )
 
-// settingsSavedMsg is sent after a successful config save.
-type settingsSavedMsg struct{ theme string }
+// SettingsSavedMsg is sent after a successful config save.
+type SettingsSavedMsg struct{ Theme string }
 
-// settingsErrMsg carries a save error back to the main model.
-type settingsErrMsg struct{ err error }
+// SettingsErrMsg carries a save error back to the main model.
+type SettingsErrMsg struct{ Err error }
 
 // settingsField enumerates the editable color roles.
 type settingsField int
@@ -39,8 +39,8 @@ var settingsFieldNames = [sfFieldCount]string{
 	"Highlight", "HighlightText", "Muted", "Error", "Warning",
 }
 
-// settingsModel drives the settings overlay panel.
-type settingsModel struct {
+// SettingsModel drives the settings overlay panel.
+type SettingsModel struct {
 	// Width / height of the terminal.
 	width, height int
 
@@ -57,8 +57,8 @@ type settingsModel struct {
 	fullConfig *config.Config
 }
 
-func newSettingsModel(width, height int, configPath string, cfg *config.Config) settingsModel {
-	return settingsModel{
+func NewSettingsModel(width, height int, configPath string, cfg *config.Config) SettingsModel {
+	return SettingsModel{
 		width:      width,
 		height:     height,
 		themeIdx:   getActiveTheme(),
@@ -67,8 +67,12 @@ func newSettingsModel(width, height int, configPath string, cfg *config.Config) 
 	}
 }
 
+// EditMode reports whether the panel is currently capturing text input for a
+// color value. Callers use this to decide whether Esc should close the panel.
+func (s SettingsModel) EditMode() bool { return s.editMode }
+
 // colorForField reads the current in-memory color for a role from Themes[].
-func (s settingsModel) colorForField(themeIdx int, f settingsField) string {
+func (s SettingsModel) colorForField(themeIdx int, f settingsField) string {
 	c := Themes[themeIdx].Colors
 	switch f {
 	case sfHeading:
@@ -118,7 +122,7 @@ func setColorForField(themeIdx int, f settingsField, val string) {
 	}
 }
 
-func (s settingsModel) Update(msg tea.Msg) (settingsModel, tea.Cmd) {
+func (s SettingsModel) Update(msg tea.Msg) (SettingsModel, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.KeyMsg:
 		if s.editMode {
@@ -129,7 +133,7 @@ func (s settingsModel) Update(msg tea.Msg) (settingsModel, tea.Cmd) {
 	return s, nil
 }
 
-func (s settingsModel) updateNavMode(msg tea.KeyMsg) (settingsModel, tea.Cmd) {
+func (s SettingsModel) updateNavMode(msg tea.KeyMsg) (SettingsModel, tea.Cmd) {
 	switch msg.String() {
 	case "up", "k":
 		if s.fieldIdx > 0 {
@@ -156,7 +160,7 @@ func (s settingsModel) updateNavMode(msg tea.KeyMsg) (settingsModel, tea.Cmd) {
 	return s, nil
 }
 
-func (s settingsModel) updateEditMode(msg tea.KeyMsg) (settingsModel, tea.Cmd) {
+func (s SettingsModel) updateEditMode(msg tea.KeyMsg) (SettingsModel, tea.Cmd) {
 	switch msg.String() {
 	case "enter":
 		setColorForField(s.themeIdx, settingsField(s.fieldIdx), strings.TrimSpace(s.editBuf))
@@ -176,10 +180,10 @@ func (s settingsModel) updateEditMode(msg tea.KeyMsg) (settingsModel, tea.Cmd) {
 }
 
 // saveCmd persists the current in-memory theme state back to config.yaml.
-func (s settingsModel) saveCmd() tea.Cmd {
+func (s SettingsModel) saveCmd() tea.Cmd {
 	return func() tea.Msg {
 		if s.configPath == "" || s.fullConfig == nil {
-			return settingsErrMsg{fmt.Errorf("config path not set")}
+			return SettingsErrMsg{fmt.Errorf("config path not set")}
 		}
 
 		// Build the updated UI config from the in-memory Themes slice.
@@ -206,20 +210,20 @@ func (s settingsModel) saveCmd() tea.Cmd {
 
 		data, err := yaml.Marshal(s.fullConfig)
 		if err != nil {
-			return settingsErrMsg{err}
+			return SettingsErrMsg{err}
 		}
 		if err := os.WriteFile(s.configPath, data, 0o644); err != nil {
-			return settingsErrMsg{err}
+			return SettingsErrMsg{err}
 		}
 
 		// Apply the chosen theme immediately.
 		SetActiveTheme(s.themeIdx)
-		return settingsSavedMsg{theme: Themes[s.themeIdx].Name}
+		return SettingsSavedMsg{Theme: Themes[s.themeIdx].Name}
 	}
 }
 
 // View renders the settings overlay.
-func (s settingsModel) View() string {
+func (s SettingsModel) View() string {
 	panelW := s.width - 4
 	if panelW < 40 {
 		panelW = 40

@@ -10,7 +10,7 @@ import (
 	"github.com/spf13/cobra"
 	"github.com/user/aws_explorer/internal/config"
 	"github.com/user/aws_explorer/internal/s3tui"
-	"github.com/user/aws_explorer/internal/tui"
+	"github.com/user/aws_explorer/internal/ui"
 )
 
 var (
@@ -60,9 +60,9 @@ var s3Cmd = &cobra.Command{
 		if AppConfig != nil && AppConfig.UI.Theme != "" && s3Theme == "spotted-pardalote" {
 			activeTheme = AppConfig.UI.Theme
 		}
-		tui.InitFromConfig(AppConfig.UI)
+		ui.InitFromConfig(AppConfig.UI)
 
-		m, err := s3tui.NewModel(ctx, s3Cfg, s3Region, s3Bucket, s3Prefix, activeTheme, s3AllowDelete, s3EndpointURL)
+		m, err := s3tui.NewModel(ctx, s3Cfg, s3Region, s3Bucket, s3Prefix, activeTheme, s3AllowDelete, s3EndpointURL, configFilePath(), AppConfig)
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "Error initializing S3 TUI: %v\n", err)
 			os.Exit(1)
@@ -84,7 +84,7 @@ func init() {
 	s3Cmd.Flags().StringVar(&s3AuthMethod, "auth-method", "", "Auth method: auto, profile, env, static, sts (overrides global --auth-method)")
 	s3Cmd.Flags().StringVar(&s3RoleARN, "role-arn", "", "IAM role ARN to assume via STS (overrides global --role-arn)")
 	s3Cmd.Flags().StringVar(&s3Region, "region", "", "AWS region (defaults to the region in ~/.aws/config or AWS_DEFAULT_REGION)")
-	s3Cmd.Flags().StringVar(&s3Theme, "theme", "spotted-pardalote", "Color theme ("+strings.Join(tui.ThemeNames(), ", ")+")")
+	s3Cmd.Flags().StringVar(&s3Theme, "theme", "spotted-pardalote", "Color theme ("+strings.Join(ui.ThemeNames(), ", ")+")")
 	s3Cmd.Flags().BoolVar(&s3AllowDelete, "allow-delete", false, "Enable delete operations (guarded by confirmation)")
 	s3Cmd.Flags().StringVar(&s3EndpointURL, "endpoint-url", "", "Custom endpoint URL (for LocalStack/MinIO)")
 	rootCmd.AddCommand(s3Cmd)

@@ -18,7 +18,7 @@ import (
 	"github.com/charmbracelet/lipgloss"
 	"github.com/user/aws_explorer/internal/config"
 	"github.com/user/aws_explorer/internal/table"
-	"github.com/user/aws_explorer/internal/tui"
+	"github.com/user/aws_explorer/internal/ui"
 )
 
 // ---------------------------------------------------------------------------
@@ -216,6 +216,12 @@ type Model struct {
 	previewViewport viewport.Model
 
 	statusMsg string // transient status shown in footer
+
+	// Shared settings panel (theme & colors). Opened with KeySettings.
+	showSettings bool
+	settings     ui.SettingsModel
+	configPath   string
+	cfg          *config.Config
 }
 
 // authDisplayInfo returns a short human-readable label for the active auth method.
@@ -250,17 +256,17 @@ func authDisplayInfo(cfg *config.AWSConfig) string {
 // NewModel
 // ---------------------------------------------------------------------------
 
-func NewModel(ctx context.Context, awsCfg *config.AWSConfig, region, bucket, prefix, themeName string, allowDelete bool, endpointURL string) (*Model, error) {
+func NewModel(ctx context.Context, awsCfg *config.AWSConfig, region, bucket, prefix, themeName string, allowDelete bool, endpointURL, configPath string, cfg *config.Config) (*Model, error) {
 	client, err := NewS3Client(ctx, awsCfg, region, endpointURL)
 	if err != nil {
 		return nil, err
 	}
 
 	themeIdx := 0
-	if idx, ok := tui.LookupTheme(themeName); ok {
+	if idx, ok := ui.LookupTheme(themeName); ok {
 		themeIdx = idx
 	}
-	tui.SetActiveTheme(themeIdx)
+	ui.SetActiveTheme(themeIdx)
 
 	m := &Model{
 		client:            client,
@@ -274,7 +280,10 @@ func NewModel(ctx context.Context, awsCfg *config.AWSConfig, region, bucket, pre
 		seenBuckets:       make(map[string]bool),
 		themeIdx:          themeIdx,
 		allowDelete:       allowDelete,
+		configPath:        configPath,
+		cfg:               cfg,
 	}
+	m.settings = ui.NewSettingsModel(0, 0, configPath, cfg)
 
 	m.initBucketTable()
 	m.initObjectTable()
@@ -283,31 +292,31 @@ func NewModel(ctx context.Context, awsCfg *config.AWSConfig, region, bucket, pre
 	m.prefixInput.Placeholder = "Enter prefix (e.g. photos/2024/)"
 	m.prefixInput.CharLimit = 256
 	m.prefixInput.Width = 50
-	m.prefixInput.PromptStyle = lipgloss.NewStyle().Foreground(lipgloss.Color(tui.FeatherColor(1))).Bold(true)
-	m.prefixInput.TextStyle = lipgloss.NewStyle().Foreground(lipgloss.Color(tui.FeatherColor(0)))
-	m.prefixInput.PlaceholderStyle = lipgloss.NewStyle().Foreground(lipgloss.Color(tui.FeatherColor(1)))
-	m.prefixInput.Cursor.Style = lipgloss.NewStyle().Foreground(lipgloss.Color(tui.FeatherColor(0)))
+	m.prefixInput.PromptStyle = lipgloss.NewStyle().Foreground(lipgloss.Color(ui.FeatherColor(1))).Bold(true)
+	m.prefixInput.TextStyle = lipgloss.NewStyle().Foreground(lipgloss.Color(ui.FeatherColor(0)))
+	m.prefixInput.PlaceholderStyle = lipgloss.NewStyle().Foreground(lipgloss.Color(ui.FeatherColor(1)))
+	m.prefixInput.Cursor.Style = lipgloss.NewStyle().Foreground(lipgloss.Color(ui.FeatherColor(0)))
 
 	m.bucketSearch = textinput.New()
 	m.bucketSearch.Placeholder = "Filter buckets..."
 	m.bucketSearch.CharLimit = 128
 	m.bucketSearch.Width = 40
-	m.bucketSearch.PromptStyle = lipgloss.NewStyle().Foreground(lipgloss.Color(tui.FeatherColor(1))).Bold(true)
-	m.bucketSearch.TextStyle = lipgloss.NewStyle().Foreground(lipgloss.Color(tui.FeatherColor(0)))
-	m.bucketSearch.PlaceholderStyle = lipgloss.NewStyle().Foreground(lipgloss.Color(tui.FeatherColor(1)))
-	m.bucketSearch.Cursor.Style = lipgloss.NewStyle().Foreground(lipgloss.Color(tui.FeatherColor(0)))
+	m.bucketSearch.PromptStyle = lipgloss.NewStyle().Foreground(lipgloss.Color(ui.FeatherColor(1))).Bold(true)
+	m.bucketSearch.TextStyle = lipgloss.NewStyle().Foreground(lipgloss.Color(ui.FeatherColor(0)))
+	m.bucketSearch.PlaceholderStyle = lipgloss.NewStyle().Foreground(lipgloss.Color(ui.FeatherColor(1)))
+	m.bucketSearch.Cursor.Style = lipgloss.NewStyle().Foreground(lipgloss.Color(ui.FeatherColor(0)))
 
 	m.deleteConfirm = textinput.New()
 	m.deleteConfirm.Placeholder = "Type 'delete' to confirm"
 	m.deleteConfirm.CharLimit = 32
 	m.deleteConfirm.Width = 30
-	m.deleteConfirm.PromptStyle = lipgloss.NewStyle().Foreground(lipgloss.Color(tui.FeatherColor(0))).Bold(true)
-	m.deleteConfirm.TextStyle = lipgloss.NewStyle().Foreground(lipgloss.Color(tui.FeatherColor(0)))
-	m.deleteConfirm.Cursor.Style = lipgloss.NewStyle().Foreground(lipgloss.Color(tui.FeatherColor(0)))
+	m.deleteConfirm.PromptStyle = lipgloss.NewStyle().Foreground(lipgloss.Color(ui.FeatherColor(0))).Bold(true)
+	m.deleteConfirm.TextStyle = lipgloss.NewStyle().Foreground(lipgloss.Color(ui.FeatherColor(0)))
+	m.deleteConfirm.Cursor.Style = lipgloss.NewStyle().Foreground(lipgloss.Color(ui.FeatherColor(0)))
 
 	m.spinner = spinner.New(
 		spinner.WithSpinner(spinner.MiniDot),
-		spinner.WithStyle(lipgloss.NewStyle().Foreground(lipgloss.Color(tui.FeatherColor(0))).Bold(true)),
+		spinner.WithStyle(lipgloss.NewStyle().Foreground(lipgloss.Color(ui.FeatherColor(0))).Bold(true)),
 	)
 
 	if bucket != "" {
@@ -341,15 +350,15 @@ func (m *Model) initBucketTable() {
 
 	s := table.DefaultStyles()
 	s.Header = s.Header.
-		Foreground(lipgloss.Color(tui.FeatherColor(1))).
+		Foreground(lipgloss.Color(ui.FeatherColor(1))).
 		BorderStyle(lipgloss.NormalBorder()).
-		BorderForeground(lipgloss.Color(tui.FeatherColor(1))).
+		BorderForeground(lipgloss.Color(ui.FeatherColor(1))).
 		BorderBottom(true).
 		Bold(true)
-	s.Cell = s.Cell.Foreground(lipgloss.Color(tui.FeatherColor(0)))
+	s.Cell = s.Cell.Foreground(lipgloss.Color(ui.FeatherColor(0)))
 	s.Selected = s.Selected.
-		Foreground(lipgloss.Color(tui.FeatherColor(0))).
-		Background(lipgloss.Color(tui.FeatherColor(1))).
+		Foreground(lipgloss.Color(ui.FeatherColor(0))).
+		Background(lipgloss.Color(ui.FeatherColor(1))).
 		Bold(true)
 	m.bucketTable.SetStyles(s)
 }
@@ -372,17 +381,44 @@ func (m *Model) initObjectTable() {
 
 	s := table.DefaultStyles()
 	s.Header = s.Header.
-		Foreground(lipgloss.Color(tui.FeatherColor(1))).
+		Foreground(lipgloss.Color(ui.FeatherColor(1))).
 		BorderStyle(lipgloss.NormalBorder()).
-		BorderForeground(lipgloss.Color(tui.FeatherColor(1))).
+		BorderForeground(lipgloss.Color(ui.FeatherColor(1))).
 		BorderBottom(true).
 		Bold(true)
-	s.Cell = s.Cell.Foreground(lipgloss.Color(tui.FeatherColor(0)))
+	s.Cell = s.Cell.Foreground(lipgloss.Color(ui.FeatherColor(0)))
 	s.Selected = s.Selected.
-		Foreground(lipgloss.Color(tui.FeatherColor(0))).
-		Background(lipgloss.Color(tui.FeatherColor(1))).
+		Foreground(lipgloss.Color(ui.FeatherColor(0))).
+		Background(lipgloss.Color(ui.FeatherColor(1))).
 		Bold(true)
 	m.objectTable.SetStyles(s)
+}
+
+// restyleForTheme re-applies palette-derived styles to the existing tables and
+// inputs without resetting their data. Called after the settings panel saves a
+// new theme so the change is visible immediately.
+func (m *Model) restyleForTheme() {
+	s := table.DefaultStyles()
+	s.Header = s.Header.
+		Foreground(lipgloss.Color(ui.FeatherColor(1))).
+		BorderStyle(lipgloss.NormalBorder()).
+		BorderForeground(lipgloss.Color(ui.FeatherColor(1))).
+		BorderBottom(true).
+		Bold(true)
+	s.Cell = s.Cell.Foreground(lipgloss.Color(ui.FeatherColor(0)))
+	s.Selected = s.Selected.
+		Foreground(lipgloss.Color(ui.FeatherColor(0))).
+		Background(lipgloss.Color(ui.FeatherColor(1))).
+		Bold(true)
+	m.bucketTable.SetStyles(s)
+	m.objectTable.SetStyles(s)
+
+	for _, in := range []*textinput.Model{&m.prefixInput, &m.bucketSearch, &m.deleteConfirm} {
+		in.PromptStyle = lipgloss.NewStyle().Foreground(lipgloss.Color(ui.FeatherColor(1))).Bold(true)
+		in.TextStyle = lipgloss.NewStyle().Foreground(lipgloss.Color(ui.FeatherColor(0)))
+		in.PlaceholderStyle = lipgloss.NewStyle().Foreground(lipgloss.Color(ui.FeatherColor(1)))
+		in.Cursor.Style = lipgloss.NewStyle().Foreground(lipgloss.Color(ui.FeatherColor(0)))
+	}
 }
 
 // ---------------------------------------------------------------------------
@@ -670,9 +706,9 @@ func (m *Model) loadingLine(message string) string {
 func (m *Model) loadingBox(message, detail string) string {
 	lines := []string{m.loadingLine(message)}
 	if detail != "" {
-		lines = append(lines, "", tui.MutedStyle().Render(detail))
+		lines = append(lines, "", ui.MutedStyle().Render(detail))
 	}
-	return tui.LoadingBoxStyle().Render(lipgloss.JoinVertical(lipgloss.Center, lines...))
+	return ui.LoadingBoxStyle().Render(lipgloss.JoinVertical(lipgloss.Center, lines...))
 }
 
 func (m *Model) selectedObjectKey() (string, bool) {
@@ -691,6 +727,29 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	var cmd tea.Cmd
 	var cmds []tea.Cmd
 	spinnerTickScheduled := false
+
+	// Route all events to the shared settings panel while it is open.
+	if m.showSettings {
+		switch msg := msg.(type) {
+		case tea.KeyMsg:
+			if msg.String() == "esc" && !m.settings.EditMode() {
+				m.showSettings = false
+				return m, nil
+			}
+		case ui.SettingsSavedMsg:
+			m.showSettings = false
+			m.statusMsg = "Theme saved: " + msg.Theme
+			m.restyleForTheme()
+			return m, nil
+		case ui.SettingsErrMsg:
+			m.showSettings = false
+			m.statusMsg = "Save failed: " + msg.Err.Error()
+			return m, nil
+		}
+		var scmd tea.Cmd
+		m.settings, scmd = m.settings.Update(msg)
+		return m, scmd
+	}
 
 	switch msg := msg.(type) {
 	case spinner.TickMsg:
@@ -770,13 +829,20 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 
-		// Global keys
-		switch msg.String() {
-		case "q", "ctrl+c":
-			return m, tea.Quit
-		case "?":
-			m.showHelp = !m.showHelp
-			return m, nil
+		// Global keys — skipped while typing into an input so that bucket
+		// names / prefixes containing these characters work as expected.
+		if !m.inBucketSearch && m.focus != focusPrefixInput {
+			switch msg.String() {
+			case "q", "ctrl+c":
+				return m, tea.Quit
+			case ui.KeyHelp:
+				m.showHelp = !m.showHelp
+				return m, nil
+			case ui.KeySettings:
+				m.settings = ui.NewSettingsModel(m.width, m.height, m.configPath, m.cfg)
+				m.showSettings = true
+				return m, nil
+			}
 		}
 
 		if m.showHelp {
@@ -961,7 +1027,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				}
 			}
 
-		case "S":
+		case "R":
 			if m.state == stateObjectList {
 				m.sortAsc = !m.sortAsc
 				rows := m.objectTable.Rows()
@@ -1307,7 +1373,7 @@ func (m *Model) View() string {
 
 	// Bucket detail full-screen view
 	if m.state == stateBucketDetail {
-		return tui.AppStyle().Render(m.bucketDetailView())
+		return ui.AppStyle().Render(m.bucketDetailView())
 	}
 
 	var content string
@@ -1327,7 +1393,7 @@ func (m *Model) View() string {
 	if m.showVersions {
 		headerText += "   [VERSIONS:ON]"
 	}
-	header := tui.HeaderStyle().Render(headerText)
+	header := ui.HeaderStyle().Render(headerText)
 
 	if m.err != nil {
 		maxErrW := m.width - 20
@@ -1336,12 +1402,12 @@ func (m *Model) View() string {
 		}
 		errBox := lipgloss.NewStyle().
 			BorderStyle(lipgloss.RoundedBorder()).
-			BorderForeground(lipgloss.Color(tui.FeatherColor(0))).
-			Foreground(lipgloss.Color(tui.FeatherColor(0))).
+			BorderForeground(lipgloss.Color(ui.FeatherColor(0))).
+			Foreground(lipgloss.Color(ui.FeatherColor(0))).
 			Padding(1, 2).
 			Width(maxErrW).
 			Align(lipgloss.Center).
-			Render(fmt.Sprintf("Failed to access bucket: %s\n\n%s\n\nPress [Esc] to return to the bucket list.", m.bucket, tui.ErrorStyle().Render(m.err.Error())))
+			Render(fmt.Sprintf("Failed to access bucket: %s\n\n%s\n\nPress [Esc] to return to the bucket list.", m.bucket, ui.ErrorStyle().Render(m.err.Error())))
 
 		content = lipgloss.Place(m.width-4, m.height-10, lipgloss.Center, lipgloss.Center, errBox)
 	} else if m.loading {
@@ -1361,7 +1427,9 @@ func (m *Model) View() string {
 	}
 
 	// Overlays
-	if m.showHelp {
+	if m.showSettings {
+		content = lipgloss.Place(m.width-4, max(8, m.height-8), lipgloss.Center, lipgloss.Center, m.settings.View())
+	} else if m.showHelp {
 		content = lipgloss.Place(m.width-4, max(8, m.height-8), lipgloss.Center, lipgloss.Center, m.helpView())
 	} else if m.showPreview {
 		content = lipgloss.Place(m.width-4, max(8, m.height-8), lipgloss.Center, lipgloss.Center, m.previewView())
@@ -1377,20 +1445,20 @@ func (m *Model) View() string {
 	if m.inBucketSearch {
 		searchBox := lipgloss.NewStyle().
 			BorderStyle(lipgloss.RoundedBorder()).
-			BorderForeground(lipgloss.Color(tui.FeatherColor(0))).
-			Foreground(lipgloss.Color(tui.FeatherColor(0))).
+			BorderForeground(lipgloss.Color(ui.FeatherColor(0))).
+			Foreground(lipgloss.Color(ui.FeatherColor(0))).
 			Padding(0, 1).
 			Render(lipgloss.JoinVertical(lipgloss.Left,
-				tui.BoldStyle().Render("Search buckets:"),
+				ui.BoldStyle().Render("Search buckets:"),
 				m.bucketSearch.View(),
-				tui.MutedStyle().Render("[Enter] Select first  [Esc] Cancel"),
+				ui.MutedStyle().Render("[Enter] Select first  [Esc] Cancel"),
 			))
 		content = lipgloss.Place(m.width-4, max(8, m.height-8), lipgloss.Center, lipgloss.Top, searchBox)
 	}
 
-	return tui.AppStyle().Render(lipgloss.JoinVertical(lipgloss.Left,
+	return ui.AppStyle().Render(lipgloss.JoinVertical(lipgloss.Left,
 		header,
-		tui.FeatherRail(max(12, m.width-4)),
+		ui.FeatherRail(max(12, m.width-4)),
 		"",
 		content,
 		"",
@@ -1422,7 +1490,7 @@ func (m *Model) renderStatusBar() string {
 		default:
 			left = fmt.Sprintf("Buckets: %d", len(m.allBucketRows))
 		}
-		hints = "↑/↓ Enter  d  /  r  ?  q"
+		hints = "↑/↓ Enter  d  /  r  S  ?  q"
 	case stateObjectList:
 		if m.statusMsg != "" {
 			left = m.statusMsg
@@ -1438,9 +1506,9 @@ func (m *Model) renderStatusBar() string {
 				left += "  [VERSIONS]"
 			}
 		}
-		hints = "↑/↓ Enter  /  p  y  g  D  f  s  r  Esc  ?  q"
+		hints = "↑/↓ Enter  /  p  y  g  D  f  s  r  S  Esc  ?  q"
 		if m.allowDelete {
-			hints = "↑/↓ Enter  /  p  y  g  D  x Delete  f  s  r  Esc  ?  q"
+			hints = "↑/↓ Enter  /  p  y  g  D  x Delete  f  s  r  S  Esc  ?  q"
 		}
 	default:
 		left = m.statusMsg
@@ -1456,17 +1524,17 @@ func (m *Model) renderStatusBar() string {
 	}
 
 	content := left + strings.Repeat(" ", gap) + hints
-	return tui.StatusBarStyle(barWidth).Render(content)
+	return ui.StatusBarStyle(barWidth).Render(content)
 }
 
 func (m *Model) bucketListView() string {
-	tableSection := tui.SelectedPanelStyle().Render(m.bucketTable.View())
+	tableSection := ui.SelectedPanelStyle().Render(m.bucketTable.View())
 
 	const detailsHeight = 10
 	detailsWidth := max(20, m.width-4)
 
 	title := "BUCKET DETAILS"
-	metaText := tui.MutedStyle().Render("Select a bucket to view details.")
+	metaText := ui.MutedStyle().Render("Select a bucket to view details.")
 	if len(m.bucketTable.SelectedRow()) > 0 {
 		row := m.bucketTable.SelectedRow()
 		name := row[1]
@@ -1514,9 +1582,9 @@ func (m *Model) bucketListView() string {
 		}
 	}
 
-	detailsPanel := tui.FixedPanelStyle(detailsWidth, detailsHeight).
+	detailsPanel := ui.FixedPanelStyle(detailsWidth, detailsHeight).
 		Render(lipgloss.JoinVertical(lipgloss.Left,
-			tui.PanelTitleStyle().Render(title),
+			ui.PanelTitleStyle().Render(title),
 			"",
 			metaText,
 		))
@@ -1530,23 +1598,23 @@ func (m *Model) bucketListView() string {
 func (m *Model) objectListView() string {
 	sizeStr := formatSize(m.totalSize)
 
-	headerRight := tui.MutedStyle().Render(
+	headerRight := ui.MutedStyle().Render(
 		fmt.Sprintf("Objects: %d   Size: %s", m.objCount, sizeStr))
 
 	bucketHeader := lipgloss.JoinHorizontal(lipgloss.Top,
-		tui.BadgeStyle().Render(fmt.Sprintf("Bucket: %s", m.bucket)),
+		ui.BadgeStyle().Render(fmt.Sprintf("Bucket: %s", m.bucket)),
 		"   ",
 		headerRight,
 	)
 
 	prefixSection := lipgloss.JoinHorizontal(lipgloss.Center,
-		lipgloss.NewStyle().Foreground(lipgloss.Color(tui.FeatherColor(1))).Bold(true).Render("Prefix: "),
+		lipgloss.NewStyle().Foreground(lipgloss.Color(ui.FeatherColor(1))).Bold(true).Render("Prefix: "),
 		m.prefixInput.View(),
 	)
 
-	tableStyle := tui.PanelStyle()
+	tableStyle := ui.PanelStyle()
 	if m.focus == focusObjects {
-		tableStyle = tui.SelectedPanelStyle()
+		tableStyle = ui.SelectedPanelStyle()
 	}
 	tableSection := tableStyle.Render(m.objectTable.View())
 
@@ -1554,7 +1622,7 @@ func (m *Model) objectListView() string {
 	const detailsHeight = 10
 	boxWidth := max(20, m.width/2-4)
 
-	detailsContent := tui.MutedStyle().Render("Select an object to view details.")
+	detailsContent := ui.MutedStyle().Render("Select an object to view details.")
 	metaText := ""
 	if len(m.objectTable.SelectedRow()) > 0 {
 		row := m.objectTable.SelectedRow()
@@ -1664,16 +1732,16 @@ func (m *Model) objectListView() string {
 		}
 	}
 
-	detailsBox := tui.FixedPanelStyle(boxWidth, detailsHeight).
+	detailsBox := ui.FixedPanelStyle(boxWidth, detailsHeight).
 		Render(lipgloss.JoinVertical(lipgloss.Left,
-			tui.PanelTitleStyle().Render("OBJECT DETAILS"),
+			ui.PanelTitleStyle().Render("OBJECT DETAILS"),
 			"",
 			detailsContent,
 		))
 
-	metadataBox := tui.FixedPanelStyle(boxWidth, detailsHeight).
+	metadataBox := ui.FixedPanelStyle(boxWidth, detailsHeight).
 		Render(lipgloss.JoinVertical(lipgloss.Left,
-			tui.PanelTitleStyle().Render("TAGS & METADATA"),
+			ui.PanelTitleStyle().Render("TAGS & METADATA"),
 			"",
 			metaText,
 		))
@@ -1700,14 +1768,14 @@ func (m *Model) bucketDetailView() string {
 	var tabs []string
 	for i, name := range tabNames {
 		if i == m.detailTabIdx {
-			tabs = append(tabs, tui.BoldStyle().Underline(true).Render(fmt.Sprintf("[ %s ]", name)))
+			tabs = append(tabs, ui.BoldStyle().Underline(true).Render(fmt.Sprintf("[ %s ]", name)))
 		} else {
-			tabs = append(tabs, tui.MutedStyle().Render(fmt.Sprintf("  %s  ", name)))
+			tabs = append(tabs, ui.MutedStyle().Render(fmt.Sprintf("  %s  ", name)))
 		}
 	}
 	tabBar := lipgloss.JoinHorizontal(lipgloss.Top, tabs...)
 
-	title := tui.PanelTitleStyle().Render(fmt.Sprintf("BUCKET DETAIL: %s", bucket))
+	title := ui.PanelTitleStyle().Render(fmt.Sprintf("BUCKET DETAIL: %s", bucket))
 
 	var body string
 	if m.detailsLoading || m.selectedBucketDetails == nil {
@@ -1723,12 +1791,12 @@ func (m *Model) bucketDetailView() string {
 		switch m.detailTabIdx {
 		case 0: // Overview
 			body = lipgloss.JoinVertical(lipgloss.Left,
-				tui.BoldStyle().Render("Name:        ")+orDash(bucket),
-				tui.BoldStyle().Render("ARN:         ")+"arn:aws:s3:::"+bucket,
-				tui.BoldStyle().Render("Region:      ")+orDash(m.region),
-				tui.BoldStyle().Render("Versioning:  ")+orDash(d.Versioning),
-				tui.BoldStyle().Render("Encryption:  ")+orDash(d.Encryption),
-				tui.BoldStyle().Render("Lifecycle:   ")+fmt.Sprintf("%d rules", d.LifecycleRules),
+				ui.BoldStyle().Render("Name:        ")+orDash(bucket),
+				ui.BoldStyle().Render("ARN:         ")+"arn:aws:s3:::"+bucket,
+				ui.BoldStyle().Render("Region:      ")+orDash(m.region),
+				ui.BoldStyle().Render("Versioning:  ")+orDash(d.Versioning),
+				ui.BoldStyle().Render("Encryption:  ")+orDash(d.Encryption),
+				ui.BoldStyle().Render("Lifecycle:   ")+fmt.Sprintf("%d rules", d.LifecycleRules),
 			)
 		case 1: // Access & Security
 			policyTrunc := d.Policy
@@ -1736,29 +1804,29 @@ func (m *Model) bucketDetailView() string {
 				policyTrunc = policyTrunc[:80] + "..."
 			}
 			body = lipgloss.JoinVertical(lipgloss.Left,
-				tui.BoldStyle().Render("Public Access Block: ")+orDash(d.PublicAccessBlock),
-				tui.BoldStyle().Render("ACL:                 ")+orDash(d.ACLSummary),
-				tui.BoldStyle().Render("Ownership Controls:  ")+orDash(d.OwnershipControls),
-				tui.BoldStyle().Render("Policy:              ")+orDash(policyTrunc),
-				tui.BoldStyle().Render("Policy Status:       ")+orDash(d.PolicyStatus),
+				ui.BoldStyle().Render("Public Access Block: ")+orDash(d.PublicAccessBlock),
+				ui.BoldStyle().Render("ACL:                 ")+orDash(d.ACLSummary),
+				ui.BoldStyle().Render("Ownership Controls:  ")+orDash(d.OwnershipControls),
+				ui.BoldStyle().Render("Policy:              ")+orDash(policyTrunc),
+				ui.BoldStyle().Render("Policy Status:       ")+orDash(d.PolicyStatus),
 			)
 		case 2: // Data Protection
 			body = lipgloss.JoinVertical(lipgloss.Left,
-				tui.BoldStyle().Render("Versioning:   ")+orDash(d.Versioning),
-				tui.BoldStyle().Render("Encryption:   ")+orDash(d.Encryption),
-				tui.BoldStyle().Render("Object Lock:  ")+orDash(d.ObjectLock),
-				tui.BoldStyle().Render("Replication:  ")+orDash(d.Replication),
+				ui.BoldStyle().Render("Versioning:   ")+orDash(d.Versioning),
+				ui.BoldStyle().Render("Encryption:   ")+orDash(d.Encryption),
+				ui.BoldStyle().Render("Object Lock:  ")+orDash(d.ObjectLock),
+				ui.BoldStyle().Render("Replication:  ")+orDash(d.Replication),
 			)
 		case 3: // Operational
 			body = lipgloss.JoinVertical(lipgloss.Left,
-				tui.BoldStyle().Render("Logging:              ")+orDash(d.Logging),
-				tui.BoldStyle().Render("CORS:                 ")+orDash(d.CORS),
-				tui.BoldStyle().Render("Website:              ")+orDash(d.Website),
-				tui.BoldStyle().Render("Notifications:        ")+orDash(d.Notifications),
-				tui.BoldStyle().Render("Request Payment:      ")+orDash(d.RequestPayment),
-				tui.BoldStyle().Render("Transfer Accel.:      ")+orDash(d.Acceleration),
-				tui.BoldStyle().Render("Intelligent Tiering:  ")+orDash(d.IntelligentTiering),
-				tui.BoldStyle().Render("Multipart Uploads:    ")+fmt.Sprintf("%d in-progress", d.MultipartUploads),
+				ui.BoldStyle().Render("Logging:              ")+orDash(d.Logging),
+				ui.BoldStyle().Render("CORS:                 ")+orDash(d.CORS),
+				ui.BoldStyle().Render("Website:              ")+orDash(d.Website),
+				ui.BoldStyle().Render("Notifications:        ")+orDash(d.Notifications),
+				ui.BoldStyle().Render("Request Payment:      ")+orDash(d.RequestPayment),
+				ui.BoldStyle().Render("Transfer Accel.:      ")+orDash(d.Acceleration),
+				ui.BoldStyle().Render("Intelligent Tiering:  ")+orDash(d.IntelligentTiering),
+				ui.BoldStyle().Render("Multipart Uploads:    ")+fmt.Sprintf("%d in-progress", d.MultipartUploads),
 			)
 		case 4: // Tags
 			if len(d.Tags) == 0 {
@@ -1778,8 +1846,8 @@ func (m *Model) bucketDetailView() string {
 	height := max(20, m.height-10)
 
 	return lipgloss.JoinVertical(lipgloss.Left,
-		tui.HeaderStyle().Render("S3 TUI"),
-		tui.FeatherRail(max(12, m.width-4)),
+		ui.HeaderStyle().Render("S3 TUI"),
+		ui.FeatherRail(max(12, m.width-4)),
 		"",
 		lipgloss.NewStyle().
 			Width(width).
@@ -1787,8 +1855,8 @@ func (m *Model) bucketDetailView() string {
 			MaxWidth(width+2).
 			MaxHeight(height+2).
 			BorderStyle(lipgloss.RoundedBorder()).
-			BorderForeground(lipgloss.Color(tui.FeatherColor(1))).
-			Foreground(lipgloss.Color(tui.FeatherColor(0))).
+			BorderForeground(lipgloss.Color(ui.FeatherColor(1))).
+			Foreground(lipgloss.Color(ui.FeatherColor(0))).
 			Padding(1, 2).
 			Render(lipgloss.JoinVertical(lipgloss.Left,
 				title,
@@ -1806,39 +1874,39 @@ func (m *Model) bucketDetailView() string {
 func (m *Model) copyMenuView() string {
 	width := min(80, max(40, m.width-12))
 	content := lipgloss.JoinVertical(lipgloss.Left,
-		tui.BoldStyle().Render("Copied to clipboard!"),
+		ui.BoldStyle().Render("Copied to clipboard!"),
 		"",
 		m.copyContent,
 		"",
-		tui.MutedStyle().Render("[y] Copy URI  [Esc] Close"),
+		ui.MutedStyle().Render("[y] Copy URI  [Esc] Close"),
 	)
-	return tui.ModalStyle(width, 8).Render(content)
+	return ui.ModalStyle(width, 8).Render(content)
 }
 
 func (m *Model) presignedURLView() string {
 	width := min(100, max(40, m.width-12))
 	content := lipgloss.JoinVertical(lipgloss.Left,
-		tui.BoldStyle().Render("PRESIGNED URL (1 hour)"),
+		ui.BoldStyle().Render("PRESIGNED URL (1 hour)"),
 		"",
 		m.presignedURL,
 		"",
-		tui.MutedStyle().Render("[Esc] Close"),
+		ui.MutedStyle().Render("[Esc] Close"),
 	)
-	return tui.ModalStyle(width, 8).Render(content)
+	return ui.ModalStyle(width, 8).Render(content)
 }
 
 func (m *Model) deleteConfirmView() string {
 	width := min(70, max(40, m.width-12))
 	content := lipgloss.JoinVertical(lipgloss.Left,
-		tui.BoldStyle().Render(fmt.Sprintf("DELETE OBJECT: %s", m.deleteKey)),
+		ui.BoldStyle().Render(fmt.Sprintf("DELETE OBJECT: %s", m.deleteKey)),
 		"",
-		lipgloss.NewStyle().Foreground(lipgloss.Color(tui.FeatherColor(0))).Render("This action is PERMANENT and cannot be undone."),
+		lipgloss.NewStyle().Foreground(lipgloss.Color(ui.FeatherColor(0))).Render("This action is PERMANENT and cannot be undone."),
 		"",
 		m.deleteConfirm.View(),
 		"",
-		tui.MutedStyle().Render("Type 'delete' and press Enter to confirm. Esc to cancel."),
+		ui.MutedStyle().Render("Type 'delete' and press Enter to confirm. Esc to cancel."),
 	)
-	return tui.ModalStyle(width, 10).Render(content)
+	return ui.ModalStyle(width, 10).Render(content)
 }
 
 func (m *Model) helpView() string {
@@ -1846,9 +1914,7 @@ func (m *Model) helpView() string {
 	if m.allowDelete {
 		deleteSection = "\n  x                  Delete selected object (requires confirmation)"
 	}
-	commands := lipgloss.JoinVertical(lipgloss.Left,
-		"S3 Explorer Help",
-		"",
+	body := lipgloss.JoinVertical(lipgloss.Left,
 		"Navigation",
 		"  ↑/↓, PgUp/PgDn     Move selection",
 		"  Enter              Open bucket, prefix, or object preview",
@@ -1868,20 +1934,15 @@ func (m *Model) helpView() string {
 		"  f                  Toggle flat mode (show all objects)",
 		"  v                  Toggle versions indicator",
 		"  s                  Cycle sort column",
-		"  S                  Reverse sort direction",
+		"  R                  Reverse sort direction",
 		"  r                  Refresh object list"+deleteSection,
 		"",
 		"Utility",
+		"  S                  Settings (theme & colors)",
 		"  ?                  Toggle this help",
 		"  q, Ctrl+C          Quit",
 	)
-	return lipgloss.NewStyle().
-		Width(min(72, max(32, m.width-12))).
-		BorderStyle(lipgloss.RoundedBorder()).
-		BorderForeground(lipgloss.Color(tui.FeatherColor(1))).
-		Foreground(lipgloss.Color(tui.FeatherColor(0))).
-		Padding(1, 2).
-		Render(commands)
+	return ui.HelpView("S3 Explorer Help", body, min(72, max(32, m.width-12)))
 }
 
 func (m *Model) previewView() string {
@@ -1898,15 +1959,15 @@ func (m *Model) previewView() string {
 
 	width := min(100, max(40, m.width-12))
 	height := min(28, max(10, m.height-10))
-	title := tui.PanelTitleStyle().Render("OBJECT PREVIEW: " + m.previewKey)
+	title := ui.PanelTitleStyle().Render("OBJECT PREVIEW: " + m.previewKey)
 	return lipgloss.NewStyle().
 		Width(width).
 		Height(height).
 		MaxWidth(width+2).
 		MaxHeight(height+2).
 		BorderStyle(lipgloss.RoundedBorder()).
-		BorderForeground(lipgloss.Color(tui.FeatherColor(0))).
-		Foreground(lipgloss.Color(tui.FeatherColor(0))).
+		BorderForeground(lipgloss.Color(ui.FeatherColor(0))).
+		Foreground(lipgloss.Color(ui.FeatherColor(0))).
 		Padding(1, 2).
-		Render(lipgloss.JoinVertical(lipgloss.Left, title, "", body, "", tui.MutedStyle().Render("[↑/↓/PgUp/PgDn] Scroll  [Esc] Close")))
+		Render(lipgloss.JoinVertical(lipgloss.Left, title, "", body, "", ui.MutedStyle().Render("[↑/↓/PgUp/PgDn] Scroll  [Esc] Close")))
 }
