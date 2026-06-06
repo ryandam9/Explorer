@@ -362,7 +362,7 @@ func wrapThemeList(themes []Theme, activeIdx, maxW int, sel, muted lipgloss.Styl
 // placeholder if the color is empty.
 func renderSwatch(hex string) string {
 	if hex == "" {
-		return lipgloss.NewStyle().Foreground(lipgloss.Color("#666666")).Render("(default)")
+		return lipgloss.NewStyle().Foreground(lipgloss.Color(ColorMuted())).Render("(default)")
 	}
 	return lipgloss.NewStyle().
 		Background(lipgloss.Color(hex)).

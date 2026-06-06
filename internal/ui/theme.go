@@ -1,10 +1,14 @@
 package ui
 
 import (
+	_ "embed"
+	"fmt"
 	"strings"
 	"sync/atomic"
 
 	"github.com/charmbracelet/lipgloss"
+	"go.yaml.in/yaml/v3"
+
 	"github.com/user/aws_explorer/internal/config"
 )
 
@@ -41,165 +45,64 @@ type Theme struct {
 	Colors ThemeColors
 }
 
-// errColor / warnColor are shared across all built-in themes. The feathers
-// palettes don't include dedicated error/warning hues, so we use conventional
-// terminal red/amber that read clearly on any background.
-const (
-	errColor  = "#FF5555"
-	warnColor = "#FFAA00"
-)
+// themesYAML holds the built-in theme palettes. It is the single source of
+// truth for default colors — there are deliberately no color literals in the
+// Go source. The user's config.yaml still overrides anything via InitFromConfig.
+//
+//go:embed themes.yaml
+var themesYAML []byte
 
-// Themes is the list of built-in themes (named after Australian birds). The
-// colors come straight from the "feathers" palettes; each palette's distinct
-// hues are mapped onto the granular roles below. Order is significant — callers
-// and tests refer to themes by index — so keep spotted-pardalote first.
+// themeDef mirrors one entry in themes.yaml. Keeping a dedicated type (rather
+// than reusing config.ThemeColorConfig) keeps the embedded-defaults format
+// decoupled from the user-facing config schema.
+type themeDef struct {
+	Name            string `yaml:"name"`
+	Heading         string `yaml:"heading"`
+	Text            string `yaml:"text"`
+	Background      string `yaml:"background"`
+	Border          string `yaml:"border"`
+	BorderFocus     string `yaml:"borderFocus"`
+	Highlight       string `yaml:"highlight"`
+	HighlightText   string `yaml:"highlightText"`
+	Muted           string `yaml:"muted"`
+	TableHeader     string `yaml:"tableHeader"`
+	TableHeaderLine string `yaml:"tableHeaderLine"`
+	StatusBarBg     string `yaml:"statusBarBg"`
+	StatusBarText   string `yaml:"statusBarText"`
+	Accent          string `yaml:"accent"`
+	Error           string `yaml:"error"`
+	Warning         string `yaml:"warning"`
+}
+
+// Themes is the list of built-in themes (named after Australian birds), loaded
+// from the embedded themes.yaml at startup. Order is significant — callers and
+// tests refer to themes by index — and is preserved from the file.
 //
 // Any role can be overridden per-theme via config.yaml ui.themes.<name>.
-var Themes = []Theme{
-	{
-		// feathers: #feca00 #d36328 #cb0300 #b4b9b3 #424847 #000100
-		Name: "spotted-pardalote",
-		Colors: ThemeColors{
-			Heading: "#feca00", Text: "#b4b9b3", Background: "",
-			Border: "#424847", BorderFocus: "#feca00",
-			Highlight: "#cb0300", HighlightText: "#feca00", Muted: "#d36328",
-			TableHeader: "#d36328", TableHeaderLine: "#424847",
-			StatusBarBg: "#feca00", StatusBarText: "#000100", Accent: "#d36328",
-			Error: errColor, Warning: warnColor,
-		},
-	},
-	{
-		// feathers: #edd8c5 #d09a5e #e7aa01 #ac570f #73481b #442c0e #0d0403
-		Name: "plains-wanderer",
-		Colors: ThemeColors{
-			Heading: "#e7aa01", Text: "#edd8c5", Background: "",
-			Border: "#73481b", BorderFocus: "#e7aa01",
-			Highlight: "#ac570f", HighlightText: "#edd8c5", Muted: "#d09a5e",
-			TableHeader: "#d09a5e", TableHeaderLine: "#442c0e",
-			StatusBarBg: "#e7aa01", StatusBarText: "#442c0e", Accent: "#d09a5e",
-			Error: errColor, Warning: warnColor,
-		},
-	},
-	{
-		// feathers: #00346E #007CBF #06ABDF #EDD03E #F5A200 #6D8600 #424D0C
-		Name: "bee-eater",
-		Colors: ThemeColors{
-			Heading: "#06ABDF", Text: "#EDD03E", Background: "",
-			Border: "#00346E", BorderFocus: "#06ABDF",
-			Highlight: "#007CBF", HighlightText: "#EDD03E", Muted: "#007CBF",
-			TableHeader: "#F5A200", TableHeaderLine: "#424D0C",
-			StatusBarBg: "#F5A200", StatusBarText: "#00346E", Accent: "#6D8600",
-			Error: errColor, Warning: warnColor,
-		},
-	},
-	{
-		// feathers: #BD338F #EB8252 #F5DC83 #CDD4DC #8098A2 #8FA33F #5F7929 #014820
-		Name: "rose-crowned-fruit-dove",
-		Colors: ThemeColors{
-			Heading: "#BD338F", Text: "#CDD4DC", Background: "",
-			Border: "#5F7929", BorderFocus: "#BD338F",
-			Highlight: "#BD338F", HighlightText: "#F5DC83", Muted: "#8098A2",
-			TableHeader: "#EB8252", TableHeaderLine: "#014820",
-			StatusBarBg: "#EB8252", StatusBarText: "#014820", Accent: "#F5DC83",
-			Error: errColor, Warning: warnColor,
-		},
-	},
-	{
-		// feathers: #cd3122 #f4c623 #bee183 #6c905e #2f533c #b8c9dc #2f7ab9
-		Name: "eastern-rosella",
-		Colors: ThemeColors{
-			Heading: "#f4c623", Text: "#bee183", Background: "",
-			Border: "#2f533c", BorderFocus: "#f4c623",
-			Highlight: "#cd3122", HighlightText: "#f4c623", Muted: "#b8c9dc",
-			TableHeader: "#2f7ab9", TableHeaderLine: "#2f533c",
-			StatusBarBg: "#f4c623", StatusBarText: "#2f533c", Accent: "#2f7ab9",
-			Error: errColor, Warning: warnColor,
-		},
-	},
-	{
-		// feathers: #8a3223 #bb5645 #d97878 #e2aba0 #d0cfe9 #a29eb8 #6c6b75 #b8a53f #93862a #4d4019
-		Name: "oriole",
-		Colors: ThemeColors{
-			Heading: "#b8a53f", Text: "#e2aba0", Background: "",
-			Border: "#6c6b75", BorderFocus: "#d97878",
-			Highlight: "#8a3223", HighlightText: "#e2aba0", Muted: "#a29eb8",
-			TableHeader: "#bb5645", TableHeaderLine: "#4d4019",
-			StatusBarBg: "#b8a53f", StatusBarText: "#4d4019", Accent: "#d0cfe9",
-			Error: errColor, Warning: warnColor,
-		},
-	},
-	{
-		// feathers: #7090c9 #8cb3de #afbe9f #616020 #6eb245 #214917 #cf2236 #d683ad
-		Name: "princess-parrot",
-		Colors: ThemeColors{
-			Heading: "#6eb245", Text: "#8cb3de", Background: "",
-			Border: "#214917", BorderFocus: "#6eb245",
-			Highlight: "#cf2236", HighlightText: "#8cb3de", Muted: "#afbe9f",
-			TableHeader: "#7090c9", TableHeaderLine: "#214917",
-			StatusBarBg: "#6eb245", StatusBarText: "#214917", Accent: "#d683ad",
-			Error: errColor, Warning: warnColor,
-		},
-	},
-	{
-		// feathers: #4F3321 #AA7853 #D9C4A7 #B03F05 #020503
-		Name: "superb-fairy-wren",
-		Colors: ThemeColors{
-			Heading: "#B03F05", Text: "#D9C4A7", Background: "",
-			Border: "#4F3321", BorderFocus: "#B03F05",
-			Highlight: "#B03F05", HighlightText: "#D9C4A7", Muted: "#AA7853",
-			TableHeader: "#AA7853", TableHeaderLine: "#4F3321",
-			StatusBarBg: "#AA7853", StatusBarText: "#020503", Accent: "#AA7853",
-			Error: errColor, Warning: warnColor,
-		},
-	},
-	{
-		// feathers: #BDA14D #3EBCB6 #0169C4 #153460 #D5114E #A56EB6 #4B1C57 #09090C
-		Name: "cassowary",
-		Colors: ThemeColors{
-			Heading: "#3EBCB6", Text: "#BDA14D", Background: "",
-			Border: "#153460", BorderFocus: "#3EBCB6",
-			Highlight: "#D5114E", HighlightText: "#BDA14D", Muted: "#A56EB6",
-			TableHeader: "#0169C4", TableHeaderLine: "#4B1C57",
-			StatusBarBg: "#3EBCB6", StatusBarText: "#09090C", Accent: "#A56EB6",
-			Error: errColor, Warning: warnColor,
-		},
-	},
-	{
-		// feathers: #E19E00 #FBEB5B #85773A #979EB9 #727B98 #454B56 #201B1E
-		Name: "yellow-robin",
-		Colors: ThemeColors{
-			Heading: "#FBEB5B", Text: "#979EB9", Background: "",
-			Border: "#454B56", BorderFocus: "#E19E00",
-			Highlight: "#E19E00", HighlightText: "#201B1E", Muted: "#85773A",
-			TableHeader: "#E19E00", TableHeaderLine: "#454B56",
-			StatusBarBg: "#FBEB5B", StatusBarText: "#201B1E", Accent: "#727B98",
-			Error: errColor, Warning: warnColor,
-		},
-	},
-	{
-		// feathers: #FFD2CF #E9A7BB #D05478 #AAB9CC #8390A2 #4C5766
-		Name: "galah",
-		Colors: ThemeColors{
-			Heading: "#D05478", Text: "#FFD2CF", Background: "",
-			Border: "#4C5766", BorderFocus: "#D05478",
-			Highlight: "#D05478", HighlightText: "#FFD2CF", Muted: "#AAB9CC",
-			TableHeader: "#E9A7BB", TableHeaderLine: "#4C5766",
-			StatusBarBg: "#D05478", StatusBarText: "#FFD2CF", Accent: "#8390A2",
-			Error: errColor, Warning: warnColor,
-		},
-	},
-	{
-		// feathers: #b5effb #0b7595 #02407c #06213a #c45829 #9C4620 #622C14 #d4d8e3 #b8bcd8 #ad8d9f #725f77
-		Name: "blue-winged-kookaburra",
-		Colors: ThemeColors{
-			Heading: "#b5effb", Text: "#d4d8e3", Background: "",
-			Border: "#02407c", BorderFocus: "#b5effb",
-			Highlight: "#0b7595", HighlightText: "#b5effb", Muted: "#b8bcd8",
-			TableHeader: "#c45829", TableHeaderLine: "#06213a",
-			StatusBarBg: "#c45829", StatusBarText: "#06213a", Accent: "#ad8d9f",
-			Error: errColor, Warning: warnColor,
-		},
-	},
+var Themes = mustLoadBuiltinThemes()
+
+func mustLoadBuiltinThemes() []Theme {
+	var defs []themeDef
+	if err := yaml.Unmarshal(themesYAML, &defs); err != nil {
+		// The file is embedded at compile time, so a parse failure is a
+		// programming error in themes.yaml, not a runtime/user condition.
+		panic(fmt.Sprintf("ui: invalid embedded themes.yaml: %v", err))
+	}
+	themes := make([]Theme, len(defs))
+	for i, d := range defs {
+		themes[i] = Theme{
+			Name: d.Name,
+			Colors: ThemeColors{
+				Heading: d.Heading, Text: d.Text, Background: d.Background,
+				Border: d.Border, BorderFocus: d.BorderFocus,
+				Highlight: d.Highlight, HighlightText: d.HighlightText, Muted: d.Muted,
+				TableHeader: d.TableHeader, TableHeaderLine: d.TableHeaderLine,
+				StatusBarBg: d.StatusBarBg, StatusBarText: d.StatusBarText, Accent: d.Accent,
+				Error: d.Error, Warning: d.Warning,
+			},
+		}
+	}
+	return themes
 }
 
 // activeThemeIdx holds the index into Themes of the currently active theme.
