@@ -75,6 +75,12 @@ type UIConfig struct {
 
 // ThemeColorConfig holds the full color palette for a single theme.
 // Each field is a hex color string (e.g. "#FF5555") or empty to use the default.
+//
+// The roles are intentionally granular so that changing one part of the UI
+// (say, the table header) never alters an unrelated part (say, a panel border).
+// Roles that are left empty fall back to a sensible related role at render time
+// (e.g. an empty borderFocus falls back to heading), so you only need to set the
+// knobs you actually want to change.
 type ThemeColorConfig struct {
 	// Heading is used for titles and section headers.
 	Heading string `mapstructure:"heading"`
@@ -82,14 +88,31 @@ type ThemeColorConfig struct {
 	Text string `mapstructure:"text"`
 	// Background is used for panel backgrounds (empty = terminal default).
 	Background string `mapstructure:"background"`
-	// Border is used for panel borders.
+	// Border is used for the borders of unfocused panels.
 	Border string `mapstructure:"border"`
-	// Highlight is the background color for selected / highlighted items.
+	// BorderFocus is used for the border of the currently focused panel.
+	// Empty falls back to Heading.
+	BorderFocus string `mapstructure:"borderFocus"`
+	// Highlight is the background color for the selected / highlighted table row.
 	Highlight string `mapstructure:"highlight"`
-	// HighlightText is the foreground color on selected / highlighted items.
+	// HighlightText is the foreground color on the selected / highlighted row.
 	HighlightText string `mapstructure:"highlightText"`
 	// Muted is used for de-emphasised / secondary text.
 	Muted string `mapstructure:"muted"`
+	// TableHeader is used for table column header text. Empty falls back to Muted.
+	TableHeader string `mapstructure:"tableHeader"`
+	// TableHeaderLine is used for the rule drawn under table headers.
+	// Empty falls back to Border.
+	TableHeaderLine string `mapstructure:"tableHeaderLine"`
+	// StatusBarBg is the background color of the bottom status bar.
+	// Empty falls back to Highlight.
+	StatusBarBg string `mapstructure:"statusBarBg"`
+	// StatusBarText is the text color of the bottom status bar.
+	// Empty falls back to HighlightText.
+	StatusBarText string `mapstructure:"statusBarText"`
+	// Accent is used for decorative rails, input prompts and cursors.
+	// Empty falls back to Heading.
+	Accent string `mapstructure:"accent"`
 	// Error is used for error messages and indicators.
 	Error string `mapstructure:"error"`
 	// Warning is used for warning messages and indicators.

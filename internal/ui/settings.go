@@ -26,17 +26,24 @@ const (
 	sfText
 	sfBackground
 	sfBorder
+	sfBorderFocus
 	sfHighlight
 	sfHighlightText
 	sfMuted
+	sfTableHeader
+	sfTableHeaderLine
+	sfStatusBarBg
+	sfStatusBarText
+	sfAccent
 	sfError
 	sfWarning
 	sfFieldCount
 )
 
 var settingsFieldNames = [sfFieldCount]string{
-	"Heading", "Text", "Background", "Border",
-	"Highlight", "HighlightText", "Muted", "Error", "Warning",
+	"Heading", "Text", "Background", "Border", "BorderFocus",
+	"Highlight", "HighlightText", "Muted", "TableHeader", "TableHeaderLine",
+	"StatusBarBg", "StatusBarText", "Accent", "Error", "Warning",
 }
 
 // SettingsModel drives the settings overlay panel.
@@ -83,12 +90,24 @@ func (s SettingsModel) colorForField(themeIdx int, f settingsField) string {
 		return c.Background
 	case sfBorder:
 		return c.Border
+	case sfBorderFocus:
+		return c.BorderFocus
 	case sfHighlight:
 		return c.Highlight
 	case sfHighlightText:
 		return c.HighlightText
 	case sfMuted:
 		return c.Muted
+	case sfTableHeader:
+		return c.TableHeader
+	case sfTableHeaderLine:
+		return c.TableHeaderLine
+	case sfStatusBarBg:
+		return c.StatusBarBg
+	case sfStatusBarText:
+		return c.StatusBarText
+	case sfAccent:
+		return c.Accent
 	case sfError:
 		return c.Error
 	case sfWarning:
@@ -109,12 +128,24 @@ func setColorForField(themeIdx int, f settingsField, val string) {
 		c.Background = val
 	case sfBorder:
 		c.Border = val
+	case sfBorderFocus:
+		c.BorderFocus = val
 	case sfHighlight:
 		c.Highlight = val
 	case sfHighlightText:
 		c.HighlightText = val
 	case sfMuted:
 		c.Muted = val
+	case sfTableHeader:
+		c.TableHeader = val
+	case sfTableHeaderLine:
+		c.TableHeaderLine = val
+	case sfStatusBarBg:
+		c.StatusBarBg = val
+	case sfStatusBarText:
+		c.StatusBarText = val
+	case sfAccent:
+		c.Accent = val
 	case sfError:
 		c.Error = val
 	case sfWarning:
@@ -193,15 +224,21 @@ func (s SettingsModel) saveCmd() tea.Cmd {
 		}
 		for _, t := range Themes {
 			uiCfg.Themes[t.Name] = config.ThemeColorConfig{
-				Heading:       t.Colors.Heading,
-				Text:          t.Colors.Text,
-				Background:    t.Colors.Background,
-				Border:        t.Colors.Border,
-				Highlight:     t.Colors.Highlight,
-				HighlightText: t.Colors.HighlightText,
-				Muted:         t.Colors.Muted,
-				Error:         t.Colors.Error,
-				Warning:       t.Colors.Warning,
+				Heading:         t.Colors.Heading,
+				Text:            t.Colors.Text,
+				Background:      t.Colors.Background,
+				Border:          t.Colors.Border,
+				BorderFocus:     t.Colors.BorderFocus,
+				Highlight:       t.Colors.Highlight,
+				HighlightText:   t.Colors.HighlightText,
+				Muted:           t.Colors.Muted,
+				TableHeader:     t.Colors.TableHeader,
+				TableHeaderLine: t.Colors.TableHeaderLine,
+				StatusBarBg:     t.Colors.StatusBarBg,
+				StatusBarText:   t.Colors.StatusBarText,
+				Accent:          t.Colors.Accent,
+				Error:           t.Colors.Error,
+				Warning:         t.Colors.Warning,
 			}
 		}
 
