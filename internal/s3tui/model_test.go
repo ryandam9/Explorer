@@ -1,9 +1,12 @@
 package s3tui
 
 import (
+	"os"
+	"path/filepath"
 	"testing"
 
 	"github.com/charmbracelet/lipgloss"
+	"github.com/user/aws_explorer/internal/config"
 	"github.com/user/aws_explorer/internal/table"
 	"github.com/user/aws_explorer/internal/ui"
 )
@@ -74,6 +77,32 @@ func TestFeatherRailRendersEveryThemeColor(t *testing.T) {
 	// FeatherRail should render exactly `width` characters, cycling through theme colors.
 	if got := lipgloss.Width(ui.FeatherRail(width)); got != width {
 		t.Fatalf("FeatherRail width = %d, want %d", got, width)
+	}
+}
+
+func TestResolveDownloadDir(t *testing.T) {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		t.Skipf("no home dir available: %v", err)
+	}
+
+	cases := []struct {
+		name string
+		cfg  *config.Config
+		want string
+	}{
+		{"nil config", nil, "."},
+		{"empty value", &config.Config{}, "."},
+		{"whitespace value", &config.Config{App: config.AppConfig{DownloadDir: "   "}}, "."},
+		{"explicit dir", &config.Config{App: config.AppConfig{DownloadDir: "/tmp/dl"}}, "/tmp/dl"},
+		{"tilde alone", &config.Config{App: config.AppConfig{DownloadDir: "~"}}, home},
+		{"tilde prefix", &config.Config{App: config.AppConfig{DownloadDir: "~/Downloads"}}, filepath.Join(home, "Downloads")},
+	}
+
+	for _, tc := range cases {
+		if got := resolveDownloadDir(tc.cfg); got != tc.want {
+			t.Fatalf("%s: resolveDownloadDir = %q, want %q", tc.name, got, tc.want)
+		}
 	}
 }
 

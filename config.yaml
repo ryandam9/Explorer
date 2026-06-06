@@ -3,6 +3,10 @@ app:
     defaultmode: cli
     timeoutseconds: 30
     maxconcurrency: 8
+    # Directory the S3 browser downloads objects into when you press "D".
+    # A leading "~" is expanded to your home directory; empty means the current
+    # working directory. The directory is created automatically if it is missing.
+    downloaddir: ""
 aws:
     profile: default
     authmethod: auto

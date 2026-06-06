@@ -191,6 +191,8 @@ app:
   defaultMode: cli            # cli | tui
   timeoutSeconds: 30          # per-collector timeout
   maxConcurrency: 8           # max parallel collectors
+  downloadDir: ""             # S3 browser download target ("D"); ~ expands to home,
+                              # empty = current dir; created automatically if missing
 
 aws:
   # Auth method: auto | profile | env | static | sts

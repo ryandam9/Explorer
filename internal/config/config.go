@@ -15,6 +15,10 @@ type AppConfig struct {
 	DefaultMode    string `mapstructure:"defaultMode"`
 	TimeoutSeconds int    `mapstructure:"timeoutSeconds"`
 	MaxConcurrency int    `mapstructure:"maxConcurrency"`
+	// DownloadDir is the directory the S3 browser writes downloaded objects to.
+	// A leading "~" is expanded to the user's home directory. Empty means the
+	// current working directory ("."). The directory is created if missing.
+	DownloadDir string `mapstructure:"downloadDir"`
 }
 
 type AWSConfig struct {
