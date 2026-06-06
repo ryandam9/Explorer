@@ -1,230 +1,198 @@
 app:
-  defaultOutput: table
-  defaultMode: cli
-  timeoutSeconds: 30
-  maxConcurrency: 8
-
+    defaultoutput: table
+    defaultmode: cli
+    timeoutseconds: 30
+    maxconcurrency: 8
 aws:
-  # authMethod controls how credentials are obtained. Valid values:
-  #   auto    - AWS SDK default chain (env vars → ~/.aws → EC2/ECS metadata)  [default]
-  #   profile - named profile from ~/.aws/credentials or ~/.aws/config
-  #   env     - only AWS_ACCESS_KEY_ID + AWS_SECRET_ACCESS_KEY env vars
-  #   static  - plaintext credentials in this file (see aws.static below)
-  #   sts     - assume an IAM role via STS (see aws.sts below)
-  authMethod: auto
-  profile: default
-
-  # STS AssumeRole — used when authMethod is "sts".
-  # Base credentials (profile / env / default chain) are used to call sts:AssumeRole.
-  sts:
-    roleArn: ""           # required, e.g. arn:aws:iam::123456789012:role/MyRole
-    sessionName: ""       # optional; defaults to "aws-explorer"
-    externalId: ""        # optional; required by some cross-account trust policies
-    mfaSerial: ""         # optional; ARN of your MFA device
-    durationSeconds: 0    # optional; 0 means AWS default (3600 s)
-
-  # Static credentials — used when authMethod is "static".
-  # Avoid committing real keys; prefer environment variables or profiles instead.
-  static:
-    accessKeyId: ""
-    secretAccessKey: ""
-    sessionToken: ""      # optional; needed for temporary credentials
-
-  # Set to true to scan all available AWS regions, or list specific regions below
-  allRegions: false
-  regions:
-    - us-east-1
-
+    profile: default
+    authmethod: auto
+    regions:
+        - us-east-1
+    allregions: false
+    sts:
+        rolearn: ""
+        sessionname: ""
+        externalid: ""
+        mfaserial: ""
+        duration: 0
+    static:
+        accesskeyid: ""
+        secretaccesskey: ""
+        sessiontoken: ""
 services:
-  ec2:
-    enabled: true
-  s3:
-    enabled: true
-  rds:
-    enabled: true
-  iam:
-    enabled: true
-  dynamodb:
-    enabled: true
-  lambda:
-    enabled: true
-  emr:
-    enabled: true
-  ecs:
-    enabled: true
-  eks:
-    enabled: true
-  elbv2:
-    enabled: true
-  secretsmanager:
-    enabled: true
-  sqs:
-    enabled: true
-  sns:
-    enabled: true
-  cloudwatch:
-    enabled: true
-  route53:
-    enabled: true
-
+    cloudwatch:
+        enabled: true
+        resources: {}
+    dynamodb:
+        enabled: true
+        resources: {}
+    ec2:
+        enabled: true
+        resources: {}
+    ecs:
+        enabled: true
+        resources: {}
+    eks:
+        enabled: true
+        resources: {}
+    elbv2:
+        enabled: true
+        resources: {}
+    emr:
+        enabled: true
+        resources: {}
+    iam:
+        enabled: true
+        resources: {}
+    lambda:
+        enabled: true
+        resources: {}
+    rds:
+        enabled: true
+        resources: {}
+    route53:
+        enabled: true
+        resources: {}
+    s3:
+        enabled: true
+        resources: {}
+    secretsmanager:
+        enabled: true
+        resources: {}
+    sns:
+        enabled: true
+        resources: {}
+    sqs:
+        enabled: true
+        resources: {}
 filters:
-  regions: []
-  tags: {}
-  states: []
-
+    regions: []
+    tags: {}
+    states: []
 output:
-  format: table
-  includeDetails: false
-
-# ── UI / Theme configuration ──────────────────────────────────────────────────
-#
-# theme: name of the active theme (one of the names below).
-# themes: per-theme color role overrides.  Any role left empty falls back to
-#         the built-in default for that theme.
-#
-# Color roles
-#   heading       titles, section headers
-#   text          body text / foreground
-#   background    panel background (leave empty for terminal default)
-#   border        panel borders
-#   highlight     selected / highlighted item background
-#   highlightText text on selected / highlighted items
-#   muted         de-emphasised / secondary text
-#   error         error messages and indicators
-#   warning       warning messages and indicators
-#
+    format: table
+    includedetails: false
+    fields: []
 ui:
-  theme: spotted-pardalote
-
-  themes:
-    spotted-pardalote:
-      heading: "#6260FF"
-      text: "#E4E4FF"
-      background: ""
-      border: "#E4E4FF"
-      highlight: "#6260FF"
-      highlightText: "#E4E4FF"
-      muted: "#E4E4FF"
-      error: "#FF5555"
-      warning: "#FFAA00"
-
-    plains-wanderer:
-      heading: "#9FE870"
-      text: "#9FE870"
-      background: ""
-      border: "#163300"
-      highlight: "#9FE870"
-      highlightText: "#163300"
-      muted: "#163300"
-      error: "#FF5555"
-      warning: "#FFAA00"
-
-    bee-eater:
-      heading: "#BDD9D7"
-      text: "#BDD9D7"
-      background: ""
-      border: "#03363D"
-      highlight: "#BDD9D7"
-      highlightText: "#03363D"
-      muted: "#03363D"
-      error: "#FF5555"
-      warning: "#FFAA00"
-
-    rose-crowned-fruit-dove:
-      heading: "#3447AA"
-      text: "#FBEAEB"
-      background: ""
-      border: "#FBEAEB"
-      highlight: "#3447AA"
-      highlightText: "#FBEAEB"
-      muted: "#FBEAEB"
-      error: "#FF5555"
-      warning: "#FFAA00"
-
-    eastern-rosella:
-      heading: "#FCDB32"
-      text: "#FCDB32"
-      background: ""
-      border: "#141D38"
-      highlight: "#FCDB32"
-      highlightText: "#141D38"
-      muted: "#141D38"
-      error: "#FF5555"
-      warning: "#FFAA00"
-
-    oriole:
-      heading: "#34E0A1"
-      text: "#34E0A1"
-      background: ""
-      border: "#000000"
-      highlight: "#34E0A1"
-      highlightText: "#000000"
-      muted: "#888888"
-      error: "#FF5555"
-      warning: "#FFAA00"
-
-    princess-parrot:
-      heading: "#FF69B4"
-      text: "#FF69B4"
-      background: ""
-      border: "#006400"
-      highlight: "#FF69B4"
-      highlightText: "#006400"
-      muted: "#006400"
-      error: "#FF5555"
-      warning: "#FFAA00"
-
-    superb-fairy-wren:
-      heading: "#1E90FF"
-      text: "#1E90FF"
-      background: ""
-      border: "#8B4513"
-      highlight: "#1E90FF"
-      highlightText: "#8B4513"
-      muted: "#8B4513"
-      error: "#FF5555"
-      warning: "#FFAA00"
-
-    cassowary:
-      heading: "#191970"
-      text: "#DC143C"
-      background: ""
-      border: "#DC143C"
-      highlight: "#191970"
-      highlightText: "#DC143C"
-      muted: "#DC143C"
-      error: "#FF5555"
-      warning: "#FFAA00"
-
-    yellow-robin:
-      heading: "#FFD700"
-      text: "#FFD700"
-      background: ""
-      border: "#696969"
-      highlight: "#FFD700"
-      highlightText: "#696969"
-      muted: "#696969"
-      error: "#FF5555"
-      warning: "#FFAA00"
-
-    galah:
-      heading: "#FF69B4"
-      text: "#FF69B4"
-      background: ""
-      border: "#808080"
-      highlight: "#FF69B4"
-      highlightText: "#808080"
-      muted: "#808080"
-      error: "#FF5555"
-      warning: "#FFAA00"
-
-    blue-winged-kookaburra:
-      heading: "#4169E1"
-      text: "#4169E1"
-      background: ""
-      border: "#D2691E"
-      highlight: "#4169E1"
-      highlightText: "#D2691E"
-      muted: "#D2691E"
-      error: "#FF5555"
-      warning: "#FFAA00"
+    theme: princess-parrot
+    themes:
+        bee-eater:
+            heading: '#BDD9D7'
+            text: '#BDD9D7'
+            background: ""
+            border: '#03363D'
+            highlight: '#BDD9D7'
+            highlighttext: '#03363D'
+            muted: '#03363D'
+            error: '#FF5555'
+            warning: '#FFAA00'
+        blue-winged-kookaburra:
+            heading: '#4169E1'
+            text: '#4169E1'
+            background: ""
+            border: '#D2691E'
+            highlight: '#4169E1'
+            highlighttext: '#D2691E'
+            muted: '#D2691E'
+            error: '#FF5555'
+            warning: '#FFAA00'
+        cassowary:
+            heading: '#191970'
+            text: '#DC143C'
+            background: ""
+            border: '#DC143C'
+            highlight: '#191970'
+            highlighttext: '#DC143C'
+            muted: '#DC143C'
+            error: '#FF5555'
+            warning: '#FFAA00'
+        eastern-rosella:
+            heading: '#FCDB32'
+            text: '#FCDB32'
+            background: ""
+            border: '#141D38'
+            highlight: '#FCDB32'
+            highlighttext: '#141D38'
+            muted: '#141D38'
+            error: '#FF5555'
+            warning: '#FFAA00'
+        galah:
+            heading: '#FF69B4'
+            text: '#FF69B4'
+            background: ""
+            border: '#808080'
+            highlight: '#FF69B4'
+            highlighttext: '#808080'
+            muted: '#808080'
+            error: '#FF5555'
+            warning: '#FFAA00'
+        oriole:
+            heading: '#34E0A1'
+            text: '#34E0A1'
+            background: ""
+            border: '#000000'
+            highlight: '#34E0A1'
+            highlighttext: '#000000'
+            muted: '#888888'
+            error: '#FF5555'
+            warning: '#FFAA00'
+        plains-wanderer:
+            heading: '#9FE870'
+            text: '#9FE870'
+            background: ""
+            border: '#163300'
+            highlight: '#9FE870'
+            highlighttext: '#163300'
+            muted: '#163300'
+            error: '#FF5555'
+            warning: '#FFAA00'
+        princess-parrot:
+            heading: '#FF69B4'
+            text: '#FF69B4'
+            background: ""
+            border: '#006400'
+            highlight: '#FF69B4'
+            highlighttext: '#006400'
+            muted: '#006400'
+            error: '#FF5555'
+            warning: '#FFAA00'
+        rose-crowned-fruit-dove:
+            heading: '#3447AA'
+            text: '#FBEAEB'
+            background: ""
+            border: '#FBEAEB'
+            highlight: '#3447AA'
+            highlighttext: '#FBEAEB'
+            muted: '#FBEAEB'
+            error: '#FF5555'
+            warning: '#FFAA00'
+        spotted-pardalote:
+            heading: '#6260FF'
+            text: '#E4E4FF'
+            background: ""
+            border: '#E4E4FF'
+            highlight: '#6260FF'
+            highlighttext: '#E4E4FF'
+            muted: '#E4E4FF'
+            error: '#FF5555'
+            warning: '#FFAA00'
+        superb-fairy-wren:
+            heading: '#1E90FF'
+            text: '#1E90FF'
+            background: ""
+            border: '#8B4513'
+            highlight: '#1E90FF'
+            highlighttext: '#8B4513'
+            muted: '#8B4513'
+            error: '#FF5555'
+            warning: '#FFAA00'
+        yellow-robin:
+            heading: '#FFD700'
+            text: '#FFD700'
+            background: ""
+            border: '#696969'
+            highlight: '#FFD700'
+            highlighttext: '#696969'
+            muted: '#696969'
+            error: '#FF5555'
+            warning: '#FFAA00'

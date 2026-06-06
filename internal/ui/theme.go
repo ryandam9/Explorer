@@ -66,8 +66,8 @@ var Themes = []Theme{
 	{
 		Name: "eastern-rosella",
 		Colors: ThemeColors{
-			Heading: "#FCDB32", Text: "#FCDB32", Background: "",
-			Border: "#141D38", Highlight: "#FCDB32", HighlightText: "#141D38",
+			Heading: "#2F533C", Text: "#FCDB32", Background: "",
+			Border: "#141D38", Highlight: "#B8C9DC", HighlightText: "#141D38",
 			Muted: "#141D38", Error: "#FF5555", Warning: "#FFAA00",
 		},
 	},
