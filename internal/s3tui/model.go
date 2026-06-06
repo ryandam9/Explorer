@@ -888,6 +888,10 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					m.bucketSearch.SetValue("")
 					m.bucket = name
 					m.region = rows[0][2]
+					// Start fresh at the bucket root — clear any prefix left
+					// over from a previously browsed bucket.
+					m.prefix = ""
+					m.prefixInput.SetValue("")
 					// Region may still be loading; fall back to the cache.
 					if m.region == "..." {
 						if cached, ok := m.bucketRegionCache[m.bucket]; ok {
@@ -1109,6 +1113,10 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				if len(row) > 0 {
 					m.bucket = row[1]
 					m.region = row[2]
+					// Start fresh at the bucket root — clear any prefix left
+					// over from a previously browsed bucket.
+					m.prefix = ""
+					m.prefixInput.SetValue("")
 					// Region may still be loading; fall back to the cache.
 					if m.region == "..." {
 						if cached, ok := m.bucketRegionCache[m.bucket]; ok {
