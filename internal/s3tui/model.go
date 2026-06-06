@@ -3,6 +3,7 @@ package s3tui
 import (
 	"context"
 	"fmt"
+	"os"
 	"path/filepath"
 	"sort"
 	"strings"
@@ -11,6 +12,7 @@ import (
 	"github.com/atotto/clipboard"
 	"github.com/aws/aws-sdk-go-v2/aws"
 	s3types "github.com/aws/aws-sdk-go-v2/service/s3/types"
+	"github.com/charmbracelet/bubbles/progress"
 	"github.com/charmbracelet/bubbles/spinner"
 	"github.com/charmbracelet/bubbles/textinput"
 	"github.com/charmbracelet/bubbles/viewport"
@@ -127,8 +129,12 @@ type presignedURLMsg struct {
 type downloadDoneMsg struct {
 	key  string
 	path string
+	dir  string
 	err  error
 }
+
+// downloadTickMsg drives the progress bar refresh while a download is running.
+type downloadTickMsg struct{}
 
 type deleteObjectDoneMsg struct {
 	key string
@@ -209,6 +215,16 @@ type Model struct {
 
 	copyMenuActive bool
 	copyContent    string
+
+	// Object download state. downloadDir is resolved once from config; the
+	// progress bar is driven by a ticking poll of downloadState while a
+	// download is in flight.
+	downloadDir      string
+	downloading      bool
+	downloadKey      string
+	downloadPercent  float64
+	downloadProgress progress.Model
+	downloadState    *DownloadProgress
 
 	presignedURL  string
 	showPresigned bool
@@ -318,6 +334,13 @@ func NewModel(ctx context.Context, awsCfg *config.AWSConfig, region, bucket, pre
 		spinner.WithSpinner(spinner.MiniDot),
 		spinner.WithStyle(lipgloss.NewStyle().Foreground(lipgloss.Color(ui.ColorHeading())).Bold(true)),
 	)
+
+	m.downloadDir = resolveDownloadDir(cfg)
+	m.downloadProgress = progress.New(
+		progress.WithDefaultGradient(),
+		progress.WithoutPercentage(),
+	)
+	m.downloadProgress.Width = 30
 
 	if bucket != "" {
 		m.state = stateObjectList
@@ -660,14 +683,41 @@ func (m *Model) generatePresignCmd(key string) tea.Cmd {
 	}
 }
 
+// resolveDownloadDir determines where downloaded objects are written, from the
+// app.downloadDir config value. A leading "~" is expanded to the user's home
+// directory and an empty value falls back to the current working directory.
+func resolveDownloadDir(cfg *config.Config) string {
+	dir := "."
+	if cfg != nil && strings.TrimSpace(cfg.App.DownloadDir) != "" {
+		dir = strings.TrimSpace(cfg.App.DownloadDir)
+	}
+	if dir == "~" || strings.HasPrefix(dir, "~/") {
+		if home, err := os.UserHomeDir(); err == nil {
+			dir = filepath.Join(home, strings.TrimPrefix(dir, "~"))
+		}
+	}
+	return dir
+}
+
 func (m *Model) downloadObjectCmd(key string) tea.Cmd {
 	bucket := m.bucket
+	dir := m.downloadDir
+	ds := m.downloadState
 	return func() tea.Msg {
-		// Download to current directory with the base filename
-		localPath := filepath.Base(key)
-		err := m.client.DownloadObject(bucket, key, localPath)
-		return downloadDoneMsg{key: key, path: localPath, err: err}
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			return downloadDoneMsg{key: key, dir: dir, err: fmt.Errorf("create directory %q: %w", dir, err)}
+		}
+		localPath := filepath.Join(dir, filepath.Base(key))
+		err := m.client.DownloadObject(bucket, key, localPath, ds)
+		return downloadDoneMsg{key: key, path: localPath, dir: dir, err: err}
 	}
+}
+
+// downloadTickCmd schedules the next progress-bar refresh.
+func downloadTickCmd() tea.Cmd {
+	return tea.Tick(100*time.Millisecond, func(time.Time) tea.Msg {
+		return downloadTickMsg{}
+	})
 }
 
 func (m *Model) deleteObjectCmd(key string) tea.Cmd {
@@ -1089,10 +1139,14 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 
 		case "D":
-			if m.state == stateObjectList && m.focus == focusObjects {
+			if m.state == stateObjectList && m.focus == focusObjects && !m.downloading {
 				if key, ok := m.selectedObjectKey(); ok {
-					cmds = append(cmds, m.downloadObjectCmd(key))
-					m.statusMsg = fmt.Sprintf("Downloading: %s ...", key)
+					m.downloading = true
+					m.downloadKey = key
+					m.downloadPercent = 0
+					m.downloadState = &DownloadProgress{}
+					cmds = append(cmds, m.downloadObjectCmd(key), downloadTickCmd())
+					m.statusMsg = ""
 				}
 			}
 
@@ -1302,11 +1356,23 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.showPresigned = true
 		}
 
+	case downloadTickMsg:
+		if m.downloading && m.downloadState != nil {
+			if total := m.downloadState.Total(); total > 0 {
+				m.downloadPercent = float64(m.downloadState.Written()) / float64(total)
+			}
+			cmds = append(cmds, downloadTickCmd())
+		}
+
 	case downloadDoneMsg:
+		m.downloading = false
+		m.downloadState = nil
 		if msg.err != nil {
+			m.downloadPercent = 0
 			m.statusMsg = fmt.Sprintf("Download error: %s", summarizeS3Error(msg.err))
 		} else {
-			m.statusMsg = fmt.Sprintf("Downloaded: %s", msg.path)
+			m.downloadPercent = 1
+			m.statusMsg = fmt.Sprintf("Object %s is downloaded to %s", filepath.Base(msg.key), msg.dir)
 		}
 
 	case deleteObjectDoneMsg:
@@ -1500,7 +1566,14 @@ func (m *Model) renderStatusBar() string {
 		}
 		hints = "↑/↓ Enter  d  /  r  S  ?  q"
 	case stateObjectList:
-		if m.statusMsg != "" {
+		if m.downloading {
+			ds := m.downloadState
+			var sizeInfo string
+			if ds != nil && ds.Total() > 0 {
+				sizeInfo = fmt.Sprintf(" %s / %s", formatSize(ds.Written()), formatSize(ds.Total()))
+			}
+			left = fmt.Sprintf("Downloading %s %s%s", filepath.Base(m.downloadKey), m.downloadProgress.ViewAs(m.downloadPercent), sizeInfo)
+		} else if m.statusMsg != "" {
 			left = m.statusMsg
 		} else {
 			left = fmt.Sprintf("Bucket: %s  |  Objects: %d  |  Size: %s", m.bucket, m.objCount, formatSize(m.totalSize))
@@ -1938,7 +2011,7 @@ func (m *Model) helpView() string {
 		"  p                  Preview selected object",
 		"  y                  Copy S3 URI to clipboard",
 		"  g                  Generate presigned URL (1 hour)",
-		"  D                  Download object to current directory",
+		"  D                  Download object (to app.downloadDir, default current dir)",
 		"  f                  Toggle flat mode (show all objects)",
 		"  v                  Toggle versions indicator",
 		"  s                  Cycle sort column",

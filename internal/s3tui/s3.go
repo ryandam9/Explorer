@@ -9,6 +9,7 @@ import (
 	"sort"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
@@ -922,8 +923,34 @@ func (c *S3Client) PresignGetObject(bucket, key string, ttl time.Duration) (stri
 	return req.URL, nil
 }
 
-// DownloadObject downloads bucket/key to localPath, streaming the body.
-func (c *S3Client) DownloadObject(bucket, key, localPath string) error {
+// DownloadProgress tracks the byte progress of an in-flight download. It is
+// safe for concurrent use: the download goroutine updates it while the TUI
+// reads it from the Bubble Tea update loop.
+type DownloadProgress struct {
+	total   atomic.Int64
+	written atomic.Int64
+}
+
+// Write implements io.Writer so the type can be used as a TeeReader sink; it
+// only counts bytes and never stores them.
+func (p *DownloadProgress) Write(b []byte) (int, error) {
+	p.written.Add(int64(len(b)))
+	return len(b), nil
+}
+
+// SetTotal records the total object size (from ContentLength).
+func (p *DownloadProgress) SetTotal(n int64) { p.total.Store(n) }
+
+// Total returns the total object size, or 0 if not yet known.
+func (p *DownloadProgress) Total() int64 { return p.total.Load() }
+
+// Written returns the number of bytes downloaded so far.
+func (p *DownloadProgress) Written() int64 { return p.written.Load() }
+
+// DownloadObject downloads bucket/key to localPath, streaming the body. If
+// progress is non-nil it is updated with the object size and bytes written as
+// the transfer proceeds.
+func (c *S3Client) DownloadObject(bucket, key, localPath string, progress *DownloadProgress) error {
 	ctx, cancel := context.WithTimeout(c.ctx, 5*time.Minute)
 	defer cancel()
 
@@ -941,7 +968,15 @@ func (c *S3Client) DownloadObject(bucket, key, localPath string) error {
 		return fmt.Errorf("create file: %w", err)
 	}
 
-	if _, err := io.Copy(f, out.Body); err != nil {
+	var src io.Reader = out.Body
+	if progress != nil {
+		if out.ContentLength != nil {
+			progress.SetTotal(*out.ContentLength)
+		}
+		src = io.TeeReader(out.Body, progress)
+	}
+
+	if _, err := io.Copy(f, src); err != nil {
 		f.Close()
 		os.Remove(localPath)
 		return fmt.Errorf("write file: %w", err)
