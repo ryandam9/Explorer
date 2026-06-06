@@ -27,8 +27,8 @@ func HelpView(title, body string, width int) string {
 	return lipgloss.NewStyle().
 		Width(width).
 		BorderStyle(lipgloss.RoundedBorder()).
-		BorderForeground(lipgloss.Color(FeatherColor(1))).
-		Foreground(lipgloss.Color(FeatherColor(0))).
+		BorderForeground(lipgloss.Color(ColorBorderFocus())).
+		Foreground(lipgloss.Color(ColorText())).
 		Padding(1, 2).
 		Render(inner)
 }

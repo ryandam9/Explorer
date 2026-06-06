@@ -481,7 +481,7 @@ func (m tuiModel) makeTable() btable.Model {
 
 	hdrStyle := lipgloss.NewStyle().
 		Bold(true).
-		Foreground(lipgloss.Color(ui.ColorMuted()))
+		Foreground(lipgloss.Color(ui.ColorTableHeader()))
 
 	return btable.New(m.columns(w)).
 		WithPageSize(pageRows).
@@ -765,8 +765,7 @@ func (m tuiModel) renderSidebar() string {
 
 	style := ui.PanelStyle()
 	if m.focus == focusSidebar {
-		style = ui.SelectedPanelStyle().
-			BorderForeground(lipgloss.Color(ui.FeatherColor(0)))
+		style = ui.SelectedPanelStyle()
 	}
 	h := m.tableHeight() + 2
 	if h < 6 {
@@ -787,9 +786,9 @@ func (m tuiModel) renderTablePanel() string {
 		WithTargetWidth(w).
 		WithPageSize(pageRows)
 
-	borderColor := lipgloss.Color(ui.FeatherColor(1))
+	borderColor := lipgloss.Color(ui.ColorBorder())
 	if m.focus == focusTable {
-		borderColor = lipgloss.Color(ui.FeatherColor(0))
+		borderColor = lipgloss.Color(ui.ColorBorderFocus())
 	}
 	_ = borderColor // evertras draws its own border; we note focus via highlight style
 
@@ -799,8 +798,7 @@ func (m tuiModel) renderTablePanel() string {
 func (m tuiModel) renderDetailPanel() string {
 	style := ui.PanelStyle()
 	if m.focus == focusDetail {
-		style = ui.SelectedPanelStyle().
-			BorderForeground(lipgloss.Color(ui.FeatherColor(0)))
+		style = ui.SelectedPanelStyle()
 	}
 	h := m.tableHeight() + 2
 	if h < 6 {

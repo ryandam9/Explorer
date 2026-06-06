@@ -292,31 +292,31 @@ func NewModel(ctx context.Context, awsCfg *config.AWSConfig, region, bucket, pre
 	m.prefixInput.Placeholder = "Enter prefix (e.g. photos/2024/)"
 	m.prefixInput.CharLimit = 256
 	m.prefixInput.Width = 50
-	m.prefixInput.PromptStyle = lipgloss.NewStyle().Foreground(lipgloss.Color(ui.FeatherColor(1))).Bold(true)
-	m.prefixInput.TextStyle = lipgloss.NewStyle().Foreground(lipgloss.Color(ui.FeatherColor(0)))
-	m.prefixInput.PlaceholderStyle = lipgloss.NewStyle().Foreground(lipgloss.Color(ui.FeatherColor(1)))
-	m.prefixInput.Cursor.Style = lipgloss.NewStyle().Foreground(lipgloss.Color(ui.FeatherColor(0)))
+	m.prefixInput.PromptStyle = lipgloss.NewStyle().Foreground(lipgloss.Color(ui.ColorAccent())).Bold(true)
+	m.prefixInput.TextStyle = lipgloss.NewStyle().Foreground(lipgloss.Color(ui.ColorText()))
+	m.prefixInput.PlaceholderStyle = lipgloss.NewStyle().Foreground(lipgloss.Color(ui.ColorMuted()))
+	m.prefixInput.Cursor.Style = lipgloss.NewStyle().Foreground(lipgloss.Color(ui.ColorAccent()))
 
 	m.bucketSearch = textinput.New()
 	m.bucketSearch.Placeholder = "Filter buckets..."
 	m.bucketSearch.CharLimit = 128
 	m.bucketSearch.Width = 40
-	m.bucketSearch.PromptStyle = lipgloss.NewStyle().Foreground(lipgloss.Color(ui.FeatherColor(1))).Bold(true)
-	m.bucketSearch.TextStyle = lipgloss.NewStyle().Foreground(lipgloss.Color(ui.FeatherColor(0)))
-	m.bucketSearch.PlaceholderStyle = lipgloss.NewStyle().Foreground(lipgloss.Color(ui.FeatherColor(1)))
-	m.bucketSearch.Cursor.Style = lipgloss.NewStyle().Foreground(lipgloss.Color(ui.FeatherColor(0)))
+	m.bucketSearch.PromptStyle = lipgloss.NewStyle().Foreground(lipgloss.Color(ui.ColorAccent())).Bold(true)
+	m.bucketSearch.TextStyle = lipgloss.NewStyle().Foreground(lipgloss.Color(ui.ColorText()))
+	m.bucketSearch.PlaceholderStyle = lipgloss.NewStyle().Foreground(lipgloss.Color(ui.ColorMuted()))
+	m.bucketSearch.Cursor.Style = lipgloss.NewStyle().Foreground(lipgloss.Color(ui.ColorAccent()))
 
 	m.deleteConfirm = textinput.New()
 	m.deleteConfirm.Placeholder = "Type 'delete' to confirm"
 	m.deleteConfirm.CharLimit = 32
 	m.deleteConfirm.Width = 30
-	m.deleteConfirm.PromptStyle = lipgloss.NewStyle().Foreground(lipgloss.Color(ui.FeatherColor(0))).Bold(true)
-	m.deleteConfirm.TextStyle = lipgloss.NewStyle().Foreground(lipgloss.Color(ui.FeatherColor(0)))
-	m.deleteConfirm.Cursor.Style = lipgloss.NewStyle().Foreground(lipgloss.Color(ui.FeatherColor(0)))
+	m.deleteConfirm.PromptStyle = lipgloss.NewStyle().Foreground(lipgloss.Color(ui.ColorError())).Bold(true)
+	m.deleteConfirm.TextStyle = lipgloss.NewStyle().Foreground(lipgloss.Color(ui.ColorText()))
+	m.deleteConfirm.Cursor.Style = lipgloss.NewStyle().Foreground(lipgloss.Color(ui.ColorAccent()))
 
 	m.spinner = spinner.New(
 		spinner.WithSpinner(spinner.MiniDot),
-		spinner.WithStyle(lipgloss.NewStyle().Foreground(lipgloss.Color(ui.FeatherColor(0))).Bold(true)),
+		spinner.WithStyle(lipgloss.NewStyle().Foreground(lipgloss.Color(ui.ColorHeading())).Bold(true)),
 	)
 
 	if bucket != "" {
@@ -350,15 +350,15 @@ func (m *Model) initBucketTable() {
 
 	s := table.DefaultStyles()
 	s.Header = s.Header.
-		Foreground(lipgloss.Color(ui.FeatherColor(1))).
+		Foreground(lipgloss.Color(ui.ColorTableHeader())).
 		BorderStyle(lipgloss.NormalBorder()).
-		BorderForeground(lipgloss.Color(ui.FeatherColor(1))).
+		BorderForeground(lipgloss.Color(ui.ColorTableHeaderLine())).
 		BorderBottom(true).
 		Bold(true)
-	s.Cell = s.Cell.Foreground(lipgloss.Color(ui.FeatherColor(0)))
+	s.Cell = s.Cell.Foreground(lipgloss.Color(ui.ColorText()))
 	s.Selected = s.Selected.
-		Foreground(lipgloss.Color(ui.FeatherColor(0))).
-		Background(lipgloss.Color(ui.FeatherColor(1))).
+		Foreground(lipgloss.Color(ui.ColorHighlightText())).
+		Background(lipgloss.Color(ui.ColorHighlight())).
 		Bold(true)
 	m.bucketTable.SetStyles(s)
 }
@@ -381,15 +381,15 @@ func (m *Model) initObjectTable() {
 
 	s := table.DefaultStyles()
 	s.Header = s.Header.
-		Foreground(lipgloss.Color(ui.FeatherColor(1))).
+		Foreground(lipgloss.Color(ui.ColorTableHeader())).
 		BorderStyle(lipgloss.NormalBorder()).
-		BorderForeground(lipgloss.Color(ui.FeatherColor(1))).
+		BorderForeground(lipgloss.Color(ui.ColorTableHeaderLine())).
 		BorderBottom(true).
 		Bold(true)
-	s.Cell = s.Cell.Foreground(lipgloss.Color(ui.FeatherColor(0)))
+	s.Cell = s.Cell.Foreground(lipgloss.Color(ui.ColorText()))
 	s.Selected = s.Selected.
-		Foreground(lipgloss.Color(ui.FeatherColor(0))).
-		Background(lipgloss.Color(ui.FeatherColor(1))).
+		Foreground(lipgloss.Color(ui.ColorHighlightText())).
+		Background(lipgloss.Color(ui.ColorHighlight())).
 		Bold(true)
 	m.objectTable.SetStyles(s)
 }
@@ -400,24 +400,24 @@ func (m *Model) initObjectTable() {
 func (m *Model) restyleForTheme() {
 	s := table.DefaultStyles()
 	s.Header = s.Header.
-		Foreground(lipgloss.Color(ui.FeatherColor(1))).
+		Foreground(lipgloss.Color(ui.ColorTableHeader())).
 		BorderStyle(lipgloss.NormalBorder()).
-		BorderForeground(lipgloss.Color(ui.FeatherColor(1))).
+		BorderForeground(lipgloss.Color(ui.ColorTableHeaderLine())).
 		BorderBottom(true).
 		Bold(true)
-	s.Cell = s.Cell.Foreground(lipgloss.Color(ui.FeatherColor(0)))
+	s.Cell = s.Cell.Foreground(lipgloss.Color(ui.ColorText()))
 	s.Selected = s.Selected.
-		Foreground(lipgloss.Color(ui.FeatherColor(0))).
-		Background(lipgloss.Color(ui.FeatherColor(1))).
+		Foreground(lipgloss.Color(ui.ColorHighlightText())).
+		Background(lipgloss.Color(ui.ColorHighlight())).
 		Bold(true)
 	m.bucketTable.SetStyles(s)
 	m.objectTable.SetStyles(s)
 
 	for _, in := range []*textinput.Model{&m.prefixInput, &m.bucketSearch, &m.deleteConfirm} {
-		in.PromptStyle = lipgloss.NewStyle().Foreground(lipgloss.Color(ui.FeatherColor(1))).Bold(true)
-		in.TextStyle = lipgloss.NewStyle().Foreground(lipgloss.Color(ui.FeatherColor(0)))
-		in.PlaceholderStyle = lipgloss.NewStyle().Foreground(lipgloss.Color(ui.FeatherColor(1)))
-		in.Cursor.Style = lipgloss.NewStyle().Foreground(lipgloss.Color(ui.FeatherColor(0)))
+		in.PromptStyle = lipgloss.NewStyle().Foreground(lipgloss.Color(ui.ColorAccent())).Bold(true)
+		in.TextStyle = lipgloss.NewStyle().Foreground(lipgloss.Color(ui.ColorText()))
+		in.PlaceholderStyle = lipgloss.NewStyle().Foreground(lipgloss.Color(ui.ColorMuted()))
+		in.Cursor.Style = lipgloss.NewStyle().Foreground(lipgloss.Color(ui.ColorAccent()))
 	}
 }
 
@@ -1402,8 +1402,8 @@ func (m *Model) View() string {
 		}
 		errBox := lipgloss.NewStyle().
 			BorderStyle(lipgloss.RoundedBorder()).
-			BorderForeground(lipgloss.Color(ui.FeatherColor(0))).
-			Foreground(lipgloss.Color(ui.FeatherColor(0))).
+			BorderForeground(lipgloss.Color(ui.ColorError())).
+			Foreground(lipgloss.Color(ui.ColorText())).
 			Padding(1, 2).
 			Width(maxErrW).
 			Align(lipgloss.Center).
@@ -1445,8 +1445,8 @@ func (m *Model) View() string {
 	if m.inBucketSearch {
 		searchBox := lipgloss.NewStyle().
 			BorderStyle(lipgloss.RoundedBorder()).
-			BorderForeground(lipgloss.Color(ui.FeatherColor(0))).
-			Foreground(lipgloss.Color(ui.FeatherColor(0))).
+			BorderForeground(lipgloss.Color(ui.ColorBorderFocus())).
+			Foreground(lipgloss.Color(ui.ColorText())).
 			Padding(0, 1).
 			Render(lipgloss.JoinVertical(lipgloss.Left,
 				ui.BoldStyle().Render("Search buckets:"),
@@ -1608,7 +1608,7 @@ func (m *Model) objectListView() string {
 	)
 
 	prefixSection := lipgloss.JoinHorizontal(lipgloss.Center,
-		lipgloss.NewStyle().Foreground(lipgloss.Color(ui.FeatherColor(1))).Bold(true).Render("Prefix: "),
+		lipgloss.NewStyle().Foreground(lipgloss.Color(ui.ColorAccent())).Bold(true).Render("Prefix: "),
 		m.prefixInput.View(),
 	)
 
@@ -1855,8 +1855,8 @@ func (m *Model) bucketDetailView() string {
 			MaxWidth(width+2).
 			MaxHeight(height+2).
 			BorderStyle(lipgloss.RoundedBorder()).
-			BorderForeground(lipgloss.Color(ui.FeatherColor(1))).
-			Foreground(lipgloss.Color(ui.FeatherColor(0))).
+			BorderForeground(lipgloss.Color(ui.ColorBorder())).
+			Foreground(lipgloss.Color(ui.ColorText())).
 			Padding(1, 2).
 			Render(lipgloss.JoinVertical(lipgloss.Left,
 				title,
@@ -1900,7 +1900,7 @@ func (m *Model) deleteConfirmView() string {
 	content := lipgloss.JoinVertical(lipgloss.Left,
 		ui.BoldStyle().Render(fmt.Sprintf("DELETE OBJECT: %s", m.deleteKey)),
 		"",
-		lipgloss.NewStyle().Foreground(lipgloss.Color(ui.FeatherColor(0))).Render("This action is PERMANENT and cannot be undone."),
+		lipgloss.NewStyle().Foreground(lipgloss.Color(ui.ColorError())).Render("This action is PERMANENT and cannot be undone."),
 		"",
 		m.deleteConfirm.View(),
 		"",
@@ -1966,8 +1966,8 @@ func (m *Model) previewView() string {
 		MaxWidth(width+2).
 		MaxHeight(height+2).
 		BorderStyle(lipgloss.RoundedBorder()).
-		BorderForeground(lipgloss.Color(ui.FeatherColor(0))).
-		Foreground(lipgloss.Color(ui.FeatherColor(0))).
+		BorderForeground(lipgloss.Color(ui.ColorBorderFocus())).
+		Foreground(lipgloss.Color(ui.ColorText())).
 		Padding(1, 2).
 		Render(lipgloss.JoinVertical(lipgloss.Left, title, "", body, "", ui.MutedStyle().Render("[↑/↓/PgUp/PgDn] Scroll  [Esc] Close")))
 }

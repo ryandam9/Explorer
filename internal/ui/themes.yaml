@@ -1,0 +1,230 @@
+# Built-in theme palettes. This file is the single source of truth for the
+# default colors and is compiled into the binary via //go:embed (see theme.go).
+#
+# Colors come from the "feathers" palettes — color schemes inspired by the
+# plumage of Australian birds (https://github.com/shandiya/feathers, the same
+# data rendered at https://ryandam.net/demos/feathers_palettes/). Each palette's
+# distinct hues are mapped onto the granular roles below.
+#
+# Order is significant: callers and tests refer to themes by index, so keep
+# spotted-pardalote first. Any role can be overridden per-theme by the user's
+# config.yaml under ui.themes.<name>; an empty granular role falls back to a
+# related role at render time (see the accessors in theme.go).
+#
+# The comment above each theme lists the source feathers palette.
+
+# feathers: #feca00 #d36328 #cb0300 #b4b9b3 #424847 #000100
+- name: spotted-pardalote
+  heading: "#feca00"
+  text: "#b4b9b3"
+  background: ""
+  border: "#424847"
+  borderFocus: "#feca00"
+  highlight: "#cb0300"
+  highlightText: "#feca00"
+  muted: "#d36328"
+  tableHeader: "#d36328"
+  tableHeaderLine: "#424847"
+  statusBarBg: "#feca00"
+  statusBarText: "#000100"
+  accent: "#d36328"
+  error: "#FF5555"
+  warning: "#FFAA00"
+
+# feathers: #edd8c5 #d09a5e #e7aa01 #ac570f #73481b #442c0e #0d0403
+- name: plains-wanderer
+  heading: "#e7aa01"
+  text: "#edd8c5"
+  background: ""
+  border: "#73481b"
+  borderFocus: "#e7aa01"
+  highlight: "#ac570f"
+  highlightText: "#edd8c5"
+  muted: "#d09a5e"
+  tableHeader: "#d09a5e"
+  tableHeaderLine: "#442c0e"
+  statusBarBg: "#e7aa01"
+  statusBarText: "#442c0e"
+  accent: "#d09a5e"
+  error: "#FF5555"
+  warning: "#FFAA00"
+
+# feathers: #00346E #007CBF #06ABDF #EDD03E #F5A200 #6D8600 #424D0C
+- name: bee-eater
+  heading: "#06ABDF"
+  text: "#EDD03E"
+  background: ""
+  border: "#00346E"
+  borderFocus: "#06ABDF"
+  highlight: "#007CBF"
+  highlightText: "#EDD03E"
+  muted: "#007CBF"
+  tableHeader: "#F5A200"
+  tableHeaderLine: "#424D0C"
+  statusBarBg: "#F5A200"
+  statusBarText: "#00346E"
+  accent: "#6D8600"
+  error: "#FF5555"
+  warning: "#FFAA00"
+
+# feathers: #BD338F #EB8252 #F5DC83 #CDD4DC #8098A2 #8FA33F #5F7929 #014820
+- name: rose-crowned-fruit-dove
+  heading: "#BD338F"
+  text: "#CDD4DC"
+  background: ""
+  border: "#5F7929"
+  borderFocus: "#BD338F"
+  highlight: "#BD338F"
+  highlightText: "#F5DC83"
+  muted: "#8098A2"
+  tableHeader: "#EB8252"
+  tableHeaderLine: "#014820"
+  statusBarBg: "#EB8252"
+  statusBarText: "#014820"
+  accent: "#F5DC83"
+  error: "#FF5555"
+  warning: "#FFAA00"
+
+# feathers: #cd3122 #f4c623 #bee183 #6c905e #2f533c #b8c9dc #2f7ab9
+- name: eastern-rosella
+  heading: "#f4c623"
+  text: "#bee183"
+  background: ""
+  border: "#2f533c"
+  borderFocus: "#f4c623"
+  highlight: "#cd3122"
+  highlightText: "#f4c623"
+  muted: "#b8c9dc"
+  tableHeader: "#2f7ab9"
+  tableHeaderLine: "#2f533c"
+  statusBarBg: "#f4c623"
+  statusBarText: "#2f533c"
+  accent: "#2f7ab9"
+  error: "#FF5555"
+  warning: "#FFAA00"
+
+# feathers: #8a3223 #bb5645 #d97878 #e2aba0 #d0cfe9 #a29eb8 #6c6b75 #b8a53f #93862a #4d4019
+- name: oriole
+  heading: "#b8a53f"
+  text: "#e2aba0"
+  background: ""
+  border: "#6c6b75"
+  borderFocus: "#d97878"
+  highlight: "#8a3223"
+  highlightText: "#e2aba0"
+  muted: "#a29eb8"
+  tableHeader: "#bb5645"
+  tableHeaderLine: "#4d4019"
+  statusBarBg: "#b8a53f"
+  statusBarText: "#4d4019"
+  accent: "#d0cfe9"
+  error: "#FF5555"
+  warning: "#FFAA00"
+
+# feathers: #7090c9 #8cb3de #afbe9f #616020 #6eb245 #214917 #cf2236 #d683ad
+- name: princess-parrot
+  heading: "#6eb245"
+  text: "#8cb3de"
+  background: ""
+  border: "#214917"
+  borderFocus: "#6eb245"
+  highlight: "#cf2236"
+  highlightText: "#8cb3de"
+  muted: "#afbe9f"
+  tableHeader: "#7090c9"
+  tableHeaderLine: "#214917"
+  statusBarBg: "#6eb245"
+  statusBarText: "#214917"
+  accent: "#d683ad"
+  error: "#FF5555"
+  warning: "#FFAA00"
+
+# feathers: #4F3321 #AA7853 #D9C4A7 #B03F05 #020503
+- name: superb-fairy-wren
+  heading: "#B03F05"
+  text: "#D9C4A7"
+  background: ""
+  border: "#4F3321"
+  borderFocus: "#B03F05"
+  highlight: "#B03F05"
+  highlightText: "#D9C4A7"
+  muted: "#AA7853"
+  tableHeader: "#AA7853"
+  tableHeaderLine: "#4F3321"
+  statusBarBg: "#AA7853"
+  statusBarText: "#020503"
+  accent: "#AA7853"
+  error: "#FF5555"
+  warning: "#FFAA00"
+
+# feathers: #BDA14D #3EBCB6 #0169C4 #153460 #D5114E #A56EB6 #4B1C57 #09090C
+- name: cassowary
+  heading: "#3EBCB6"
+  text: "#BDA14D"
+  background: ""
+  border: "#153460"
+  borderFocus: "#3EBCB6"
+  highlight: "#D5114E"
+  highlightText: "#BDA14D"
+  muted: "#A56EB6"
+  tableHeader: "#0169C4"
+  tableHeaderLine: "#4B1C57"
+  statusBarBg: "#3EBCB6"
+  statusBarText: "#09090C"
+  accent: "#A56EB6"
+  error: "#FF5555"
+  warning: "#FFAA00"
+
+# feathers: #E19E00 #FBEB5B #85773A #979EB9 #727B98 #454B56 #201B1E
+- name: yellow-robin
+  heading: "#FBEB5B"
+  text: "#979EB9"
+  background: ""
+  border: "#454B56"
+  borderFocus: "#E19E00"
+  highlight: "#E19E00"
+  highlightText: "#201B1E"
+  muted: "#85773A"
+  tableHeader: "#E19E00"
+  tableHeaderLine: "#454B56"
+  statusBarBg: "#FBEB5B"
+  statusBarText: "#201B1E"
+  accent: "#727B98"
+  error: "#FF5555"
+  warning: "#FFAA00"
+
+# feathers: #FFD2CF #E9A7BB #D05478 #AAB9CC #8390A2 #4C5766
+- name: galah
+  heading: "#D05478"
+  text: "#FFD2CF"
+  background: ""
+  border: "#4C5766"
+  borderFocus: "#D05478"
+  highlight: "#D05478"
+  highlightText: "#FFD2CF"
+  muted: "#AAB9CC"
+  tableHeader: "#E9A7BB"
+  tableHeaderLine: "#4C5766"
+  statusBarBg: "#D05478"
+  statusBarText: "#FFD2CF"
+  accent: "#8390A2"
+  error: "#FF5555"
+  warning: "#FFAA00"
+
+# feathers: #b5effb #0b7595 #02407c #06213a #c45829 #9C4620 #622C14 #d4d8e3 #b8bcd8 #ad8d9f #725f77
+- name: blue-winged-kookaburra
+  heading: "#b5effb"
+  text: "#d4d8e3"
+  background: ""
+  border: "#02407c"
+  borderFocus: "#b5effb"
+  highlight: "#0b7595"
+  highlightText: "#b5effb"
+  muted: "#b8bcd8"
+  tableHeader: "#c45829"
+  tableHeaderLine: "#06213a"
+  statusBarBg: "#c45829"
+  statusBarText: "#06213a"
+  accent: "#ad8d9f"
+  error: "#FF5555"
+  warning: "#FFAA00"

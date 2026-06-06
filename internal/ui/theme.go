@@ -1,24 +1,42 @@
 package ui
 
 import (
+	_ "embed"
+	"fmt"
 	"strings"
 	"sync/atomic"
 
 	"github.com/charmbracelet/lipgloss"
+	"go.yaml.in/yaml/v3"
+
 	"github.com/user/aws_explorer/internal/config"
 )
 
 // ThemeColors holds the full color palette for a theme.
+//
+// Colors are taken from the "feathers" palettes (color schemes inspired by the
+// plumage of Australian birds — https://github.com/shandiya/feathers, the same
+// data rendered at https://ryandam.net/demos/feathers_palettes/). Each role is
+// granular so editing one UI area never bleeds into another. Roles past the
+// first nine were added so areas that previously shared a single color (table
+// headers, focused borders, the status bar, decorative accents) can each be
+// themed independently.
 type ThemeColors struct {
-	Heading       string // titles, section headers
-	Text          string // body text / foreground
-	Background    string // panel background (empty = terminal default)
-	Border        string // panel borders
-	Highlight     string // selected / highlighted item background
-	HighlightText string // text on selected / highlighted items
-	Muted         string // de-emphasised / secondary text
-	Error         string // error messages and indicators
-	Warning       string // warning messages and indicators
+	Heading         string // titles, section headers
+	Text            string // body text / foreground
+	Background      string // panel background (empty = terminal default)
+	Border          string // borders of unfocused panels
+	BorderFocus     string // border of the focused panel
+	Highlight       string // selected row background
+	HighlightText   string // text on the selected row
+	Muted           string // de-emphasised / secondary text
+	TableHeader     string // table column header text
+	TableHeaderLine string // rule drawn under table headers
+	StatusBarBg     string // status bar background
+	StatusBarText   string // status bar text
+	Accent          string // decorative rails, input prompts and cursors
+	Error           string // error messages and indicators
+	Warning         string // warning messages and indicators
 }
 
 // Theme holds a named theme with its full color palette.
@@ -27,106 +45,64 @@ type Theme struct {
 	Colors ThemeColors
 }
 
-// Themes is the list of built-in themes (named after Australian birds).
-// Color roles beyond Heading/Border are derived from the two-tone originals
-// and can be overridden via config.yaml ui.themes.<name>.
-var Themes = []Theme{
-	{
-		Name: "spotted-pardalote",
-		Colors: ThemeColors{
-			Heading: "#6260FF", Text: "#E4E4FF", Background: "",
-			Border: "#E4E4FF", Highlight: "#6260FF", HighlightText: "#E4E4FF",
-			Muted: "#E4E4FF", Error: "#FF5555", Warning: "#FFAA00",
-		},
-	},
-	{
-		Name: "plains-wanderer",
-		Colors: ThemeColors{
-			Heading: "#9FE870", Text: "#9FE870", Background: "",
-			Border: "#163300", Highlight: "#9FE870", HighlightText: "#163300",
-			Muted: "#163300", Error: "#FF5555", Warning: "#FFAA00",
-		},
-	},
-	{
-		Name: "bee-eater",
-		Colors: ThemeColors{
-			Heading: "#BDD9D7", Text: "#BDD9D7", Background: "",
-			Border: "#03363D", Highlight: "#BDD9D7", HighlightText: "#03363D",
-			Muted: "#03363D", Error: "#FF5555", Warning: "#FFAA00",
-		},
-	},
-	{
-		Name: "rose-crowned-fruit-dove",
-		Colors: ThemeColors{
-			Heading: "#3447AA", Text: "#FBEAEB", Background: "",
-			Border: "#FBEAEB", Highlight: "#3447AA", HighlightText: "#FBEAEB",
-			Muted: "#FBEAEB", Error: "#FF5555", Warning: "#FFAA00",
-		},
-	},
-	{
-		Name: "eastern-rosella",
-		Colors: ThemeColors{
-			Heading: "#2F533C", Text: "#FCDB32", Background: "",
-			Border: "#141D38", Highlight: "#B8C9DC", HighlightText: "#141D38",
-			Muted: "#141D38", Error: "#FF5555", Warning: "#FFAA00",
-		},
-	},
-	{
-		Name: "oriole",
-		Colors: ThemeColors{
-			Heading: "#34E0A1", Text: "#34E0A1", Background: "",
-			Border: "#000000", Highlight: "#34E0A1", HighlightText: "#000000",
-			Muted: "#888888", Error: "#FF5555", Warning: "#FFAA00",
-		},
-	},
-	{
-		Name: "princess-parrot",
-		Colors: ThemeColors{
-			Heading: "#FF69B4", Text: "#FF69B4", Background: "",
-			Border: "#006400", Highlight: "#FF69B4", HighlightText: "#006400",
-			Muted: "#006400", Error: "#FF5555", Warning: "#FFAA00",
-		},
-	},
-	{
-		Name: "superb-fairy-wren",
-		Colors: ThemeColors{
-			Heading: "#1E90FF", Text: "#1E90FF", Background: "",
-			Border: "#8B4513", Highlight: "#1E90FF", HighlightText: "#8B4513",
-			Muted: "#8B4513", Error: "#FF5555", Warning: "#FFAA00",
-		},
-	},
-	{
-		Name: "cassowary",
-		Colors: ThemeColors{
-			Heading: "#191970", Text: "#DC143C", Background: "",
-			Border: "#DC143C", Highlight: "#191970", HighlightText: "#DC143C",
-			Muted: "#DC143C", Error: "#FF5555", Warning: "#FFAA00",
-		},
-	},
-	{
-		Name: "yellow-robin",
-		Colors: ThemeColors{
-			Heading: "#FFD700", Text: "#FFD700", Background: "",
-			Border: "#696969", Highlight: "#FFD700", HighlightText: "#696969",
-			Muted: "#696969", Error: "#FF5555", Warning: "#FFAA00",
-		},
-	},
-	{
-		Name: "galah",
-		Colors: ThemeColors{
-			Heading: "#FF69B4", Text: "#FF69B4", Background: "",
-			Border: "#808080", Highlight: "#FF69B4", HighlightText: "#808080",
-			Muted: "#808080", Error: "#FF5555", Warning: "#FFAA00",
-		},
-	},
-	{
-		Name: "blue-winged-kookaburra",
-		Colors: ThemeColors{
-			Heading: "#4169E1", Text: "#4169E1", Background: "",
-			Border: "#D2691E", Highlight: "#4169E1", HighlightText: "#D2691E",
-			Muted: "#D2691E", Error: "#FF5555", Warning: "#FFAA00",
-		},
-	},
+// themesYAML holds the built-in theme palettes. It is the single source of
+// truth for default colors — there are deliberately no color literals in the
+// Go source. The user's config.yaml still overrides anything via InitFromConfig.
+//
+//go:embed themes.yaml
+var themesYAML []byte
+
+// themeDef mirrors one entry in themes.yaml. Keeping a dedicated type (rather
+// than reusing config.ThemeColorConfig) keeps the embedded-defaults format
+// decoupled from the user-facing config schema.
+type themeDef struct {
+	Name            string `yaml:"name"`
+	Heading         string `yaml:"heading"`
+	Text            string `yaml:"text"`
+	Background      string `yaml:"background"`
+	Border          string `yaml:"border"`
+	BorderFocus     string `yaml:"borderFocus"`
+	Highlight       string `yaml:"highlight"`
+	HighlightText   string `yaml:"highlightText"`
+	Muted           string `yaml:"muted"`
+	TableHeader     string `yaml:"tableHeader"`
+	TableHeaderLine string `yaml:"tableHeaderLine"`
+	StatusBarBg     string `yaml:"statusBarBg"`
+	StatusBarText   string `yaml:"statusBarText"`
+	Accent          string `yaml:"accent"`
+	Error           string `yaml:"error"`
+	Warning         string `yaml:"warning"`
+}
+
+// Themes is the list of built-in themes (named after Australian birds), loaded
+// from the embedded themes.yaml at startup. Order is significant — callers and
+// tests refer to themes by index — and is preserved from the file.
+//
+// Any role can be overridden per-theme via config.yaml ui.themes.<name>.
+var Themes = mustLoadBuiltinThemes()
+
+func mustLoadBuiltinThemes() []Theme {
+	var defs []themeDef
+	if err := yaml.Unmarshal(themesYAML, &defs); err != nil {
+		// The file is embedded at compile time, so a parse failure is a
+		// programming error in themes.yaml, not a runtime/user condition.
+		panic(fmt.Sprintf("ui: invalid embedded themes.yaml: %v", err))
+	}
+	themes := make([]Theme, len(defs))
+	for i, d := range defs {
+		themes[i] = Theme{
+			Name: d.Name,
+			Colors: ThemeColors{
+				Heading: d.Heading, Text: d.Text, Background: d.Background,
+				Border: d.Border, BorderFocus: d.BorderFocus,
+				Highlight: d.Highlight, HighlightText: d.HighlightText, Muted: d.Muted,
+				TableHeader: d.TableHeader, TableHeaderLine: d.TableHeaderLine,
+				StatusBarBg: d.StatusBarBg, StatusBarText: d.StatusBarText, Accent: d.Accent,
+				Error: d.Error, Warning: d.Warning,
+			},
+		}
+	}
+	return themes
 }
 
 // activeThemeIdx holds the index into Themes of the currently active theme.
@@ -163,6 +139,9 @@ func InitFromConfig(ui config.UIConfig) {
 		if cfg.Border != "" {
 			c.Border = cfg.Border
 		}
+		if cfg.BorderFocus != "" {
+			c.BorderFocus = cfg.BorderFocus
+		}
 		if cfg.Highlight != "" {
 			c.Highlight = cfg.Highlight
 		}
@@ -171,6 +150,21 @@ func InitFromConfig(ui config.UIConfig) {
 		}
 		if cfg.Muted != "" {
 			c.Muted = cfg.Muted
+		}
+		if cfg.TableHeader != "" {
+			c.TableHeader = cfg.TableHeader
+		}
+		if cfg.TableHeaderLine != "" {
+			c.TableHeaderLine = cfg.TableHeaderLine
+		}
+		if cfg.StatusBarBg != "" {
+			c.StatusBarBg = cfg.StatusBarBg
+		}
+		if cfg.StatusBarText != "" {
+			c.StatusBarText = cfg.StatusBarText
+		}
+		if cfg.Accent != "" {
+			c.Accent = cfg.Accent
 		}
 		if cfg.Error != "" {
 			c.Error = cfg.Error
@@ -230,6 +224,52 @@ func ColorMuted() string         { return Themes[getActiveTheme()].Colors.Muted 
 func ColorError() string         { return Themes[getActiveTheme()].Colors.Error }
 func ColorWarning() string       { return Themes[getActiveTheme()].Colors.Warning }
 
+// Granular accessors. Each falls back to a related role when its own value is
+// unset, so configs that only specify the original nine roles keep working and
+// users can override just the knobs they care about.
+
+func ColorBorderFocus() string {
+	if c := Themes[getActiveTheme()].Colors.BorderFocus; c != "" {
+		return c
+	}
+	return ColorHeading()
+}
+
+func ColorTableHeader() string {
+	if c := Themes[getActiveTheme()].Colors.TableHeader; c != "" {
+		return c
+	}
+	return ColorMuted()
+}
+
+func ColorTableHeaderLine() string {
+	if c := Themes[getActiveTheme()].Colors.TableHeaderLine; c != "" {
+		return c
+	}
+	return ColorBorder()
+}
+
+func ColorStatusBarBg() string {
+	if c := Themes[getActiveTheme()].Colors.StatusBarBg; c != "" {
+		return c
+	}
+	return ColorHighlight()
+}
+
+func ColorStatusBarText() string {
+	if c := Themes[getActiveTheme()].Colors.StatusBarText; c != "" {
+		return c
+	}
+	return ColorHighlightText()
+}
+
+func ColorAccent() string {
+	if c := Themes[getActiveTheme()].Colors.Accent; c != "" {
+		return c
+	}
+	return ColorHeading()
+}
+
 // FeatherColor returns theme colors by shade index for backwards compatibility.
 // shade 0 → Heading (primary), shade 1 → Border (secondary).
 func FeatherColor(shade int) string {
@@ -240,12 +280,13 @@ func FeatherColor(shade int) string {
 	return c.Border
 }
 
-// FeatherRail renders a decorative horizontal separator using heading/border colors.
+// FeatherRail renders a decorative horizontal separator using the heading and
+// accent colors.
 func FeatherRail(width int) string {
 	if width < 1 {
 		return ""
 	}
-	colors := []string{ColorHeading(), ColorBorder()}
+	colors := []string{ColorHeading(), ColorAccent()}
 	styles := []lipgloss.Style{
 		lipgloss.NewStyle().Foreground(lipgloss.Color(colors[0])),
 		lipgloss.NewStyle().Foreground(lipgloss.Color(colors[1])),
@@ -283,7 +324,7 @@ func PanelStyle() lipgloss.Style {
 
 func SelectedPanelStyle() lipgloss.Style {
 	return PanelStyle().
-		BorderForeground(lipgloss.Color(ColorHeading())).
+		BorderForeground(lipgloss.Color(ColorBorderFocus())).
 		Foreground(lipgloss.Color(ColorText()))
 }
 
@@ -332,7 +373,7 @@ func ModalStyle(width, height int) lipgloss.Style {
 		MaxWidth(width+2).
 		MaxHeight(height+2).
 		BorderStyle(lipgloss.RoundedBorder()).
-		BorderForeground(lipgloss.Color(ColorHeading())).
+		BorderForeground(lipgloss.Color(ColorBorderFocus())).
 		Foreground(lipgloss.Color(ColorText())).
 		Padding(1, 2)
 }
@@ -345,8 +386,8 @@ func StatusBarStyle(width int) lipgloss.Style {
 	return lipgloss.NewStyle().
 		Width(width).
 		MaxWidth(width+2).
-		Background(lipgloss.Color(ColorHighlight())).
-		Foreground(lipgloss.Color(ColorHighlightText())).
+		Background(lipgloss.Color(ColorStatusBarBg())).
+		Foreground(lipgloss.Color(ColorStatusBarText())).
 		Padding(0, 1)
 }
 

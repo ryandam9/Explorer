@@ -299,33 +299,66 @@ Global services (S3, IAM, Route53) are collected once regardless of the regions 
 
 ## Themes
 
-The TUI supports 12 built-in color themes, all named after birds. Set the active theme in `config.yaml` under `ui.theme` or with the `--theme` flag on the S3 subcommand.
+The TUI supports 12 built-in color themes, all named after Australian birds.
+Their colors come straight from the [feathers](https://github.com/shandiya/feathers)
+palettes (the same data rendered at
+[ryandam.net/demos/feathers_palettes](https://ryandam.net/demos/feathers_palettes/index.html)).
+Set the active theme in `config.yaml` under `ui.theme` or with the `--theme`
+flag on the S3 subcommand.
 
-| Theme Name | Description |
-|------------|-------------|
-| `spotted-pardalote` | Purple/violet (default) |
-| `plains-wanderer` | Green on dark |
-| `bee-eater` | Teal/cyan |
-| `rose-crowned-fruit-dove` | Navy and rose |
-| `eastern-rosella` | Yellow on dark navy |
-| `oriole` | Mint green on black |
-| `princess-parrot` | Pink on forest green |
-| `superb-fairy-wren` | Dodger blue on brown |
-| `cassowary` | Midnight blue and crimson |
-| `yellow-robin` | Gold on grey |
-| `galah` | Pink on grey |
-| `blue-winged-kookaburra` | Royal blue on chocolate |
+| Theme Name | Palette feel |
+|------------|--------------|
+| `spotted-pardalote` | Warm yellow, orange and red |
+| `plains-wanderer` | Cream, tan and golden brown |
+| `bee-eater` | Cyan, blue and amber |
+| `rose-crowned-fruit-dove` | Magenta, coral and green |
+| `eastern-rosella` | Yellow, lime and red |
+| `oriole` | Gold, salmon and lavender |
+| `princess-parrot` | Green, blue and pink (default) |
+| `superb-fairy-wren` | Rust, tan and cream |
+| `cassowary` | Teal, gold and pink |
+| `yellow-robin` | Bright yellow, slate and amber |
+| `galah` | Pink, blush and slate |
+| `blue-winged-kookaburra` | Light cyan, teal and orange |
 
-Each theme configures nine color roles: `heading`, `text`, `background`, `border`, `highlight`, `highlightText`, `muted`, `error`, `warning`. You can override any role in `config.yaml`:
+### Color roles
+
+Each theme configures granular color roles so that changing one part of the UI
+never bleeds into another. Set only the roles you want to change — any role you
+leave out falls back to a sensible related role (noted below).
+
+| Role | Used for | Fallback |
+|------|----------|----------|
+| `heading` | Titles and section headers | — |
+| `text` | Body / foreground text | — |
+| `background` | Panel backgrounds (empty = terminal default) | — |
+| `border` | Borders of unfocused panels | — |
+| `borderFocus` | Border of the focused panel | `heading` |
+| `highlight` | Selected table-row background | — |
+| `highlightText` | Text on the selected row | — |
+| `muted` | De-emphasised / secondary text | — |
+| `tableHeader` | Table column header text | `muted` |
+| `tableHeaderLine` | Rule drawn under table headers | `border` |
+| `statusBarBg` | Status bar background | `highlight` |
+| `statusBarText` | Status bar text | `highlightText` |
+| `accent` | Decorative rails, input prompts and cursors | `heading` |
+| `error` | Error messages and indicators | — |
+| `warning` | Warning messages and indicators | — |
+
+Override any role in `config.yaml` — for example, to recolor just the table
+header of the `oriole` theme without touching anything else:
 
 ```yaml
 ui:
   theme: oriole
   themes:
     oriole:
-      heading: "#34E0A1"
-      error: "#FF0000"    # override just this role
+      tableHeader: "#34E0A1"   # only the table header changes
+      error: "#FF0000"         # override just this role
 ```
+
+The in-app settings panel (press `S`) lets you edit every role live and saves
+your changes back to `config.yaml`.
 
 ## Architecture
 
