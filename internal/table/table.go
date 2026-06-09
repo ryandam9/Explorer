@@ -27,6 +27,14 @@ type Model struct {
 	focus  bool
 	styles Styles
 
+	// Horizontal column scrolling. width is the available render width (0 means
+	// unconstrained / show every column). frozenCols leading columns are pinned
+	// and always shown; colOffset counts how many of the remaining (scrollable)
+	// columns are hidden off the left edge.
+	width      int
+	colOffset  int
+	frozenCols int
+
 	viewport viewport.Model
 	start    int
 	end      int
@@ -140,6 +148,8 @@ func New(opts ...Option) Model {
 		cursor:   0,
 		viewport: viewport.New(0, 20), //nolint:mnd
 
+		frozenCols: 1, // pin the leading column (e.g. the row-number "#") by default
+
 		KeyMap: DefaultKeyMap(),
 		Help:   help.New(),
 		styles: DefaultStyles(),
@@ -179,6 +189,17 @@ func WithHeight(h int) Option {
 func WithWidth(w int) Option {
 	return func(m *Model) {
 		m.viewport.Width = w
+	}
+}
+
+// WithFrozenColumns sets how many leading columns are pinned (never scrolled
+// off) during horizontal column scrolling.
+func WithFrozenColumns(n int) Option {
+	return func(m *Model) {
+		if n < 0 {
+			n = 0
+		}
+		m.frozenCols = n
 	}
 }
 
@@ -321,13 +342,131 @@ func (m *Model) SetRows(r []Row) {
 // SetColumns sets a new columns state.
 func (m *Model) SetColumns(c []Column) {
 	m.cols = c
+	m.colOffset = 0 // new column set: start scrolled fully left
 	m.UpdateViewport()
 }
 
-// SetWidth sets the width of the viewport of the table.
+// SetWidth sets the render width available to the table. Columns that do not
+// fit are scrolled rather than truncated; see ScrollLeft / ScrollRight.
 func (m *Model) SetWidth(w int) {
+	m.width = w
 	m.viewport.Width = w
+	if max := m.maxColOffset(); m.colOffset > max {
+		m.colOffset = max
+	}
 	m.UpdateViewport()
+}
+
+// ScrollRight reveals the next hidden column on the right, if any.
+func (m *Model) ScrollRight() {
+	if m.colOffset < m.maxColOffset() {
+		m.colOffset++
+		m.UpdateViewport()
+	}
+}
+
+// ScrollLeft reveals the previous hidden column on the left, if any.
+func (m *Model) ScrollLeft() {
+	if m.colOffset > 0 {
+		m.colOffset--
+		m.UpdateViewport()
+	}
+}
+
+// ColScrollInfo reports how many scrollable (non-frozen) columns are currently
+// hidden off the left and right edges. Both zero means every column is visible.
+func (m Model) ColScrollInfo() (hiddenLeft, hiddenRight int) {
+	pos, frozen := m.layoutCols()
+	scroll := pos[frozen:]
+	if m.width <= 0 || len(scroll) == 0 {
+		return 0, 0
+	}
+	hiddenLeft = m.colOffset
+	if hiddenLeft > len(scroll) {
+		hiddenLeft = len(scroll)
+	}
+	visScroll := len(m.visibleCols()) - frozen
+	hiddenRight = len(scroll) - hiddenLeft - visScroll
+	if hiddenRight < 0 {
+		hiddenRight = 0
+	}
+	return hiddenLeft, hiddenRight
+}
+
+// layoutCols returns the indexes of columns with a positive width (the ones
+// that actually render) and the effective number of frozen leading columns.
+func (m Model) layoutCols() (pos []int, frozen int) {
+	for i, c := range m.cols {
+		if c.Width > 0 {
+			pos = append(pos, i)
+		}
+	}
+	frozen = m.frozenCols
+	if frozen > len(pos) {
+		frozen = len(pos)
+	}
+	return pos, frozen
+}
+
+// colSpan is the on-screen width a column occupies, including cell padding.
+func (m Model) colSpan(i int) int {
+	return m.cols[i].Width + m.styles.Cell.GetHorizontalPadding()
+}
+
+// visibleCols returns the column indexes to render given the current width and
+// scroll offset: the frozen columns followed by as many scrollable columns
+// (starting at colOffset) as fit.
+func (m Model) visibleCols() []int {
+	pos, frozen := m.layoutCols()
+	if m.width <= 0 {
+		return pos
+	}
+	res := append([]int{}, pos[:frozen]...)
+	used := 0
+	for _, i := range res {
+		used += m.colSpan(i)
+	}
+	scroll := pos[frozen:]
+	off := m.colOffset
+	if off > len(scroll) {
+		off = len(scroll)
+	}
+	for k := off; k < len(scroll); k++ {
+		span := m.colSpan(scroll[k])
+		if used+span > m.width && len(res) > frozen {
+			break
+		}
+		res = append(res, scroll[k])
+		used += span
+	}
+	return res
+}
+
+// maxColOffset is the largest colOffset that still fills the view from the
+// right edge, so scrolling never reveals empty space past the last column.
+func (m Model) maxColOffset() int {
+	pos, frozen := m.layoutCols()
+	scroll := pos[frozen:]
+	if m.width <= 0 || len(scroll) == 0 {
+		return 0
+	}
+	avail := m.width
+	for _, i := range pos[:frozen] {
+		avail -= m.colSpan(i)
+	}
+	used, fit := 0, 0
+	for k := len(scroll) - 1; k >= 0; k-- {
+		span := m.colSpan(scroll[k])
+		if used+span > avail && fit > 0 {
+			break
+		}
+		used += span
+		fit++
+	}
+	if mo := len(scroll) - fit; mo > 0 {
+		return mo
+	}
+	return 0
 }
 
 // SetHeight sets the height of the viewport of the table.
@@ -416,11 +555,10 @@ func (m *Model) FromValues(value, separator string) {
 }
 
 func (m Model) headersView() string {
-	s := make([]string, 0, len(m.cols))
-	for _, col := range m.cols {
-		if col.Width <= 0 {
-			continue
-		}
+	vis := m.visibleCols()
+	s := make([]string, 0, len(vis))
+	for _, i := range vis {
+		col := m.cols[i]
 		style := lipgloss.NewStyle().Width(col.Width).MaxWidth(col.Width).Inline(true)
 		renderedCell := style.Render(runewidth.Truncate(col.Title, col.Width, "…"))
 		s = append(s, m.styles.Header.Render(renderedCell))
@@ -429,7 +567,8 @@ func (m Model) headersView() string {
 }
 
 func (m *Model) renderRow(r int) string {
-	s := make([]string, 0, len(m.cols))
+	vis := m.visibleCols()
+	s := make([]string, 0, len(vis))
 
 	// For the selected row, build a cell style that uses Cell's padding but
 	// overrides colors/bold from Selected. This ensures the highlight background
@@ -443,9 +582,10 @@ func (m *Model) renderRow(r int) string {
 			Bold(m.styles.Selected.GetBold())
 	}
 
-	for i, value := range m.rows[r] {
-		if m.cols[i].Width <= 0 {
-			continue
+	for _, i := range vis {
+		var value string
+		if i < len(m.rows[r]) {
+			value = m.rows[r][i]
 		}
 		style := lipgloss.NewStyle().Width(m.cols[i].Width).MaxWidth(m.cols[i].Width).Inline(true)
 		truncated := style.Render(runewidth.Truncate(value, m.cols[i].Width, "…"))

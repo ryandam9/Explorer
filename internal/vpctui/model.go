@@ -81,10 +81,10 @@ type Model struct {
 	allVPCs    []VPCInfo
 
 	// Multi-region scan
-	scanTotal int
-	scanDone  int
-	scanning  bool
-	seenVPCs  map[string]bool
+	scanTotal  int
+	scanDone   int
+	scanning   bool
+	seenVPCs   map[string]bool
 	allRegions bool
 
 	// VPC search
@@ -92,10 +92,10 @@ type Model struct {
 	vpcSearch   textinput.Model
 
 	// Resource browser (stateResourceBrowser)
-	selectedVPC     *VPCInfo
-	sidebarItems    []sidebarItem
+	selectedVPC      *VPCInfo
+	sidebarItems     []sidebarItem
 	activeSidebarIdx int
-	activeResource  resourceType
+	activeResource   resourceType
 
 	resourceTable   table.Model
 	resourceMaps    map[resourceType][]map[string]string
@@ -111,10 +111,10 @@ type Model struct {
 	width  int
 	height int
 
-	spinner  spinner.Model
+	spinner   spinner.Model
 	statusMsg string
-	err      error
-	loading  bool
+	err       error
+	loading   bool
 
 	// Settings / help
 	showHelp     bool
@@ -209,7 +209,14 @@ func (m *Model) initVPCTable() {
 
 func (m *Model) initResourceTable(rt resourceType) {
 	cols := display.Columns(m.colFields(rt))
-	m.resourceTable = table.New(table.WithColumns(cols), table.WithFocused(false), table.WithHeight(15))
+	// Freeze the row-number column plus the first data column (the resource's
+	// identifier) so it stays pinned while the wider columns scroll horizontally.
+	m.resourceTable = table.New(
+		table.WithColumns(cols),
+		table.WithFocused(false),
+		table.WithHeight(15),
+		table.WithFrozenColumns(2),
+	)
 	m.applyTableStyle(&m.resourceTable)
 }
 
@@ -594,6 +601,12 @@ func (m *Model) handleResourceTableKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.focus = focusCategory
 		m.resourceTable.Blur()
 		return m, nil
+	case ">", ".":
+		m.resourceTable.ScrollRight()
+		return m, nil
+	case "<", ",":
+		m.resourceTable.ScrollLeft()
+		return m, nil
 	case "r":
 		return m, m.refreshResources()
 	case "c":
@@ -686,6 +699,9 @@ func (m *Model) updateTableSizes() {
 		rightWidth = 20
 	}
 	m.resourceTable.SetHeight(tableH)
+	// Inner content area = panel width minus its horizontal padding (0,1). The
+	// table uses this to decide how many columns fit before scrolling kicks in.
+	m.resourceTable.SetWidth(rightWidth - 2)
 
 	// Resize detail viewport.
 	dvW := m.width - 8
@@ -895,6 +911,21 @@ func (m *Model) viewResourcePanel(height int) string {
 		Bold(true).
 		Foreground(lipgloss.Color(ui.ColorHeading()))
 
+	// Column-scroll indicator: shows arrows when columns are hidden off either
+	// edge so the user knows there is more to scroll to with < / >.
+	var scrollHint string
+	if hiddenLeft, hiddenRight := m.resourceTable.ColScrollInfo(); hiddenLeft+hiddenRight > 0 {
+		left, right := " ", " "
+		if hiddenLeft > 0 {
+			left = "◀"
+		}
+		if hiddenRight > 0 {
+			right = "▶"
+		}
+		scrollHint = lipgloss.NewStyle().Foreground(lipgloss.Color(ui.ColorMuted())).
+			Render(fmt.Sprintf("  %s %d more cols %s", left, hiddenLeft+hiddenRight, right))
+	}
+
 	var body string
 	switch {
 	case m.resourceLoading:
@@ -909,7 +940,8 @@ func (m *Model) viewResourcePanel(height int) string {
 		body = m.resourceTable.View()
 	}
 
-	content := lipgloss.JoinVertical(lipgloss.Left, titleStyle.Render(title), "", body)
+	header := lipgloss.JoinHorizontal(lipgloss.Left, titleStyle.Render(title), scrollHint)
+	content := lipgloss.JoinVertical(lipgloss.Left, header, "", body)
 
 	// A resource table can be wider than the panel on narrow terminals. Clip
 	// each line to the panel's inner width so the rightmost column truncates
@@ -1002,7 +1034,7 @@ func (m *Model) viewStatusBar() string {
 		case focusCategory:
 			hint = "↑↓=navigate  Enter=load  Tab=resource table  Esc=back  ?=help  q=quit"
 		case focusResourceTable:
-			hint = "↑↓=navigate  Enter=detail  c=copy  r=refresh  Tab=categories  Esc=back  ?=help  q=quit"
+			hint = "↑↓=navigate  <>=scroll cols  Enter=detail  c=copy  r=refresh  Tab=categories  Esc=back  ?=help  q=quit"
 		}
 	}
 
@@ -1030,6 +1062,7 @@ func (m *Model) helpText() string {
 		"",
 		lipgloss.NewStyle().Foreground(lipgloss.Color(ui.ColorMuted())).Render("Resource Browser"),
 		"  ↑ ↓      Navigate category sidebar or resource table",
+		"  < >      Scroll table columns left/right (when wider than panel)",
 		"  Tab      Switch focus between sidebar and resource table",
 		"  Enter    Load resource type (sidebar) / open detail (table)",
 		"  c        Copy resource ID to clipboard",
