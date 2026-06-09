@@ -6,8 +6,8 @@ Discover, monitor, and display AWS resources across accounts and regions via CLI
 
 - **Four modes**: CLI (streaming table/JSON output), TUI (interactive exploration), VPC Explorer TUI (drill into a VPC's networking), S3 TUI (dedicated S3 browser)
 - **15 services**: EC2, S3, RDS, IAM, DynamoDB, Lambda, EMR, ECS, EKS, ELBv2, Secrets Manager, SQS, SNS, CloudWatch, Route53
-- **VPC Explorer**: browse a VPC's subnets, security groups, route tables, gateways, endpoints, NACLs, peering, flow logs, and attached compute/services in a three-pane TUI
-- **Plain-English rule explanations**: Security Group and Network ACL rules are translated into readable sentences with `⚠` risk flags for sensitive ports exposed to the internet — no AI required
+- **VPC Explorer**: browse a VPC's subnets, security groups, network interfaces, route tables, gateways, endpoints, NACLs, peering, flow logs, and attached compute/services in a three-pane TUI
+- **VPC debugging toolkit** (no AI, deterministic): a findings linter, a connectivity path tracer, plain-English SG/NACL rule explanations, cross-reference ("where used"), merged effective security rules, DNS diagnostics, a public-exposure audit, snapshot diffing, Markdown export, and AWS Reachability Analyzer integration — see [VPC Debugging Toolkit](#vpc-debugging-toolkit)
 - **Config-driven**: YAML configuration for services, regions, filters, output, and per-resource display columns
 - **5 auth methods**: auto (SDK default chain), profile, env vars, static credentials, STS AssumeRole
 - **Output formats**: Table (default), JSON
@@ -166,37 +166,76 @@ If `--region` is omitted, all regions are scanned for VPCs.
 
 ### Resource categories
 
-- **NETWORK** — Subnets, Security Groups, Route Tables, Internet Gateways, NAT Gateways, VPC Endpoints, Network ACLs, Peering, Flow Logs
+The middle pane groups the resource types a VPC contains. Selecting one (with
+`Enter`) loads it into the right-hand table.
+
+- **NETWORK** — Subnets, Security Groups, **Network Interfaces** (ENIs), Route Tables, Internet Gateways, NAT Gateways, VPC Endpoints, Network ACLs, Peering, Flow Logs
 - **COMPUTE** — EC2 Instances, Lambda Functions
 - **SERVICES** — RDS Instances, Load Balancers
 
-### VPC Explorer Keyboard Shortcuts
+Each table shows a default set of columns; the full attribute set (plus tags,
+rule lists, etc.) appears in the **detail overlay** when you press `Enter` on a
+row. Which columns and detail fields are shown can be overridden per resource
+type in `config.yaml` — see [Customizing displayed columns](#customizing-displayed-columns).
+
+### Keyboard shortcuts
+
+**Navigation**
 
 | Key | Action |
 |-----|--------|
-| `↑` / `↓` / `j` / `k` | Navigate the VPC list, category sidebar, or resource table |
-| `Enter` | Open a VPC / load a category / open the resource detail overlay |
+| `↑` / `↓` / `j` / `k` | Move within the VPC list, category sidebar, or resource table |
+| `Enter` | Open a VPC · load a category · open the selected row's detail overlay |
 | `Tab` | Switch focus between the category sidebar and the resource table |
 | `<` / `>` (or `,` / `.`) | Scroll table columns left/right when a table is wider than the panel |
-| `/` | Filter the VPC list by name or ID |
-| `c` | Copy the selected resource ID to the clipboard |
+| `/` | Filter the VPC list by name or ID (VPC list only) |
+| `c` | Copy the selected resource's ID to the clipboard |
 | `r` | Refresh the VPC list or the current resource list |
-| `Esc` | Go back (detail → table → VPC list) |
+| `Esc` | Go back one level (overlay → table → sidebar → VPC list) |
 | `S` | Open the settings panel (themes & colors) |
-| `?` | Toggle help |
+| `?` | Toggle the help overlay |
 | `q` / `Ctrl+C` | Quit |
+
+**Debugging toolkit** (available in the resource browser)
+
+| Key | Action | Cost |
+|-----|--------|------|
+| `F` | **Findings** — run the VPC linter and list ranked issues | free |
+| `t` | **Trace** — connectivity path tracer from the selected network interface | free |
+| `x` | **Where used** — cross-reference the selected resource | free |
+| `e` | **Effective rules** — merged security-group rules for the selected ENI | free |
+| `D` | **DNS** — the VPC's DNS resolution / hostnames / DHCP options | free |
+| `P` | **Public exposure** — everything reachable from the internet | free |
+| `w` | **What changed** — baseline the VPC, then diff against it later | free |
+| `E` | **Export** — write a Markdown report of resources + findings | free |
+| `A` | **Reachability Analyzer** — list AWS Network Insights analyses; create new ones | listing free; creating ~$0.10/analysis |
+
+Inside any overlay, `↑` / `↓` scroll and `Esc` (or the same trigger key) closes it.
 
 ### Horizontal column scrolling
 
-Wide tables (e.g. Security Groups) don't truncate or drop columns on narrow
-terminals. The leading identifier columns stay pinned while the rest scroll with
-`<` / `>`; a `◀ N more cols ▶` indicator shows when columns are off-screen.
+Wide tables (e.g. Security Groups, with ~106 columns of data) don't truncate or
+drop columns on narrow terminals. The leading identifier columns stay **pinned**
+while the remaining columns scroll with `<` / `>`; a `◀ N more cols ▶` indicator
+in the panel header shows when columns are hidden off either edge.
+
+---
+
+## VPC Debugging Toolkit
+
+The VPC Explorer is built for the questions a cloud/support engineer actually
+asks. Every analysis below is **deterministic** — computed locally from the
+resources AWS returns, with no AI — and the one feature that can change anything
+in AWS (`A`) is read-only by default and asks for confirmation before any paid
+call. Most overlays fetch a one-shot *snapshot* of the VPC's networking
+(subnets, security groups, ENIs, route tables, gateways, NACLs, peerings,
+endpoints) and reason over it.
 
 ### Plain-English rule explanations
 
 Opening the detail overlay (`Enter`) for a **Security Group** or **Network ACL**
 adds an "In plain English" section that translates each rule into a readable
-sentence, for example:
+sentence:
 
 ```
   In plain English:
@@ -205,13 +244,203 @@ sentence, for example:
   • Allow inbound MySQL/Aurora (TCP 3306) from resources in security group sg-0abc123
 ```
 
-Well-known ports are named, CIDRs are classified (public / IPv6 / single host /
-RFC1918 private), and security-group / prefix-list references are resolved.
-Rules that expose sensitive ports (remote-admin, databases, or all ports) to the
-public internet are flagged with `⚠`; ordinary public web ports are not, to
-avoid alert fatigue. NACL explanations additionally show the rule number, the
-allow/deny action, and a reminder that NACLs are stateless and evaluated in
-ascending rule-number order (first match wins).
+- **Ports** are named from a table of ~60 well-known services (22→SSH, 443→HTTPS, 3306→MySQL/Aurora, 5432→PostgreSQL, 6379→Redis, 3389→RDP, …).
+- **Sources/destinations** are classified: public (`0.0.0.0/0`), IPv6 (`::/0`), single host (`/32`), RFC1918 private networks, security-group references (`sg-…`), and prefix lists (`pl-…`).
+- **Risk flags (`⚠`)** are added only for genuinely dangerous exposure to the public internet — remote-admin ports (SSH/RDP/VNC/Telnet), database/cache ports, all-ports/all-traffic, or a port range spanning sensitive ports. Ordinary public web ports (HTTP/HTTPS) are intentionally **not** flagged, to avoid alert fatigue.
+- **NACL** explanations additionally show the rule number and allow/deny action, label the catch-all as `Rule * (default)`, and note that NACLs are **stateless** and evaluated in ascending rule-number order (first match wins).
+
+### Findings linter (`F`)
+
+Scans the whole VPC and opens a scrollable, severity-grouped list of issues
+(`🔴 critical`, `🟡 warning`, `🔵 info`), sorted most-severe first:
+
+```
+VPC Findings — 1 critical, 2 warning, 0 info
+
+🔴 CRITICAL  Security group exposes a sensitive port to the internet  [sg-0a1]
+   sg-0a1 (default): Allow inbound SSH (TCP 22) from anywhere on the internet (0.0.0.0/0)
+   Fix: Restrict the source to specific CIDRs or a security group instead of 0.0.0.0/0.
+```
+
+Each finding has a **title**, the **resource** it concerns, a **detail** of why
+it fired, and a suggested **fix**. The checks:
+
+| Area | Finding | Severity |
+|------|---------|----------|
+| Security groups | Sensitive port (admin/database/all) open to `0.0.0.0/0` | 🔴 critical |
+| Security groups | Rule references a security group not in this VPC | 🔵 info |
+| Route tables | Blackhole route (target deleted) | 🟡 warning |
+| Subnets | Low available IPs / >90% utilization | 🟡 warning |
+| Subnets | Auto-assign public IP but no internet-gateway route | 🟡 warning |
+| Subnets | No outbound internet path (no IGW/NAT route) | 🔵 info |
+| NAT gateways | Available but unreferenced by any route (idle, still billing) | 🟡 warning |
+| Internet gateways | Detached from the VPC | 🔵 info |
+| Network ACLs | Stateless return-traffic gap (ephemeral ports not allowed back) | 🟡 warning |
+| Peering | Overlapping CIDRs · not active | 🟡 / 🔵 |
+| VPC endpoints | Gateway endpoint with no route-table association | 🟡 warning |
+| VPC endpoints | Interface endpoint SGs don't allow inbound 443 · private DNS off | 🟡 / 🔵 |
+| **Capacity** | Rules per SG (limit 60), routes per route table (50), SGs per ENI (5), subnets per VPC (200) | 🟡 ≥80%, 🔴 at limit |
+| **Orphans** | Security group attached to nothing & unreferenced · empty subnet | 🔵 info |
+
+The NACL stateless check is careful to *not* flag the correct "inbound 443 +
+outbound ephemeral" pattern. Capacity limits are AWS defaults (adjustable via
+Service Quotas). Orphan checks are skipped if ENI data is unavailable.
+
+### Connectivity path tracer (`t`)
+
+The "can't connect" doctor. From a selected **Network Interface**, press `t` and
+enter a destination as `IP[:port]` (or `internet:443`). It walks the path the
+way AWS evaluates it and reports the **first hop that blocks** the connection:
+
+```
+❌ Blocked at: Destination security group ingress
+
+• Source                              eni-web (10.0.0.10) in subnet subnet-pub
+✓ Security group egress               sg-web allows all traffic
+✓ Source NACL egress                  acl-default rule 100 allows it
+✓ Route table                         10.0.0.0/16 → local (local)
+✓ Destination NACL ingress            acl-default rule 100 allows it
+✗ Destination security group ingress  no ingress rule on sg-db allows TCP 5432 from 10.0.0.10
+```
+
+It evaluates, in order: source security-group **egress** (stateful) → source
+NACL **egress** (stateless, ordered, first-match-wins) → **route-table**
+longest-prefix lookup (local / IGW / NAT / blackhole) → for in-VPC
+destinations, the destination NACL **ingress** and security-group **ingress**
+(resolving `sg-` references against the peer ENI) → and the **stateless return
+path** (ephemeral ports 1024–65535). Internet via an internet gateway requires
+the source to hold a public IP/EIP; via a NAT gateway it's treated as private
+egress.
+
+### Cross-reference — "where used" (`x`)
+
+On any resource, `x` shows everything that references it and what it
+references, turning the flat tables into a navigable graph:
+
+```
+Where used: subnet-priv
+Route table  (1)                    • rtb-priv
+Network ACL  (1)                    • acl-priv
+Network interfaces in subnet  (1)   • eni-b
+```
+
+Covered: **security groups** (attached ENIs + their instances, and other SGs
+referencing them), **subnets** (route table & NACL — including the implicit
+main/default when unassociated — plus ENIs and NAT gateways), **route tables**
+(associated subnets and non-local targets), **network interfaces**
+(instance/subnet/SGs), **NAT & internet gateways** (route tables routing to
+them), and **network ACLs** (associated subnets).
+
+### Effective security rules (`e`)
+
+An ENI can carry several security groups, and AWS evaluates the **union** of
+their rules. On a Network Interface, `e` shows the merged, de-duplicated
+inbound/outbound rules in plain English, annotated with the contributing
+group(s):
+
+```
+Effective rules: eni-app
+Security groups: sg-a, sg-b
+
+Inbound  (3)
+  • Allow inbound HTTPS (TCP 443) from anywhere on the internet (0.0.0.0/0)
+      via sg-a, sg-b          ← identical rule in both groups, collapsed
+Network ACL acl-1 also applies to this subnet (stateless, evaluated separately).
+```
+
+### DNS & VPC attributes (`D`)
+
+For the "DNS doesn't resolve in my VPC" case. Shows the attributes plus
+diagnostic notes:
+
+```
+DNS resolution        Enabled
+DNS hostnames         Disabled
+DHCP options set      dopt-abc
+Domain name servers   10.0.0.2, 8.8.8.8
+Domain name           corp.internal
+
+Notes
+  🟡 DNS hostnames disabled — interface VPC endpoints' private DNS will not resolve.
+  • Custom DNS servers bypass the Amazon Route 53 Resolver; private hosted zones /
+    endpoint private DNS may not resolve unless those servers forward to it.
+```
+
+`enableDnsSupport` off is flagged critical, `enableDnsHostnames` off is a
+warning, and custom DHCP DNS servers are noted as info.
+
+### Public exposure (`P`)
+
+A one-screen audit of the VPC's internet-facing surface:
+
+```
+Public exposure — internet-facing surface
+Public subnets (route to an internet gateway)                    (1)  • subnet-pub
+Security groups open to the internet (inbound from 0.0.0.0/0)    (1)  • sg-web (web) — HTTPS (TCP 443)
+Network interfaces with a public IP                              (1)  • eni-pub (52.1.1.1) → i-web
+```
+
+Public subnets are those routing to an internet gateway; SGs list their
+internet-open ports in plain English (SG-to-SG references excluded); ENIs are
+those holding a public IP/EIP.
+
+### Snapshot diff — "what changed" (`w`)
+
+For "it worked yesterday". The first `w` on a VPC saves a baseline snapshot;
+later, `w` diffs the live VPC against it and shows exactly what changed —
+added/removed resources and, for resources that still exist, the specific facts
+(rules, routes, attributes) that were added or removed:
+
+```
+Changes since baseline — 1 added, 1 removed, 1 modified
++ Security group sg-new
+- Security group sg-old
+~ Security group sg-web
+    + inbound|tcp|22|10.0.0.0/8
+```
+
+Baselines are stored as JSON in `~/.aws_explorer/vpc-snapshots/<vpc-id>.json`.
+Inside the overlay, `b` re-baselines to the current state. Volatile fields (like
+available-IP counts) are deliberately excluded so they don't create noise.
+
+### Markdown export (`E`)
+
+Writes a self-contained Markdown report — a resource-count summary, all findings
+grouped by severity with fixes, and inventory tables (subnets, security groups,
+route tables, NAT gateways, endpoints, network interfaces) — to
+`~/.aws_explorer/exports/<vpc-id>-<timestamp>.md`. Ideal for pasting into a
+support case or runbook. The status bar shows the path.
+
+### AWS Reachability Analyzer (`A`)
+
+Integrates the authoritative AWS [Reachability Analyzer](https://docs.aws.amazon.com/vpc/latest/reachability/what-is-reachability-analyzer.html).
+**Read-only by default** — `A` lists the Network Insights analyses that already
+exist in the account, each as `source → destination:port` with a
+`reachable` / `not reachable` / `running` / `failed` verdict:
+
+```
+Reachability Analyzer
+✓ eni-web → eni-db:3306 (tcp)  [reachable]       2026-06-09 10:00
+✗ eni-web → igw-1 (tcp)  [not reachable]         2026-06-09 11:30
+```
+
+Creating a new analysis is **opt-in**: press `n`, enter
+`source -> destination[:port]` (prefilled with the selected network interface),
+then confirm a prompt that **states the cost** before anything is created:
+
+```
+⚠ This creates AWS resources and incurs a per-analysis charge (~$0.10).
+  eni-web → eni-db:3306
+y = create and run  •  n/Esc = cancel
+```
+
+On confirmation it creates a Network Insights path, starts the analysis, polls
+until it completes (up to ~2 minutes), and prepends the result. This is the only
+VPC Explorer feature that mutates AWS or incurs a charge.
+
+> **Files written by the toolkit.** Snapshots: `~/.aws_explorer/vpc-snapshots/`.
+> Exports: `~/.aws_explorer/exports/`. Both directories are created on demand.
+> All other features are purely in-memory.
 
 ## S3 TUI Usage
 
