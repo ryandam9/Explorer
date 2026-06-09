@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/atotto/clipboard"
 	"github.com/charmbracelet/bubbles/spinner"
@@ -89,6 +90,11 @@ type diffDoneMsg struct {
 	baseline    vpcSnapshot
 	hasBaseline bool
 	err         error
+}
+
+type exportDoneMsg struct {
+	path string
+	err  error
 }
 
 // ---------------------------------------------------------------------------
@@ -531,6 +537,26 @@ func (m *Model) loadDiff() tea.Cmd {
 	}
 }
 
+// exportReport builds a snapshot, analyzes it, and writes a Markdown report to
+// disk, returning the path in the status bar.
+func (m *Model) exportReport() tea.Cmd {
+	if m.selectedVPC == nil {
+		return nil
+	}
+	m.statusMsg = "Exporting VPC report…"
+	client := m.client
+	vpcID := m.selectedVPC.ID
+	region := m.selectedVPC.Region
+	return func() tea.Msg {
+		snap, err := buildVPCSnapshot(client, vpcID)
+		if err != nil {
+			return exportDoneMsg{err: err}
+		}
+		path, err := writeExport(snap, analyzeVPC(snap), region, time.Now())
+		return exportDoneMsg{path: path, err: err}
+	}
+}
+
 // loadDNS fetches the selected VPC's DNS attributes and opens the DNS overlay.
 func (m *Model) loadDNS() tea.Cmd {
 	if m.selectedVPC == nil {
@@ -757,6 +783,13 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.dnsVP.SetContent(m.renderDNS())
 		m.dnsVP.GotoTop()
 
+	case exportDoneMsg:
+		if msg.err != nil {
+			m.statusMsg = "Export failed: " + msg.err.Error()
+		} else {
+			m.statusMsg = "Exported VPC report to " + msg.path
+		}
+
 	case diffDoneMsg:
 		m.diffLoading = false
 		m.currentSnap = msg.current
@@ -962,6 +995,11 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		// Snapshot diff: baseline on first use, "what changed" thereafter.
 		if m.state == stateResourceBrowser && m.selectedVPC != nil {
 			return m, m.loadDiff()
+		}
+	case "E":
+		// Export a Markdown report of the VPC + findings.
+		if m.state == stateResourceBrowser && m.selectedVPC != nil {
+			return m, m.exportReport()
 		}
 	}
 
@@ -2190,6 +2228,7 @@ func (m *Model) helpText() string {
 		"  F        Run the VPC findings linter (security/routing/capacity issues)",
 		"  D        Show the VPC's DNS configuration (resolution, hostnames, DHCP)",
 		"  w        What changed: baseline the VPC, then diff against it later",
+		"  E        Export a Markdown report (resources + findings) to a file",
 		"  t        Trace connectivity from the selected network interface",
 		"  x        Cross-reference the selected resource (where used)",
 		"  e        Effective merged security rules (network interface)",
