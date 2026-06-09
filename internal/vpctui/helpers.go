@@ -449,6 +449,8 @@ func naclToMap(nacl NACLInfo) map[string]string {
 		sb.WriteString(fmt.Sprintf("\n  %-8d %-8s %-10s %-20s %s", r.RuleNumber, r.Protocol, r.PortRange, r.CIDR, r.Action))
 	}
 
+	sb.WriteString(encodeNACLExplanations(inbound, outbound))
+
 	return map[string]string{
 		"nacl_id":      nacl.ID,
 		"name":         orDash(nacl.Name),

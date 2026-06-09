@@ -97,8 +97,8 @@ func explainSGRule(r SGRule) string {
 		verb, prep = "Allow outbound", "to"
 	}
 
-	sentence := verb + " " + describeProtoPorts(r) + " " + prep + " " + describeSource(r.Source)
-	if note := sgRuleRisk(r); note != "" {
+	sentence := verb + " " + describeProtoPorts(r.Protocol, r.PortRange) + " " + prep + " " + describeSource(r.Source)
+	if note := exposureRisk(r.Protocol, r.PortRange, r.Source); note != "" {
 		sentence += "  " + note
 	}
 	return sentence
@@ -106,12 +106,12 @@ func explainSGRule(r SGRule) string {
 
 // describeProtoPorts turns the protocol + port range into a readable phrase such
 // as "HTTPS (TCP 443)", "all TCP ports", or "all traffic".
-func describeProtoPorts(r SGRule) string {
-	proto := strings.TrimSpace(r.Protocol)
+func describeProtoPorts(protocol, portRange string) string {
+	proto := strings.TrimSpace(protocol)
 	if proto == "" || strings.EqualFold(proto, "All") {
 		return "all traffic"
 	}
-	ports := strings.TrimSpace(r.PortRange)
+	ports := strings.TrimSpace(portRange)
 	if ports == "" || strings.EqualFold(ports, "All") {
 		return "all " + proto + " ports"
 	}
@@ -150,14 +150,15 @@ func describeSource(src string) string {
 	}
 }
 
-// sgRuleRisk returns a warning when a rule allows a sensitive port (or all
-// ports) from the public internet. It returns "" for low-risk rules.
-func sgRuleRisk(r SGRule) string {
-	if !isPublicSource(r.Source) {
+// exposureRisk returns a warning when a rule allows a sensitive port (or all
+// ports) from the public internet. It returns "" for low-risk rules. It is
+// shared by the Security Group and Network ACL explanations.
+func exposureRisk(protocol, portRange, source string) string {
+	if !isPublicSource(source) {
 		return ""
 	}
-	proto := strings.TrimSpace(r.Protocol)
-	ports := strings.TrimSpace(r.PortRange)
+	proto := strings.TrimSpace(protocol)
+	ports := strings.TrimSpace(portRange)
 
 	if proto == "" || strings.EqualFold(proto, "All") || strings.EqualFold(ports, "All") {
 		return "⚠ ALL ports open to the entire internet"
