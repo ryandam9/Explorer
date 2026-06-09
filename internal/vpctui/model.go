@@ -12,6 +12,7 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/user/aws_explorer/internal/config"
+	"github.com/user/aws_explorer/internal/display"
 	"github.com/user/aws_explorer/internal/table"
 	"github.com/user/aws_explorer/internal/ui"
 )
@@ -49,10 +50,9 @@ type regionScannedMsg struct {
 }
 
 type resourcesLoadedMsg struct {
-	rt      resourceType
-	rows    []table.Row
-	details [][]string
-	err     error
+	rt   resourceType
+	maps []map[string]string
+	err  error
 }
 
 type errMsg struct{ err error }
@@ -97,8 +97,7 @@ type Model struct {
 	activeResource  resourceType
 
 	resourceTable   table.Model
-	resourceRows    map[resourceType][]table.Row
-	resourceDetails map[resourceType][][]string
+	resourceMaps    map[resourceType][]map[string]string
 	resourceLoading bool
 	resourceErr     error
 
@@ -158,8 +157,7 @@ func NewModel(
 		region:           region,
 		allRegions:       allRegions,
 		seenVPCs:         make(map[string]bool),
-		resourceRows:     make(map[resourceType][]table.Row),
-		resourceDetails:  make(map[resourceType][][]string),
+		resourceMaps:     make(map[resourceType][]map[string]string),
 		themeIdx:         themeIdx,
 		configPath:       configPath,
 		cfg:              cfg,
@@ -209,9 +207,55 @@ func (m *Model) initVPCTable() {
 }
 
 func (m *Model) initResourceTable(rt resourceType) {
-	cols := columnsFor(rt)
+	cols := display.Columns(m.colFields(rt))
 	m.resourceTable = table.New(table.WithColumns(cols), table.WithFocused(false), table.WithHeight(15))
 	m.applyTableStyle(&m.resourceTable)
+}
+
+// rebuildResourceTable refreshes columns and rows for m.activeResource from cached maps.
+func (m *Model) rebuildResourceTable() {
+	rt := m.activeResource
+	maps := m.resourceMaps[rt]
+	colFields := m.colFields(rt)
+	m.resourceTable.SetColumns(display.Columns(colFields))
+	rows := make([]table.Row, len(maps))
+	for i, r := range maps {
+		rows[i] = display.Row(colFields, r)
+	}
+	m.resourceTable.SetRows(seqRows(rows))
+}
+
+// colFields returns the resolved column FieldMeta list for rt, applying any
+// user config overrides on top of the built-in defaults.
+func (m *Model) colFields(rt resourceType) []display.FieldMeta {
+	key := rtKey(rt)
+	fields, ok := display.VPCFields[key]
+	if !ok {
+		return nil
+	}
+	var cfgCols []string
+	if m.cfg != nil {
+		if rd, ok := m.cfg.Display.VPC[key]; ok {
+			cfgCols = rd.Columns
+		}
+	}
+	return display.ResolveColumns(fields, cfgCols)
+}
+
+// detailFields returns the resolved detail FieldMeta list for rt.
+func (m *Model) detailFields(rt resourceType) []display.FieldMeta {
+	key := rtKey(rt)
+	fields, ok := display.VPCFields[key]
+	if !ok {
+		return nil
+	}
+	var cfgDetail []string
+	if m.cfg != nil {
+		if rd, ok := m.cfg.Display.VPC[key]; ok {
+			cfgDetail = rd.Detail
+		}
+	}
+	return display.ResolveDetail(fields, cfgDetail)
 }
 
 func (m *Model) applyTableStyle(t *table.Model) {
@@ -265,32 +309,26 @@ func (m *Model) loadVPCs() tea.Cmd {
 func (m *Model) loadResources(rt resourceType) tea.Cmd {
 	m.resourceLoading = true
 	m.resourceErr = nil
-	if _, cached := m.resourceRows[rt]; cached {
-		// Return cached data instantly.
-		rows := m.resourceRows[rt]
-		details := m.resourceDetails[rt]
+	if cached, ok := m.resourceMaps[rt]; ok {
 		return func() tea.Msg {
-			return resourcesLoadedMsg{rt: rt, rows: rows, details: details}
+			return resourcesLoadedMsg{rt: rt, maps: cached}
 		}
 	}
 	client := m.client
 	vpcID := m.selectedVPC.ID
 	return func() tea.Msg {
-		data, err := fetchResourceData(client, rt, vpcID)
-		return resourcesLoadedMsg{rt: rt, rows: data.rows, details: data.details, err: err}
+		maps, err := fetchResourceMaps(client, rt, vpcID)
+		return resourcesLoadedMsg{rt: rt, maps: maps, err: err}
 	}
 }
 
 func (m *Model) refreshResources() tea.Cmd {
-	// Invalidate cache for active resource type and reload.
-	delete(m.resourceRows, m.activeResource)
-	delete(m.resourceDetails, m.activeResource)
+	delete(m.resourceMaps, m.activeResource)
 	return m.loadResources(m.activeResource)
 }
 
 func (m *Model) enterVPC(vpc VPCInfo) tea.Cmd {
 	m.selectedVPC = &vpc
-	// Re-create client scoped to the VPC's region.
 	if vpc.Region != "" && vpc.Region != m.region {
 		client, err := NewVPCClient(m.client.ctx, m.awsCfg, vpc.Region)
 		if err != nil {
@@ -299,9 +337,7 @@ func (m *Model) enterVPC(vpc VPCInfo) tea.Cmd {
 		}
 		m.client = client
 	}
-	// Flush cache when switching VPCs.
-	m.resourceRows = make(map[resourceType][]table.Row)
-	m.resourceDetails = make(map[resourceType][][]string)
+	m.resourceMaps = make(map[resourceType][]map[string]string)
 	m.state = stateResourceBrowser
 	m.focus = focusCategory
 	return m.loadResources(m.activeResource)
@@ -384,10 +420,9 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if msg.err != nil {
 			m.resourceErr = msg.err
 		} else {
-			m.resourceRows[msg.rt] = msg.rows
-			m.resourceDetails[msg.rt] = msg.details
+			m.resourceMaps[msg.rt] = msg.maps
 			if msg.rt == m.activeResource {
-				m.resourceTable.SetRows(msg.rows)
+				m.rebuildResourceTable()
 			}
 		}
 
@@ -533,8 +568,8 @@ func (m *Model) handleCategoryKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.activeResource = item.rt
 		m.initResourceTable(m.activeResource)
 		m.updateTableSizes()
-		if rows, ok := m.resourceRows[m.activeResource]; ok {
-			m.resourceTable.SetRows(rows)
+		if _, cached := m.resourceMaps[m.activeResource]; cached {
+			m.rebuildResourceTable()
 		}
 		return m, m.loadResources(m.activeResource)
 	}
@@ -562,12 +597,16 @@ func (m *Model) handleResourceTableKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 		return m, nil
 	case "enter":
-		rows := m.resourceRows[m.activeResource]
-		details := m.resourceDetails[m.activeResource]
+		maps := m.resourceMaps[m.activeResource]
 		idx := m.resourceTable.Cursor()
-		if idx >= 0 && idx < len(details) && idx < len(rows) {
-			m.detailTitle = rtLabel(m.activeResource) + " Detail: " + rows[idx][1]
-			m.detailViewport.SetContent(strings.Join(details[idx], "\n"))
+		if idx >= 0 && idx < len(maps) {
+			r := maps[idx]
+			detFields := m.detailFields(m.activeResource)
+			lines := display.Detail(detFields, r)
+			// Use the first non-empty value among common ID keys for the title.
+			idVal := firstID(r)
+			m.detailTitle = rtLabel(m.activeResource) + ": " + idVal
+			m.detailViewport.SetContent(strings.Join(lines, "\n"))
 			m.detailViewport.GotoTop()
 			m.showDetail = true
 		}
@@ -650,6 +689,19 @@ func (m *Model) updateTableSizes() {
 	}
 	m.detailViewport.Width = dvW
 	m.detailViewport.Height = dvH
+}
+
+// firstID returns a human-readable identifier from a resource map, trying
+// common primary-key field names in order.
+func firstID(r map[string]string) string {
+	for _, k := range []string{"instance_id", "subnet_id", "sg_id", "rt_id", "igw_id",
+		"nat_id", "endpoint_id", "nacl_id", "peering_id", "log_id",
+		"name", "db_id"} {
+		if v := r[k]; v != "" && v != "-" {
+			return v
+		}
+	}
+	return "detail"
 }
 
 // ---------------------------------------------------------------------------
@@ -838,7 +890,7 @@ func (m *Model) viewResourcePanel(height int) string {
 	case m.resourceErr != nil:
 		body = lipgloss.NewStyle().Foreground(lipgloss.Color(ui.ColorError())).
 			Render("Error: " + m.resourceErr.Error())
-	case len(m.resourceRows[m.activeResource]) == 0:
+	case len(m.resourceMaps[m.activeResource]) == 0:
 		body = lipgloss.NewStyle().Foreground(lipgloss.Color(ui.ColorMuted())).
 			Render("No " + rtLabel(m.activeResource) + " found in this VPC.")
 	default:
