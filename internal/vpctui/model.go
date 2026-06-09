@@ -74,6 +74,11 @@ type xrefDoneMsg struct {
 	err    error
 }
 
+type effRulesDoneMsg struct {
+	result effectiveRuleSet
+	err    error
+}
+
 // ---------------------------------------------------------------------------
 // Model
 // ---------------------------------------------------------------------------
@@ -147,6 +152,13 @@ type Model struct {
 	xrefLoading  bool
 	xrefErr      error
 	xrefViewport viewport.Model
+
+	// Effective security rules overlay
+	showEffRules    bool
+	effRules        effectiveRuleSet
+	effRulesLoading bool
+	effRulesErr     error
+	effRulesVP      viewport.Model
 
 	// UI dimensions
 	width  int
@@ -233,6 +245,7 @@ func NewModel(
 	m.findingsViewport = viewport.New(80, 20)
 	m.traceViewport = viewport.New(80, 20)
 	m.xrefViewport = viewport.New(80, 20)
+	m.effRulesVP = viewport.New(80, 20)
 
 	m.traceInput = textinput.New()
 	m.traceInput.Placeholder = "10.0.1.20:3306  (or internet:443)"
@@ -448,6 +461,27 @@ func (m *Model) loadXref(resourceID string) tea.Cmd {
 	}
 }
 
+// loadEffectiveRules gathers a snapshot and computes the merged effective
+// security rules for the given ENI, opening the overlay.
+func (m *Model) loadEffectiveRules(eniID string) tea.Cmd {
+	if m.selectedVPC == nil || eniID == "" {
+		return nil
+	}
+	m.showEffRules = true
+	m.effRulesLoading = true
+	m.effRulesErr = nil
+	m.effRules = effectiveRuleSet{ENIID: eniID}
+	client := m.client
+	vpcID := m.selectedVPC.ID
+	return func() tea.Msg {
+		snap, err := buildVPCSnapshot(client, vpcID)
+		if err != nil {
+			return effRulesDoneMsg{err: err}
+		}
+		return effRulesDoneMsg{result: computeEffectiveRules(snap, eniID)}
+	}
+}
+
 // parseTraceTarget parses a "host[:port]" destination. A missing port yields
 // -1 (any port). "internet" is accepted as the host.
 func parseTraceTarget(s string) (destIP string, port int) {
@@ -643,6 +677,13 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.xrefViewport.SetContent(m.renderXref())
 		m.xrefViewport.GotoTop()
 
+	case effRulesDoneMsg:
+		m.effRulesLoading = false
+		m.effRulesErr = msg.err
+		m.effRules = msg.result
+		m.effRulesVP.SetContent(m.renderEffRules())
+		m.effRulesVP.GotoTop()
+
 	case errMsg:
 		m.err = msg.err
 		m.loading = false
@@ -710,6 +751,19 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.traceViewport.LineUp(1)
 		case "down", "j":
 			m.traceViewport.LineDown(1)
+		}
+		return m, nil
+	}
+
+	// Effective-rules overlay: capture scrolling keys.
+	if m.showEffRules {
+		switch key {
+		case "esc", "q", "e":
+			m.showEffRules = false
+		case "up", "k":
+			m.effRulesVP.LineUp(1)
+		case "down", "j":
+			m.effRulesVP.LineDown(1)
 		}
 		return m, nil
 	}
@@ -922,6 +976,14 @@ func (m *Model) handleResourceTableKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			return m, m.loadXref(id)
 		}
 		return m, nil
+	case "e":
+		// Effective merged security rules for the selected network interface.
+		if m.activeResource == rtNetworkInterfaces {
+			if id := m.selectedResourceID(); id != "" {
+				return m, m.loadEffectiveRules(id)
+			}
+		}
+		return m, nil
 	case "enter":
 		maps := m.resourceMaps[m.activeResource]
 		idx := m.resourceTable.Cursor()
@@ -1051,6 +1113,16 @@ func (m *Model) updateTableSizes() {
 	if len(m.xrefGroups) > 0 {
 		m.xrefViewport.SetContent(m.renderXref())
 	}
+
+	// Effective-rules overlay mirrors the same sizing.
+	m.effRulesVP.Width = dvW
+	m.effRulesVP.Height = dvH - 2
+	if m.effRulesVP.Height < 3 {
+		m.effRulesVP.Height = 3
+	}
+	if m.effRules.Found {
+		m.effRulesVP.SetContent(m.renderEffRules())
+	}
 }
 
 // selectedResourceID returns the primary ID of the resource currently selected
@@ -1113,6 +1185,10 @@ func (m *Model) View() string {
 
 	if m.showXref {
 		return m.viewXrefOverlay(content)
+	}
+
+	if m.showEffRules {
+		return m.viewEffRulesOverlay(content)
 	}
 
 	if m.showTraceInput {
@@ -1608,6 +1684,95 @@ func (m *Model) renderXref() string {
 	return b.String()
 }
 
+func (m *Model) viewEffRulesOverlay(bg string) string {
+	title := lipgloss.NewStyle().
+		Bold(true).
+		Foreground(lipgloss.Color(ui.ColorHeading())).
+		Render("Effective rules: " + m.effRules.ENIID)
+
+	hint := lipgloss.NewStyle().
+		Foreground(lipgloss.Color(ui.ColorMuted())).
+		Render("↑/↓ scroll  •  Esc/e close")
+
+	var body string
+	switch {
+	case m.effRulesLoading:
+		body = m.spinner.View() + "  Merging security group rules…"
+	case m.effRulesErr != nil:
+		body = lipgloss.NewStyle().Foreground(lipgloss.Color(ui.ColorError())).
+			Render("Error: " + m.effRulesErr.Error())
+	default:
+		body = m.effRulesVP.View()
+	}
+
+	inner := lipgloss.JoinVertical(lipgloss.Left, title, "", body, "", hint)
+
+	overlay := lipgloss.NewStyle().
+		BorderStyle(lipgloss.RoundedBorder()).
+		BorderForeground(lipgloss.Color(ui.ColorBorderFocus())).
+		Foreground(lipgloss.Color(ui.ColorText())).
+		Padding(1, 2).
+		Render(inner)
+
+	if m.width > 0 && m.height > 0 {
+		return lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center, overlay)
+	}
+	return overlay
+}
+
+// renderEffRules builds the scrollable body of the effective-rules overlay: the
+// merged inbound and outbound rules in plain English, annotated with the
+// contributing security groups, plus the applicable NACL.
+func (m *Model) renderEffRules() string {
+	if !m.effRules.Found {
+		return lipgloss.NewStyle().Foreground(lipgloss.Color(ui.ColorMuted())).
+			Render("Network interface not found.")
+	}
+	heading := lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color(ui.ColorAccent()))
+	muted := lipgloss.NewStyle().Foreground(lipgloss.Color(ui.ColorMuted()))
+
+	wrapW := m.effRulesVP.Width
+	if wrapW <= 0 {
+		wrapW = 80
+	}
+	// Wrap a rule explanation, hanging-indented under its bullet.
+	bullet := func(text string) string {
+		wrapped := lipgloss.NewStyle().Width(wrapW - 4).Render(text)
+		lines := strings.Split(wrapped, "\n")
+		for i := range lines {
+			if i == 0 {
+				lines[i] = "  • " + lines[i]
+			} else {
+				lines[i] = "    " + lines[i]
+			}
+		}
+		return strings.Join(lines, "\n")
+	}
+
+	section := func(b *strings.Builder, label string, rules []mergedRule) {
+		b.WriteString(heading.Render(label) + muted.Render(fmt.Sprintf("  (%d)", len(rules))))
+		if len(rules) == 0 {
+			b.WriteString("\n  " + muted.Render("(none)"))
+		}
+		for _, mr := range rules {
+			b.WriteString("\n" + bullet(explainSGRule(mr.Rule)))
+			b.WriteString("\n      " + muted.Render("via "+strings.Join(mr.SGs, ", ")))
+		}
+	}
+
+	var b strings.Builder
+	b.WriteString(muted.Render("Security groups: " + strings.Join(m.effRules.SGIDs, ", ")))
+	b.WriteString("\n\n")
+	section(&b, "Inbound", m.effRules.Inbound)
+	b.WriteString("\n\n")
+	section(&b, "Outbound", m.effRules.Outbound)
+	if m.effRules.NACLID != "" {
+		b.WriteString("\n\n" + muted.Render("Network ACL "+m.effRules.NACLID+
+			" also applies to this subnet (stateless, evaluated separately)."))
+	}
+	return b.String()
+}
+
 func (m *Model) viewScanStatus() string {
 	if m.loading && m.scanning {
 		return m.spinner.View() + fmt.Sprintf("  Scanning %d/%d regions…", m.scanDone, m.scanTotal)
@@ -1653,7 +1818,7 @@ func (m *Model) viewStatusBar() string {
 		case focusCategory:
 			hint = "↑↓=navigate  Enter=load  Tab=resource table  F=findings  Esc=back  ?=help  q=quit"
 		case focusResourceTable:
-			hint = "↑↓=nav  Enter=detail  x=where-used  c=copy  F=findings  t=trace  r=refresh  Tab=cats  Esc=back  q=quit"
+			hint = "↑↓=nav  Enter=detail  x=where-used  e=eff-rules  F=findings  t=trace  c=copy  r=refresh  Esc=back  q=quit"
 		}
 	}
 
@@ -1688,6 +1853,7 @@ func (m *Model) helpText() string {
 		"  F        Run the VPC findings linter (security/routing/capacity issues)",
 		"  t        Trace connectivity from the selected network interface",
 		"  x        Cross-reference the selected resource (where used)",
+		"  e        Effective merged security rules (network interface)",
 		"  r        Refresh current resource list",
 		"  Esc      Go back to VPC list",
 		"",
