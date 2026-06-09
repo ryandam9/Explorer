@@ -33,6 +33,8 @@ func rtKey(rt resourceType) string {
 		return "peering"
 	case rtFlowLogs:
 		return "flow_logs"
+	case rtNetworkInterfaces:
+		return "network_interfaces"
 	case rtEC2Instances:
 		return "ec2_instances"
 	case rtLambda:
@@ -66,6 +68,7 @@ const (
 	rtLambda
 	rtRDS
 	rtLoadBalancers
+	rtNetworkInterfaces
 	rtCount
 )
 
@@ -89,6 +92,8 @@ func rtLabel(rt resourceType) string {
 		return "Peering"
 	case rtFlowLogs:
 		return "Flow Logs"
+	case rtNetworkInterfaces:
+		return "Network Interfaces"
 	case rtEC2Instances:
 		return "EC2 Instances"
 	case rtLambda:
@@ -108,7 +113,7 @@ type sidebarCategory struct {
 }
 
 var sidebarCategories = []sidebarCategory{
-	{"NETWORK", []resourceType{rtSubnets, rtSecurityGroups, rtRouteTables, rtInternetGateways, rtNatGateways, rtEndpoints, rtNetworkACLs, rtPeering, rtFlowLogs}},
+	{"NETWORK", []resourceType{rtSubnets, rtSecurityGroups, rtNetworkInterfaces, rtRouteTables, rtInternetGateways, rtNatGateways, rtEndpoints, rtNetworkACLs, rtPeering, rtFlowLogs}},
 	{"COMPUTE", []resourceType{rtEC2Instances, rtLambda}},
 	{"SERVICES", []resourceType{rtRDS, rtLoadBalancers}},
 }
@@ -253,6 +258,17 @@ func fetchResourceMaps(client *VPCClient, rt resourceType, vpcID string) ([]map[
 		out := make([]map[string]string, len(items))
 		for i, fl := range items {
 			out[i] = flowLogToMap(fl)
+		}
+		return out, nil
+
+	case rtNetworkInterfaces:
+		items, err := client.ListNetworkInterfaces(vpcID)
+		if err != nil {
+			return nil, err
+		}
+		out := make([]map[string]string, len(items))
+		for i, eni := range items {
+			out[i] = eniToMap(eni)
 		}
 		return out, nil
 
@@ -496,6 +512,24 @@ func flowLogToMap(fl FlowLogInfo) map[string]string {
 		"destination": fl.LogDestination,
 		"log_format":  fl.LogFormat,
 		"tags":        display.EncodeTags(fl.Tags),
+	}
+}
+
+func eniToMap(e ENIInfo) map[string]string {
+	return map[string]string{
+		"eni_id":            e.ID,
+		"type":              orDash(e.Type),
+		"status":            orDash(e.Status),
+		"private_ip":        orDash(e.PrivateIP),
+		"public_ip":         orDash(e.PublicIP),
+		"attached_to":       orDash(e.AttachedTo),
+		"subnet_id":         e.SubnetID,
+		"az":                e.AZ,
+		"security_groups":   orDash(strings.Join(e.SecurityGroups, ", ")),
+		"source_dest_check": boolStr(e.SourceDestCheck),
+		"description":       orDash(e.Description),
+		"vpc_id":            e.VPCID,
+		"tags":              display.EncodeTags(e.Tags),
 	}
 }
 

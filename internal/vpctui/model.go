@@ -853,7 +853,7 @@ func (m *Model) updateTableSizes() {
 // firstID returns a human-readable identifier from a resource map, trying
 // common primary-key field names in order.
 func firstID(r map[string]string) string {
-	for _, k := range []string{"instance_id", "subnet_id", "sg_id", "rt_id", "igw_id",
+	for _, k := range []string{"instance_id", "eni_id", "subnet_id", "sg_id", "rt_id", "igw_id",
 		"nat_id", "endpoint_id", "nacl_id", "peering_id", "log_id",
 		"name", "db_id"} {
 		if v := r[k]; v != "" && v != "-" {
