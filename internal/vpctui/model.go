@@ -97,6 +97,11 @@ type exportDoneMsg struct {
 	err  error
 }
 
+type exposureDoneMsg struct {
+	groups []xrefGroup
+	err    error
+}
+
 // ---------------------------------------------------------------------------
 // Model
 // ---------------------------------------------------------------------------
@@ -193,6 +198,13 @@ type Model struct {
 	diffErr     error
 	diffVP      viewport.Model
 
+	// Public exposure overlay
+	showExposure    bool
+	exposureGroups  []xrefGroup
+	exposureLoading bool
+	exposureErr     error
+	exposureVP      viewport.Model
+
 	// UI dimensions
 	width  int
 	height int
@@ -281,6 +293,7 @@ func NewModel(
 	m.effRulesVP = viewport.New(80, 20)
 	m.dnsVP = viewport.New(80, 20)
 	m.diffVP = viewport.New(80, 20)
+	m.exposureVP = viewport.New(80, 20)
 
 	m.traceInput = textinput.New()
 	m.traceInput.Placeholder = "10.0.1.20:3306  (or internet:443)"
@@ -557,6 +570,27 @@ func (m *Model) exportReport() tea.Cmd {
 	}
 }
 
+// loadExposure builds a snapshot and computes the VPC's internet-facing
+// surface, opening the public-exposure overlay.
+func (m *Model) loadExposure() tea.Cmd {
+	if m.selectedVPC == nil {
+		return nil
+	}
+	m.showExposure = true
+	m.exposureLoading = true
+	m.exposureErr = nil
+	m.exposureGroups = nil
+	client := m.client
+	vpcID := m.selectedVPC.ID
+	return func() tea.Msg {
+		snap, err := buildVPCSnapshot(client, vpcID)
+		if err != nil {
+			return exposureDoneMsg{err: err}
+		}
+		return exposureDoneMsg{groups: exposureReport(snap)}
+	}
+}
+
 // loadDNS fetches the selected VPC's DNS attributes and opens the DNS overlay.
 func (m *Model) loadDNS() tea.Cmd {
 	if m.selectedVPC == nil {
@@ -790,6 +824,13 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.statusMsg = "Exported VPC report to " + msg.path
 		}
 
+	case exposureDoneMsg:
+		m.exposureLoading = false
+		m.exposureErr = msg.err
+		m.exposureGroups = msg.groups
+		m.exposureVP.SetContent(m.renderExposure())
+		m.exposureVP.GotoTop()
+
 	case diffDoneMsg:
 		m.diffLoading = false
 		m.currentSnap = msg.current
@@ -881,6 +922,19 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.traceViewport.LineUp(1)
 		case "down", "j":
 			m.traceViewport.LineDown(1)
+		}
+		return m, nil
+	}
+
+	// Public-exposure overlay: capture scrolling keys.
+	if m.showExposure {
+		switch key {
+		case "esc", "q", "P":
+			m.showExposure = false
+		case "up", "k":
+			m.exposureVP.LineUp(1)
+		case "down", "j":
+			m.exposureVP.LineDown(1)
 		}
 		return m, nil
 	}
@@ -1000,6 +1054,11 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		// Export a Markdown report of the VPC + findings.
 		if m.state == stateResourceBrowser && m.selectedVPC != nil {
 			return m, m.exportReport()
+		}
+	case "P":
+		// Public exposure: what is reachable from the internet.
+		if m.state == stateResourceBrowser && m.selectedVPC != nil {
+			return m, m.loadExposure()
 		}
 	}
 
@@ -1321,6 +1380,16 @@ func (m *Model) updateTableSizes() {
 	if m.showDiff && m.diffErr == nil {
 		m.diffVP.SetContent(m.renderDiff())
 	}
+
+	// Public-exposure overlay mirrors the same sizing.
+	m.exposureVP.Width = dvW
+	m.exposureVP.Height = dvH - 2
+	if m.exposureVP.Height < 3 {
+		m.exposureVP.Height = 3
+	}
+	if len(m.exposureGroups) > 0 {
+		m.exposureVP.SetContent(m.renderExposure())
+	}
 }
 
 // selectedResourceID returns the primary ID of the resource currently selected
@@ -1395,6 +1464,10 @@ func (m *Model) View() string {
 
 	if m.showDiff {
 		return m.viewDiffOverlay(content)
+	}
+
+	if m.showExposure {
+		return m.viewExposureOverlay(content)
 	}
 
 	if m.showTraceInput {
@@ -1869,20 +1942,25 @@ func (m *Model) viewXrefOverlay(bg string) string {
 // renderXref builds the scrollable body of the cross-reference overlay: each
 // relationship group with its members.
 func (m *Model) renderXref() string {
-	if len(m.xrefGroups) == 0 {
-		return lipgloss.NewStyle().Foreground(lipgloss.Color(ui.ColorMuted())).
-			Render("No related resources found in this VPC.")
+	return renderResourceGroups(m.xrefGroups, "No related resources found in this VPC.")
+}
+
+// renderResourceGroups renders labelled resource groups, shared by the
+// cross-reference and public-exposure overlays.
+func renderResourceGroups(groups []xrefGroup, emptyMsg string) string {
+	if len(groups) == 0 {
+		return lipgloss.NewStyle().Foreground(lipgloss.Color(ui.ColorMuted())).Render(emptyMsg)
 	}
 	groupStyle := lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color(ui.ColorAccent()))
 	itemStyle := lipgloss.NewStyle().Foreground(lipgloss.Color(ui.ColorText()))
+	countStyle := lipgloss.NewStyle().Foreground(lipgloss.Color(ui.ColorMuted()))
 
 	var b strings.Builder
-	for i, g := range m.xrefGroups {
+	for i, g := range groups {
 		if i > 0 {
 			b.WriteString("\n\n")
 		}
-		b.WriteString(groupStyle.Render(g.Label) + lipgloss.NewStyle().
-			Foreground(lipgloss.Color(ui.ColorMuted())).Render(fmt.Sprintf("  (%d)", len(g.Items))))
+		b.WriteString(groupStyle.Render(g.Label) + countStyle.Render(fmt.Sprintf("  (%d)", len(g.Items))))
 		for _, it := range g.Items {
 			b.WriteString("\n  • " + itemStyle.Render(it))
 		}
@@ -2148,6 +2226,47 @@ func (m *Model) renderDiff() string {
 	return b.String()
 }
 
+func (m *Model) viewExposureOverlay(bg string) string {
+	title := lipgloss.NewStyle().
+		Bold(true).
+		Foreground(lipgloss.Color(ui.ColorHeading())).
+		Render("Public exposure — internet-facing surface")
+
+	hint := lipgloss.NewStyle().
+		Foreground(lipgloss.Color(ui.ColorMuted())).
+		Render("↑/↓ scroll  •  Esc/P close")
+
+	var body string
+	switch {
+	case m.exposureLoading:
+		body = m.spinner.View() + "  Computing exposure…"
+	case m.exposureErr != nil:
+		body = lipgloss.NewStyle().Foreground(lipgloss.Color(ui.ColorError())).
+			Render("Error: " + m.exposureErr.Error())
+	default:
+		body = m.exposureVP.View()
+	}
+
+	inner := lipgloss.JoinVertical(lipgloss.Left, title, "", body, "", hint)
+
+	overlay := lipgloss.NewStyle().
+		BorderStyle(lipgloss.RoundedBorder()).
+		BorderForeground(lipgloss.Color(ui.ColorBorderFocus())).
+		Foreground(lipgloss.Color(ui.ColorText())).
+		Padding(1, 2).
+		Render(inner)
+
+	if m.width > 0 && m.height > 0 {
+		return lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center, overlay)
+	}
+	return overlay
+}
+
+// renderExposure builds the scrollable body of the public-exposure overlay.
+func (m *Model) renderExposure() string {
+	return renderResourceGroups(m.exposureGroups, "Nothing in this VPC is reachable from the internet. ✓")
+}
+
 func (m *Model) viewScanStatus() string {
 	if m.loading && m.scanning {
 		return m.spinner.View() + fmt.Sprintf("  Scanning %d/%d regions…", m.scanDone, m.scanTotal)
@@ -2191,7 +2310,7 @@ func (m *Model) viewStatusBar() string {
 	case stateResourceBrowser:
 		switch m.focus {
 		case focusCategory:
-			hint = "↑↓=navigate  Enter=load  F=findings  D=dns  w=changes  Tab=table  Esc=back  q=quit"
+			hint = "↑↓=navigate  Enter=load  F=findings  P=exposure  D=dns  w=changes  Tab=table  Esc=back  q=quit"
 		case focusResourceTable:
 			hint = "↑↓=nav  Enter=detail  x=where-used  e=eff-rules  F=findings  D=dns  w=changes  t=trace  Esc=back  q=quit"
 		}
@@ -2226,6 +2345,7 @@ func (m *Model) helpText() string {
 		"  Enter    Load resource type (sidebar) / open detail (table)",
 		"  c        Copy resource ID to clipboard",
 		"  F        Run the VPC findings linter (security/routing/capacity issues)",
+		"  P        Public exposure: what is reachable from the internet",
 		"  D        Show the VPC's DNS configuration (resolution, hostnames, DHCP)",
 		"  w        What changed: baseline the VPC, then diff against it later",
 		"  E        Export a Markdown report (resources + findings) to a file",

@@ -78,6 +78,7 @@ func analyzeVPC(snap vpcSnapshot) []Finding {
 	checkNACLs(snap, &out)
 	checkPeerings(snap, &out)
 	checkEndpoints(snap, &out)
+	checkOrphans(snap, &out)
 	checkQuotas(snap, &out)
 
 	sort.SliceStable(out, func(i, j int) bool {
@@ -677,4 +678,63 @@ func endpointSGsAllowHTTPS(snap vpcSnapshot, ep EndpointInfo) bool {
 		}
 	}
 	return false
+}
+
+// ---------------------------------------------------------------------------
+// Orphan / unused resources
+//
+// Idle resources clutter a VPC and (for NAT gateways, covered above) cost
+// money. These checks need the ENI inventory to know what is actually in use.
+// ---------------------------------------------------------------------------
+
+func checkOrphans(snap vpcSnapshot, out *[]Finding) {
+	// Skip orphan checks entirely when we have no ENI data, to avoid
+	// false "unused" findings from a partial snapshot.
+	if len(snap.NetworkInterfaces) == 0 {
+		return
+	}
+
+	sgUsed := map[string]bool{}
+	subnetUsed := map[string]bool{}
+	for _, e := range snap.NetworkInterfaces {
+		subnetUsed[e.SubnetID] = true
+		for _, g := range e.SecurityGroups {
+			sgUsed[g] = true
+		}
+	}
+	// A security group is also "in use" if another group references it.
+	for _, sg := range snap.SecurityGroups {
+		for _, r := range sg.Rules {
+			if strings.HasPrefix(r.Source, "sg-") {
+				sgUsed[r.Source] = true
+			}
+		}
+	}
+
+	for _, sg := range snap.SecurityGroups {
+		if strings.EqualFold(sg.Name, "default") {
+			continue // the default SG is expected to linger unused
+		}
+		if !sgUsed[sg.ID] {
+			*out = append(*out, Finding{
+				Severity: SevInfo,
+				Resource: sg.ID,
+				Title:    "Security group appears unused",
+				Detail:   sgLabel(sg) + " is not attached to any network interface and is not referenced by other security groups.",
+				Fix:      "Delete the security group if it is no longer needed.",
+			})
+		}
+	}
+
+	for _, s := range snap.Subnets {
+		if !subnetUsed[s.ID] {
+			*out = append(*out, Finding{
+				Severity: SevInfo,
+				Resource: s.ID,
+				Title:    "Subnet has no network interfaces",
+				Detail:   subnetLabel(s) + " contains no network interfaces (it may be unused).",
+				Fix:      "Reclaim the subnet's CIDR or remove it if it is no longer needed.",
+			})
+		}
+	}
 }
