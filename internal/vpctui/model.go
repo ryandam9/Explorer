@@ -672,11 +672,13 @@ func (m *Model) updateTableSizes() {
 	m.vpcTable.SetHeight(tableH)
 
 	// Resource table: right panel = total - left panel - middle panel - borders.
+	// The panel adds 2 for borders; the content area has title + separator (2 lines)
+	// already accounted for in the same tableH base, so use tableH directly.
 	rightWidth := m.width - (vpcPanelInner + 4) - (catPanelInner + 4)
 	if rightWidth < 20 {
 		rightWidth = 20
 	}
-	m.resourceTable.SetHeight(tableH - 2)
+	m.resourceTable.SetHeight(tableH)
 
 	// Resize detail viewport.
 	dvW := m.width - 8

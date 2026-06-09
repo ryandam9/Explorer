@@ -36,17 +36,17 @@ var EC2InstanceFields = []FieldMeta{
 }
 
 var SubnetFields = []FieldMeta{
-	{Key: "subnet_id",      Title: "Subnet ID",        Width: 24, DefaultCol: true,  DefaultDetail: true},
-	{Key: "name",           Title: "Name",             Width: 18, DefaultCol: true,  DefaultDetail: true},
-	{Key: "cidr",           Title: "CIDR",             Width: 16, DefaultCol: true,  DefaultDetail: true},
-	{Key: "az",             Title: "AZ",               Width: 14, DefaultCol: true,  DefaultDetail: true},
-	{Key: "available_ips",  Title: "Avail IPs",        Width: 10, DefaultCol: true,  DefaultDetail: true},
-	{Key: "public",         Title: "Public",           Width: 7,  DefaultCol: true,  DefaultDetail: true},
-	{Key: "state",          Title: "State",            Width: 10, DefaultCol: true,  DefaultDetail: true},
-	{Key: "vpc_id",         Title: "VPC ID",           Width: 22, DefaultCol: false, DefaultDetail: true},
-	{Key: "default_for_az", Title: "Default for AZ",  Width: 14, DefaultCol: false, DefaultDetail: true},
-	{Key: "map_public_ip",  Title: "Map Public IP",   Width: 14, DefaultCol: false, DefaultDetail: true},
-	{Key: "ipv6_cidrs",     Title: "IPv6 CIDRs",      Width: 30, DefaultCol: false, DefaultDetail: true},
+	{Key: "name",           Title: "Name",            Width: 18, DefaultCol: true,  DefaultDetail: true},
+	{Key: "cidr",           Title: "CIDR",            Width: 16, DefaultCol: true,  DefaultDetail: true},
+	{Key: "az",             Title: "AZ",              Width: 14, DefaultCol: true,  DefaultDetail: true},
+	{Key: "available_ips",  Title: "Avail IPs",       Width: 10, DefaultCol: true,  DefaultDetail: true},
+	{Key: "public",         Title: "Public",          Width: 7,  DefaultCol: true,  DefaultDetail: true},
+	{Key: "subnet_id",      Title: "Subnet ID",       Width: 24, DefaultCol: false, DefaultDetail: true},
+	{Key: "state",          Title: "State",           Width: 10, DefaultCol: false, DefaultDetail: true},
+	{Key: "vpc_id",         Title: "VPC ID",          Width: 22, DefaultCol: false, DefaultDetail: true},
+	{Key: "default_for_az", Title: "Default for AZ", Width: 14, DefaultCol: false, DefaultDetail: true},
+	{Key: "map_public_ip",  Title: "Map Public IP",  Width: 14, DefaultCol: false, DefaultDetail: true},
+	{Key: "ipv6_cidrs",     Title: "IPv6 CIDRs",     Width: 30, DefaultCol: false, DefaultDetail: true},
 	{Key: "tags",           Title: "Tags",            Width: 0,  DefaultCol: false, DefaultDetail: true},
 }
 
