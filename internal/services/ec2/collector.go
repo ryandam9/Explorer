@@ -7,6 +7,7 @@ import (
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/service/ec2"
 	"github.com/aws/aws-sdk-go-v2/service/ec2/types"
+	"github.com/user/aws_explorer/internal/awsutil"
 	"github.com/user/aws_explorer/internal/model"
 	"github.com/user/aws_explorer/internal/services"
 )
@@ -63,19 +64,14 @@ func (c *Collector) Collect(ctx context.Context, input services.CollectInput) ([
 
 func (c *Collector) mapInstance(region string, instance types.Instance, detail services.DetailLevel) model.Resource {
 	id := aws.ToString(instance.InstanceId)
-	state := string(instance.State.Name)
+	state := ""
+	if instance.State != nil {
+		state = string(instance.State.Name)
+	}
 	iType := string(instance.InstanceType)
 
-	var name string
-	tags := make(map[string]string)
-	for _, t := range instance.Tags {
-		key := aws.ToString(t.Key)
-		val := aws.ToString(t.Value)
-		tags[key] = val
-		if key == "Name" {
-			name = val
-		}
-	}
+	name := awsutil.EC2TagName(instance.Tags)
+	tags := awsutil.EC2TagsToMap(instance.Tags)
 
 	res := model.Resource{
 		Service: "ec2",
@@ -111,16 +107,8 @@ func (c *Collector) mapVpc(region string, vpc types.Vpc, detail services.DetailL
 	id := aws.ToString(vpc.VpcId)
 	state := string(vpc.State)
 
-	var name string
-	tags := make(map[string]string)
-	for _, t := range vpc.Tags {
-		key := aws.ToString(t.Key)
-		val := aws.ToString(t.Value)
-		tags[key] = val
-		if key == "Name" {
-			name = val
-		}
-	}
+	name := awsutil.EC2TagName(vpc.Tags)
+	tags := awsutil.EC2TagsToMap(vpc.Tags)
 
 	res := model.Resource{
 		Service: "ec2",

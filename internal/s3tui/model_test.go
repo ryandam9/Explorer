@@ -121,3 +121,35 @@ func TestParentPrefix(t *testing.T) {
 		}
 	}
 }
+
+func TestUniquePath(t *testing.T) {
+	dir := t.TempDir()
+
+	p := uniquePath(dir, "data.csv")
+	if p != filepath.Join(dir, "data.csv") {
+		t.Fatalf("first download should use the plain name, got %q", p)
+	}
+	if err := os.WriteFile(p, []byte("x"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	p = uniquePath(dir, "data.csv")
+	if p != filepath.Join(dir, "data (1).csv") {
+		t.Fatalf("existing file should yield a (1) suffix, got %q", p)
+	}
+	if err := os.WriteFile(p, []byte("x"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	if p = uniquePath(dir, "data.csv"); p != filepath.Join(dir, "data (2).csv") {
+		t.Fatalf("second collision should yield a (2) suffix, got %q", p)
+	}
+
+	// Extension-less names get the suffix at the end.
+	if err := os.WriteFile(filepath.Join(dir, "README"), []byte("x"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if p = uniquePath(dir, "README"); p != filepath.Join(dir, "README (1)") {
+		t.Fatalf("extension-less collision suffix wrong, got %q", p)
+	}
+}

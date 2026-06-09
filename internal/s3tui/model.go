@@ -710,9 +710,26 @@ func (m *Model) downloadObjectCmd(key string) tea.Cmd {
 		if err := os.MkdirAll(dir, 0o755); err != nil {
 			return downloadDoneMsg{key: key, dir: dir, err: fmt.Errorf("create directory %q: %w", dir, err)}
 		}
-		localPath := filepath.Join(dir, filepath.Base(key))
+		localPath := uniquePath(dir, filepath.Base(key))
 		err := m.client.DownloadObject(bucket, key, localPath, ds)
 		return downloadDoneMsg{key: key, path: localPath, dir: dir, err: err}
+	}
+}
+
+// uniquePath returns dir/base, or a "name (N).ext" variant when a file with
+// that name already exists, so a download never silently overwrites a file.
+func uniquePath(dir, base string) string {
+	path := filepath.Join(dir, base)
+	if _, err := os.Stat(path); os.IsNotExist(err) {
+		return path
+	}
+	ext := filepath.Ext(base)
+	stem := strings.TrimSuffix(base, ext)
+	for i := 1; ; i++ {
+		path = filepath.Join(dir, fmt.Sprintf("%s (%d)%s", stem, i, ext))
+		if _, err := os.Stat(path); os.IsNotExist(err) {
+			return path
+		}
 	}
 }
 

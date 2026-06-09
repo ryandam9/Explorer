@@ -31,35 +31,38 @@ func (c *Collector) Collect(ctx context.Context, input services.CollectInput) ([
 	client := s3.NewFromConfig(input.AWSConfig)
 	var resources []model.Resource
 
-	output, err := client.ListBuckets(ctx, &s3.ListBucketsInput{})
-	if err != nil {
-		return nil, fmt.Errorf("failed to list S3 buckets: %w", err)
-	}
-
-	for _, bucket := range output.Buckets {
-		name := aws.ToString(bucket.Name)
-
-		res := model.Resource{
-			Service: "s3",
-			Type:    "bucket",
-			Region:  "global",
-			ID:      name,
-			Name:    name,
-			Summary: map[string]string{
-				"creationDate": "",
-			},
+	paginator := s3.NewListBucketsPaginator(client, &s3.ListBucketsInput{})
+	for paginator.HasMorePages() {
+		page, err := paginator.NextPage(ctx)
+		if err != nil {
+			return nil, fmt.Errorf("failed to list S3 buckets: %w", err)
 		}
 
-		if bucket.CreationDate != nil {
-			res.CreatedAt = bucket.CreationDate
-			res.Summary["creationDate"] = bucket.CreationDate.Format("2006-01-02 15:04:05")
-		}
+		for _, bucket := range page.Buckets {
+			name := aws.ToString(bucket.Name)
 
-		if input.DetailLevel == services.DetailLevelDetailed || input.DetailLevel == services.DetailLevelRaw {
-			res.Details = fetchBucketDetails(ctx, client, name)
-		}
+			res := model.Resource{
+				Service: "s3",
+				Type:    "bucket",
+				Region:  "global",
+				ID:      name,
+				Name:    name,
+				Summary: map[string]string{
+					"creationDate": "",
+				},
+			}
 
-		resources = append(resources, res)
+			if bucket.CreationDate != nil {
+				res.CreatedAt = bucket.CreationDate
+				res.Summary["creationDate"] = bucket.CreationDate.Format("2006-01-02 15:04:05")
+			}
+
+			if input.DetailLevel == services.DetailLevelDetailed || input.DetailLevel == services.DetailLevelRaw {
+				res.Details = fetchBucketDetails(ctx, client, name)
+			}
+
+			resources = append(resources, res)
+		}
 	}
 
 	return resources, nil

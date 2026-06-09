@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/atotto/clipboard"
@@ -51,41 +52,52 @@ type regionScannedMsg struct {
 	err    error
 }
 
+// The vpcID on the messages below identifies the VPC the work was started
+// for; replies that arrive after the user has navigated to a different VPC
+// are dropped so a slow fetch can never populate the wrong VPC's view.
+
 type resourcesLoadedMsg struct {
-	rt   resourceType
-	maps []map[string]string
-	err  error
+	vpcID string
+	rt    resourceType
+	maps  []map[string]string
+	err   error
 }
 
 type errMsg struct{ err error }
 
 type findingsLoadedMsg struct {
+	vpcID    string
 	findings []Finding
 	err      error
 }
 
 type traceDoneMsg struct {
+	vpcID  string
 	result traceResult
 	err    error
 }
 
 type xrefDoneMsg struct {
+	vpcID  string
 	title  string
 	groups []xrefGroup
 	err    error
 }
 
 type effRulesDoneMsg struct {
+	vpcID  string
 	result effectiveRuleSet
 	err    error
 }
 
 type dnsDoneMsg struct {
-	info VPCDNSInfo
-	err  error
+	vpcID string
+	info  VPCDNSInfo
+	err   error
 }
 
 type diffDoneMsg struct {
+	vpcID       string
 	current     vpcSnapshot
 	baseline    vpcSnapshot
 	hasBaseline bool
@@ -98,6 +110,7 @@ type exportDoneMsg struct {
 }
 
 type exposureDoneMsg struct {
+	vpcID  string
 	groups []xrefGroup
 	err    error
 }
@@ -137,6 +150,7 @@ type Model struct {
 	// Multi-region scan
 	scanTotal  int
 	scanDone   int
+	scanFailed int
 	scanning   bool
 	seenVPCs   map[string]bool
 	allRegions bool
@@ -446,6 +460,7 @@ func (m *Model) loadVPCs() tea.Cmd {
 	m.scanning = false
 	m.scanTotal = 0
 	m.scanDone = 0
+	m.scanFailed = 0
 	m.seenVPCs = make(map[string]bool)
 	awsCfg := m.awsCfg
 	scanAll := m.allRegions
@@ -463,16 +478,16 @@ func (m *Model) loadVPCs() tea.Cmd {
 func (m *Model) loadResources(rt resourceType) tea.Cmd {
 	m.resourceLoading = true
 	m.resourceErr = nil
+	vpcID := m.selectedVPC.ID
 	if cached, ok := m.resourceMaps[rt]; ok {
 		return func() tea.Msg {
-			return resourcesLoadedMsg{rt: rt, maps: cached}
+			return resourcesLoadedMsg{vpcID: vpcID, rt: rt, maps: cached}
 		}
 	}
 	client := m.client
-	vpcID := m.selectedVPC.ID
 	return func() tea.Msg {
 		maps, err := fetchResourceMaps(client, rt, vpcID)
-		return resourcesLoadedMsg{rt: rt, maps: maps, err: err}
+		return resourcesLoadedMsg{vpcID: vpcID, rt: rt, maps: maps, err: err}
 	}
 }
 
@@ -496,9 +511,9 @@ func (m *Model) loadFindings() tea.Cmd {
 	return func() tea.Msg {
 		snap, err := buildVPCSnapshot(client, vpcID)
 		if err != nil {
-			return findingsLoadedMsg{err: err}
+			return findingsLoadedMsg{vpcID: vpcID, err: err}
 		}
-		return findingsLoadedMsg{findings: analyzeVPC(snap)}
+		return findingsLoadedMsg{vpcID: vpcID, findings: analyzeVPC(snap)}
 	}
 }
 
@@ -514,9 +529,9 @@ func (m *Model) runTrace(req traceRequest) tea.Cmd {
 	return func() tea.Msg {
 		snap, err := buildVPCSnapshot(client, vpcID)
 		if err != nil {
-			return traceDoneMsg{err: err}
+			return traceDoneMsg{vpcID: vpcID, err: err}
 		}
-		return traceDoneMsg{result: tracePath(snap, req)}
+		return traceDoneMsg{vpcID: vpcID, result: tracePath(snap, req)}
 	}
 }
 
@@ -536,9 +551,9 @@ func (m *Model) loadXref(resourceID string) tea.Cmd {
 	return func() tea.Msg {
 		snap, err := buildVPCSnapshot(client, vpcID)
 		if err != nil {
-			return xrefDoneMsg{err: err}
+			return xrefDoneMsg{vpcID: vpcID, err: err}
 		}
-		return xrefDoneMsg{title: resourceID, groups: crossReference(snap, resourceID)}
+		return xrefDoneMsg{vpcID: vpcID, title: resourceID, groups: crossReference(snap, resourceID)}
 	}
 }
 
@@ -557,9 +572,9 @@ func (m *Model) loadEffectiveRules(eniID string) tea.Cmd {
 	return func() tea.Msg {
 		snap, err := buildVPCSnapshot(client, vpcID)
 		if err != nil {
-			return effRulesDoneMsg{err: err}
+			return effRulesDoneMsg{vpcID: vpcID, err: err}
 		}
-		return effRulesDoneMsg{result: computeEffectiveRules(snap, eniID)}
+		return effRulesDoneMsg{vpcID: vpcID, result: computeEffectiveRules(snap, eniID)}
 	}
 }
 
@@ -573,13 +588,17 @@ func (m *Model) loadDiff() tea.Cmd {
 	m.diffErr = nil
 	client := m.client
 	vpcID := m.selectedVPC.ID
+	region := m.selectedVPC.Region
+	owner := m.selectedVPC.OwnerId
 	return func() tea.Msg {
 		current, err := buildVPCSnapshot(client, vpcID)
 		if err != nil {
-			return diffDoneMsg{err: err}
+			return diffDoneMsg{vpcID: vpcID, err: err}
 		}
-		baseline, ok, err := loadSnapshot(vpcID)
-		return diffDoneMsg{current: current, baseline: baseline, hasBaseline: ok, err: err}
+		current.Region = region
+		current.OwnerID = owner
+		baseline, ok, err := loadSnapshot(vpcID, owner)
+		return diffDoneMsg{vpcID: vpcID, current: current, baseline: baseline, hasBaseline: ok, err: err}
 	}
 }
 
@@ -642,9 +661,9 @@ func (m *Model) loadExposure() tea.Cmd {
 	return func() tea.Msg {
 		snap, err := buildVPCSnapshot(client, vpcID)
 		if err != nil {
-			return exposureDoneMsg{err: err}
+			return exposureDoneMsg{vpcID: vpcID, err: err}
 		}
-		return exposureDoneMsg{groups: exposureReport(snap)}
+		return exposureDoneMsg{vpcID: vpcID, groups: exposureReport(snap)}
 	}
 }
 
@@ -661,7 +680,7 @@ func (m *Model) loadDNS() tea.Cmd {
 	vpcID := m.selectedVPC.ID
 	return func() tea.Msg {
 		info, err := client.GetVPCDNSInfo(vpcID)
-		return dnsDoneMsg{info: info, err: err}
+		return dnsDoneMsg{vpcID: vpcID, info: info, err: err}
 	}
 }
 
@@ -680,63 +699,59 @@ func parseTraceTarget(s string) (destIP string, port int) {
 }
 
 // buildVPCSnapshot fetches the networking resources analyzed by the findings
-// engine. It is best-effort: a single resource type that fails (e.g. missing
-// permissions) does not abort the rest. It only returns an error if every
-// fetch failed.
+// engine, running the nine list calls concurrently. It is best-effort: a
+// single resource type that fails (e.g. missing permissions) does not abort
+// the rest. It only returns an error if every fetch failed.
 func buildVPCSnapshot(c *VPCClient, vpcID string) (vpcSnapshot, error) {
 	snap := vpcSnapshot{VPCID: vpcID}
-	var firstErr error
-	ok := 0
-	record := func(err error) {
-		if err != nil {
-			if firstErr == nil {
-				firstErr = err
+
+	var (
+		wg       sync.WaitGroup
+		mu       sync.Mutex
+		firstErr error
+		ok       int
+	)
+	// Each fetch writes a distinct snapshot field, so only the bookkeeping
+	// needs the mutex.
+	run := func(fetch func() error) {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			err := fetch()
+			mu.Lock()
+			defer mu.Unlock()
+			if err != nil {
+				if firstErr == nil {
+					firstErr = err
+				}
+				return
 			}
-			return
-		}
-		ok++
+			ok++
+		}()
 	}
 
-	subnets, err := c.ListSubnets(vpcID)
-	record(err)
-	snap.Subnets = subnets
-
-	sgs, err := c.ListSecurityGroups(vpcID)
-	record(err)
-	snap.SecurityGroups = sgs
-
-	rts, err := c.ListRouteTables(vpcID)
-	record(err)
-	snap.RouteTables = rts
-
-	igws, err := c.ListInternetGateways(vpcID)
-	record(err)
-	snap.InternetGateways = igws
-
-	nats, err := c.ListNatGateways(vpcID)
-	record(err)
-	snap.NatGateways = nats
-
-	nacls, err := c.ListNetworkACLs(vpcID)
-	record(err)
-	snap.NetworkACLs = nacls
-
-	peerings, err := c.ListPeeringConnections(vpcID)
-	record(err)
-	snap.Peerings = peerings
-
-	endpoints, err := c.ListVPCEndpoints(vpcID)
-	record(err)
-	snap.Endpoints = endpoints
-
-	enis, err := c.ListNetworkInterfaces(vpcID)
-	record(err)
-	snap.NetworkInterfaces = enis
+	run(func() (err error) { snap.Subnets, err = c.ListSubnets(vpcID); return })
+	run(func() (err error) { snap.SecurityGroups, err = c.ListSecurityGroups(vpcID); return })
+	run(func() (err error) { snap.RouteTables, err = c.ListRouteTables(vpcID); return })
+	run(func() (err error) { snap.InternetGateways, err = c.ListInternetGateways(vpcID); return })
+	run(func() (err error) { snap.NatGateways, err = c.ListNatGateways(vpcID); return })
+	run(func() (err error) { snap.NetworkACLs, err = c.ListNetworkACLs(vpcID); return })
+	run(func() (err error) { snap.Peerings, err = c.ListPeeringConnections(vpcID); return })
+	run(func() (err error) { snap.Endpoints, err = c.ListVPCEndpoints(vpcID); return })
+	run(func() (err error) { snap.NetworkInterfaces, err = c.ListNetworkInterfaces(vpcID); return })
+	wg.Wait()
 
 	if ok == 0 && firstErr != nil {
 		return snap, firstErr
 	}
 	return snap, nil
+}
+
+// staleVPCMsg reports whether an async reply produced for vpcID no longer
+// applies because the user has navigated to a different VPC (or back to the
+// VPC list) since the work was started.
+func (m *Model) staleVPCMsg(vpcID string) bool {
+	return m.selectedVPC == nil || m.selectedVPC.ID != vpcID
 }
 
 func (m *Model) enterVPC(vpc VPCInfo) tea.Cmd {
@@ -815,6 +830,9 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case regionScannedMsg:
 		m.scanDone++
+		if msg.err != nil {
+			m.scanFailed++
+		}
 		for _, vpc := range msg.vpcs {
 			if !m.seenVPCs[vpc.ID] {
 				m.seenVPCs[vpc.ID] = true
@@ -828,6 +846,9 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 
 	case resourcesLoadedMsg:
+		if m.staleVPCMsg(msg.vpcID) {
+			break
+		}
 		m.resourceLoading = false
 		if msg.err != nil {
 			m.resourceErr = msg.err
@@ -839,6 +860,9 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 
 	case findingsLoadedMsg:
+		if m.staleVPCMsg(msg.vpcID) {
+			break
+		}
 		m.findingsLoading = false
 		m.findingsErr = msg.err
 		m.findings = msg.findings
@@ -846,6 +870,9 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.findingsViewport.GotoTop()
 
 	case traceDoneMsg:
+		if m.staleVPCMsg(msg.vpcID) {
+			break
+		}
 		m.traceLoading = false
 		m.traceErr = msg.err
 		m.traceResult = msg.result
@@ -853,6 +880,9 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.traceViewport.GotoTop()
 
 	case xrefDoneMsg:
+		if m.staleVPCMsg(msg.vpcID) {
+			break
+		}
 		m.xrefLoading = false
 		m.xrefErr = msg.err
 		m.xrefTitle = msg.title
@@ -861,6 +891,9 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.xrefViewport.GotoTop()
 
 	case effRulesDoneMsg:
+		if m.staleVPCMsg(msg.vpcID) {
+			break
+		}
 		m.effRulesLoading = false
 		m.effRulesErr = msg.err
 		m.effRules = msg.result
@@ -868,6 +901,9 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.effRulesVP.GotoTop()
 
 	case dnsDoneMsg:
+		if m.staleVPCMsg(msg.vpcID) {
+			break
+		}
 		m.dnsLoading = false
 		m.dnsErr = msg.err
 		m.dnsInfo = msg.info
@@ -882,6 +918,9 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 
 	case exposureDoneMsg:
+		if m.staleVPCMsg(msg.vpcID) {
+			break
+		}
 		m.exposureLoading = false
 		m.exposureErr = msg.err
 		m.exposureGroups = msg.groups
@@ -909,6 +948,9 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.analyzerVP.GotoTop()
 
 	case diffDoneMsg:
+		if m.staleVPCMsg(msg.vpcID) {
+			break
+		}
 		m.diffLoading = false
 		m.currentSnap = msg.current
 		if msg.err != nil {
@@ -943,25 +985,30 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	return m, tea.Batch(cmds...)
 }
 
+// scrollKeys applies the shared overlay scrolling keys to vp, reporting
+// whether the key was handled.
+func scrollKeys(vp *viewport.Model, key string) bool {
+	switch key {
+	case "up", "k":
+		vp.LineUp(1)
+	case "down", "j":
+		vp.LineDown(1)
+	case "pgup":
+		vp.HalfViewUp()
+	case "pgdown", " ":
+		vp.HalfViewDown()
+	case "g", "home":
+		vp.GotoTop()
+	case "G", "end":
+		vp.GotoBottom()
+	default:
+		return false
+	}
+	return true
+}
+
 func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	key := msg.String()
-
-	// Detail overlay: capture scrolling keys.
-	if m.showDetail {
-		switch key {
-		case "esc", "q", "enter":
-			m.showDetail = false
-		case "up", "k":
-			m.detailViewport.LineUp(1)
-		case "down", "j":
-			m.detailViewport.LineDown(1)
-		case "pgup":
-			m.detailViewport.HalfViewUp()
-		case "pgdown":
-			m.detailViewport.HalfViewDown()
-		}
-		return m, nil
-	}
 
 	// Trace destination input: capture typing.
 	if m.showTraceInput {
@@ -990,15 +1037,29 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 	}
 
-	// Trace result overlay: capture scrolling keys.
-	if m.showTraceResult {
+	// Simple scroll-and-close overlays share one key handler. Each closes on
+	// Esc/q plus its own toggle key.
+	for _, ov := range []struct {
+		open     *bool
+		vp       *viewport.Model
+		closeKey string
+	}{
+		{&m.showDetail, &m.detailViewport, "enter"},
+		{&m.showTraceResult, &m.traceViewport, "t"},
+		{&m.showExposure, &m.exposureVP, "P"},
+		{&m.showDNS, &m.dnsVP, "D"},
+		{&m.showEffRules, &m.effRulesVP, "e"},
+		{&m.showXref, &m.xrefViewport, "x"},
+		{&m.showFindings, &m.findingsViewport, "F"},
+	} {
+		if !*ov.open {
+			continue
+		}
 		switch key {
-		case "esc", "q", "t":
-			m.showTraceResult = false
-		case "up", "k":
-			m.traceViewport.LineUp(1)
-		case "down", "j":
-			m.traceViewport.LineDown(1)
+		case "esc", "q", ov.closeKey:
+			*ov.open = false
+		default:
+			scrollKeys(ov.vp, key)
 		}
 		return m, nil
 	}
@@ -1007,7 +1068,15 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	if m.showAnalyzer {
 		switch {
 		case m.analyzerRunning:
-			return m, nil // ignore keys while the analysis runs
+			// The analysis itself keeps running on AWS; only the overlay and
+			// the app respond to keys.
+			switch key {
+			case "ctrl+c":
+				return m, tea.Quit
+			case "esc":
+				m.showAnalyzer = false
+			}
+			return m, nil
 		case m.analyzerInputMode:
 			switch key {
 			case "esc":
@@ -1051,29 +1120,14 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 				m.analyzerInput.SetValue(prefill)
 				m.analyzerInput.CursorEnd()
 				return m, m.analyzerInput.Focus()
-			case "up", "k":
-				m.analyzerVP.LineUp(1)
-			case "down", "j":
-				m.analyzerVP.LineDown(1)
+			default:
+				scrollKeys(&m.analyzerVP, key)
 			}
 			return m, nil
 		}
 	}
 
-	// Public-exposure overlay: capture scrolling keys.
-	if m.showExposure {
-		switch key {
-		case "esc", "q", "P":
-			m.showExposure = false
-		case "up", "k":
-			m.exposureVP.LineUp(1)
-		case "down", "j":
-			m.exposureVP.LineDown(1)
-		}
-		return m, nil
-	}
-
-	// Snapshot-diff overlay: capture scrolling keys; b re-baselines.
+	// Snapshot-diff overlay: scroll-and-close plus b to re-baseline.
 	if m.showDiff {
 		switch key {
 		case "esc", "q", "w":
@@ -1085,70 +1139,8 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 				m.statusMsg = "Baseline updated to the current state"
 			}
 			m.showDiff = false
-		case "up", "k":
-			m.diffVP.LineUp(1)
-		case "down", "j":
-			m.diffVP.LineDown(1)
-		}
-		return m, nil
-	}
-
-	// DNS overlay: capture scrolling keys.
-	if m.showDNS {
-		switch key {
-		case "esc", "q", "D":
-			m.showDNS = false
-		case "up", "k":
-			m.dnsVP.LineUp(1)
-		case "down", "j":
-			m.dnsVP.LineDown(1)
-		}
-		return m, nil
-	}
-
-	// Effective-rules overlay: capture scrolling keys.
-	if m.showEffRules {
-		switch key {
-		case "esc", "q", "e":
-			m.showEffRules = false
-		case "up", "k":
-			m.effRulesVP.LineUp(1)
-		case "down", "j":
-			m.effRulesVP.LineDown(1)
-		}
-		return m, nil
-	}
-
-	// Cross-reference overlay: capture scrolling keys.
-	if m.showXref {
-		switch key {
-		case "esc", "q", "x":
-			m.showXref = false
-		case "up", "k":
-			m.xrefViewport.LineUp(1)
-		case "down", "j":
-			m.xrefViewport.LineDown(1)
-		}
-		return m, nil
-	}
-
-	// Findings overlay: capture scrolling keys.
-	if m.showFindings {
-		switch key {
-		case "esc", "q", "F":
-			m.showFindings = false
-		case "up", "k":
-			m.findingsViewport.LineUp(1)
-		case "down", "j":
-			m.findingsViewport.LineDown(1)
-		case "pgup":
-			m.findingsViewport.HalfViewUp()
-		case "pgdown", " ":
-			m.findingsViewport.HalfViewDown()
-		case "g", "home":
-			m.findingsViewport.GotoTop()
-		case "G", "end":
-			m.findingsViewport.GotoBottom()
+		default:
+			scrollKeys(&m.diffVP, key)
 		}
 		return m, nil
 	}
@@ -1459,82 +1451,37 @@ func (m *Model) updateTableSizes() {
 	m.detailViewport.Width = dvW
 	m.detailViewport.Height = dvH
 
-	// Findings overlay viewport: leave room for the border, title and footer.
-	m.findingsViewport.Width = dvW
-	m.findingsViewport.Height = dvH - 2
-	if m.findingsViewport.Height < 3 {
-		m.findingsViewport.Height = 3
-	}
-	// Re-wrap the findings content to the new width when already loaded.
-	if len(m.findings) > 0 {
-		m.findingsViewport.SetContent(m.renderFindings())
+	// All other overlay viewports share one size: the detail size minus room
+	// for the border, title and footer.
+	for _, vp := range []*viewport.Model{
+		&m.findingsViewport, &m.traceViewport, &m.xrefViewport, &m.effRulesVP,
+		&m.dnsVP, &m.diffVP, &m.exposureVP, &m.analyzerVP,
+	} {
+		vp.Width = dvW
+		vp.Height = max(dvH-2, 3)
 	}
 
-	// Trace result viewport mirrors the findings overlay sizing.
-	m.traceViewport.Width = dvW
-	m.traceViewport.Height = dvH - 2
-	if m.traceViewport.Height < 3 {
-		m.traceViewport.Height = 3
+	// Re-wrap already-loaded overlay content to the new width.
+	if len(m.findings) > 0 {
+		m.findingsViewport.SetContent(m.renderFindings())
 	}
 	if len(m.traceResult.Hops) > 0 {
 		m.traceViewport.SetContent(m.renderTraceResult())
 	}
-
-	// Cross-reference overlay mirrors the same sizing.
-	m.xrefViewport.Width = dvW
-	m.xrefViewport.Height = dvH - 2
-	if m.xrefViewport.Height < 3 {
-		m.xrefViewport.Height = 3
-	}
 	if len(m.xrefGroups) > 0 {
 		m.xrefViewport.SetContent(m.renderXref())
-	}
-
-	// Effective-rules overlay mirrors the same sizing.
-	m.effRulesVP.Width = dvW
-	m.effRulesVP.Height = dvH - 2
-	if m.effRulesVP.Height < 3 {
-		m.effRulesVP.Height = 3
 	}
 	if m.effRules.Found {
 		m.effRulesVP.SetContent(m.renderEffRules())
 	}
-
-	// DNS overlay mirrors the same sizing.
-	m.dnsVP.Width = dvW
-	m.dnsVP.Height = dvH - 2
-	if m.dnsVP.Height < 3 {
-		m.dnsVP.Height = 3
-	}
 	if m.dnsInfo.VPCID != "" {
 		m.dnsVP.SetContent(m.renderDNS())
-	}
-
-	// Snapshot-diff overlay mirrors the same sizing.
-	m.diffVP.Width = dvW
-	m.diffVP.Height = dvH - 2
-	if m.diffVP.Height < 3 {
-		m.diffVP.Height = 3
 	}
 	if m.showDiff && m.diffErr == nil {
 		m.diffVP.SetContent(m.renderDiff())
 	}
-
-	// Public-exposure overlay mirrors the same sizing.
-	m.exposureVP.Width = dvW
-	m.exposureVP.Height = dvH - 2
-	if m.exposureVP.Height < 3 {
-		m.exposureVP.Height = 3
-	}
 	if len(m.exposureGroups) > 0 {
 		m.exposureVP.SetContent(m.renderExposure())
-	}
-
-	// Reachability Analyzer overlay mirrors the same sizing.
-	m.analyzerVP.Width = dvW
-	m.analyzerVP.Height = dvH - 2
-	if m.analyzerVP.Height < 3 {
-		m.analyzerVP.Height = 3
 	}
 	if m.showAnalyzer {
 		m.analyzerVP.SetContent(m.renderAnalyzerList())
@@ -1694,8 +1641,8 @@ func (m *Model) viewVPCPanel(height int) string {
 		if vpc.Name != "" {
 			label = vpc.Name
 		}
-		if len(label) > vpcPanelInner-2 {
-			label = label[:vpcPanelInner-5] + "..."
+		if ansi.StringWidth(label) > vpcPanelInner-2 {
+			label = ansi.Truncate(label, vpcPanelInner-2, "...")
 		}
 		style := lipgloss.NewStyle().Foreground(lipgloss.Color(ui.ColorText()))
 		if m.selectedVPC != nil && vpc.ID == m.selectedVPC.ID {
@@ -1735,8 +1682,8 @@ func (m *Model) viewCategoryPanel(height int) string {
 				Render("▸ "+item.label))
 		} else {
 			label := item.label
-			if len(label) > catPanelInner-2 {
-				label = label[:catPanelInner-5] + "..."
+			if ansi.StringWidth(label) > catPanelInner-2 {
+				label = ansi.Truncate(label, catPanelInner-2, "...")
 			}
 			var style lipgloss.Style
 			if i == m.activeSidebarIdx {
@@ -1837,17 +1784,19 @@ func (m *Model) viewResourcePanel(height int) string {
 		Render(content)
 }
 
-func (m *Model) viewDetailOverlay(bg string) string {
-	title := lipgloss.NewStyle().
+// overlayFrame renders the shared overlay chrome: title, body, and footer
+// hint inside a centered, focus-bordered box.
+func (m *Model) overlayFrame(title, body, hint string) string {
+	titleView := lipgloss.NewStyle().
 		Bold(true).
 		Foreground(lipgloss.Color(ui.ColorHeading())).
-		Render(m.detailTitle)
+		Render(title)
 
-	hint := lipgloss.NewStyle().
+	hintView := lipgloss.NewStyle().
 		Foreground(lipgloss.Color(ui.ColorMuted())).
-		Render("↑/↓ scroll  •  Esc close")
+		Render(hint)
 
-	inner := lipgloss.JoinVertical(lipgloss.Left, title, "", m.detailViewport.View(), "", hint)
+	inner := lipgloss.JoinVertical(lipgloss.Left, titleView, "", body, "", hintView)
 
 	overlay := lipgloss.NewStyle().
 		BorderStyle(lipgloss.RoundedBorder()).
@@ -1862,47 +1811,31 @@ func (m *Model) viewDetailOverlay(bg string) string {
 	return overlay
 }
 
+// overlayBody picks the spinner, error, or viewport content for an overlay.
+func (m *Model) overlayBody(loading bool, loadingText string, err error, vp *viewport.Model) string {
+	switch {
+	case loading:
+		return m.spinner.View() + "  " + loadingText
+	case err != nil:
+		return lipgloss.NewStyle().Foreground(lipgloss.Color(ui.ColorError())).
+			Render("Error: " + err.Error())
+	default:
+		return vp.View()
+	}
+}
+
+func (m *Model) viewDetailOverlay(bg string) string {
+	return m.overlayFrame(m.detailTitle, m.detailViewport.View(), "↑/↓ scroll  •  Esc close")
+}
+
 func (m *Model) viewFindingsOverlay(bg string) string {
-	var titleText string
-	if m.findingsLoading {
-		titleText = "VPC Findings"
-	} else {
+	titleText := "VPC Findings"
+	if !m.findingsLoading {
 		crit, warn, info := countBySeverity(m.findings)
 		titleText = fmt.Sprintf("VPC Findings — %d critical, %d warning, %d info", crit, warn, info)
 	}
-	title := lipgloss.NewStyle().
-		Bold(true).
-		Foreground(lipgloss.Color(ui.ColorHeading())).
-		Render(titleText)
-
-	hint := lipgloss.NewStyle().
-		Foreground(lipgloss.Color(ui.ColorMuted())).
-		Render("↑/↓ scroll  •  Esc/F close")
-
-	var bodyView string
-	switch {
-	case m.findingsLoading:
-		bodyView = m.spinner.View() + "  Analyzing VPC…"
-	case m.findingsErr != nil:
-		bodyView = lipgloss.NewStyle().Foreground(lipgloss.Color(ui.ColorError())).
-			Render("Error: " + m.findingsErr.Error())
-	default:
-		bodyView = m.findingsViewport.View()
-	}
-
-	inner := lipgloss.JoinVertical(lipgloss.Left, title, "", bodyView, "", hint)
-
-	overlay := lipgloss.NewStyle().
-		BorderStyle(lipgloss.RoundedBorder()).
-		BorderForeground(lipgloss.Color(ui.ColorBorderFocus())).
-		Foreground(lipgloss.Color(ui.ColorText())).
-		Padding(1, 2).
-		Render(inner)
-
-	if m.width > 0 && m.height > 0 {
-		return lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center, overlay)
-	}
-	return overlay
+	body := m.overlayBody(m.findingsLoading, "Analyzing VPC…", m.findingsErr, &m.findingsViewport)
+	return m.overlayFrame(titleText, body, "↑/↓ scroll  •  Esc/F close")
 }
 
 // renderFindings builds the scrollable body of the findings overlay: a coloured,
@@ -1958,65 +1891,17 @@ func (m *Model) renderFindings() string {
 }
 
 func (m *Model) viewTraceInputOverlay(bg string) string {
-	title := lipgloss.NewStyle().
-		Bold(true).
-		Foreground(lipgloss.Color(ui.ColorHeading())).
-		Render("Trace connectivity from " + m.traceSourceID)
-
 	prompt := lipgloss.NewStyle().Foreground(lipgloss.Color(ui.ColorText())).
 		Render("Destination:")
-	hint := lipgloss.NewStyle().
-		Foreground(lipgloss.Color(ui.ColorMuted())).
-		Render("Enter an IP and port (e.g. 10.0.1.20:3306) or internet:443  •  Enter run  •  Esc cancel")
-
-	inner := lipgloss.JoinVertical(lipgloss.Left, title, "", prompt+" "+m.traceInput.View(), "", hint)
-
-	overlay := lipgloss.NewStyle().
-		BorderStyle(lipgloss.RoundedBorder()).
-		BorderForeground(lipgloss.Color(ui.ColorBorderFocus())).
-		Padding(1, 2).
-		Render(inner)
-
-	if m.width > 0 && m.height > 0 {
-		return lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center, overlay)
-	}
-	return overlay
+	return m.overlayFrame(
+		"Trace connectivity from "+m.traceSourceID,
+		prompt+" "+m.traceInput.View(),
+		"Enter an IP and port (e.g. 10.0.1.20:3306) or internet:443  •  Enter run  •  Esc cancel")
 }
 
 func (m *Model) viewTraceResultOverlay(bg string) string {
-	title := lipgloss.NewStyle().
-		Bold(true).
-		Foreground(lipgloss.Color(ui.ColorHeading())).
-		Render("Connectivity Trace")
-
-	hint := lipgloss.NewStyle().
-		Foreground(lipgloss.Color(ui.ColorMuted())).
-		Render("↑/↓ scroll  •  Esc/t close")
-
-	var body string
-	switch {
-	case m.traceLoading:
-		body = m.spinner.View() + "  Tracing path…"
-	case m.traceErr != nil:
-		body = lipgloss.NewStyle().Foreground(lipgloss.Color(ui.ColorError())).
-			Render("Error: " + m.traceErr.Error())
-	default:
-		body = m.traceViewport.View()
-	}
-
-	inner := lipgloss.JoinVertical(lipgloss.Left, title, "", body, "", hint)
-
-	overlay := lipgloss.NewStyle().
-		BorderStyle(lipgloss.RoundedBorder()).
-		BorderForeground(lipgloss.Color(ui.ColorBorderFocus())).
-		Foreground(lipgloss.Color(ui.ColorText())).
-		Padding(1, 2).
-		Render(inner)
-
-	if m.width > 0 && m.height > 0 {
-		return lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center, overlay)
-	}
-	return overlay
+	body := m.overlayBody(m.traceLoading, "Tracing path…", m.traceErr, &m.traceViewport)
+	return m.overlayFrame("Connectivity Trace", body, "↑/↓ scroll  •  Esc/t close")
 }
 
 // renderTraceResult builds the scrollable body of the trace result overlay: a
@@ -2057,39 +1942,8 @@ func (m *Model) renderTraceResult() string {
 }
 
 func (m *Model) viewXrefOverlay(bg string) string {
-	title := lipgloss.NewStyle().
-		Bold(true).
-		Foreground(lipgloss.Color(ui.ColorHeading())).
-		Render("Where used: " + m.xrefTitle)
-
-	hint := lipgloss.NewStyle().
-		Foreground(lipgloss.Color(ui.ColorMuted())).
-		Render("↑/↓ scroll  •  Esc/x close")
-
-	var body string
-	switch {
-	case m.xrefLoading:
-		body = m.spinner.View() + "  Resolving relationships…"
-	case m.xrefErr != nil:
-		body = lipgloss.NewStyle().Foreground(lipgloss.Color(ui.ColorError())).
-			Render("Error: " + m.xrefErr.Error())
-	default:
-		body = m.xrefViewport.View()
-	}
-
-	inner := lipgloss.JoinVertical(lipgloss.Left, title, "", body, "", hint)
-
-	overlay := lipgloss.NewStyle().
-		BorderStyle(lipgloss.RoundedBorder()).
-		BorderForeground(lipgloss.Color(ui.ColorBorderFocus())).
-		Foreground(lipgloss.Color(ui.ColorText())).
-		Padding(1, 2).
-		Render(inner)
-
-	if m.width > 0 && m.height > 0 {
-		return lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center, overlay)
-	}
-	return overlay
+	body := m.overlayBody(m.xrefLoading, "Resolving relationships…", m.xrefErr, &m.xrefViewport)
+	return m.overlayFrame("Where used: "+m.xrefTitle, body, "↑/↓ scroll  •  Esc/x close")
 }
 
 // renderXref builds the scrollable body of the cross-reference overlay: each
@@ -2122,39 +1976,8 @@ func renderResourceGroups(groups []xrefGroup, emptyMsg string) string {
 }
 
 func (m *Model) viewEffRulesOverlay(bg string) string {
-	title := lipgloss.NewStyle().
-		Bold(true).
-		Foreground(lipgloss.Color(ui.ColorHeading())).
-		Render("Effective rules: " + m.effRules.ENIID)
-
-	hint := lipgloss.NewStyle().
-		Foreground(lipgloss.Color(ui.ColorMuted())).
-		Render("↑/↓ scroll  •  Esc/e close")
-
-	var body string
-	switch {
-	case m.effRulesLoading:
-		body = m.spinner.View() + "  Merging security group rules…"
-	case m.effRulesErr != nil:
-		body = lipgloss.NewStyle().Foreground(lipgloss.Color(ui.ColorError())).
-			Render("Error: " + m.effRulesErr.Error())
-	default:
-		body = m.effRulesVP.View()
-	}
-
-	inner := lipgloss.JoinVertical(lipgloss.Left, title, "", body, "", hint)
-
-	overlay := lipgloss.NewStyle().
-		BorderStyle(lipgloss.RoundedBorder()).
-		BorderForeground(lipgloss.Color(ui.ColorBorderFocus())).
-		Foreground(lipgloss.Color(ui.ColorText())).
-		Padding(1, 2).
-		Render(inner)
-
-	if m.width > 0 && m.height > 0 {
-		return lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center, overlay)
-	}
-	return overlay
+	body := m.overlayBody(m.effRulesLoading, "Merging security group rules…", m.effRulesErr, &m.effRulesVP)
+	return m.overlayFrame("Effective rules: "+m.effRules.ENIID, body, "↑/↓ scroll  •  Esc/e close")
 }
 
 // renderEffRules builds the scrollable body of the effective-rules overlay: the
@@ -2211,39 +2034,8 @@ func (m *Model) renderEffRules() string {
 }
 
 func (m *Model) viewDNSOverlay(bg string) string {
-	title := lipgloss.NewStyle().
-		Bold(true).
-		Foreground(lipgloss.Color(ui.ColorHeading())).
-		Render("DNS & VPC attributes: " + m.dnsInfo.VPCID)
-
-	hint := lipgloss.NewStyle().
-		Foreground(lipgloss.Color(ui.ColorMuted())).
-		Render("↑/↓ scroll  •  Esc/D close")
-
-	var body string
-	switch {
-	case m.dnsLoading:
-		body = m.spinner.View() + "  Reading VPC DNS attributes…"
-	case m.dnsErr != nil:
-		body = lipgloss.NewStyle().Foreground(lipgloss.Color(ui.ColorError())).
-			Render("Error: " + m.dnsErr.Error())
-	default:
-		body = m.dnsVP.View()
-	}
-
-	inner := lipgloss.JoinVertical(lipgloss.Left, title, "", body, "", hint)
-
-	overlay := lipgloss.NewStyle().
-		BorderStyle(lipgloss.RoundedBorder()).
-		BorderForeground(lipgloss.Color(ui.ColorBorderFocus())).
-		Foreground(lipgloss.Color(ui.ColorText())).
-		Padding(1, 2).
-		Render(inner)
-
-	if m.width > 0 && m.height > 0 {
-		return lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center, overlay)
-	}
-	return overlay
+	body := m.overlayBody(m.dnsLoading, "Reading VPC DNS attributes…", m.dnsErr, &m.dnsVP)
+	return m.overlayFrame("DNS & VPC attributes: "+m.dnsInfo.VPCID, body, "↑/↓ scroll  •  Esc/D close")
 }
 
 // renderDNS builds the scrollable body of the DNS overlay: the VPC's DNS
@@ -2307,39 +2099,8 @@ func (m *Model) renderDNS() string {
 func (m *Model) viewDiffOverlay(bg string) string {
 	added, removed, modified := diffCounts(m.snapDiff)
 	titleText := fmt.Sprintf("Changes since baseline — %d added, %d removed, %d modified", added, removed, modified)
-	title := lipgloss.NewStyle().
-		Bold(true).
-		Foreground(lipgloss.Color(ui.ColorHeading())).
-		Render(titleText)
-
-	hint := lipgloss.NewStyle().
-		Foreground(lipgloss.Color(ui.ColorMuted())).
-		Render("↑/↓ scroll  •  b save current as new baseline  •  Esc/w close")
-
-	var body string
-	switch {
-	case m.diffLoading:
-		body = m.spinner.View() + "  Comparing with baseline…"
-	case m.diffErr != nil:
-		body = lipgloss.NewStyle().Foreground(lipgloss.Color(ui.ColorError())).
-			Render("Error: " + m.diffErr.Error())
-	default:
-		body = m.diffVP.View()
-	}
-
-	inner := lipgloss.JoinVertical(lipgloss.Left, title, "", body, "", hint)
-
-	overlay := lipgloss.NewStyle().
-		BorderStyle(lipgloss.RoundedBorder()).
-		BorderForeground(lipgloss.Color(ui.ColorBorderFocus())).
-		Foreground(lipgloss.Color(ui.ColorText())).
-		Padding(1, 2).
-		Render(inner)
-
-	if m.width > 0 && m.height > 0 {
-		return lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center, overlay)
-	}
-	return overlay
+	body := m.overlayBody(m.diffLoading, "Comparing with baseline…", m.diffErr, &m.diffVP)
+	return m.overlayFrame(titleText, body, "↑/↓ scroll  •  b save current as new baseline  •  Esc/w close")
 }
 
 // renderDiff builds the scrollable body of the snapshot-diff overlay.
@@ -2380,39 +2141,8 @@ func (m *Model) renderDiff() string {
 }
 
 func (m *Model) viewExposureOverlay(bg string) string {
-	title := lipgloss.NewStyle().
-		Bold(true).
-		Foreground(lipgloss.Color(ui.ColorHeading())).
-		Render("Public exposure — internet-facing surface")
-
-	hint := lipgloss.NewStyle().
-		Foreground(lipgloss.Color(ui.ColorMuted())).
-		Render("↑/↓ scroll  •  Esc/P close")
-
-	var body string
-	switch {
-	case m.exposureLoading:
-		body = m.spinner.View() + "  Computing exposure…"
-	case m.exposureErr != nil:
-		body = lipgloss.NewStyle().Foreground(lipgloss.Color(ui.ColorError())).
-			Render("Error: " + m.exposureErr.Error())
-	default:
-		body = m.exposureVP.View()
-	}
-
-	inner := lipgloss.JoinVertical(lipgloss.Left, title, "", body, "", hint)
-
-	overlay := lipgloss.NewStyle().
-		BorderStyle(lipgloss.RoundedBorder()).
-		BorderForeground(lipgloss.Color(ui.ColorBorderFocus())).
-		Foreground(lipgloss.Color(ui.ColorText())).
-		Padding(1, 2).
-		Render(inner)
-
-	if m.width > 0 && m.height > 0 {
-		return lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center, overlay)
-	}
-	return overlay
+	body := m.overlayBody(m.exposureLoading, "Computing exposure…", m.exposureErr, &m.exposureVP)
+	return m.overlayFrame("Public exposure — internet-facing surface", body, "↑/↓ scroll  •  Esc/P close")
 }
 
 // renderExposure builds the scrollable body of the public-exposure overlay.
@@ -2421,16 +2151,11 @@ func (m *Model) renderExposure() string {
 }
 
 func (m *Model) viewAnalyzerOverlay(bg string) string {
-	title := lipgloss.NewStyle().
-		Bold(true).
-		Foreground(lipgloss.Color(ui.ColorHeading())).
-		Render("Reachability Analyzer")
-
 	var body, hint string
 	switch {
 	case m.analyzerRunning:
 		body = m.spinner.View() + "  Running analysis — this can take up to a minute…"
-		hint = "please wait"
+		hint = "Esc close (the analysis keeps running)"
 	case m.analyzerInputMode:
 		prompt := lipgloss.NewStyle().Foreground(lipgloss.Color(ui.ColorText())).Render("New analysis:")
 		body = prompt + " " + m.analyzerInput.View()
@@ -2455,20 +2180,7 @@ func (m *Model) viewAnalyzerOverlay(bg string) string {
 		hint = "↑/↓ scroll  •  n new analysis (paid)  •  Esc/A close"
 	}
 
-	hintStyle := lipgloss.NewStyle().Foreground(lipgloss.Color(ui.ColorMuted())).Render(hint)
-	inner := lipgloss.JoinVertical(lipgloss.Left, title, "", body, "", hintStyle)
-
-	overlay := lipgloss.NewStyle().
-		BorderStyle(lipgloss.RoundedBorder()).
-		BorderForeground(lipgloss.Color(ui.ColorBorderFocus())).
-		Foreground(lipgloss.Color(ui.ColorText())).
-		Padding(1, 2).
-		Render(inner)
-
-	if m.width > 0 && m.height > 0 {
-		return lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center, overlay)
-	}
-	return overlay
+	return m.overlayFrame("Reachability Analyzer", body, hint)
 }
 
 // renderAnalyzerList renders the existing analyses as a scrollable list.
@@ -2504,7 +2216,12 @@ func (m *Model) renderAnalyzerList() string {
 
 func (m *Model) viewScanStatus() string {
 	if m.loading && m.scanning {
-		return m.spinner.View() + fmt.Sprintf("  Scanning %d/%d regions…", m.scanDone, m.scanTotal)
+		s := m.spinner.View() + fmt.Sprintf("  Scanning %d/%d regions…", m.scanDone, m.scanTotal)
+		if m.scanFailed > 0 {
+			s += lipgloss.NewStyle().Foreground(lipgloss.Color(ui.ColorWarning())).
+				Render(fmt.Sprintf("  (%d failed)", m.scanFailed))
+		}
+		return s
 	}
 	if m.loading {
 		return m.spinner.View() + "  Loading…"
@@ -2514,8 +2231,13 @@ func (m *Model) viewScanStatus() string {
 	if count == 1 {
 		noun = "VPC"
 	}
-	return lipgloss.NewStyle().Foreground(lipgloss.Color(ui.ColorMuted())).
+	s := lipgloss.NewStyle().Foreground(lipgloss.Color(ui.ColorMuted())).
 		Render(fmt.Sprintf("%d %s", count, noun))
+	if m.scanFailed > 0 {
+		s += lipgloss.NewStyle().Foreground(lipgloss.Color(ui.ColorWarning())).
+			Render(fmt.Sprintf("  ⚠ %d regions failed — results may be incomplete", m.scanFailed))
+	}
+	return s
 }
 
 func (m *Model) viewStatusBar() string {
@@ -2552,12 +2274,14 @@ func (m *Model) viewStatusBar() string {
 	}
 
 	left := strings.Join(parts, "  │  ")
+	leftW := ansi.StringWidth(left)
+	hintW := ansi.StringWidth(hint)
 	barW := m.width
-	if barW < len(left)+len(hint)+4 {
-		barW = len(left) + len(hint) + 4
+	if barW < leftW+hintW+4 {
+		barW = leftW + hintW + 4
 	}
 
-	gap := barW - len(left) - len(hint) - 2
+	gap := barW - leftW - hintW - 2
 	if gap < 1 {
 		gap = 1
 	}
@@ -2601,13 +2325,6 @@ func (m *Model) helpText() string {
 		"  q        Quit",
 	}
 	return strings.Join(lines, "\n")
-}
-
-func min(a, b int) int {
-	if a < b {
-		return a
-	}
-	return b
 }
 
 // clipLines truncates every line of s to at most w display columns, in an

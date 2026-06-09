@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"sort"
 	"strings"
 	"text/tabwriter"
 
@@ -161,7 +162,14 @@ func printTable(resources []model.Resource) {
 		grouped[key] = append(grouped[key], r)
 	}
 
-	for key, resList := range grouped {
+	keys := make([]string, 0, len(grouped))
+	for key := range grouped {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+
+	for _, key := range keys {
+		resList := grouped[key]
 		fmt.Printf("\n--- %s ---\n", strings.ToUpper(key))
 
 		w := tabwriter.NewWriter(os.Stdout, 0, 0, 3, ' ', 0)

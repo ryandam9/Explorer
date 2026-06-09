@@ -272,8 +272,14 @@ func snapshotDir() (string, error) {
 	return dir, nil
 }
 
-func snapshotPath(dir, vpcID string) string {
-	return filepath.Join(dir, vpcID+".json")
+// snapshotPath returns the baseline file for a VPC. The owning account is part
+// of the name so that VPCs from different accounts/profiles cannot collide.
+func snapshotPath(dir, vpcID, ownerID string) string {
+	name := vpcID + ".json"
+	if ownerID != "" {
+		name = ownerID + "-" + name
+	}
+	return filepath.Join(dir, name)
 }
 
 // saveSnapshot writes a baseline snapshot for a VPC to disk.
@@ -286,17 +292,21 @@ func saveSnapshot(snap vpcSnapshot) error {
 	if err != nil {
 		return err
 	}
-	return os.WriteFile(snapshotPath(dir, snap.VPCID), data, 0o644)
+	return os.WriteFile(snapshotPath(dir, snap.VPCID, snap.OwnerID), data, 0o644)
 }
 
 // loadSnapshot reads a baseline snapshot for a VPC. The bool is false when no
-// baseline has been saved yet.
-func loadSnapshot(vpcID string) (vpcSnapshot, bool, error) {
+// baseline has been saved yet. Baselines written before account scoping
+// (vpcID.json) are still found as a fallback.
+func loadSnapshot(vpcID, ownerID string) (vpcSnapshot, bool, error) {
 	dir, err := snapshotDir()
 	if err != nil {
 		return vpcSnapshot{}, false, err
 	}
-	data, err := os.ReadFile(snapshotPath(dir, vpcID))
+	data, err := os.ReadFile(snapshotPath(dir, vpcID, ownerID))
+	if os.IsNotExist(err) && ownerID != "" {
+		data, err = os.ReadFile(snapshotPath(dir, vpcID, ""))
+	}
 	if os.IsNotExist(err) {
 		return vpcSnapshot{}, false, nil
 	}

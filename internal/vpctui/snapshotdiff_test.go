@@ -108,7 +108,7 @@ func TestSaveLoadSnapshotRoundTrip(t *testing.T) {
 	if err := saveSnapshot(snap); err != nil {
 		t.Fatalf("saveSnapshot: %v", err)
 	}
-	got, ok, err := loadSnapshot("vpc-1")
+	got, ok, err := loadSnapshot("vpc-1", "")
 	if err != nil || !ok {
 		t.Fatalf("loadSnapshot: ok=%v err=%v", ok, err)
 	}
@@ -121,9 +121,44 @@ func TestSaveLoadSnapshotRoundTrip(t *testing.T) {
 	}
 }
 
+func TestSaveLoadSnapshotAccountScoped(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+
+	snap := diffBase()
+	snap.OwnerID = "111122223333"
+	if err := saveSnapshot(snap); err != nil {
+		t.Fatalf("saveSnapshot: %v", err)
+	}
+	// Loading with the owning account finds the baseline; a different account
+	// must not see it.
+	if _, ok, err := loadSnapshot("vpc-1", "111122223333"); err != nil || !ok {
+		t.Fatalf("owner-scoped load: ok=%v err=%v", ok, err)
+	}
+	if _, ok, _ := loadSnapshot("vpc-1", "444455556666"); ok {
+		t.Error("baseline from another account should not be visible")
+	}
+}
+
+func TestLoadSnapshotLegacyFallback(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+
+	// A baseline saved before account scoping (no OwnerID → vpc-1.json) must
+	// still be found when loading with an owner.
+	if err := saveSnapshot(diffBase()); err != nil {
+		t.Fatalf("saveSnapshot: %v", err)
+	}
+	got, ok, err := loadSnapshot("vpc-1", "111122223333")
+	if err != nil || !ok {
+		t.Fatalf("legacy fallback load: ok=%v err=%v", ok, err)
+	}
+	if got.VPCID != "vpc-1" {
+		t.Errorf("legacy fallback mismatch: %+v", got)
+	}
+}
+
 func TestLoadSnapshotMissing(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
-	_, ok, err := loadSnapshot("vpc-absent")
+	_, ok, err := loadSnapshot("vpc-absent", "")
 	if err != nil {
 		t.Errorf("missing baseline should not error, got %v", err)
 	}

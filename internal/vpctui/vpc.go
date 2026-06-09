@@ -17,6 +17,7 @@ import (
 	"github.com/aws/smithy-go"
 
 	"github.com/user/aws_explorer/internal/auth"
+	"github.com/user/aws_explorer/internal/awsutil"
 	"github.com/user/aws_explorer/internal/config"
 )
 
@@ -787,10 +788,14 @@ func (c *VPCClient) ListEC2Instances(vpcID string) ([]EC2InstanceInfo, error) {
 				if inst.IamInstanceProfile != nil {
 					iamRole = aws.ToString(inst.IamInstanceProfile.Arn)
 				}
+				state := ""
+				if inst.State != nil {
+					state = string(inst.State.Name)
+				}
 				instances = append(instances, EC2InstanceInfo{
 					ID:         aws.ToString(inst.InstanceId),
 					Name:       ec2TagName(inst.Tags),
-					State:      string(inst.State.Name),
+					State:      state,
 					Type:       string(inst.InstanceType),
 					PrivateIP:  aws.ToString(inst.PrivateIpAddress),
 					PublicIP:   aws.ToString(inst.PublicIpAddress),
@@ -974,19 +979,28 @@ func (c *VPCClient) CreateStartWaitAnalysis(source, dest string, port int) (NetI
 	if err != nil {
 		return NetInsightsAnalysis{}, err
 	}
+	if pathOut.NetworkInsightsPath == nil {
+		return NetInsightsAnalysis{}, fmt.Errorf("CreateNetworkInsightsPath returned no path")
+	}
 	pathID := aws.ToString(pathOut.NetworkInsightsPath.NetworkInsightsPathId)
 
 	startOut, err := c.ec2.StartNetworkInsightsAnalysis(ctx, &awsec2.StartNetworkInsightsAnalysisInput{
 		NetworkInsightsPathId: aws.String(pathID),
 	})
 	if err != nil {
+		// Don't leave the just-created path behind when the analysis never
+		// started. Use a fresh context: the failure may be a cancellation.
+		cleanupCtx, cleanupCancel := context.WithTimeout(context.Background(), 15*time.Second)
+		defer cleanupCancel()
+		_, _ = c.ec2.DeleteNetworkInsightsPath(cleanupCtx, &awsec2.DeleteNetworkInsightsPathInput{
+			NetworkInsightsPathId: aws.String(pathID),
+		})
 		return NetInsightsAnalysis{}, err
 	}
 	analysisID := aws.ToString(startOut.NetworkInsightsAnalysis.NetworkInsightsAnalysisId)
 
-	paths := map[string]ec2types.NetworkInsightsPath{}
-	if pathOut.NetworkInsightsPath != nil {
-		paths[pathID] = *pathOut.NetworkInsightsPath
+	paths := map[string]ec2types.NetworkInsightsPath{
+		pathID: *pathOut.NetworkInsightsPath,
 	}
 	for {
 		resp, err := c.ec2.DescribeNetworkInsightsAnalyses(ctx, &awsec2.DescribeNetworkInsightsAnalysesInput{
@@ -1174,22 +1188,10 @@ func (c *VPCClient) ListLoadBalancers(vpcID string) ([]LoadBalancerInfo, error) 
 // Helpers
 // ---------------------------------------------------------------------------
 
-func ec2TagName(tags []ec2types.Tag) string {
-	for _, t := range tags {
-		if aws.ToString(t.Key) == "Name" {
-			return aws.ToString(t.Value)
-		}
-	}
-	return ""
-}
-
-func ec2TagsToMap(tags []ec2types.Tag) map[string]string {
-	m := make(map[string]string, len(tags))
-	for _, t := range tags {
-		m[aws.ToString(t.Key)] = aws.ToString(t.Value)
-	}
-	return m
-}
+var (
+	ec2TagName   = awsutil.EC2TagName
+	ec2TagsToMap = awsutil.EC2TagsToMap
+)
 
 func routeTarget(r ec2types.Route) string {
 	switch {
@@ -1207,6 +1209,12 @@ func routeTarget(r ec2types.Route) string {
 		return *r.InstanceId
 	case r.EgressOnlyInternetGatewayId != nil:
 		return *r.EgressOnlyInternetGatewayId
+	case r.CarrierGatewayId != nil:
+		return *r.CarrierGatewayId
+	case r.LocalGatewayId != nil:
+		return *r.LocalGatewayId
+	case r.CoreNetworkArn != nil:
+		return *r.CoreNetworkArn
 	default:
 		return "-"
 	}
@@ -1224,6 +1232,9 @@ func permToRules(perm ec2types.IpPermission, dir string) []SGRule {
 	}
 	for _, g := range perm.UserIdGroupPairs {
 		rules = append(rules, SGRule{Direction: dir, Protocol: proto, PortRange: ports, Source: aws.ToString(g.GroupId)})
+	}
+	for _, p := range perm.PrefixListIds {
+		rules = append(rules, SGRule{Direction: dir, Protocol: proto, PortRange: ports, Source: aws.ToString(p.PrefixListId), Description: aws.ToString(p.Description)})
 	}
 	if len(rules) == 0 {
 		rules = append(rules, SGRule{Direction: dir, Protocol: proto, PortRange: ports, Source: "-"})
