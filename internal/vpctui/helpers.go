@@ -351,6 +351,13 @@ func encodeSGRules(rules []SGRule) string {
 		}
 		sb.WriteString(fmt.Sprintf("\n  %-10s %-8s %-12s %-22s %s", r.Direction, r.Protocol, r.PortRange, r.Source, desc))
 	}
+
+	// Plain-English explanation of each rule, with risk flags for sensitive
+	// ports exposed to the public internet.
+	sb.WriteString("\n\n  In plain English:")
+	for _, r := range rules {
+		sb.WriteString("\n  • " + explainSGRule(r))
+	}
 	return sb.String()
 }
 
@@ -466,15 +473,15 @@ func filterNACLRules(rules []NACLRule, dir string) []NACLRule {
 
 func peeringToMap(pc PeeringInfo) map[string]string {
 	return map[string]string{
-		"peering_id":      pc.ID,
-		"status":          pc.Status,
-		"requester_vpc":   pc.RequesterVPCID,
-		"requester_region":orDash(pc.RequesterRegion),
-		"requester_cidr":  orDash(pc.RequesterCIDR),
-		"accepter_vpc":    pc.AccepterVPCID,
-		"accepter_region": orDash(pc.AccepterRegion),
-		"accepter_cidr":   orDash(pc.AccepterCIDR),
-		"tags":            display.EncodeTags(pc.Tags),
+		"peering_id":       pc.ID,
+		"status":           pc.Status,
+		"requester_vpc":    pc.RequesterVPCID,
+		"requester_region": orDash(pc.RequesterRegion),
+		"requester_cidr":   orDash(pc.RequesterCIDR),
+		"accepter_vpc":     pc.AccepterVPCID,
+		"accepter_region":  orDash(pc.AccepterRegion),
+		"accepter_cidr":    orDash(pc.AccepterCIDR),
+		"tags":             display.EncodeTags(pc.Tags),
 	}
 }
 
@@ -512,16 +519,16 @@ func ec2ToMap(inst EC2InstanceInfo) map[string]string {
 
 func lambdaToMap(fn LambdaFunctionInfo) map[string]string {
 	return map[string]string{
-		"name":           fn.Name,
-		"runtime":        fn.Runtime,
-		"state":          fn.State,
-		"handler":        fn.Handler,
-		"memory":         fmt.Sprintf("%d MB", fn.MemoryMB),
-		"timeout":        fmt.Sprintf("%ds", fn.TimeoutSec),
-		"last_modified":  orDash(fn.LastModified),
-		"vpc_id":         fn.VPCID,
-		"subnets":        strings.Join(fn.SubnetIDs, ", "),
-		"security_groups":strings.Join(fn.SGIDs, ", "),
+		"name":            fn.Name,
+		"runtime":         fn.Runtime,
+		"state":           fn.State,
+		"handler":         fn.Handler,
+		"memory":          fmt.Sprintf("%d MB", fn.MemoryMB),
+		"timeout":         fmt.Sprintf("%ds", fn.TimeoutSec),
+		"last_modified":   orDash(fn.LastModified),
+		"vpc_id":          fn.VPCID,
+		"subnets":         strings.Join(fn.SubnetIDs, ", "),
+		"security_groups": strings.Join(fn.SGIDs, ", "),
 	}
 }
 
