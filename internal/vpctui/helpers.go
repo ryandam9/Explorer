@@ -5,11 +5,49 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/user/aws_explorer/internal/display"
 	"github.com/user/aws_explorer/internal/table"
 )
 
 // ---------------------------------------------------------------------------
-// Resource types and sidebar
+// Resource type → config key
+// ---------------------------------------------------------------------------
+
+func rtKey(rt resourceType) string {
+	switch rt {
+	case rtSubnets:
+		return "subnets"
+	case rtSecurityGroups:
+		return "security_groups"
+	case rtRouteTables:
+		return "route_tables"
+	case rtInternetGateways:
+		return "internet_gateways"
+	case rtNatGateways:
+		return "nat_gateways"
+	case rtEndpoints:
+		return "endpoints"
+	case rtNetworkACLs:
+		return "network_acls"
+	case rtPeering:
+		return "peering"
+	case rtFlowLogs:
+		return "flow_logs"
+	case rtEC2Instances:
+		return "ec2_instances"
+	case rtLambda:
+		return "lambda"
+	case rtRDS:
+		return "rds"
+	case rtLoadBalancers:
+		return "load_balancers"
+	default:
+		return "unknown"
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Resource type and sidebar
 // ---------------------------------------------------------------------------
 
 type resourceType int
@@ -92,7 +130,6 @@ func buildSidebarItems() []sidebarItem {
 	return items
 }
 
-// firstSelectableIdx returns the index of the first non-header sidebar item.
 func firstSelectableIdx(items []sidebarItem) int {
 	for i, item := range items {
 		if !item.isHeader {
@@ -102,7 +139,6 @@ func firstSelectableIdx(items []sidebarItem) int {
 	return 0
 }
 
-// nextSelectableIdx returns the next non-header item index, wrapping around.
 func nextSelectableIdx(items []sidebarItem, cur int, delta int) int {
 	n := len(items)
 	idx := cur
@@ -116,468 +152,306 @@ func nextSelectableIdx(items []sidebarItem, cur int, delta int) int {
 }
 
 // ---------------------------------------------------------------------------
-// Table columns per resource type
+// Fetch → []map[string]string
 // ---------------------------------------------------------------------------
 
-func columnsFor(rt resourceType) []table.Column {
-	switch rt {
-	case rtSubnets:
-		return []table.Column{
-			{Title: "#", Width: 4},
-			{Title: "Subnet ID", Width: 24},
-			{Title: "Name", Width: 18},
-			{Title: "CIDR", Width: 16},
-			{Title: "AZ", Width: 14},
-			{Title: "Avail IPs", Width: 10},
-			{Title: "Public", Width: 7},
-			{Title: "State", Width: 10},
-		}
-	case rtSecurityGroups:
-		return []table.Column{
-			{Title: "#", Width: 4},
-			{Title: "SG ID", Width: 22},
-			{Title: "Name", Width: 22},
-			{Title: "In", Width: 5},
-			{Title: "Out", Width: 5},
-			{Title: "Description", Width: 36},
-		}
-	case rtRouteTables:
-		return []table.Column{
-			{Title: "#", Width: 4},
-			{Title: "RT ID", Width: 24},
-			{Title: "Name", Width: 18},
-			{Title: "Routes", Width: 7},
-			{Title: "Subnets", Width: 7},
-			{Title: "Main", Width: 6},
-		}
-	case rtInternetGateways:
-		return []table.Column{
-			{Title: "#", Width: 4},
-			{Title: "IGW ID", Width: 24},
-			{Title: "Name", Width: 24},
-			{Title: "State", Width: 12},
-		}
-	case rtNatGateways:
-		return []table.Column{
-			{Title: "#", Width: 4},
-			{Title: "NAT ID", Width: 24},
-			{Title: "Name", Width: 18},
-			{Title: "Type", Width: 8},
-			{Title: "State", Width: 10},
-			{Title: "Public IP", Width: 16},
-			{Title: "Subnet", Width: 24},
-		}
-	case rtEndpoints:
-		return []table.Column{
-			{Title: "#", Width: 4},
-			{Title: "Endpoint ID", Width: 24},
-			{Title: "Service", Width: 40},
-			{Title: "Type", Width: 12},
-			{Title: "State", Width: 12},
-		}
-	case rtNetworkACLs:
-		return []table.Column{
-			{Title: "#", Width: 4},
-			{Title: "NACL ID", Width: 24},
-			{Title: "Name", Width: 18},
-			{Title: "Rules", Width: 6},
-			{Title: "Subnets", Width: 7},
-			{Title: "Default", Width: 8},
-		}
-	case rtPeering:
-		return []table.Column{
-			{Title: "#", Width: 4},
-			{Title: "Peering ID", Width: 24},
-			{Title: "Status", Width: 12},
-			{Title: "Requester VPC", Width: 22},
-			{Title: "Accepter VPC", Width: 22},
-		}
-	case rtFlowLogs:
-		return []table.Column{
-			{Title: "#", Width: 4},
-			{Title: "Log ID", Width: 24},
-			{Title: "Traffic", Width: 10},
-			{Title: "Status", Width: 12},
-			{Title: "Destination", Width: 40},
-		}
-	case rtEC2Instances:
-		return []table.Column{
-			{Title: "#", Width: 4},
-			{Title: "Instance ID", Width: 20},
-			{Title: "Name", Width: 18},
-			{Title: "State", Width: 10},
-			{Title: "Type", Width: 14},
-			{Title: "Private IP", Width: 16},
-			{Title: "Public IP", Width: 16},
-			{Title: "AZ", Width: 14},
-		}
-	case rtLambda:
-		return []table.Column{
-			{Title: "#", Width: 4},
-			{Title: "Function Name", Width: 30},
-			{Title: "Runtime", Width: 14},
-			{Title: "State", Width: 10},
-			{Title: "Memory", Width: 8},
-			{Title: "Timeout", Width: 9},
-		}
-	case rtRDS:
-		return []table.Column{
-			{Title: "#", Width: 4},
-			{Title: "DB ID", Width: 28},
-			{Title: "Engine", Width: 20},
-			{Title: "Class", Width: 16},
-			{Title: "Status", Width: 12},
-			{Title: "AZ", Width: 14},
-			{Title: "Multi-AZ", Width: 9},
-		}
-	case rtLoadBalancers:
-		return []table.Column{
-			{Title: "#", Width: 4},
-			{Title: "Name", Width: 24},
-			{Title: "Type", Width: 12},
-			{Title: "Scheme", Width: 12},
-			{Title: "State", Width: 12},
-			{Title: "DNS Name", Width: 40},
-		}
-	default:
-		return []table.Column{{Title: "#", Width: 4}, {Title: "ID", Width: 40}}
-	}
-}
-
-// ---------------------------------------------------------------------------
-// Row and detail builders per resource type
-// ---------------------------------------------------------------------------
-
-type resourceData struct {
-	rows    []table.Row
-	details [][]string
-}
-
-func fetchResourceData(client *VPCClient, rt resourceType, vpcID string) (resourceData, error) {
+func fetchResourceMaps(client *VPCClient, rt resourceType, vpcID string) ([]map[string]string, error) {
 	switch rt {
 	case rtSubnets:
 		items, err := client.ListSubnets(vpcID)
 		if err != nil {
-			return resourceData{}, err
+			return nil, err
 		}
-		var rows []table.Row
-		var details [][]string
-		for _, s := range items {
-			pub := boolStr(s.IsPublic)
-			rows = append(rows, table.Row{"", s.ID, orDash(s.Name), s.CIDR, s.AZ, fmt.Sprintf("%d", s.AvailableIPs), pub, s.State})
-			details = append(details, subnetDetail(s))
+		out := make([]map[string]string, len(items))
+		for i, s := range items {
+			out[i] = subnetToMap(s)
 		}
-		return resourceData{seqRows(rows), details}, nil
+		return out, nil
 
 	case rtSecurityGroups:
 		items, err := client.ListSecurityGroups(vpcID)
 		if err != nil {
-			return resourceData{}, err
+			return nil, err
 		}
-		var rows []table.Row
-		var details [][]string
-		for _, sg := range items {
-			rows = append(rows, table.Row{"", sg.ID, sg.Name, fmt.Sprintf("%d", sg.InboundCount), fmt.Sprintf("%d", sg.OutboundCount), sg.Description})
-			details = append(details, sgDetail(sg))
+		out := make([]map[string]string, len(items))
+		for i, sg := range items {
+			out[i] = sgToMap(sg)
 		}
-		return resourceData{seqRows(rows), details}, nil
+		return out, nil
 
 	case rtRouteTables:
 		items, err := client.ListRouteTables(vpcID)
 		if err != nil {
-			return resourceData{}, err
+			return nil, err
 		}
-		var rows []table.Row
-		var details [][]string
-		for _, rt := range items {
-			rows = append(rows, table.Row{"", rt.ID, orDash(rt.Name), fmt.Sprintf("%d", len(rt.Routes)), fmt.Sprintf("%d", len(rt.Associations)), boolStr(rt.IsMain)})
-			details = append(details, routeTableDetail(rt))
+		out := make([]map[string]string, len(items))
+		for i, rt := range items {
+			out[i] = routeTableToMap(rt)
 		}
-		return resourceData{seqRows(rows), details}, nil
+		return out, nil
 
 	case rtInternetGateways:
 		items, err := client.ListInternetGateways(vpcID)
 		if err != nil {
-			return resourceData{}, err
+			return nil, err
 		}
-		var rows []table.Row
-		var details [][]string
-		for _, igw := range items {
-			rows = append(rows, table.Row{"", igw.ID, orDash(igw.Name), igw.State})
-			details = append(details, igwDetail(igw))
+		out := make([]map[string]string, len(items))
+		for i, igw := range items {
+			out[i] = igwToMap(igw)
 		}
-		return resourceData{seqRows(rows), details}, nil
+		return out, nil
 
 	case rtNatGateways:
 		items, err := client.ListNatGateways(vpcID)
 		if err != nil {
-			return resourceData{}, err
+			return nil, err
 		}
-		var rows []table.Row
-		var details [][]string
-		for _, ngw := range items {
-			rows = append(rows, table.Row{"", ngw.ID, orDash(ngw.Name), ngw.Type, ngw.State, orDash(ngw.PublicIP), ngw.SubnetID})
-			details = append(details, natgwDetail(ngw))
+		out := make([]map[string]string, len(items))
+		for i, ngw := range items {
+			out[i] = natgwToMap(ngw)
 		}
-		return resourceData{seqRows(rows), details}, nil
+		return out, nil
 
 	case rtEndpoints:
 		items, err := client.ListVPCEndpoints(vpcID)
 		if err != nil {
-			return resourceData{}, err
+			return nil, err
 		}
-		var rows []table.Row
-		var details [][]string
-		for _, ep := range items {
-			rows = append(rows, table.Row{"", ep.ID, ep.ServiceName, ep.Type, ep.State})
-			details = append(details, endpointDetail(ep))
+		out := make([]map[string]string, len(items))
+		for i, ep := range items {
+			out[i] = endpointToMap(ep)
 		}
-		return resourceData{seqRows(rows), details}, nil
+		return out, nil
 
 	case rtNetworkACLs:
 		items, err := client.ListNetworkACLs(vpcID)
 		if err != nil {
-			return resourceData{}, err
+			return nil, err
 		}
-		var rows []table.Row
-		var details [][]string
-		for _, nacl := range items {
-			rows = append(rows, table.Row{"", nacl.ID, orDash(nacl.Name), fmt.Sprintf("%d", len(nacl.Rules)), fmt.Sprintf("%d", len(nacl.Associations)), boolStr(nacl.IsDefault)})
-			details = append(details, naclDetail(nacl))
+		out := make([]map[string]string, len(items))
+		for i, nacl := range items {
+			out[i] = naclToMap(nacl)
 		}
-		return resourceData{seqRows(rows), details}, nil
+		return out, nil
 
 	case rtPeering:
 		items, err := client.ListPeeringConnections(vpcID)
 		if err != nil {
-			return resourceData{}, err
+			return nil, err
 		}
-		var rows []table.Row
-		var details [][]string
-		for _, pc := range items {
-			rows = append(rows, table.Row{"", pc.ID, pc.Status, pc.RequesterVPCID, pc.AccepterVPCID})
-			details = append(details, peeringDetail(pc))
+		out := make([]map[string]string, len(items))
+		for i, pc := range items {
+			out[i] = peeringToMap(pc)
 		}
-		return resourceData{seqRows(rows), details}, nil
+		return out, nil
 
 	case rtFlowLogs:
 		items, err := client.ListFlowLogs(vpcID)
 		if err != nil {
-			return resourceData{}, err
+			return nil, err
 		}
-		var rows []table.Row
-		var details [][]string
-		for _, fl := range items {
-			rows = append(rows, table.Row{"", fl.ID, fl.TrafficType, fl.Status, fl.LogDestination})
-			details = append(details, flowLogDetail(fl))
+		out := make([]map[string]string, len(items))
+		for i, fl := range items {
+			out[i] = flowLogToMap(fl)
 		}
-		return resourceData{seqRows(rows), details}, nil
+		return out, nil
 
 	case rtEC2Instances:
 		items, err := client.ListEC2Instances(vpcID)
 		if err != nil {
-			return resourceData{}, err
+			return nil, err
 		}
-		var rows []table.Row
-		var details [][]string
-		for _, inst := range items {
-			rows = append(rows, table.Row{"", inst.ID, orDash(inst.Name), inst.State, inst.Type, orDash(inst.PrivateIP), orDash(inst.PublicIP), inst.AZ})
-			details = append(details, ec2Detail(inst))
+		out := make([]map[string]string, len(items))
+		for i, inst := range items {
+			out[i] = ec2ToMap(inst)
 		}
-		return resourceData{seqRows(rows), details}, nil
+		return out, nil
 
 	case rtLambda:
 		items, err := client.ListLambdaFunctions(vpcID)
 		if err != nil {
-			return resourceData{}, err
+			return nil, err
 		}
-		var rows []table.Row
-		var details [][]string
-		for _, fn := range items {
-			rows = append(rows, table.Row{"", fn.Name, fn.Runtime, fn.State, fmt.Sprintf("%d MB", fn.MemoryMB), fmt.Sprintf("%ds", fn.TimeoutSec)})
-			details = append(details, lambdaDetail(fn))
+		out := make([]map[string]string, len(items))
+		for i, fn := range items {
+			out[i] = lambdaToMap(fn)
 		}
-		return resourceData{seqRows(rows), details}, nil
+		return out, nil
 
 	case rtRDS:
 		items, err := client.ListRDSInstances(vpcID)
 		if err != nil {
-			return resourceData{}, err
+			return nil, err
 		}
-		var rows []table.Row
-		var details [][]string
-		for _, db := range items {
-			rows = append(rows, table.Row{"", db.ID, db.Engine, db.Class, db.Status, db.AZ, boolStr(db.MultiAZ)})
-			details = append(details, rdsDetail(db))
+		out := make([]map[string]string, len(items))
+		for i, db := range items {
+			out[i] = rdsToMap(db)
 		}
-		return resourceData{seqRows(rows), details}, nil
+		return out, nil
 
 	case rtLoadBalancers:
 		items, err := client.ListLoadBalancers(vpcID)
 		if err != nil {
-			return resourceData{}, err
+			return nil, err
 		}
-		var rows []table.Row
-		var details [][]string
-		for _, lb := range items {
-			rows = append(rows, table.Row{"", lb.Name, lb.Type, lb.Scheme, lb.State, lb.DNSName})
-			details = append(details, lbDetail(lb))
+		out := make([]map[string]string, len(items))
+		for i, lb := range items {
+			out[i] = lbToMap(lb)
 		}
-		return resourceData{seqRows(rows), details}, nil
+		return out, nil
 	}
-	return resourceData{}, nil
+	return nil, nil
 }
 
 // ---------------------------------------------------------------------------
-// Detail formatters
+// toMap converters
 // ---------------------------------------------------------------------------
 
-func dl(key, val string) string {
-	return fmt.Sprintf("  %-22s %s", key, val)
+func subnetToMap(s SubnetInfo) map[string]string {
+	return map[string]string{
+		"subnet_id":      s.ID,
+		"name":           orDash(s.Name),
+		"cidr":           s.CIDR,
+		"az":             s.AZ,
+		"available_ips":  fmt.Sprintf("%d", s.AvailableIPs),
+		"public":         boolStr(s.IsPublic),
+		"state":          s.State,
+		"vpc_id":         s.VPCID,
+		"default_for_az": boolStr(s.DefaultForAz),
+		"map_public_ip":  boolStr(s.MapPublicIPOnLaunch),
+		"ipv6_cidrs":     strings.Join(s.Ipv6CIDRs, ", "),
+		"tags":           display.EncodeTags(s.Tags),
+	}
 }
 
-func subnetDetail(s SubnetInfo) []string {
-	lines := []string{
-		dl("ID", s.ID),
-		dl("Name", orDash(s.Name)),
-		dl("CIDR", s.CIDR),
-		dl("Availability Zone", s.AZ),
-		dl("Available IPs", fmt.Sprintf("%d", s.AvailableIPs)),
-		dl("Public (map-on-launch)", boolStr(s.MapPublicIPOnLaunch)),
-		dl("Default for AZ", boolStr(s.DefaultForAz)),
-		dl("State", s.State),
-		dl("VPC ID", s.VPCID),
+func sgToMap(sg SGInfo) map[string]string {
+	return map[string]string{
+		"sg_id":       sg.ID,
+		"name":        sg.Name,
+		"description": sg.Description,
+		"vpc_id":      sg.VPCID,
+		"inbound":     fmt.Sprintf("%d", sg.InboundCount),
+		"outbound":    fmt.Sprintf("%d", sg.OutboundCount),
+		"rules":       encodeSGRules(sg.Rules),
+		"tags":        display.EncodeTags(sg.Tags),
 	}
-	if len(s.Ipv6CIDRs) > 0 {
-		lines = append(lines, dl("IPv6 CIDRs", strings.Join(s.Ipv6CIDRs, ", ")))
-	}
-	lines = append(lines, tagLines(s.Tags)...)
-	return lines
 }
 
-func sgDetail(sg SGInfo) []string {
-	lines := []string{
-		dl("ID", sg.ID),
-		dl("Name", sg.Name),
-		dl("Description", sg.Description),
-		dl("VPC ID", sg.VPCID),
-		dl("Inbound rules", fmt.Sprintf("%d", sg.InboundCount)),
-		dl("Outbound rules", fmt.Sprintf("%d", sg.OutboundCount)),
-		"",
+func encodeSGRules(rules []SGRule) string {
+	if len(rules) == 0 {
+		return ""
 	}
-	if len(sg.Rules) > 0 {
-		lines = append(lines, "  Rules:")
-		lines = append(lines, fmt.Sprintf("  %-10s %-8s %-12s %-22s %s", "Dir", "Proto", "Ports", "Source", "Description"))
-		lines = append(lines, "  "+strings.Repeat("─", 70))
-		for _, r := range sg.Rules {
-			desc := r.Description
-			if desc == "" {
-				desc = "-"
-			}
-			lines = append(lines, fmt.Sprintf("  %-10s %-8s %-12s %-22s %s", r.Direction, r.Protocol, r.PortRange, r.Source, desc))
+	var sb strings.Builder
+	sb.WriteString(fmt.Sprintf("\n  %-10s %-8s %-12s %-22s %s", "Dir", "Proto", "Ports", "Source", "Description"))
+	sb.WriteString("\n  " + strings.Repeat("─", 70))
+	for _, r := range rules {
+		desc := r.Description
+		if desc == "" {
+			desc = "-"
 		}
+		sb.WriteString(fmt.Sprintf("\n  %-10s %-8s %-12s %-22s %s", r.Direction, r.Protocol, r.PortRange, r.Source, desc))
 	}
-	lines = append(lines, tagLines(sg.Tags)...)
-	return lines
+	return sb.String()
 }
 
-func routeTableDetail(rt RouteTableInfo) []string {
-	lines := []string{
-		dl("ID", rt.ID),
-		dl("Name", orDash(rt.Name)),
-		dl("VPC ID", rt.VPCID),
-		dl("Main", boolStr(rt.IsMain)),
-		dl("Associated subnets", fmt.Sprintf("%d", len(rt.Associations))),
-		"",
+func routeTableToMap(rt RouteTableInfo) map[string]string {
+	assocCount := fmt.Sprintf("%d", len(rt.Associations))
+	routeCount := fmt.Sprintf("%d", len(rt.Routes))
+
+	var assocLines strings.Builder
+	for _, s := range rt.Associations {
+		assocLines.WriteString("\n  " + s)
 	}
+
+	var routeLines strings.Builder
+	routeLines.WriteString(fmt.Sprintf("\n  %-22s %-30s %s", "Destination", "Target", "State"))
+	routeLines.WriteString("\n  " + strings.Repeat("─", 60))
+	for _, r := range rt.Routes {
+		routeLines.WriteString(fmt.Sprintf("\n  %-22s %-30s %s", r.Destination, r.Target, r.State))
+	}
+
+	routeList := routeLines.String()
 	if len(rt.Associations) > 0 {
-		lines = append(lines, "  Associations:")
-		for _, s := range rt.Associations {
-			lines = append(lines, "    "+s)
-		}
-		lines = append(lines, "")
+		routeList = assocLines.String() + "\n" + routeList
 	}
-	if len(rt.Routes) > 0 {
-		lines = append(lines, "  Routes:")
-		lines = append(lines, fmt.Sprintf("  %-22s %-30s %s", "Destination", "Target", "State"))
-		lines = append(lines, "  "+strings.Repeat("─", 60))
-		for _, r := range rt.Routes {
-			lines = append(lines, fmt.Sprintf("  %-22s %-30s %s", r.Destination, r.Target, r.State))
-		}
+
+	return map[string]string{
+		"rt_id":      rt.ID,
+		"name":       orDash(rt.Name),
+		"routes":     routeCount,
+		"subnets":    assocCount,
+		"main":       boolStr(rt.IsMain),
+		"vpc_id":     rt.VPCID,
+		"route_list": routeList,
+		"tags":       display.EncodeTags(rt.Tags),
 	}
-	lines = append(lines, tagLines(rt.Tags)...)
-	return lines
 }
 
-func igwDetail(igw IGWInfo) []string {
-	lines := []string{
-		dl("ID", igw.ID),
-		dl("Name", orDash(igw.Name)),
-		dl("State", igw.State),
-		dl("VPC ID", igw.VPCID),
+func igwToMap(igw IGWInfo) map[string]string {
+	return map[string]string{
+		"igw_id": igw.ID,
+		"name":   orDash(igw.Name),
+		"state":  igw.State,
+		"vpc_id": igw.VPCID,
+		"tags":   display.EncodeTags(igw.Tags),
 	}
-	lines = append(lines, tagLines(igw.Tags)...)
-	return lines
 }
 
-func natgwDetail(ngw NatGWInfo) []string {
-	lines := []string{
-		dl("ID", ngw.ID),
-		dl("Name", orDash(ngw.Name)),
-		dl("Type", ngw.Type),
-		dl("State", ngw.State),
-		dl("Subnet ID", ngw.SubnetID),
-		dl("VPC ID", ngw.VPCID),
-		dl("Public IP", orDash(ngw.PublicIP)),
-		dl("Private IP", orDash(ngw.PrivateIP)),
+func natgwToMap(ngw NatGWInfo) map[string]string {
+	return map[string]string{
+		"nat_id":     ngw.ID,
+		"name":       orDash(ngw.Name),
+		"nat_type":   ngw.Type,
+		"state":      ngw.State,
+		"public_ip":  orDash(ngw.PublicIP),
+		"private_ip": orDash(ngw.PrivateIP),
+		"subnet_id":  ngw.SubnetID,
+		"vpc_id":     ngw.VPCID,
+		"tags":       display.EncodeTags(ngw.Tags),
 	}
-	lines = append(lines, tagLines(ngw.Tags)...)
-	return lines
 }
 
-func endpointDetail(ep EndpointInfo) []string {
-	lines := []string{
-		dl("ID", ep.ID),
-		dl("Service", ep.ServiceName),
-		dl("Type", ep.Type),
-		dl("State", ep.State),
-		dl("VPC ID", ep.VPCID),
+func endpointToMap(ep EndpointInfo) map[string]string {
+	return map[string]string{
+		"endpoint_id": ep.ID,
+		"service":     ep.ServiceName,
+		"ep_type":     ep.Type,
+		"state":       ep.State,
+		"vpc_id":      ep.VPCID,
+		"tags":        display.EncodeTags(ep.Tags),
 	}
-	lines = append(lines, tagLines(ep.Tags)...)
-	return lines
 }
 
-func naclDetail(nacl NACLInfo) []string {
-	lines := []string{
-		dl("ID", nacl.ID),
-		dl("Name", orDash(nacl.Name)),
-		dl("VPC ID", nacl.VPCID),
-		dl("Default", boolStr(nacl.IsDefault)),
-		dl("Associated subnets", fmt.Sprintf("%d", len(nacl.Associations))),
-		"",
-	}
-	if len(nacl.Rules) > 0 {
-		inbound := filterNACLRules(nacl.Rules, "Inbound")
-		outbound := filterNACLRules(nacl.Rules, "Outbound")
-		sort.Slice(inbound, func(i, j int) bool { return inbound[i].RuleNumber < inbound[j].RuleNumber })
-		sort.Slice(outbound, func(i, j int) bool { return outbound[i].RuleNumber < outbound[j].RuleNumber })
+func naclToMap(nacl NACLInfo) map[string]string {
+	inbound := filterNACLRules(nacl.Rules, "Inbound")
+	outbound := filterNACLRules(nacl.Rules, "Outbound")
+	sort.Slice(inbound, func(i, j int) bool { return inbound[i].RuleNumber < inbound[j].RuleNumber })
+	sort.Slice(outbound, func(i, j int) bool { return outbound[i].RuleNumber < outbound[j].RuleNumber })
 
-		lines = append(lines, "  Inbound Rules:")
-		lines = append(lines, fmt.Sprintf("  %-8s %-8s %-10s %-20s %s", "Rule#", "Proto", "Ports", "CIDR", "Action"))
-		lines = append(lines, "  "+strings.Repeat("─", 55))
-		for _, r := range inbound {
-			lines = append(lines, fmt.Sprintf("  %-8d %-8s %-10s %-20s %s", r.RuleNumber, r.Protocol, r.PortRange, r.CIDR, r.Action))
-		}
-		lines = append(lines, "")
-		lines = append(lines, "  Outbound Rules:")
-		lines = append(lines, fmt.Sprintf("  %-8s %-8s %-10s %-20s %s", "Rule#", "Proto", "Ports", "CIDR", "Action"))
-		lines = append(lines, "  "+strings.Repeat("─", 55))
-		for _, r := range outbound {
-			lines = append(lines, fmt.Sprintf("  %-8d %-8s %-10s %-20s %s", r.RuleNumber, r.Protocol, r.PortRange, r.CIDR, r.Action))
-		}
+	var sb strings.Builder
+	sb.WriteString("\n  Inbound:")
+	sb.WriteString(fmt.Sprintf("\n  %-8s %-8s %-10s %-20s %s", "Rule#", "Proto", "Ports", "CIDR", "Action"))
+	sb.WriteString("\n  " + strings.Repeat("─", 55))
+	for _, r := range inbound {
+		sb.WriteString(fmt.Sprintf("\n  %-8d %-8s %-10s %-20s %s", r.RuleNumber, r.Protocol, r.PortRange, r.CIDR, r.Action))
 	}
-	lines = append(lines, tagLines(nacl.Tags)...)
-	return lines
+	sb.WriteString("\n\n  Outbound:")
+	sb.WriteString(fmt.Sprintf("\n  %-8s %-8s %-10s %-20s %s", "Rule#", "Proto", "Ports", "CIDR", "Action"))
+	sb.WriteString("\n  " + strings.Repeat("─", 55))
+	for _, r := range outbound {
+		sb.WriteString(fmt.Sprintf("\n  %-8d %-8s %-10s %-20s %s", r.RuleNumber, r.Protocol, r.PortRange, r.CIDR, r.Action))
+	}
+
+	return map[string]string{
+		"nacl_id":      nacl.ID,
+		"name":         orDash(nacl.Name),
+		"rule_count":   fmt.Sprintf("%d", len(nacl.Rules)),
+		"subnet_count": fmt.Sprintf("%d", len(nacl.Associations)),
+		"is_default":   boolStr(nacl.IsDefault),
+		"vpc_id":       nacl.VPCID,
+		"rule_list":    sb.String(),
+		"tags":         display.EncodeTags(nacl.Tags),
+	}
 }
 
 func filterNACLRules(rules []NACLRule, dir string) []NACLRule {
@@ -590,121 +464,96 @@ func filterNACLRules(rules []NACLRule, dir string) []NACLRule {
 	return out
 }
 
-func peeringDetail(pc PeeringInfo) []string {
-	lines := []string{
-		dl("ID", pc.ID),
-		dl("Status", pc.Status),
-		"",
-		dl("Requester VPC", pc.RequesterVPCID),
-		dl("Requester Region", orDash(pc.RequesterRegion)),
-		dl("Requester CIDR", orDash(pc.RequesterCIDR)),
-		"",
-		dl("Accepter VPC", pc.AccepterVPCID),
-		dl("Accepter Region", orDash(pc.AccepterRegion)),
-		dl("Accepter CIDR", orDash(pc.AccepterCIDR)),
-	}
-	lines = append(lines, tagLines(pc.Tags)...)
-	return lines
-}
-
-func flowLogDetail(fl FlowLogInfo) []string {
-	lines := []string{
-		dl("ID", fl.ID),
-		dl("Resource ID", fl.ResourceID),
-		dl("Traffic Type", fl.TrafficType),
-		dl("Status", fl.Status),
-		dl("Log Destination", fl.LogDestination),
-	}
-	if fl.LogFormat != "" {
-		lines = append(lines, dl("Log Format", fl.LogFormat))
-	}
-	lines = append(lines, tagLines(fl.Tags)...)
-	return lines
-}
-
-func ec2Detail(inst EC2InstanceInfo) []string {
-	lines := []string{
-		dl("Instance ID", inst.ID),
-		dl("Name", orDash(inst.Name)),
-		dl("State", inst.State),
-		dl("Instance Type", inst.Type),
-		dl("Platform", inst.Platform),
-		dl("Private IP", orDash(inst.PrivateIP)),
-		dl("Public IP", orDash(inst.PublicIP)),
-		dl("Availability Zone", inst.AZ),
-		dl("Subnet ID", inst.SubnetID),
-		dl("VPC ID", inst.VPCID),
-		dl("Launch Time", orDash(inst.LaunchTime)),
-	}
-	lines = append(lines, tagLines(inst.Tags)...)
-	return lines
-}
-
-func lambdaDetail(fn LambdaFunctionInfo) []string {
-	lines := []string{
-		dl("Function Name", fn.Name),
-		dl("Runtime", fn.Runtime),
-		dl("State", fn.State),
-		dl("Handler", fn.Handler),
-		dl("Memory", fmt.Sprintf("%d MB", fn.MemoryMB)),
-		dl("Timeout", fmt.Sprintf("%d seconds", fn.TimeoutSec)),
-		dl("Last Modified", orDash(fn.LastModified)),
-		dl("VPC ID", fn.VPCID),
-	}
-	if len(fn.SubnetIDs) > 0 {
-		lines = append(lines, dl("Subnets", strings.Join(fn.SubnetIDs, ", ")))
-	}
-	if len(fn.SGIDs) > 0 {
-		lines = append(lines, dl("Security Groups", strings.Join(fn.SGIDs, ", ")))
-	}
-	return lines
-}
-
-func rdsDetail(db RDSInstanceInfo) []string {
-	return []string{
-		dl("DB Identifier", db.ID),
-		dl("Engine", db.Engine),
-		dl("Instance Class", db.Class),
-		dl("Status", db.Status),
-		dl("Availability Zone", db.AZ),
-		dl("Multi-AZ", boolStr(db.MultiAZ)),
-		dl("Storage (GB)", fmt.Sprintf("%d", db.Storage)),
-		dl("Endpoint", orDash(db.Endpoint)),
-		dl("VPC ID", db.VPCID),
+func peeringToMap(pc PeeringInfo) map[string]string {
+	return map[string]string{
+		"peering_id":      pc.ID,
+		"status":          pc.Status,
+		"requester_vpc":   pc.RequesterVPCID,
+		"requester_region":orDash(pc.RequesterRegion),
+		"requester_cidr":  orDash(pc.RequesterCIDR),
+		"accepter_vpc":    pc.AccepterVPCID,
+		"accepter_region": orDash(pc.AccepterRegion),
+		"accepter_cidr":   orDash(pc.AccepterCIDR),
+		"tags":            display.EncodeTags(pc.Tags),
 	}
 }
 
-func lbDetail(lb LoadBalancerInfo) []string {
-	return []string{
-		dl("Name", lb.Name),
-		dl("Type", lb.Type),
-		dl("Scheme", lb.Scheme),
-		dl("State", lb.State),
-		dl("VPC ID", lb.VPCID),
-		dl("DNS Name", lb.DNSName),
-		dl("Created", orDash(lb.CreatedAt)),
-		dl("ARN", lb.ARN),
+func flowLogToMap(fl FlowLogInfo) map[string]string {
+	return map[string]string{
+		"log_id":      fl.ID,
+		"resource_id": fl.ResourceID,
+		"traffic":     fl.TrafficType,
+		"status":      fl.Status,
+		"destination": fl.LogDestination,
+		"log_format":  fl.LogFormat,
+		"tags":        display.EncodeTags(fl.Tags),
 	}
 }
 
-func tagLines(tags map[string]string) []string {
-	if len(tags) == 0 {
-		return nil
+func ec2ToMap(inst EC2InstanceInfo) map[string]string {
+	return map[string]string{
+		"instance_id": inst.ID,
+		"name":        orDash(inst.Name),
+		"state":       inst.State,
+		"type":        inst.Type,
+		"private_ip":  orDash(inst.PrivateIP),
+		"public_ip":   orDash(inst.PublicIP),
+		"az":          inst.AZ,
+		"platform":    inst.Platform,
+		"subnet_id":   inst.SubnetID,
+		"vpc_id":      inst.VPCID,
+		"iam_role":    orDash(inst.IamRole),
+		"ami_id":      orDash(inst.AMIID),
+		"key_pair":    orDash(inst.KeyPair),
+		"launch_time": orDash(inst.LaunchTime),
+		"tags":        display.EncodeTags(inst.Tags),
 	}
-	lines := []string{"", "  Tags:"}
-	keys := make([]string, 0, len(tags))
-	for k := range tags {
-		keys = append(keys, k)
+}
+
+func lambdaToMap(fn LambdaFunctionInfo) map[string]string {
+	return map[string]string{
+		"name":           fn.Name,
+		"runtime":        fn.Runtime,
+		"state":          fn.State,
+		"handler":        fn.Handler,
+		"memory":         fmt.Sprintf("%d MB", fn.MemoryMB),
+		"timeout":        fmt.Sprintf("%ds", fn.TimeoutSec),
+		"last_modified":  orDash(fn.LastModified),
+		"vpc_id":         fn.VPCID,
+		"subnets":        strings.Join(fn.SubnetIDs, ", "),
+		"security_groups":strings.Join(fn.SGIDs, ", "),
 	}
-	sort.Strings(keys)
-	for _, k := range keys {
-		lines = append(lines, fmt.Sprintf("    %-20s %s", k, tags[k]))
+}
+
+func rdsToMap(db RDSInstanceInfo) map[string]string {
+	return map[string]string{
+		"db_id":    db.ID,
+		"engine":   db.Engine,
+		"class":    db.Class,
+		"status":   db.Status,
+		"az":       db.AZ,
+		"multi_az": boolStr(db.MultiAZ),
+		"storage":  fmt.Sprintf("%d", db.Storage),
+		"endpoint": orDash(db.Endpoint),
+		"vpc_id":   db.VPCID,
 	}
-	return lines
+}
+
+func lbToMap(lb LoadBalancerInfo) map[string]string {
+	return map[string]string{
+		"name":       lb.Name,
+		"lb_type":    lb.Type,
+		"scheme":     lb.Scheme,
+		"state":      lb.State,
+		"dns_name":   lb.DNSName,
+		"vpc_id":     lb.VPCID,
+		"created_at": orDash(lb.CreatedAt),
+		"arn":        lb.ARN,
+	}
 }
 
 // ---------------------------------------------------------------------------
-// Shared utilities
+// Shared table helpers
 // ---------------------------------------------------------------------------
 
 func seqRows(rows []table.Row) []table.Row {

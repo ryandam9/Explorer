@@ -19,6 +19,7 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/user/aws_explorer/internal/config"
+	"github.com/user/aws_explorer/internal/display"
 	"github.com/user/aws_explorer/internal/table"
 	"github.com/user/aws_explorer/internal/ui"
 )
@@ -91,7 +92,7 @@ type regionScannedMsg struct {
 }
 
 type objectsLoadedMsg struct {
-	rows  []table.Row
+	maps  []map[string]string
 	count int
 	size  int64
 }
@@ -163,8 +164,9 @@ type Model struct {
 	err     error
 	loading bool
 
-	sortCol int
-	sortAsc bool
+	sortCol    int
+	sortAsc    bool
+	objectMaps []map[string]string
 
 	bucketTable table.Model
 	objectTable table.Model
@@ -357,20 +359,25 @@ func NewModel(ctx context.Context, awsCfg *config.AWSConfig, region, bucket, pre
 // Table initialization
 // ---------------------------------------------------------------------------
 
-func (m *Model) initBucketTable() {
-	columns := []table.Column{
-		{Title: "#", Width: 4},
-		{Title: "Name", Width: 40},
-		{Title: "Region", Width: 20},
-		{Title: "Creation Date", Width: 25},
+// objectColFields returns the resolved column fields for the object table.
+func (m *Model) objectColFields() []display.FieldMeta {
+	var cfgCols []string
+	if m.cfg != nil {
+		cfgCols = m.cfg.Display.S3.Objects.Columns
 	}
+	return display.ResolveColumns(display.S3ObjectFields, cfgCols)
+}
 
-	m.bucketTable = table.New(
-		table.WithColumns(columns),
-		table.WithFocused(true),
-		table.WithHeight(15),
-	)
+// bucketColFields returns the resolved column fields for the bucket table.
+func (m *Model) bucketColFields() []display.FieldMeta {
+	var cfgCols []string
+	if m.cfg != nil {
+		cfgCols = m.cfg.Display.S3.Buckets.Columns
+	}
+	return display.ResolveColumns(display.S3BucketFields, cfgCols)
+}
 
+func (m *Model) applyTableStyle(t *table.Model) {
 	s := table.DefaultStyles()
 	s.Header = s.Header.
 		Foreground(lipgloss.Color(ui.ColorTableHeader())).
@@ -383,59 +390,36 @@ func (m *Model) initBucketTable() {
 		Foreground(lipgloss.Color(ui.ColorHighlightText())).
 		Background(lipgloss.Color(ui.ColorHighlight())).
 		Bold(true)
-	m.bucketTable.SetStyles(s)
+	t.SetStyles(s)
+}
+
+func (m *Model) initBucketTable() {
+	cols := display.Columns(m.bucketColFields())
+	m.bucketTable = table.New(table.WithColumns(cols), table.WithFocused(true), table.WithHeight(15))
+	m.applyTableStyle(&m.bucketTable)
 }
 
 func (m *Model) initObjectTable() {
-	columns := []table.Column{
-		{Title: "#", Width: 4},
-		{Title: sortTitle("Name", 0, m.sortCol, m.sortAsc), Width: 40},
-		{Title: sortTitle("Size", 1, m.sortCol, m.sortAsc), Width: 10},
-		{Title: sortTitle("Last Modified", 2, m.sortCol, m.sortAsc), Width: 20},
-		{Title: sortTitle("Storage Class", 3, m.sortCol, m.sortAsc), Width: 15},
-		{Title: sortTitle("ETag", 4, m.sortCol, m.sortAsc), Width: 34},
-	}
-
-	m.objectTable = table.New(
-		table.WithColumns(columns),
-		table.WithFocused(true),
-		table.WithHeight(10),
-	)
-
-	s := table.DefaultStyles()
-	s.Header = s.Header.
-		Foreground(lipgloss.Color(ui.ColorTableHeader())).
-		BorderStyle(lipgloss.NormalBorder()).
-		BorderForeground(lipgloss.Color(ui.ColorTableHeaderLine())).
-		BorderBottom(true).
-		Bold(true)
-	s.Cell = s.Cell.Foreground(lipgloss.Color(ui.ColorText()))
-	s.Selected = s.Selected.
-		Foreground(lipgloss.Color(ui.ColorHighlightText())).
-		Background(lipgloss.Color(ui.ColorHighlight())).
-		Bold(true)
-	m.objectTable.SetStyles(s)
+	cols := m.buildObjectColumns()
+	m.objectTable = table.New(table.WithColumns(cols), table.WithFocused(true), table.WithHeight(10))
+	m.applyTableStyle(&m.objectTable)
 }
 
-// restyleForTheme re-applies palette-derived styles to the existing tables and
-// inputs without resetting their data. Called after the settings panel saves a
-// new theme so the change is visible immediately.
-func (m *Model) restyleForTheme() {
-	s := table.DefaultStyles()
-	s.Header = s.Header.
-		Foreground(lipgloss.Color(ui.ColorTableHeader())).
-		BorderStyle(lipgloss.NormalBorder()).
-		BorderForeground(lipgloss.Color(ui.ColorTableHeaderLine())).
-		BorderBottom(true).
-		Bold(true)
-	s.Cell = s.Cell.Foreground(lipgloss.Color(ui.ColorText()))
-	s.Selected = s.Selected.
-		Foreground(lipgloss.Color(ui.ColorHighlightText())).
-		Background(lipgloss.Color(ui.ColorHighlight())).
-		Bold(true)
-	m.bucketTable.SetStyles(s)
-	m.objectTable.SetStyles(s)
+// buildObjectColumns produces columns with sort indicators on the active field.
+func (m *Model) buildObjectColumns() []table.Column {
+	fields := m.objectColFields()
+	cols := make([]table.Column, 0, len(fields)+1)
+	cols = append(cols, table.Column{Title: "#", Width: 4})
+	for i, f := range fields {
+		title := sortTitle(f.Title, i, m.sortCol, m.sortAsc)
+		cols = append(cols, table.Column{Title: title, Width: f.Width})
+	}
+	return cols
+}
 
+func (m *Model) restyleForTheme() {
+	m.applyTableStyle(&m.bucketTable)
+	m.applyTableStyle(&m.objectTable)
 	for _, in := range []*textinput.Model{&m.prefixInput, &m.bucketSearch, &m.deleteConfirm} {
 		in.PromptStyle = lipgloss.NewStyle().Foreground(lipgloss.Color(ui.ColorAccent())).Bold(true)
 		in.TextStyle = lipgloss.NewStyle().Foreground(lipgloss.Color(ui.ColorText()))
@@ -448,58 +432,68 @@ func (m *Model) restyleForTheme() {
 // Sort
 // ---------------------------------------------------------------------------
 
-func (m *Model) sortObjects(rows []table.Row) {
-	if len(rows) <= 1 {
+func (m *Model) sortObjects(objs []map[string]string) {
+	if len(objs) <= 1 {
 		return
 	}
-
-	var dirs []table.Row
-	var objs []table.Row
-	for _, r := range rows {
-		if len(r) > 4 && r[4] == "DIR" {
-			dirs = append(dirs, r)
-		} else {
-			objs = append(objs, r)
-		}
+	fields := m.objectColFields()
+	col := m.sortCol
+	if col >= len(fields) {
+		col = 0
 	}
+	fieldKey := fields[col].Key
 
 	sort.SliceStable(objs, func(i, j int) bool {
-		if m.sortCol == 1 {
-			left := parseSize(objs[i][2])
-			right := parseSize(objs[j][2])
-			if m.sortAsc {
-				return left < right
-			}
-			return left > right
+		// Directories always sort before files regardless of direction.
+		di, dj := objs[i]["type"] == "DIR", objs[j]["type"] == "DIR"
+		if di != dj {
+			return di
 		}
-
-		left := objs[i][m.sortCol+1]
-		right := objs[j][m.sortCol+1]
-		if m.sortCol == 0 {
-			left = strings.ToLower(left)
-			right = strings.ToLower(right)
+		if di && dj {
+			return strings.ToLower(objs[i]["name"]) < strings.ToLower(objs[j]["name"])
+		}
+		if fieldKey == "size" {
+			li := parseSize(objs[i]["size"])
+			lj := parseSize(objs[j]["size"])
+			if m.sortAsc {
+				return li < lj
+			}
+			return li > lj
+		}
+		li := objs[i][fieldKey]
+		lj := objs[j][fieldKey]
+		if fieldKey == "name" {
+			li = strings.ToLower(li)
+			lj = strings.ToLower(lj)
 		}
 		if m.sortAsc {
-			return left < right
+			return li < lj
 		}
-		return left > right
+		return li > lj
 	})
-
-	copy(rows, dirs)
-	copy(rows[len(dirs):], objs)
 }
 
 func (m *Model) updateObjectColumns() {
+	fields := m.objectColFields()
+	// Distribute any extra terminal width to the name column.
 	objectWidth := max(40, m.width-10)
-	nameWidth := max(18, objectWidth-93)
-	m.objectTable.SetColumns([]table.Column{
-		{Title: "#", Width: 4},
-		{Title: sortTitle("Name", 0, m.sortCol, m.sortAsc), Width: nameWidth},
-		{Title: sortTitle("Size", 1, m.sortCol, m.sortAsc), Width: 10},
-		{Title: sortTitle("Last Modified", 2, m.sortCol, m.sortAsc), Width: 19},
-		{Title: sortTitle("Storage Class", 3, m.sortCol, m.sortAsc), Width: 14},
-		{Title: sortTitle("ETag", 4, m.sortCol, m.sortAsc), Width: 32},
-	})
+	fixedW := 4 // # col
+	for _, f := range fields {
+		if f.Key != "name" {
+			fixedW += f.Width
+		}
+	}
+	nameWidth := max(18, objectWidth-fixedW)
+	cols := make([]table.Column, 0, len(fields)+1)
+	cols = append(cols, table.Column{Title: "#", Width: 4})
+	for i, f := range fields {
+		w := f.Width
+		if f.Key == "name" {
+			w = nameWidth
+		}
+		cols = append(cols, table.Column{Title: sortTitle(f.Title, i, m.sortCol, m.sortAsc), Width: w})
+	}
+	m.objectTable.SetColumns(cols)
 }
 
 // ---------------------------------------------------------------------------
@@ -608,71 +602,80 @@ func (m *Model) fetchBucketRegions() tea.Cmd {
 func (m *Model) loadObjects() tea.Cmd {
 	m.loading = true
 	flat := m.flatMode
+	prefix := m.prefix
+	bucket := m.bucket
 	return func() tea.Msg {
 		var res *ListObjectsResult
 		var err error
 		if flat {
-			res, err = m.client.ListObjectsFlat(m.bucket, m.prefix)
+			res, err = m.client.ListObjectsFlat(bucket, prefix)
 		} else {
-			res, err = m.client.ListObjects(m.bucket, m.prefix)
+			res, err = m.client.ListObjects(bucket, prefix)
 		}
 		if err != nil {
-			return errMsg{fmt.Errorf("access denied or region mismatch for bucket '%s': %w", m.bucket, err)}
+			return errMsg{fmt.Errorf("access denied or region mismatch for bucket '%s': %w", bucket, err)}
 		}
 
-		var rows []table.Row
+		var maps []map[string]string
 		var count int
 		var totalSize int64
 
-		// Add ".." navigation if we are inside a prefix (non-flat mode only)
-		if m.prefix != "" && !flat {
-			rows = append(rows, table.Row{"", "..", "-", "-", "DIR", "-"})
+		if prefix != "" && !flat {
+			maps = append(maps, map[string]string{"name": "..", "type": "DIR", "size": "-", "last_modified": "-", "storage_class": "DIR", "etag": "-"})
 		}
 
 		if !flat {
 			for _, p := range res.Prefixes {
 				name := aws.ToString(p.Prefix)
-				if m.prefix != "" && strings.HasPrefix(name, m.prefix) {
-					name = strings.TrimPrefix(name, m.prefix)
+				if prefix != "" && strings.HasPrefix(name, prefix) {
+					name = strings.TrimPrefix(name, prefix)
 				}
-				rows = append(rows, table.Row{"", name, "-", "-", "DIR", "-"})
+				maps = append(maps, map[string]string{"name": name, "type": "DIR", "size": "-", "last_modified": "-", "storage_class": "DIR", "etag": "-"})
 			}
 		}
 
 		for _, o := range res.Objects {
 			name := aws.ToString(o.Key)
-			if m.prefix != "" && strings.HasPrefix(name, m.prefix) {
-				name = strings.TrimPrefix(name, m.prefix)
+			if prefix != "" && strings.HasPrefix(name, prefix) {
+				name = strings.TrimPrefix(name, prefix)
 			}
 			if name == "" {
 				continue
 			}
-
 			count++
 			sizeBytes := aws.ToInt64(o.Size)
 			totalSize += sizeBytes
-
-			size := formatSize(sizeBytes)
-
 			date := ""
 			if o.LastModified != nil {
 				date = o.LastModified.Format("2006-01-02 15:04:05")
 			}
-
 			class := string(o.StorageClass)
 			if class == "" {
 				class = "STANDARD"
 			}
-
-			etag := aws.ToString(o.ETag)
-			etag = strings.Trim(etag, "\"")
-
-			rows = append(rows, table.Row{"", name, size, date, class, etag})
+			etag := strings.Trim(aws.ToString(o.ETag), "\"")
+			maps = append(maps, map[string]string{
+				"name":          name,
+				"type":          "FILE",
+				"size":          formatSize(sizeBytes),
+				"last_modified": date,
+				"storage_class": class,
+				"etag":          etag,
+			})
 		}
 
-		m.sortObjects(rows)
-		return objectsLoadedMsg{rows, count, totalSize}
+		return objectsLoadedMsg{maps: maps, count: count, size: totalSize}
 	}
+}
+
+// buildObjectRows converts objectMaps to display rows using current column config.
+func (m *Model) buildObjectRows() []table.Row {
+	fields := m.objectColFields()
+	rows := make([]table.Row, len(m.objectMaps))
+	for i, r := range m.objectMaps {
+		rows[i] = display.Row(fields, r)
+	}
+	return seqRows(rows)
 }
 
 func (m *Model) generatePresignCmd(key string) tea.Cmd {
@@ -762,11 +765,15 @@ func (m *Model) loadingBox(message, detail string) string {
 }
 
 func (m *Model) selectedObjectKey() (string, bool) {
-	row := m.objectTable.SelectedRow()
-	if len(row) == 0 || row[4] == "DIR" {
+	idx := m.objectTable.Cursor()
+	if idx < 0 || idx >= len(m.objectMaps) {
 		return "", false
 	}
-	return m.prefix + row[1], true
+	r := m.objectMaps[idx]
+	if r["type"] == "DIR" {
+		return "", false
+	}
+	return m.prefix + r["name"], true
 }
 
 // ---------------------------------------------------------------------------
@@ -1084,20 +1091,18 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case "R":
 			if m.state == stateObjectList {
 				m.sortAsc = !m.sortAsc
-				rows := m.objectTable.Rows()
-				m.sortObjects(rows)
-				m.objectTable.SetRows(seqRows(rows))
+				m.sortObjects(m.objectMaps)
 				m.updateObjectColumns()
+				m.objectTable.SetRows(m.buildObjectRows())
 				return m, nil
 			}
 
 		case "s":
 			if m.state == stateObjectList {
-				m.sortCol = (m.sortCol + 1) % 5
-				rows := m.objectTable.Rows()
-				m.sortObjects(rows)
-				m.objectTable.SetRows(seqRows(rows))
+				m.sortCol = (m.sortCol + 1) % len(m.objectColFields())
+				m.sortObjects(m.objectMaps)
 				m.updateObjectColumns()
+				m.objectTable.SetRows(m.buildObjectRows())
 				return m, nil
 			}
 
@@ -1189,11 +1194,11 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					cmds = append(cmds, m.loadObjects())
 				}
 			} else if m.state == stateObjectList && m.focus == focusObjects {
-				row := m.objectTable.SelectedRow()
-				if len(row) > 0 {
-					name := row[1]
-					class := row[4]
-					if class == "DIR" {
+				idx := m.objectTable.Cursor()
+				if idx >= 0 && idx < len(m.objectMaps) {
+					r := m.objectMaps[idx]
+					name := r["name"]
+					if r["type"] == "DIR" {
 						if name == ".." {
 							m.prefix = parentPrefix(m.prefix)
 						} else {
@@ -1300,13 +1305,16 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.err = nil
 		m.objCount = msg.count
 		m.totalSize = msg.size
-		m.objectTable.SetRows(seqRows(msg.rows))
+		m.objectMaps = msg.maps
+		m.sortObjects(m.objectMaps)
+		m.updateObjectColumns()
+		m.objectTable.SetRows(m.buildObjectRows())
 
 		m.lastSelectedKey = ""
 		m.selectedDetails = nil
 
-		if len(msg.rows) > 0 && msg.rows[0][4] != "DIR" {
-			m.lastSelectedKey = m.prefix + msg.rows[0][1]
+		if len(m.objectMaps) > 0 && m.objectMaps[0]["type"] != "DIR" {
+			m.lastSelectedKey = m.prefix + m.objectMaps[0]["name"]
 			cmds = append(cmds, m.fetchObjectDetails(m.lastSelectedKey))
 		}
 
@@ -1413,18 +1421,21 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.objectTable, cmd = m.objectTable.Update(msg)
 		cmds = append(cmds, cmd)
 
-		if m.focus == focusObjects && prevRow != m.objectTable.Cursor() && len(m.objectTable.SelectedRow()) > 0 {
-			row := m.objectTable.SelectedRow()
-			if row[4] != "DIR" {
-				newKey := m.prefix + row[1]
-				if newKey != m.lastSelectedKey {
-					m.lastSelectedKey = newKey
+		if m.focus == focusObjects && prevRow != m.objectTable.Cursor() {
+			idx := m.objectTable.Cursor()
+			if idx >= 0 && idx < len(m.objectMaps) {
+				r := m.objectMaps[idx]
+				if r["type"] != "DIR" {
+					newKey := m.prefix + r["name"]
+					if newKey != m.lastSelectedKey {
+						m.lastSelectedKey = newKey
+						m.selectedDetails = nil
+						cmds = append(cmds, m.fetchObjectDetails(newKey))
+					}
+				} else {
+					m.lastSelectedKey = ""
 					m.selectedDetails = nil
-					cmds = append(cmds, m.fetchObjectDetails(newKey))
 				}
-			} else {
-				m.lastSelectedKey = ""
-				m.selectedDetails = nil
 			}
 		}
 	}
@@ -1705,11 +1716,16 @@ func (m *Model) objectListView() string {
 
 	detailsContent := ui.MutedStyle().Render("Select an object to view details.")
 	metaText := ""
-	if len(m.objectTable.SelectedRow()) > 0 {
-		row := m.objectTable.SelectedRow()
-		name, size, date, class, etag := row[1], row[2], row[3], row[4], row[5]
+	idx := m.objectTable.Cursor()
+	if idx >= 0 && idx < len(m.objectMaps) {
+		r := m.objectMaps[idx]
+		name := r["name"]
+		size := r["size"]
+		date := r["last_modified"]
+		class := r["storage_class"]
+		etag := r["etag"]
 
-		isDir := (class == "DIR")
+		isDir := r["type"] == "DIR"
 
 		detailsContent = fmt.Sprintf("Key: %s%s\nSize: %s\nLast Modified: %s\nStorage Class: %s\nETag: %s",
 			m.prefix, name, size, date, class, etag)

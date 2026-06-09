@@ -269,6 +269,9 @@ type EC2InstanceInfo struct {
 	AZ         string
 	Platform   string
 	LaunchTime string
+	IamRole    string
+	AMIID      string
+	KeyPair    string
 	Tags       map[string]string
 }
 
@@ -750,6 +753,10 @@ func (c *VPCClient) ListEC2Instances(vpcID string) ([]EC2InstanceInfo, error) {
 				if inst.Placement != nil {
 					az = aws.ToString(inst.Placement.AvailabilityZone)
 				}
+				iamRole := ""
+				if inst.IamInstanceProfile != nil {
+					iamRole = aws.ToString(inst.IamInstanceProfile.Arn)
+				}
 				instances = append(instances, EC2InstanceInfo{
 					ID:         aws.ToString(inst.InstanceId),
 					Name:       ec2TagName(inst.Tags),
@@ -762,6 +769,9 @@ func (c *VPCClient) ListEC2Instances(vpcID string) ([]EC2InstanceInfo, error) {
 					AZ:         az,
 					Platform:   platform,
 					LaunchTime: launchTime,
+					IamRole:    iamRole,
+					AMIID:      aws.ToString(inst.ImageId),
+					KeyPair:    aws.ToString(inst.KeyName),
 					Tags:       ec2TagsToMap(inst.Tags),
 				})
 			}

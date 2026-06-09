@@ -7,7 +7,6 @@ import (
 
 	"github.com/charmbracelet/lipgloss"
 	"github.com/user/aws_explorer/internal/config"
-	"github.com/user/aws_explorer/internal/table"
 	"github.com/user/aws_explorer/internal/ui"
 )
 
@@ -36,36 +35,36 @@ func TestFormatAndParseSize(t *testing.T) {
 
 func TestSortObjectsKeepsDirectoriesFirstAndSortsSize(t *testing.T) {
 	m := &Model{sortCol: 1, sortAsc: true}
-	rows := []table.Row{
-		{"", "z.txt", "2.0 MB", "2026-01-01", "STANDARD", "etag-z"},
-		{"", "photos/", "-", "-", "DIR", "-"},
-		{"", "a.txt", "10 B", "2026-01-01", "STANDARD", "etag-a"},
-		{"", "b.txt", "1.5 KB", "2026-01-01", "STANDARD", "etag-b"},
+	objs := []map[string]string{
+		{"name": "z.txt",    "type": "FILE", "size": "2.0 MB", "last_modified": "2026-01-01", "storage_class": "STANDARD", "etag": "etag-z"},
+		{"name": "photos/",  "type": "DIR",  "size": "-",      "last_modified": "-",          "storage_class": "DIR",      "etag": "-"},
+		{"name": "a.txt",    "type": "FILE", "size": "10 B",   "last_modified": "2026-01-01", "storage_class": "STANDARD", "etag": "etag-a"},
+		{"name": "b.txt",    "type": "FILE", "size": "1.5 KB", "last_modified": "2026-01-01", "storage_class": "STANDARD", "etag": "etag-b"},
 	}
 
-	m.sortObjects(rows)
+	m.sortObjects(objs)
 
 	wantNames := []string{"photos/", "a.txt", "b.txt", "z.txt"}
 	for i, want := range wantNames {
-		if got := rows[i][1]; got != want {
-			t.Fatalf("row %d name = %q, want %q; rows=%v", i, got, want, rows)
+		if got := objs[i]["name"]; got != want {
+			t.Fatalf("row %d name = %q, want %q; objs=%v", i, got, want, objs)
 		}
 	}
 }
 
 func TestSortObjectsNameDescendingCaseInsensitive(t *testing.T) {
 	m := &Model{sortCol: 0, sortAsc: false}
-	rows := []table.Row{
-		{"", "alpha.txt", "1 B", "", "STANDARD", ""},
-		{"", "Bravo.txt", "1 B", "", "STANDARD", ""},
-		{"", "charlie.txt", "1 B", "", "STANDARD", ""},
+	objs := []map[string]string{
+		{"name": "alpha.txt",   "type": "FILE", "size": "1 B", "storage_class": "STANDARD"},
+		{"name": "Bravo.txt",   "type": "FILE", "size": "1 B", "storage_class": "STANDARD"},
+		{"name": "charlie.txt", "type": "FILE", "size": "1 B", "storage_class": "STANDARD"},
 	}
 
-	m.sortObjects(rows)
+	m.sortObjects(objs)
 
 	wantNames := []string{"charlie.txt", "Bravo.txt", "alpha.txt"}
 	for i, want := range wantNames {
-		if got := rows[i][1]; got != want {
+		if got := objs[i]["name"]; got != want {
 			t.Fatalf("row %d name = %q, want %q", i, got, want)
 		}
 	}
