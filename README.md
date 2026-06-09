@@ -4,9 +4,11 @@ Discover, monitor, and display AWS resources across accounts and regions via CLI
 
 ## Features
 
-- **Three modes**: CLI (streaming table/JSON output), TUI (interactive exploration), S3 TUI (dedicated S3 browser)
+- **Four modes**: CLI (streaming table/JSON output), TUI (interactive exploration), VPC Explorer TUI (drill into a VPC's networking), S3 TUI (dedicated S3 browser)
 - **15 services**: EC2, S3, RDS, IAM, DynamoDB, Lambda, EMR, ECS, EKS, ELBv2, Secrets Manager, SQS, SNS, CloudWatch, Route53
-- **Config-driven**: YAML configuration for services, regions, filters, and output
+- **VPC Explorer**: browse a VPC's subnets, security groups, route tables, gateways, endpoints, NACLs, peering, flow logs, and attached compute/services in a three-pane TUI
+- **Plain-English rule explanations**: Security Group and Network ACL rules are translated into readable sentences with `⚠` risk flags for sensitive ports exposed to the internet — no AI required
+- **Config-driven**: YAML configuration for services, regions, filters, output, and per-resource display columns
 - **5 auth methods**: auto (SDK default chain), profile, env vars, static credentials, STS AssumeRole
 - **Output formats**: Table (default), JSON
 - **Filtering**: By region, state, tags, name, and IDs
@@ -31,6 +33,9 @@ make build          # produces bin/aws_explorer
 
 # Run interactive TUI
 ./bin/aws_explorer tui
+
+# Run the VPC Explorer TUI
+./bin/aws_explorer vpc --region us-east-1
 
 # Run S3 browser TUI
 ./bin/aws_explorer s3 --bucket my-bucket --region us-east-1
@@ -121,6 +126,92 @@ Accepts the same `--config`, `--profile`, `--auth-method`, `--role-arn`, and `--
 | `/` | Search / filter |
 | `c` | Copy selected resource ID to clipboard |
 | `q` / `Ctrl+C` | Quit |
+
+## VPC Explorer TUI Usage
+
+An interactive, three-pane TUI for drilling into a single VPC's networking and
+attached resources. Pick a VPC on the left, a resource category in the middle,
+and browse the matching resources on the right.
+
+```bash
+./bin/aws_explorer vpc [flags]
+```
+
+If `--region` is omitted, all regions are scanned for VPCs.
+
+### VPC Flags
+
+| Flag | Default | Description |
+|------|---------|-------------|
+| `--profile` | (global) | AWS named profile (overrides global `--profile`) |
+| `--auth-method` | (global) | Auth method: `auto`, `profile`, `env`, `static`, `sts` |
+| `--role-arn` | — | IAM role ARN to assume via STS |
+| `--region` | — | AWS region (defaults to all regions if omitted) |
+| `--theme` | `spotted-pardalote` | Color theme |
+| `--all-regions` | `false` | Scan all AWS regions |
+
+### Layout
+
+```
+┌─ VPCs ──────┬─ Resources ─────┬─ Subnets ─────────────────────────────┐
+│ vpc-0a1b... │ ▸ NETWORK       │  #  Name   CIDR          AZ    Public  │
+│ vpc-2c3d... │   Subnets       │  1  -      172.31.0.0/20 ...   Yes     │
+│ my-vpc      │   Security Grps │  2  -      172.31.16.0/20 ...  Yes     │
+│ default     │   Route Tables  │                                       │
+│             │ ▸ COMPUTE       │                                       │
+│             │   EC2 Instances │                                       │
+│             │ ▸ SERVICES      │                                       │
+└─────────────┴─────────────────┴───────────────────────────────────────┘
+```
+
+### Resource categories
+
+- **NETWORK** — Subnets, Security Groups, Route Tables, Internet Gateways, NAT Gateways, VPC Endpoints, Network ACLs, Peering, Flow Logs
+- **COMPUTE** — EC2 Instances, Lambda Functions
+- **SERVICES** — RDS Instances, Load Balancers
+
+### VPC Explorer Keyboard Shortcuts
+
+| Key | Action |
+|-----|--------|
+| `↑` / `↓` / `j` / `k` | Navigate the VPC list, category sidebar, or resource table |
+| `Enter` | Open a VPC / load a category / open the resource detail overlay |
+| `Tab` | Switch focus between the category sidebar and the resource table |
+| `<` / `>` (or `,` / `.`) | Scroll table columns left/right when a table is wider than the panel |
+| `/` | Filter the VPC list by name or ID |
+| `c` | Copy the selected resource ID to the clipboard |
+| `r` | Refresh the VPC list or the current resource list |
+| `Esc` | Go back (detail → table → VPC list) |
+| `S` | Open the settings panel (themes & colors) |
+| `?` | Toggle help |
+| `q` / `Ctrl+C` | Quit |
+
+### Horizontal column scrolling
+
+Wide tables (e.g. Security Groups) don't truncate or drop columns on narrow
+terminals. The leading identifier columns stay pinned while the rest scroll with
+`<` / `>`; a `◀ N more cols ▶` indicator shows when columns are off-screen.
+
+### Plain-English rule explanations
+
+Opening the detail overlay (`Enter`) for a **Security Group** or **Network ACL**
+adds an "In plain English" section that translates each rule into a readable
+sentence, for example:
+
+```
+  In plain English:
+  • Allow inbound HTTPS (TCP 443) from anywhere on the internet (0.0.0.0/0)
+  • Allow inbound SSH (TCP 22) from anywhere on the internet (0.0.0.0/0)  ⚠ remote admin access open to the entire internet
+  • Allow inbound MySQL/Aurora (TCP 3306) from resources in security group sg-0abc123
+```
+
+Well-known ports are named, CIDRs are classified (public / IPv6 / single host /
+RFC1918 private), and security-group / prefix-list references are resolved.
+Rules that expose sensitive ports (remote-admin, databases, or all ports) to the
+public internet are flagged with `⚠`; ordinary public web ports are not, to
+avoid alert fatigue. NACL explanations additionally show the rule number, the
+allow/deny action, and a reminder that NACLs are stateless and evaluated in
+ascending rule-number order (first match wins).
 
 ## S3 TUI Usage
 
@@ -247,6 +338,27 @@ ui:
   theme: spotted-pardalote    # active theme name (see themes below)
 ```
 
+### Customizing displayed columns
+
+The VPC Explorer ships sensible default columns for each resource type, but you
+can override which fields appear as table `columns` and which appear in the
+`detail` overlay under `display.vpc.<resource>`. Resource keys match the service
+keys (`subnets`, `security_groups`, `route_tables`, `internet_gateways`,
+`nat_gateways`, `endpoints`, `network_acls`, `peering`, `flow_logs`,
+`ec2_instances`, `lambda`, `rds`, `load_balancers`).
+
+```yaml
+display:
+  vpc:
+    subnets:
+      columns: [name, cidr, az, available_ips, public]   # table columns, left→right
+      detail:  [subnet_id, vpc_id, state, map_public_ip] # fields in the detail overlay
+    security_groups:
+      columns: [sg_id, name, inbound, outbound, description]
+```
+
+Any resource type you omit keeps its built-in defaults.
+
 ## Authentication
 
 Five methods are supported, configured via `authMethod` in `config.yaml` or `--auth-method` on the CLI:
@@ -365,28 +477,24 @@ your changes back to `config.yaml`.
 ## Architecture
 
 ```
-CLI (cobra)          ┐
-                     ├─── Engine ─────┬─── Collector Registry ──┬─── EC2
-TUI (bubbletea)      ┘                │                         ├─── S3
-                                      │                         ├─── RDS
-S3 TUI (bubbletea)  ─────────────────┤                         ├─── IAM
-                                      │                         ├─── DynamoDB
-                                      │                         ├─── Lambda
-                                      │                         ├─── EMR
-                                      │                         ├─── ECS / EKS
-                                      │                         ├─── ELBv2
-                                      │                         ├─── Secrets Mgr
-                                      │                         ├─── SQS / SNS
-                                      │                         ├─── CloudWatch
-                                      │                         └─── Route53
-                                      │
-                                      ├─── Auth (5 methods)
-                                      ├─── Config (viper + YAML)
-                                      ├─── Filtering (region/tag/state)
-                                      └─── Output (table / JSON streaming)
+CLI (cobra)     ┐
+                ├── Engine ──┬── Collector Registry ──┬── EC2        ┐
+TUI (bubbletea) ┘            │                        ├── S3         │
+                            │                        ├── RDS        │
+                            ├── Auth (5 methods)      ├── IAM        │ 15 service
+                            ├── Config (viper + YAML) ├── DynamoDB   ├ collectors
+                            ├── Filtering (reg/tag)   ├── Lambda     │ (EMR, ECS,
+                            └── Output (table / JSON) ├── ELBv2      │  EKS, SQS,
+                                                      └── ...        ┘  SNS, etc.)
+
+VPC TUI (bubbletea) ──┐
+                      ├── Auth (5 methods) ──── EC2 / VPC, RDS, Lambda, ELBv2 APIs
+S3 TUI (bubbletea) ───┘                          S3 API
 ```
 
-The `Engine` orchestrates concurrent collection via a bounded goroutine pool, running each `(service, region)` pair in parallel. Global services run once. Results stream back incrementally via a channel so the CLI can print and the TUI can render as data arrives.
+The CLI and main TUI share the **`Engine`**, which orchestrates concurrent collection via a bounded goroutine pool, running each `(service, region)` pair in parallel. Global services run once. Results stream back incrementally via a channel so the CLI can print and the TUI can render as data arrives.
+
+The **VPC Explorer** and **S3** TUIs are standalone: they build credentials through the same auth layer but call the relevant AWS APIs directly rather than going through the collector engine.
 
 Each service collector implements:
 
@@ -407,11 +515,13 @@ aws_explorer/
 ├── cmd/
 │   ├── root.go          # Default CLI command (streaming output)
 │   ├── tui.go           # Interactive TUI launcher
+│   ├── vpc.go           # VPC Explorer TUI launcher
 │   └── s3.go            # S3 browser TUI launcher
 ├── internal/
 │   ├── auth/            # AWS credential building (5 auth methods)
 │   ├── awserr/          # AWS error mapping + IAM permission hints
 │   ├── config/          # Configuration structs (YAML marshaling)
+│   ├── display/         # Per-resource column/detail field registries (VPC, S3)
 │   ├── engine/          # Orchestration: concurrent collection + streaming
 │   ├── model/           # Data models: Resource, Result, Filter, ExploreError
 │   ├── output/          # Table/JSON formatting + streaming writer
@@ -432,8 +542,10 @@ aws_explorer/
 │   │   ├── cloudwatch/
 │   │   ├── route53/
 │   │   └── service.go   # Collector interface + CollectInput
-│   ├── table/           # Terminal table rendering utilities
+│   ├── table/           # Terminal table component (selection, horizontal column scrolling)
 │   ├── tui/             # Main TUI model (sidebar, table, detail panel, search)
+│   ├── ui/              # Shared TUI theming, settings panel, help overlay
+│   ├── vpctui/          # VPC Explorer TUI (VPC list, resource browser, SG/NACL rule explanations)
 │   └── s3tui/           # S3 browser TUI (bucket list, object tree, metadata)
 ├── main.go              # Entry point: logger init + cmd.Execute()
 ├── config.yaml          # Default configuration
