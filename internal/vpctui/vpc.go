@@ -847,6 +847,68 @@ func (c *VPCClient) ListNetworkInterfaces(vpcID string) ([]ENIInfo, error) {
 	return enis, nil
 }
 
+// GetVPCDNSInfo fetches the DNS-relevant attributes of a VPC: the DNS
+// support/hostnames flags and the DHCP option set's DNS servers / domain name.
+func (c *VPCClient) GetVPCDNSInfo(vpcID string) (VPCDNSInfo, error) {
+	ctx, cancel := c.requestContext()
+	defer cancel()
+
+	info := VPCDNSInfo{VPCID: vpcID}
+
+	sup, err := c.ec2.DescribeVpcAttribute(ctx, &awsec2.DescribeVpcAttributeInput{
+		VpcId:     aws.String(vpcID),
+		Attribute: ec2types.VpcAttributeNameEnableDnsSupport,
+	})
+	if err != nil {
+		return info, err
+	}
+	if sup.EnableDnsSupport != nil {
+		info.EnableDnsSupport = aws.ToBool(sup.EnableDnsSupport.Value)
+	}
+
+	host, err := c.ec2.DescribeVpcAttribute(ctx, &awsec2.DescribeVpcAttributeInput{
+		VpcId:     aws.String(vpcID),
+		Attribute: ec2types.VpcAttributeNameEnableDnsHostnames,
+	})
+	if err != nil {
+		return info, err
+	}
+	if host.EnableDnsHostnames != nil {
+		info.EnableDnsHostnames = aws.ToBool(host.EnableDnsHostnames.Value)
+	}
+
+	vpcs, err := c.ec2.DescribeVpcs(ctx, &awsec2.DescribeVpcsInput{VpcIds: []string{vpcID}})
+	if err != nil {
+		return info, err
+	}
+	if len(vpcs.Vpcs) > 0 {
+		info.DhcpOptionsID = aws.ToString(vpcs.Vpcs[0].DhcpOptionsId)
+	}
+
+	if info.DhcpOptionsID != "" {
+		opts, err := c.ec2.DescribeDhcpOptions(ctx, &awsec2.DescribeDhcpOptionsInput{
+			DhcpOptionsIds: []string{info.DhcpOptionsID},
+		})
+		if err == nil && len(opts.DhcpOptions) > 0 {
+			for _, cfg := range opts.DhcpOptions[0].DhcpConfigurations {
+				var vals []string
+				for _, v := range cfg.Values {
+					vals = append(vals, aws.ToString(v.Value))
+				}
+				switch aws.ToString(cfg.Key) {
+				case "domain-name-servers":
+					info.DomainNameServers = vals
+				case "domain-name":
+					if len(vals) > 0 {
+						info.DomainName = vals[0]
+					}
+				}
+			}
+		}
+	}
+	return info, nil
+}
+
 func (c *VPCClient) ListLambdaFunctions(vpcID string) ([]LambdaFunctionInfo, error) {
 	ctx, cancel := c.requestContext()
 	defer cancel()
