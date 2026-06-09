@@ -436,12 +436,16 @@ func natgwToMap(ngw NatGWInfo) map[string]string {
 
 func endpointToMap(ep EndpointInfo) map[string]string {
 	return map[string]string{
-		"endpoint_id": ep.ID,
-		"service":     ep.ServiceName,
-		"ep_type":     ep.Type,
-		"state":       ep.State,
-		"vpc_id":      ep.VPCID,
-		"tags":        display.EncodeTags(ep.Tags),
+		"endpoint_id":     ep.ID,
+		"service":         ep.ServiceName,
+		"ep_type":         ep.Type,
+		"state":           ep.State,
+		"route_tables":    orDash(strings.Join(ep.RouteTableIDs, ", ")),
+		"subnets":         orDash(strings.Join(ep.SubnetIDs, ", ")),
+		"security_groups": orDash(strings.Join(ep.SecurityGroups, ", ")),
+		"private_dns":     boolStr(ep.PrivateDNSEnabled),
+		"vpc_id":          ep.VPCID,
+		"tags":            display.EncodeTags(ep.Tags),
 	}
 }
 

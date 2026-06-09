@@ -208,12 +208,16 @@ type NatGWInfo struct {
 }
 
 type EndpointInfo struct {
-	ID          string
-	ServiceName string
-	Type        string
-	State       string
-	VPCID       string
-	Tags        map[string]string
+	ID                string
+	ServiceName       string
+	Type              string // Interface | Gateway | GatewayLoadBalancer
+	State             string
+	VPCID             string
+	RouteTableIDs     []string // gateway endpoints: associated route tables
+	SubnetIDs         []string // interface endpoints: subnets with an ENI
+	SecurityGroups    []string // interface endpoints: attached security groups
+	PrivateDNSEnabled bool     // interface endpoints
+	Tags              map[string]string
 }
 
 type NACLRule struct {
@@ -585,13 +589,21 @@ func (c *VPCClient) ListVPCEndpoints(vpcID string) ([]EndpointInfo, error) {
 			return nil, err
 		}
 		for _, ep := range page.VpcEndpoints {
+			var sgs []string
+			for _, g := range ep.Groups {
+				sgs = append(sgs, aws.ToString(g.GroupId))
+			}
 			endpoints = append(endpoints, EndpointInfo{
-				ID:          aws.ToString(ep.VpcEndpointId),
-				ServiceName: aws.ToString(ep.ServiceName),
-				Type:        string(ep.VpcEndpointType),
-				State:       string(ep.State),
-				VPCID:       aws.ToString(ep.VpcId),
-				Tags:        ec2TagsToMap(ep.Tags),
+				ID:                aws.ToString(ep.VpcEndpointId),
+				ServiceName:       aws.ToString(ep.ServiceName),
+				Type:              string(ep.VpcEndpointType),
+				State:             string(ep.State),
+				VPCID:             aws.ToString(ep.VpcId),
+				RouteTableIDs:     ep.RouteTableIds,
+				SubnetIDs:         ep.SubnetIds,
+				SecurityGroups:    sgs,
+				PrivateDNSEnabled: aws.ToBool(ep.PrivateDnsEnabled),
+				Tags:              ec2TagsToMap(ep.Tags),
 			})
 		}
 	}

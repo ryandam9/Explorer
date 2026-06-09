@@ -77,6 +77,7 @@ func analyzeVPC(snap vpcSnapshot) []Finding {
 	checkInternetGateways(snap, &out)
 	checkNACLs(snap, &out)
 	checkPeerings(snap, &out)
+	checkEndpoints(snap, &out)
 	checkQuotas(snap, &out)
 
 	sort.SliceStable(out, func(i, j int) bool {
@@ -601,4 +602,79 @@ func checkQuotas(snap vpcSnapshot, out *[]Finding) {
 			Fix:      "Request a subnets-per-VPC quota increase, or split workloads across VPCs.",
 		})
 	}
+}
+
+// ---------------------------------------------------------------------------
+// VPC endpoints
+//
+// "My private instance can't reach S3 / Secrets Manager" usually means a
+// gateway endpoint with no route-table association, or an interface endpoint
+// whose security group blocks HTTPS or whose private DNS is off.
+// ---------------------------------------------------------------------------
+
+func checkEndpoints(snap vpcSnapshot, out *[]Finding) {
+	for _, ep := range snap.Endpoints {
+		switch {
+		case strings.EqualFold(ep.Type, "Gateway"):
+			if len(ep.RouteTableIDs) == 0 {
+				*out = append(*out, Finding{
+					Severity: SevWarning,
+					Resource: ep.ID,
+					Title:    "Gateway endpoint is not associated with any route table",
+					Detail: fmt.Sprintf("%s (%s) has no route-table association, so no subnet can route to the service through it.",
+						ep.ID, ep.ServiceName),
+					Fix: "Associate the gateway endpoint with the route tables of the subnets that need it.",
+				})
+			}
+		case strings.EqualFold(ep.Type, "Interface"):
+			if !endpointSGsAllowHTTPS(snap, ep) {
+				*out = append(*out, Finding{
+					Severity: SevWarning,
+					Resource: ep.ID,
+					Title:    "Interface endpoint's security groups do not allow inbound HTTPS",
+					Detail: fmt.Sprintf("%s (%s) has no security-group rule allowing inbound TCP 443, so clients in the VPC cannot reach it.",
+						ep.ID, ep.ServiceName),
+					Fix: "Add an inbound TCP 443 rule from the VPC CIDR (or client security groups) to the endpoint's security group.",
+				})
+			}
+			if !ep.PrivateDNSEnabled {
+				*out = append(*out, Finding{
+					Severity: SevInfo,
+					Resource: ep.ID,
+					Title:    "Interface endpoint has private DNS disabled",
+					Detail: fmt.Sprintf("%s (%s) has private DNS disabled; clients must use the endpoint-specific DNS name rather than the standard service name.",
+						ep.ID, ep.ServiceName),
+					Fix: "Enable private DNS on the endpoint (requires the VPC's DNS support and hostnames to be on).",
+				})
+			}
+		}
+
+		if ep.State != "" && !strings.EqualFold(ep.State, "available") {
+			*out = append(*out, Finding{
+				Severity: SevInfo,
+				Resource: ep.ID,
+				Title:    "VPC endpoint is not in the available state",
+				Detail:   fmt.Sprintf("%s (%s) is in state %q.", ep.ID, ep.ServiceName, ep.State),
+				Fix:      "Investigate the endpoint status if workloads depend on it.",
+			})
+		}
+	}
+}
+
+// endpointSGsAllowHTTPS reports whether any of an interface endpoint's security
+// groups has an inbound rule permitting TCP 443.
+func endpointSGsAllowHTTPS(snap vpcSnapshot, ep EndpointInfo) bool {
+	for _, sgID := range ep.SecurityGroups {
+		sg := findSG(snap, sgID)
+		if sg == nil {
+			continue
+		}
+		for _, r := range sg.Rules {
+			if strings.EqualFold(r.Direction, "Inbound") &&
+				protoMatch(r.Protocol, "tcp") && portMatch(r.PortRange, 443) {
+				return true
+			}
+		}
+	}
+	return false
 }
