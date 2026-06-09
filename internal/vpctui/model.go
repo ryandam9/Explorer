@@ -79,6 +79,11 @@ type effRulesDoneMsg struct {
 	err    error
 }
 
+type dnsDoneMsg struct {
+	info VPCDNSInfo
+	err  error
+}
+
 // ---------------------------------------------------------------------------
 // Model
 // ---------------------------------------------------------------------------
@@ -159,6 +164,13 @@ type Model struct {
 	effRulesLoading bool
 	effRulesErr     error
 	effRulesVP      viewport.Model
+
+	// DNS / VPC attributes overlay
+	showDNS    bool
+	dnsInfo    VPCDNSInfo
+	dnsLoading bool
+	dnsErr     error
+	dnsVP      viewport.Model
 
 	// UI dimensions
 	width  int
@@ -246,6 +258,7 @@ func NewModel(
 	m.traceViewport = viewport.New(80, 20)
 	m.xrefViewport = viewport.New(80, 20)
 	m.effRulesVP = viewport.New(80, 20)
+	m.dnsVP = viewport.New(80, 20)
 
 	m.traceInput = textinput.New()
 	m.traceInput.Placeholder = "10.0.1.20:3306  (or internet:443)"
@@ -482,6 +495,23 @@ func (m *Model) loadEffectiveRules(eniID string) tea.Cmd {
 	}
 }
 
+// loadDNS fetches the selected VPC's DNS attributes and opens the DNS overlay.
+func (m *Model) loadDNS() tea.Cmd {
+	if m.selectedVPC == nil {
+		return nil
+	}
+	m.showDNS = true
+	m.dnsLoading = true
+	m.dnsErr = nil
+	m.dnsInfo = VPCDNSInfo{}
+	client := m.client
+	vpcID := m.selectedVPC.ID
+	return func() tea.Msg {
+		info, err := client.GetVPCDNSInfo(vpcID)
+		return dnsDoneMsg{info: info, err: err}
+	}
+}
+
 // parseTraceTarget parses a "host[:port]" destination. A missing port yields
 // -1 (any port). "internet" is accepted as the host.
 func parseTraceTarget(s string) (destIP string, port int) {
@@ -684,6 +714,13 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.effRulesVP.SetContent(m.renderEffRules())
 		m.effRulesVP.GotoTop()
 
+	case dnsDoneMsg:
+		m.dnsLoading = false
+		m.dnsErr = msg.err
+		m.dnsInfo = msg.info
+		m.dnsVP.SetContent(m.renderDNS())
+		m.dnsVP.GotoTop()
+
 	case errMsg:
 		m.err = msg.err
 		m.loading = false
@@ -755,6 +792,19 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 
+	// DNS overlay: capture scrolling keys.
+	if m.showDNS {
+		switch key {
+		case "esc", "q", "D":
+			m.showDNS = false
+		case "up", "k":
+			m.dnsVP.LineUp(1)
+		case "down", "j":
+			m.dnsVP.LineDown(1)
+		}
+		return m, nil
+	}
+
 	// Effective-rules overlay: capture scrolling keys.
 	if m.showEffRules {
 		switch key {
@@ -822,6 +872,11 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		// Run the VPC findings linter (resource browser only).
 		if m.state == stateResourceBrowser && m.selectedVPC != nil {
 			return m, m.loadFindings()
+		}
+	case "D":
+		// Show the VPC's DNS configuration (resource browser only).
+		if m.state == stateResourceBrowser && m.selectedVPC != nil {
+			return m, m.loadDNS()
 		}
 	}
 
@@ -1123,6 +1178,16 @@ func (m *Model) updateTableSizes() {
 	if m.effRules.Found {
 		m.effRulesVP.SetContent(m.renderEffRules())
 	}
+
+	// DNS overlay mirrors the same sizing.
+	m.dnsVP.Width = dvW
+	m.dnsVP.Height = dvH - 2
+	if m.dnsVP.Height < 3 {
+		m.dnsVP.Height = 3
+	}
+	if m.dnsInfo.VPCID != "" {
+		m.dnsVP.SetContent(m.renderDNS())
+	}
 }
 
 // selectedResourceID returns the primary ID of the resource currently selected
@@ -1189,6 +1254,10 @@ func (m *Model) View() string {
 
 	if m.showEffRules {
 		return m.viewEffRulesOverlay(content)
+	}
+
+	if m.showDNS {
+		return m.viewDNSOverlay(content)
 	}
 
 	if m.showTraceInput {
@@ -1773,6 +1842,100 @@ func (m *Model) renderEffRules() string {
 	return b.String()
 }
 
+func (m *Model) viewDNSOverlay(bg string) string {
+	title := lipgloss.NewStyle().
+		Bold(true).
+		Foreground(lipgloss.Color(ui.ColorHeading())).
+		Render("DNS & VPC attributes: " + m.dnsInfo.VPCID)
+
+	hint := lipgloss.NewStyle().
+		Foreground(lipgloss.Color(ui.ColorMuted())).
+		Render("↑/↓ scroll  •  Esc/D close")
+
+	var body string
+	switch {
+	case m.dnsLoading:
+		body = m.spinner.View() + "  Reading VPC DNS attributes…"
+	case m.dnsErr != nil:
+		body = lipgloss.NewStyle().Foreground(lipgloss.Color(ui.ColorError())).
+			Render("Error: " + m.dnsErr.Error())
+	default:
+		body = m.dnsVP.View()
+	}
+
+	inner := lipgloss.JoinVertical(lipgloss.Left, title, "", body, "", hint)
+
+	overlay := lipgloss.NewStyle().
+		BorderStyle(lipgloss.RoundedBorder()).
+		BorderForeground(lipgloss.Color(ui.ColorBorderFocus())).
+		Foreground(lipgloss.Color(ui.ColorText())).
+		Padding(1, 2).
+		Render(inner)
+
+	if m.width > 0 && m.height > 0 {
+		return lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center, overlay)
+	}
+	return overlay
+}
+
+// renderDNS builds the scrollable body of the DNS overlay: the VPC's DNS
+// attributes followed by plain-English notes.
+func (m *Model) renderDNS() string {
+	info := m.dnsInfo
+	muted := lipgloss.NewStyle().Foreground(lipgloss.Color(ui.ColorMuted()))
+	text := lipgloss.NewStyle().Foreground(lipgloss.Color(ui.ColorText()))
+	good := lipgloss.NewStyle().Foreground(lipgloss.Color(ui.ColorAccent()))
+	bad := lipgloss.NewStyle().Foreground(lipgloss.Color(ui.ColorError()))
+
+	onOff := func(b bool) string {
+		if b {
+			return good.Render("Enabled")
+		}
+		return bad.Render("Disabled")
+	}
+	dns := "AmazonProvidedDNS (Route 53 Resolver)"
+	if usesCustomDNS(info.DomainNameServers) {
+		dns = strings.Join(info.DomainNameServers, ", ")
+	}
+	row := func(label, val string) string {
+		return muted.Render(fmt.Sprintf("%-28s", label)) + val
+	}
+
+	wrapW := m.dnsVP.Width
+	if wrapW <= 0 {
+		wrapW = 80
+	}
+
+	var b strings.Builder
+	b.WriteString(row("DNS resolution", onOff(info.EnableDnsSupport)))
+	b.WriteString("\n" + row("DNS hostnames", onOff(info.EnableDnsHostnames)))
+	b.WriteString("\n" + row("DHCP options set", text.Render(orDash(info.DhcpOptionsID))))
+	b.WriteString("\n" + row("Domain name servers", text.Render(dns)))
+	b.WriteString("\n" + row("Domain name", text.Render(orDash(info.DomainName))))
+
+	b.WriteString("\n\n" + lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color(ui.ColorAccent())).Render("Notes"))
+	for _, n := range dnsNotes(info) {
+		glyph, style := "•", muted
+		switch n.Severity {
+		case SevCritical:
+			glyph, style = "🔴", bad
+		case SevWarning:
+			glyph, style = "🟡", lipgloss.NewStyle().Foreground(lipgloss.Color(ui.ColorWarning()))
+		}
+		wrapped := lipgloss.NewStyle().Width(wrapW - 4).Render(n.Text)
+		lines := strings.Split(wrapped, "\n")
+		for i := range lines {
+			if i == 0 {
+				lines[i] = "  " + style.Render(glyph) + " " + lines[i]
+			} else {
+				lines[i] = "    " + lines[i]
+			}
+		}
+		b.WriteString("\n" + strings.Join(lines, "\n"))
+	}
+	return b.String()
+}
+
 func (m *Model) viewScanStatus() string {
 	if m.loading && m.scanning {
 		return m.spinner.View() + fmt.Sprintf("  Scanning %d/%d regions…", m.scanDone, m.scanTotal)
@@ -1816,9 +1979,9 @@ func (m *Model) viewStatusBar() string {
 	case stateResourceBrowser:
 		switch m.focus {
 		case focusCategory:
-			hint = "↑↓=navigate  Enter=load  Tab=resource table  F=findings  Esc=back  ?=help  q=quit"
+			hint = "↑↓=navigate  Enter=load  Tab=resource table  F=findings  D=dns  Esc=back  ?=help  q=quit"
 		case focusResourceTable:
-			hint = "↑↓=nav  Enter=detail  x=where-used  e=eff-rules  F=findings  t=trace  c=copy  r=refresh  Esc=back  q=quit"
+			hint = "↑↓=nav  Enter=detail  x=where-used  e=eff-rules  F=findings  D=dns  t=trace  c=copy  Esc=back  q=quit"
 		}
 	}
 
@@ -1851,6 +2014,7 @@ func (m *Model) helpText() string {
 		"  Enter    Load resource type (sidebar) / open detail (table)",
 		"  c        Copy resource ID to clipboard",
 		"  F        Run the VPC findings linter (security/routing/capacity issues)",
+		"  D        Show the VPC's DNS configuration (resolution, hostnames, DHCP)",
 		"  t        Trace connectivity from the selected network interface",
 		"  x        Cross-reference the selected resource (where used)",
 		"  e        Effective merged security rules (network interface)",
