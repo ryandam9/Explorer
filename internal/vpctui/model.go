@@ -84,6 +84,13 @@ type dnsDoneMsg struct {
 	err  error
 }
 
+type diffDoneMsg struct {
+	current     vpcSnapshot
+	baseline    vpcSnapshot
+	hasBaseline bool
+	err         error
+}
+
 // ---------------------------------------------------------------------------
 // Model
 // ---------------------------------------------------------------------------
@@ -172,6 +179,14 @@ type Model struct {
 	dnsErr     error
 	dnsVP      viewport.Model
 
+	// Snapshot diff ("what changed") overlay
+	showDiff    bool
+	snapDiff    []snapshotChange
+	currentSnap vpcSnapshot
+	diffLoading bool
+	diffErr     error
+	diffVP      viewport.Model
+
 	// UI dimensions
 	width  int
 	height int
@@ -259,6 +274,7 @@ func NewModel(
 	m.xrefViewport = viewport.New(80, 20)
 	m.effRulesVP = viewport.New(80, 20)
 	m.dnsVP = viewport.New(80, 20)
+	m.diffVP = viewport.New(80, 20)
 
 	m.traceInput = textinput.New()
 	m.traceInput.Placeholder = "10.0.1.20:3306  (or internet:443)"
@@ -495,6 +511,26 @@ func (m *Model) loadEffectiveRules(eniID string) tea.Cmd {
 	}
 }
 
+// loadDiff builds the current VPC snapshot and loads the saved baseline (if
+// any) so the update loop can either save a first baseline or show the diff.
+func (m *Model) loadDiff() tea.Cmd {
+	if m.selectedVPC == nil {
+		return nil
+	}
+	m.diffLoading = true
+	m.diffErr = nil
+	client := m.client
+	vpcID := m.selectedVPC.ID
+	return func() tea.Msg {
+		current, err := buildVPCSnapshot(client, vpcID)
+		if err != nil {
+			return diffDoneMsg{err: err}
+		}
+		baseline, ok, err := loadSnapshot(vpcID)
+		return diffDoneMsg{current: current, baseline: baseline, hasBaseline: ok, err: err}
+	}
+}
+
 // loadDNS fetches the selected VPC's DNS attributes and opens the DNS overlay.
 func (m *Model) loadDNS() tea.Cmd {
 	if m.selectedVPC == nil {
@@ -721,6 +757,30 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.dnsVP.SetContent(m.renderDNS())
 		m.dnsVP.GotoTop()
 
+	case diffDoneMsg:
+		m.diffLoading = false
+		m.currentSnap = msg.current
+		if msg.err != nil {
+			m.diffErr = msg.err
+			m.showDiff = true
+			m.diffVP.SetContent("")
+			break
+		}
+		if !msg.hasBaseline {
+			// First run for this VPC: save the baseline and tell the user.
+			if err := saveSnapshot(msg.current); err != nil {
+				m.statusMsg = "Failed to save baseline: " + err.Error()
+			} else {
+				m.statusMsg = "Baseline snapshot saved — press w later to see what changed"
+			}
+			break
+		}
+		m.snapDiff = diffSnapshots(msg.baseline, msg.current)
+		m.diffErr = nil
+		m.showDiff = true
+		m.diffVP.SetContent(m.renderDiff())
+		m.diffVP.GotoTop()
+
 	case errMsg:
 		m.err = msg.err
 		m.loading = false
@@ -788,6 +848,26 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.traceViewport.LineUp(1)
 		case "down", "j":
 			m.traceViewport.LineDown(1)
+		}
+		return m, nil
+	}
+
+	// Snapshot-diff overlay: capture scrolling keys; b re-baselines.
+	if m.showDiff {
+		switch key {
+		case "esc", "q", "w":
+			m.showDiff = false
+		case "b":
+			if err := saveSnapshot(m.currentSnap); err != nil {
+				m.statusMsg = "Failed to update baseline: " + err.Error()
+			} else {
+				m.statusMsg = "Baseline updated to the current state"
+			}
+			m.showDiff = false
+		case "up", "k":
+			m.diffVP.LineUp(1)
+		case "down", "j":
+			m.diffVP.LineDown(1)
 		}
 		return m, nil
 	}
@@ -877,6 +957,11 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		// Show the VPC's DNS configuration (resource browser only).
 		if m.state == stateResourceBrowser && m.selectedVPC != nil {
 			return m, m.loadDNS()
+		}
+	case "w":
+		// Snapshot diff: baseline on first use, "what changed" thereafter.
+		if m.state == stateResourceBrowser && m.selectedVPC != nil {
+			return m, m.loadDiff()
 		}
 	}
 
@@ -1188,6 +1273,16 @@ func (m *Model) updateTableSizes() {
 	if m.dnsInfo.VPCID != "" {
 		m.dnsVP.SetContent(m.renderDNS())
 	}
+
+	// Snapshot-diff overlay mirrors the same sizing.
+	m.diffVP.Width = dvW
+	m.diffVP.Height = dvH - 2
+	if m.diffVP.Height < 3 {
+		m.diffVP.Height = 3
+	}
+	if m.showDiff && m.diffErr == nil {
+		m.diffVP.SetContent(m.renderDiff())
+	}
 }
 
 // selectedResourceID returns the primary ID of the resource currently selected
@@ -1258,6 +1353,10 @@ func (m *Model) View() string {
 
 	if m.showDNS {
 		return m.viewDNSOverlay(content)
+	}
+
+	if m.showDiff {
+		return m.viewDiffOverlay(content)
 	}
 
 	if m.showTraceInput {
@@ -1936,6 +2035,81 @@ func (m *Model) renderDNS() string {
 	return b.String()
 }
 
+func (m *Model) viewDiffOverlay(bg string) string {
+	added, removed, modified := diffCounts(m.snapDiff)
+	titleText := fmt.Sprintf("Changes since baseline — %d added, %d removed, %d modified", added, removed, modified)
+	title := lipgloss.NewStyle().
+		Bold(true).
+		Foreground(lipgloss.Color(ui.ColorHeading())).
+		Render(titleText)
+
+	hint := lipgloss.NewStyle().
+		Foreground(lipgloss.Color(ui.ColorMuted())).
+		Render("↑/↓ scroll  •  b save current as new baseline  •  Esc/w close")
+
+	var body string
+	switch {
+	case m.diffLoading:
+		body = m.spinner.View() + "  Comparing with baseline…"
+	case m.diffErr != nil:
+		body = lipgloss.NewStyle().Foreground(lipgloss.Color(ui.ColorError())).
+			Render("Error: " + m.diffErr.Error())
+	default:
+		body = m.diffVP.View()
+	}
+
+	inner := lipgloss.JoinVertical(lipgloss.Left, title, "", body, "", hint)
+
+	overlay := lipgloss.NewStyle().
+		BorderStyle(lipgloss.RoundedBorder()).
+		BorderForeground(lipgloss.Color(ui.ColorBorderFocus())).
+		Foreground(lipgloss.Color(ui.ColorText())).
+		Padding(1, 2).
+		Render(inner)
+
+	if m.width > 0 && m.height > 0 {
+		return lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center, overlay)
+	}
+	return overlay
+}
+
+// renderDiff builds the scrollable body of the snapshot-diff overlay.
+func (m *Model) renderDiff() string {
+	if len(m.snapDiff) == 0 {
+		return lipgloss.NewStyle().Foreground(lipgloss.Color(ui.ColorMuted())).
+			Render("No changes since the baseline snapshot. ✓")
+	}
+	addStyle := lipgloss.NewStyle().Foreground(lipgloss.Color(ui.ColorAccent()))
+	remStyle := lipgloss.NewStyle().Foreground(lipgloss.Color(ui.ColorError()))
+	modStyle := lipgloss.NewStyle().Foreground(lipgloss.Color(ui.ColorWarning()))
+
+	style := func(k changeKind) lipgloss.Style {
+		switch k {
+		case changeAdded:
+			return addStyle
+		case changeRemoved:
+			return remStyle
+		default:
+			return modStyle
+		}
+	}
+
+	var b strings.Builder
+	for i, c := range m.snapDiff {
+		if i > 0 {
+			b.WriteString("\n")
+		}
+		b.WriteString(style(c.Kind).Render(c.Kind.glyph()+" "+c.Type) + " " + c.ID)
+		for _, f := range c.Added {
+			b.WriteString("\n    " + addStyle.Render("+ "+f))
+		}
+		for _, f := range c.Removed {
+			b.WriteString("\n    " + remStyle.Render("- "+f))
+		}
+	}
+	return b.String()
+}
+
 func (m *Model) viewScanStatus() string {
 	if m.loading && m.scanning {
 		return m.spinner.View() + fmt.Sprintf("  Scanning %d/%d regions…", m.scanDone, m.scanTotal)
@@ -1979,9 +2153,9 @@ func (m *Model) viewStatusBar() string {
 	case stateResourceBrowser:
 		switch m.focus {
 		case focusCategory:
-			hint = "↑↓=navigate  Enter=load  Tab=resource table  F=findings  D=dns  Esc=back  ?=help  q=quit"
+			hint = "↑↓=navigate  Enter=load  F=findings  D=dns  w=changes  Tab=table  Esc=back  q=quit"
 		case focusResourceTable:
-			hint = "↑↓=nav  Enter=detail  x=where-used  e=eff-rules  F=findings  D=dns  t=trace  c=copy  Esc=back  q=quit"
+			hint = "↑↓=nav  Enter=detail  x=where-used  e=eff-rules  F=findings  D=dns  w=changes  t=trace  Esc=back  q=quit"
 		}
 	}
 
@@ -2015,6 +2189,7 @@ func (m *Model) helpText() string {
 		"  c        Copy resource ID to clipboard",
 		"  F        Run the VPC findings linter (security/routing/capacity issues)",
 		"  D        Show the VPC's DNS configuration (resolution, hostnames, DHCP)",
+		"  w        What changed: baseline the VPC, then diff against it later",
 		"  t        Trace connectivity from the selected network interface",
 		"  x        Cross-reference the selected resource (where used)",
 		"  e        Effective merged security rules (network interface)",
