@@ -49,6 +49,8 @@ type Finding struct {
 // empty when a resource type could not be fetched (e.g. missing permissions).
 type vpcSnapshot struct {
 	VPCID             string
+	Region            string // region the snapshot was taken in (baselines only)
+	OwnerID           string // account that owns the VPC (baselines only)
 	Subnets           []SubnetInfo
 	SecurityGroups    []SGInfo
 	RouteTables       []RouteTableInfo

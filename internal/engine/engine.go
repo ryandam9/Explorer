@@ -6,6 +6,7 @@ import (
 	"log/slog"
 	"sort"
 	"strings"
+	"time"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
 	awsec2 "github.com/aws/aws-sdk-go-v2/service/ec2"
@@ -182,6 +183,14 @@ func (e *Engine) StreamRun(ctx context.Context, chunks chan<- model.ResultChunk)
 			g.Go(func() error {
 				slog.Debug("Starting collector", "service", s.Name(), "region", r)
 
+				// app.timeoutSeconds bounds each collector run.
+				collectCtx := gCtx
+				if e.Config.App.TimeoutSeconds > 0 {
+					var cancel context.CancelFunc
+					collectCtx, cancel = context.WithTimeout(gCtx, time.Duration(e.Config.App.TimeoutSeconds)*time.Second)
+					defer cancel()
+				}
+
 				regionalConfig := e.AWSConfig
 				if r != "global" {
 					regionalConfig.Region = r
@@ -199,7 +208,7 @@ func (e *Engine) StreamRun(ctx context.Context, chunks chan<- model.ResultChunk)
 					DetailLevel: services.DetailLevelSummary,
 				}
 
-				res, err := s.Collect(gCtx, input)
+				res, err := s.Collect(collectCtx, input)
 				if err != nil {
 					code := "CollectionError"
 					msg := err.Error()

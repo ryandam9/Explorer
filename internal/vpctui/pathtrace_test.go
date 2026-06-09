@@ -170,6 +170,33 @@ func TestTraceUnknownSource(t *testing.T) {
 	}
 }
 
+func TestTracePrefixListCaveatNoted(t *testing.T) {
+	snap := baseSnap()
+	// Give the source SG a prefix-list egress rule: the trace cannot expand it,
+	// so a caveat hop must be added.
+	snap.SecurityGroups[0].Rules = append(snap.SecurityGroups[0].Rules,
+		SGRule{Direction: "Outbound", Protocol: "TCP", PortRange: "443", Source: "pl-12345"})
+	res := tracePath(snap, traceRequest{SourceENIID: "eni-web", DestIP: "10.0.1.20", Protocol: "tcp", Port: 3306})
+	found := false
+	for _, h := range res.Hops {
+		if h.Status == hopNote && strings.Contains(h.Detail, "prefix lists") {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("expected a prefix-list caveat note, hops: %+v", res.Hops)
+	}
+}
+
+func TestTraceNoPrefixListCaveatWhenUnused(t *testing.T) {
+	res := tracePath(baseSnap(), traceRequest{SourceENIID: "eni-web", DestIP: "10.0.1.20", Protocol: "tcp", Port: 3306})
+	for _, h := range res.Hops {
+		if strings.Contains(h.Detail, "prefix lists") {
+			t.Errorf("unexpected prefix-list caveat: %+v", h)
+		}
+	}
+}
+
 func TestPortAndProtoMatchers(t *testing.T) {
 	if !portMatch("All", 443) || !portMatch("443", 443) || !portMatch("1024-65535", 32768) {
 		t.Error("portMatch positive cases failed")

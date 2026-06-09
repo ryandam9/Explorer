@@ -89,6 +89,14 @@ func tracePath(snap vpcSnapshot, req traceRequest) traceResult {
 	add(hopNote, "Source",
 		fmt.Sprintf("%s (%s) in subnet %s", src.ID, orDash(src.PrivateIP), orDash(src.SubnetID)))
 
+	// Managed prefix lists cannot be expanded from a snapshot, so any rule or
+	// route that uses one is skipped by the matchers below. Flag that up front
+	// so a "Blocked" verdict is not read as definitive.
+	if hasPrefixListElements(snap, src, dst) {
+		add(hopNote, "Prefix lists",
+			"some security-group rules or routes reference managed prefix lists (pl-…), which this trace cannot expand; the verdict may be incomplete")
+	}
+
 	// 1. Source security-group egress (stateful).
 	if ok, why := sgEgressAllows(snap, src, destIP, dst, req); ok {
 		add(hopPass, "Security group egress", why)
@@ -196,6 +204,43 @@ func findENIByIP(snap vpcSnapshot, ip string) *ENIInfo {
 	return nil
 }
 
+// hasPrefixListElements reports whether any rule on the source/destination
+// ENI's security groups, or any route on the source subnet's route table,
+// references a managed prefix list. Those elements cannot be evaluated from a
+// snapshot, so the caller surfaces a caveat.
+func hasPrefixListElements(snap vpcSnapshot, src, dst *ENIInfo) bool {
+	sgHasPL := func(eni *ENIInfo) bool {
+		if eni == nil {
+			return false
+		}
+		for _, sgID := range eni.SecurityGroups {
+			sg := findSG(snap, sgID)
+			if sg == nil {
+				continue
+			}
+			for _, r := range sg.Rules {
+				if strings.HasPrefix(strings.TrimSpace(r.Source), "pl-") {
+					return true
+				}
+			}
+		}
+		return false
+	}
+	if sgHasPL(src) || sgHasPL(dst) {
+		return true
+	}
+	if src != nil {
+		if rt := effectiveRouteTable(snap, src.SubnetID); rt != nil {
+			for _, r := range rt.Routes {
+				if strings.HasPrefix(r.Destination, "pl-") {
+					return true
+				}
+			}
+		}
+	}
+	return false
+}
+
 // naclForSubnet returns the NACL explicitly associated with a subnet, or the
 // default NACL as a fallback.
 func naclForSubnet(snap vpcSnapshot, subnetID string) *NACLInfo {
@@ -266,6 +311,10 @@ func routeTargetKind(target string) string {
 		return "transit gateway"
 	case strings.HasPrefix(target, "eigw-"):
 		return "egress-only internet gateway"
+	case strings.HasPrefix(target, "cagw-"):
+		return "carrier gateway"
+	case strings.HasPrefix(target, "lgw-"):
+		return "local gateway"
 	default:
 		return "gateway"
 	}
