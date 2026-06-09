@@ -921,6 +921,125 @@ func (c *VPCClient) GetVPCDNSInfo(vpcID string) (VPCDNSInfo, error) {
 	return info, nil
 }
 
+// ListReachabilityAnalyses lists existing Network Insights analyses joined with
+// their paths. This is read-only and incurs no charge.
+func (c *VPCClient) ListReachabilityAnalyses() ([]NetInsightsAnalysis, error) {
+	ctx, cancel := c.requestContext()
+	defer cancel()
+
+	paths := map[string]ec2types.NetworkInsightsPath{}
+	pp := awsec2.NewDescribeNetworkInsightsPathsPaginator(c.ec2, &awsec2.DescribeNetworkInsightsPathsInput{})
+	for pp.HasMorePages() {
+		page, err := pp.NextPage(ctx)
+		if err != nil {
+			return nil, err
+		}
+		for _, p := range page.NetworkInsightsPaths {
+			paths[aws.ToString(p.NetworkInsightsPathId)] = p
+		}
+	}
+
+	var out []NetInsightsAnalysis
+	ap := awsec2.NewDescribeNetworkInsightsAnalysesPaginator(c.ec2, &awsec2.DescribeNetworkInsightsAnalysesInput{})
+	for ap.HasMorePages() {
+		page, err := ap.NextPage(ctx)
+		if err != nil {
+			return nil, err
+		}
+		for _, a := range page.NetworkInsightsAnalyses {
+			out = append(out, analysisFromSDK(a, paths))
+		}
+	}
+	return out, nil
+}
+
+// CreateStartWaitAnalysis creates a Network Insights path, starts an analysis,
+// and polls until it completes or the deadline passes. THIS CREATES REAL AWS
+// RESOURCES AND INCURS A PER-ANALYSIS CHARGE — callers must confirm first.
+func (c *VPCClient) CreateStartWaitAnalysis(source, dest string, port int) (NetInsightsAnalysis, error) {
+	ctx, cancel := context.WithTimeout(c.ctx, 2*time.Minute)
+	defer cancel()
+
+	pathIn := &awsec2.CreateNetworkInsightsPathInput{
+		Source:      aws.String(source),
+		Destination: aws.String(dest),
+		Protocol:    ec2types.ProtocolTcp,
+		ClientToken: aws.String(fmt.Sprintf("aws-explorer-%d", time.Now().UnixNano())),
+	}
+	if port > 0 {
+		p := int32(port)
+		pathIn.DestinationPort = &p
+	}
+	pathOut, err := c.ec2.CreateNetworkInsightsPath(ctx, pathIn)
+	if err != nil {
+		return NetInsightsAnalysis{}, err
+	}
+	pathID := aws.ToString(pathOut.NetworkInsightsPath.NetworkInsightsPathId)
+
+	startOut, err := c.ec2.StartNetworkInsightsAnalysis(ctx, &awsec2.StartNetworkInsightsAnalysisInput{
+		NetworkInsightsPathId: aws.String(pathID),
+	})
+	if err != nil {
+		return NetInsightsAnalysis{}, err
+	}
+	analysisID := aws.ToString(startOut.NetworkInsightsAnalysis.NetworkInsightsAnalysisId)
+
+	paths := map[string]ec2types.NetworkInsightsPath{}
+	if pathOut.NetworkInsightsPath != nil {
+		paths[pathID] = *pathOut.NetworkInsightsPath
+	}
+	for {
+		resp, err := c.ec2.DescribeNetworkInsightsAnalyses(ctx, &awsec2.DescribeNetworkInsightsAnalysesInput{
+			NetworkInsightsAnalysisIds: []string{analysisID},
+		})
+		if err != nil {
+			return NetInsightsAnalysis{}, err
+		}
+		if len(resp.NetworkInsightsAnalyses) > 0 {
+			a := resp.NetworkInsightsAnalyses[0]
+			if a.Status != ec2types.AnalysisStatusRunning {
+				return analysisFromSDK(a, paths), nil
+			}
+		}
+		select {
+		case <-ctx.Done():
+			// Timed out: return what we have (still running).
+			return NetInsightsAnalysis{AnalysisID: analysisID, PathID: pathID, Source: source,
+				Destination: dest, DestPort: int32(port), Protocol: "tcp", Status: "running"}, nil
+		case <-time.After(4 * time.Second):
+		}
+	}
+}
+
+func analysisFromSDK(a ec2types.NetworkInsightsAnalysis, paths map[string]ec2types.NetworkInsightsPath) NetInsightsAnalysis {
+	out := NetInsightsAnalysis{
+		AnalysisID:    aws.ToString(a.NetworkInsightsAnalysisId),
+		PathID:        aws.ToString(a.NetworkInsightsPathId),
+		Status:        string(a.Status),
+		StatusMessage: aws.ToString(a.StatusMessage),
+		PathFound:     a.NetworkPathFound,
+	}
+	if a.StartDate != nil {
+		out.StartDate = a.StartDate.Format("2006-01-02 15:04")
+	}
+	if p, ok := paths[out.PathID]; ok {
+		out.Source = firstNonEmpty(aws.ToString(p.Source), aws.ToString(p.SourceIp))
+		out.Destination = firstNonEmpty(aws.ToString(p.Destination), aws.ToString(p.DestinationIp))
+		out.Protocol = string(p.Protocol)
+		out.DestPort = aws.ToInt32(p.DestinationPort)
+	}
+	return out
+}
+
+func firstNonEmpty(vals ...string) string {
+	for _, v := range vals {
+		if v != "" {
+			return v
+		}
+	}
+	return ""
+}
+
 func (c *VPCClient) ListLambdaFunctions(vpcID string) ([]LambdaFunctionInfo, error) {
 	ctx, cancel := c.requestContext()
 	defer cancel()

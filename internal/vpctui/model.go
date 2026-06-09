@@ -102,6 +102,16 @@ type exposureDoneMsg struct {
 	err    error
 }
 
+type analyzerListMsg struct {
+	list []NetInsightsAnalysis
+	err  error
+}
+
+type analyzerRunMsg struct {
+	analysis NetInsightsAnalysis
+	err      error
+}
+
 // ---------------------------------------------------------------------------
 // Model
 // ---------------------------------------------------------------------------
@@ -205,6 +215,20 @@ type Model struct {
 	exposureErr     error
 	exposureVP      viewport.Model
 
+	// Reachability Analyzer overlay (AWS Network Insights)
+	showAnalyzer      bool
+	analyzerList      []NetInsightsAnalysis
+	analyzerLoading   bool
+	analyzerErr       error
+	analyzerVP        viewport.Model
+	analyzerInputMode bool
+	analyzerInput     textinput.Model
+	analyzerConfirm   bool
+	analyzerRunning   bool
+	analyzerPendSrc   string
+	analyzerPendDst   string
+	analyzerPendPort  int
+
 	// UI dimensions
 	width  int
 	height int
@@ -294,6 +318,15 @@ func NewModel(
 	m.dnsVP = viewport.New(80, 20)
 	m.diffVP = viewport.New(80, 20)
 	m.exposureVP = viewport.New(80, 20)
+	m.analyzerVP = viewport.New(80, 20)
+
+	m.analyzerInput = textinput.New()
+	m.analyzerInput.Placeholder = "eni-src -> eni-dst:443  (or eni-src -> igw-xxxx)"
+	m.analyzerInput.CharLimit = 96
+	m.analyzerInput.Width = 48
+	m.analyzerInput.PromptStyle = lipgloss.NewStyle().Foreground(lipgloss.Color(ui.ColorAccent())).Bold(true)
+	m.analyzerInput.TextStyle = lipgloss.NewStyle().Foreground(lipgloss.Color(ui.ColorText()))
+	m.analyzerInput.Cursor.Style = lipgloss.NewStyle().Foreground(lipgloss.Color(ui.ColorAccent()))
 
 	m.traceInput = textinput.New()
 	m.traceInput.Placeholder = "10.0.1.20:3306  (or internet:443)"
@@ -570,6 +603,30 @@ func (m *Model) exportReport() tea.Cmd {
 	}
 }
 
+// loadAnalyzerList lists existing Reachability Analyzer analyses (read-only).
+func (m *Model) loadAnalyzerList() tea.Cmd {
+	m.showAnalyzer = true
+	m.analyzerInputMode = false
+	m.analyzerConfirm = false
+	m.analyzerLoading = true
+	m.analyzerErr = nil
+	client := m.client
+	return func() tea.Msg {
+		list, err := client.ListReachabilityAnalyses()
+		return analyzerListMsg{list: list, err: err}
+	}
+}
+
+// runAnalysis creates and runs a new (paid) Reachability Analyzer analysis.
+func (m *Model) runAnalysis(source, dest string, port int) tea.Cmd {
+	m.analyzerRunning = true
+	client := m.client
+	return func() tea.Msg {
+		a, err := client.CreateStartWaitAnalysis(source, dest, port)
+		return analyzerRunMsg{analysis: a, err: err}
+	}
+}
+
 // loadExposure builds a snapshot and computes the VPC's internet-facing
 // surface, opening the public-exposure overlay.
 func (m *Model) loadExposure() tea.Cmd {
@@ -831,6 +888,26 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.exposureVP.SetContent(m.renderExposure())
 		m.exposureVP.GotoTop()
 
+	case analyzerListMsg:
+		m.analyzerLoading = false
+		m.analyzerErr = msg.err
+		m.analyzerList = msg.list
+		m.analyzerVP.SetContent(m.renderAnalyzerList())
+		m.analyzerVP.GotoTop()
+
+	case analyzerRunMsg:
+		m.analyzerRunning = false
+		if msg.err != nil {
+			m.analyzerErr = msg.err
+		} else {
+			// Prepend the new analysis and refresh the list view.
+			m.analyzerList = append([]NetInsightsAnalysis{msg.analysis}, m.analyzerList...)
+			m.analyzerErr = nil
+			m.statusMsg = "Analysis " + msg.analysis.AnalysisID + ": " + analysisVerdict(msg.analysis)
+		}
+		m.analyzerVP.SetContent(m.renderAnalyzerList())
+		m.analyzerVP.GotoTop()
+
 	case diffDoneMsg:
 		m.diffLoading = false
 		m.currentSnap = msg.current
@@ -924,6 +1001,63 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.traceViewport.LineDown(1)
 		}
 		return m, nil
+	}
+
+	// Reachability Analyzer overlay: list / new-input / confirm / running.
+	if m.showAnalyzer {
+		switch {
+		case m.analyzerRunning:
+			return m, nil // ignore keys while the analysis runs
+		case m.analyzerInputMode:
+			switch key {
+			case "esc":
+				m.analyzerInputMode = false
+				m.analyzerInput.Blur()
+			case "enter":
+				src, dst, port, ok := parseAnalyzerInput(m.analyzerInput.Value())
+				if ok {
+					m.analyzerPendSrc, m.analyzerPendDst, m.analyzerPendPort = src, dst, port
+					m.analyzerInputMode = false
+					m.analyzerInput.Blur()
+					m.analyzerConfirm = true
+				}
+			default:
+				var cmd tea.Cmd
+				m.analyzerInput, cmd = m.analyzerInput.Update(msg)
+				return m, cmd
+			}
+			return m, nil
+		case m.analyzerConfirm:
+			switch key {
+			case "y", "Y":
+				m.analyzerConfirm = false
+				return m, m.runAnalysis(m.analyzerPendSrc, m.analyzerPendDst, m.analyzerPendPort)
+			case "n", "N", "esc":
+				m.analyzerConfirm = false
+			}
+			return m, nil
+		default:
+			switch key {
+			case "esc", "q", "A":
+				m.showAnalyzer = false
+			case "n":
+				m.analyzerInputMode = true
+				prefill := ""
+				if m.activeResource == rtNetworkInterfaces {
+					if id := m.selectedResourceID(); id != "" {
+						prefill = id + " -> "
+					}
+				}
+				m.analyzerInput.SetValue(prefill)
+				m.analyzerInput.CursorEnd()
+				return m, m.analyzerInput.Focus()
+			case "up", "k":
+				m.analyzerVP.LineUp(1)
+			case "down", "j":
+				m.analyzerVP.LineDown(1)
+			}
+			return m, nil
+		}
 	}
 
 	// Public-exposure overlay: capture scrolling keys.
@@ -1059,6 +1193,11 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		// Public exposure: what is reachable from the internet.
 		if m.state == stateResourceBrowser && m.selectedVPC != nil {
 			return m, m.loadExposure()
+		}
+	case "A":
+		// AWS Reachability Analyzer: list existing analyses (read-only).
+		if m.state == stateResourceBrowser && m.selectedVPC != nil {
+			return m, m.loadAnalyzerList()
 		}
 	}
 
@@ -1390,6 +1529,16 @@ func (m *Model) updateTableSizes() {
 	if len(m.exposureGroups) > 0 {
 		m.exposureVP.SetContent(m.renderExposure())
 	}
+
+	// Reachability Analyzer overlay mirrors the same sizing.
+	m.analyzerVP.Width = dvW
+	m.analyzerVP.Height = dvH - 2
+	if m.analyzerVP.Height < 3 {
+		m.analyzerVP.Height = 3
+	}
+	if m.showAnalyzer {
+		m.analyzerVP.SetContent(m.renderAnalyzerList())
+	}
 }
 
 // selectedResourceID returns the primary ID of the resource currently selected
@@ -1468,6 +1617,10 @@ func (m *Model) View() string {
 
 	if m.showExposure {
 		return m.viewExposureOverlay(content)
+	}
+
+	if m.showAnalyzer {
+		return m.viewAnalyzerOverlay(content)
 	}
 
 	if m.showTraceInput {
@@ -2267,6 +2420,88 @@ func (m *Model) renderExposure() string {
 	return renderResourceGroups(m.exposureGroups, "Nothing in this VPC is reachable from the internet. ✓")
 }
 
+func (m *Model) viewAnalyzerOverlay(bg string) string {
+	title := lipgloss.NewStyle().
+		Bold(true).
+		Foreground(lipgloss.Color(ui.ColorHeading())).
+		Render("Reachability Analyzer")
+
+	var body, hint string
+	switch {
+	case m.analyzerRunning:
+		body = m.spinner.View() + "  Running analysis — this can take up to a minute…"
+		hint = "please wait"
+	case m.analyzerInputMode:
+		prompt := lipgloss.NewStyle().Foreground(lipgloss.Color(ui.ColorText())).Render("New analysis:")
+		body = prompt + " " + m.analyzerInput.View()
+		hint = "format: source -> destination[:port]  •  Enter continue  •  Esc cancel"
+	case m.analyzerConfirm:
+		dst := m.analyzerPendDst
+		if m.analyzerPendPort > 0 {
+			dst = fmt.Sprintf("%s:%d", dst, m.analyzerPendPort)
+		}
+		warn := lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color(ui.ColorWarning()))
+		body = warn.Render("⚠ This creates AWS resources and incurs a per-analysis charge (~$0.10).") +
+			"\n\n  " + m.analyzerPendSrc + " → " + dst
+		hint = "y = create and run  •  n/Esc = cancel"
+	case m.analyzerLoading:
+		body = m.spinner.View() + "  Loading existing analyses…"
+		hint = "Esc close"
+	case m.analyzerErr != nil:
+		body = lipgloss.NewStyle().Foreground(lipgloss.Color(ui.ColorError())).Render("Error: " + m.analyzerErr.Error())
+		hint = "n new analysis  •  Esc close"
+	default:
+		body = m.analyzerVP.View()
+		hint = "↑/↓ scroll  •  n new analysis (paid)  •  Esc/A close"
+	}
+
+	hintStyle := lipgloss.NewStyle().Foreground(lipgloss.Color(ui.ColorMuted())).Render(hint)
+	inner := lipgloss.JoinVertical(lipgloss.Left, title, "", body, "", hintStyle)
+
+	overlay := lipgloss.NewStyle().
+		BorderStyle(lipgloss.RoundedBorder()).
+		BorderForeground(lipgloss.Color(ui.ColorBorderFocus())).
+		Foreground(lipgloss.Color(ui.ColorText())).
+		Padding(1, 2).
+		Render(inner)
+
+	if m.width > 0 && m.height > 0 {
+		return lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center, overlay)
+	}
+	return overlay
+}
+
+// renderAnalyzerList renders the existing analyses as a scrollable list.
+func (m *Model) renderAnalyzerList() string {
+	if len(m.analyzerList) == 0 {
+		return lipgloss.NewStyle().Foreground(lipgloss.Color(ui.ColorMuted())).
+			Render("No Reachability Analyzer analyses found. Press n to create one (paid).")
+	}
+	glyphStyle := func(a NetInsightsAnalysis) lipgloss.Style {
+		switch analysisVerdict(a) {
+		case "reachable":
+			return lipgloss.NewStyle().Foreground(lipgloss.Color(ui.ColorAccent()))
+		case "not reachable", "failed":
+			return lipgloss.NewStyle().Foreground(lipgloss.Color(ui.ColorError()))
+		default:
+			return lipgloss.NewStyle().Foreground(lipgloss.Color(ui.ColorMuted()))
+		}
+	}
+	muted := lipgloss.NewStyle().Foreground(lipgloss.Color(ui.ColorMuted()))
+
+	var b strings.Builder
+	for i, a := range m.analyzerList {
+		if i > 0 {
+			b.WriteString("\n")
+		}
+		b.WriteString(glyphStyle(a).Render(analysisLine(a)))
+		if a.StartDate != "" {
+			b.WriteString(muted.Render("  " + a.StartDate))
+		}
+	}
+	return b.String()
+}
+
 func (m *Model) viewScanStatus() string {
 	if m.loading && m.scanning {
 		return m.spinner.View() + fmt.Sprintf("  Scanning %d/%d regions…", m.scanDone, m.scanTotal)
@@ -2310,7 +2545,7 @@ func (m *Model) viewStatusBar() string {
 	case stateResourceBrowser:
 		switch m.focus {
 		case focusCategory:
-			hint = "↑↓=navigate  Enter=load  F=findings  P=exposure  D=dns  w=changes  Tab=table  Esc=back  q=quit"
+			hint = "↑↓=nav  Enter=load  F=findings  P=exposure  A=analyzer  D=dns  w=changes  Tab=table  Esc=back  q=quit"
 		case focusResourceTable:
 			hint = "↑↓=nav  Enter=detail  x=where-used  e=eff-rules  F=findings  D=dns  w=changes  t=trace  Esc=back  q=quit"
 		}
@@ -2346,6 +2581,7 @@ func (m *Model) helpText() string {
 		"  c        Copy resource ID to clipboard",
 		"  F        Run the VPC findings linter (security/routing/capacity issues)",
 		"  P        Public exposure: what is reachable from the internet",
+		"  A        AWS Reachability Analyzer: list analyses; n creates one (paid)",
 		"  D        Show the VPC's DNS configuration (resolution, hostnames, DHCP)",
 		"  w        What changed: baseline the VPC, then diff against it later",
 		"  E        Export a Markdown report (resources + findings) to a file",
