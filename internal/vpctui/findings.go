@@ -48,15 +48,16 @@ type Finding struct {
 // vpcSnapshot bundles the networking resources analyzed together. Slices may be
 // empty when a resource type could not be fetched (e.g. missing permissions).
 type vpcSnapshot struct {
-	VPCID            string
-	Subnets          []SubnetInfo
-	SecurityGroups   []SGInfo
-	RouteTables      []RouteTableInfo
-	InternetGateways []IGWInfo
-	NatGateways      []NatGWInfo
-	NetworkACLs      []NACLInfo
-	Peerings         []PeeringInfo
-	Endpoints        []EndpointInfo
+	VPCID             string
+	Subnets           []SubnetInfo
+	SecurityGroups    []SGInfo
+	RouteTables       []RouteTableInfo
+	InternetGateways  []IGWInfo
+	NatGateways       []NatGWInfo
+	NetworkACLs       []NACLInfo
+	Peerings          []PeeringInfo
+	Endpoints         []EndpointInfo
+	NetworkInterfaces []ENIInfo
 }
 
 // Thresholds for capacity checks.
