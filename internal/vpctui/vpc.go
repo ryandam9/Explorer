@@ -275,6 +275,24 @@ type EC2InstanceInfo struct {
 	Tags       map[string]string
 }
 
+// ENIInfo describes an Elastic Network Interface — the attachment point that
+// actually carries a resource's traffic and applies its security groups.
+type ENIInfo struct {
+	ID              string
+	Description     string
+	Type            string // interface type: interface, nat_gateway, lambda, ...
+	Status          string // available | in-use
+	PrivateIP       string
+	PublicIP        string // associated public IP / EIP, if any
+	SubnetID        string
+	VPCID           string
+	AZ              string
+	AttachedTo      string // attached instance ID, or "-" for service-managed ENIs
+	SecurityGroups  []string
+	SourceDestCheck bool
+	Tags            map[string]string
+}
+
 type LambdaFunctionInfo struct {
 	Name         string
 	Runtime      string
@@ -778,6 +796,55 @@ func (c *VPCClient) ListEC2Instances(vpcID string) ([]EC2InstanceInfo, error) {
 		}
 	}
 	return instances, nil
+}
+
+func (c *VPCClient) ListNetworkInterfaces(vpcID string) ([]ENIInfo, error) {
+	ctx, cancel := c.requestContext()
+	defer cancel()
+
+	input := &awsec2.DescribeNetworkInterfacesInput{
+		Filters: []ec2types.Filter{
+			{Name: aws.String("vpc-id"), Values: []string{vpcID}},
+		},
+	}
+	var enis []ENIInfo
+	paginator := awsec2.NewDescribeNetworkInterfacesPaginator(c.ec2, input)
+	for paginator.HasMorePages() {
+		page, err := paginator.NextPage(ctx)
+		if err != nil {
+			return nil, err
+		}
+		for _, ni := range page.NetworkInterfaces {
+			publicIP := ""
+			if ni.Association != nil {
+				publicIP = aws.ToString(ni.Association.PublicIp)
+			}
+			attachedTo := "-"
+			if ni.Attachment != nil && ni.Attachment.InstanceId != nil {
+				attachedTo = aws.ToString(ni.Attachment.InstanceId)
+			}
+			var groups []string
+			for _, g := range ni.Groups {
+				groups = append(groups, aws.ToString(g.GroupId))
+			}
+			enis = append(enis, ENIInfo{
+				ID:              aws.ToString(ni.NetworkInterfaceId),
+				Description:     aws.ToString(ni.Description),
+				Type:            string(ni.InterfaceType),
+				Status:          string(ni.Status),
+				PrivateIP:       aws.ToString(ni.PrivateIpAddress),
+				PublicIP:        publicIP,
+				SubnetID:        aws.ToString(ni.SubnetId),
+				VPCID:           aws.ToString(ni.VpcId),
+				AZ:              aws.ToString(ni.AvailabilityZone),
+				AttachedTo:      attachedTo,
+				SecurityGroups:  groups,
+				SourceDestCheck: aws.ToBool(ni.SourceDestCheck),
+				Tags:            ec2TagsToMap(ni.TagSet),
+			})
+		}
+	}
+	return enis, nil
 }
 
 func (c *VPCClient) ListLambdaFunctions(vpcID string) ([]LambdaFunctionInfo, error) {
