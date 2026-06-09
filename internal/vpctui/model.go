@@ -68,6 +68,12 @@ type traceDoneMsg struct {
 	err    error
 }
 
+type xrefDoneMsg struct {
+	title  string
+	groups []xrefGroup
+	err    error
+}
+
 // ---------------------------------------------------------------------------
 // Model
 // ---------------------------------------------------------------------------
@@ -133,6 +139,14 @@ type Model struct {
 	traceErr        error
 	traceResult     traceResult
 	traceViewport   viewport.Model
+
+	// Cross-reference ("where used") overlay
+	showXref     bool
+	xrefTitle    string
+	xrefGroups   []xrefGroup
+	xrefLoading  bool
+	xrefErr      error
+	xrefViewport viewport.Model
 
 	// UI dimensions
 	width  int
@@ -218,6 +232,7 @@ func NewModel(
 	m.detailViewport = viewport.New(80, 20)
 	m.findingsViewport = viewport.New(80, 20)
 	m.traceViewport = viewport.New(80, 20)
+	m.xrefViewport = viewport.New(80, 20)
 
 	m.traceInput = textinput.New()
 	m.traceInput.Placeholder = "10.0.1.20:3306  (or internet:443)"
@@ -411,6 +426,28 @@ func (m *Model) runTrace(req traceRequest) tea.Cmd {
 	}
 }
 
+// loadXref gathers a VPC snapshot and cross-references the given resource,
+// opening the "where used" overlay with the result.
+func (m *Model) loadXref(resourceID string) tea.Cmd {
+	if m.selectedVPC == nil || resourceID == "" {
+		return nil
+	}
+	m.showXref = true
+	m.xrefLoading = true
+	m.xrefErr = nil
+	m.xrefGroups = nil
+	m.xrefTitle = resourceID
+	client := m.client
+	vpcID := m.selectedVPC.ID
+	return func() tea.Msg {
+		snap, err := buildVPCSnapshot(client, vpcID)
+		if err != nil {
+			return xrefDoneMsg{err: err}
+		}
+		return xrefDoneMsg{title: resourceID, groups: crossReference(snap, resourceID)}
+	}
+}
+
 // parseTraceTarget parses a "host[:port]" destination. A missing port yields
 // -1 (any port). "internet" is accepted as the host.
 func parseTraceTarget(s string) (destIP string, port int) {
@@ -598,6 +635,14 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.traceViewport.SetContent(m.renderTraceResult())
 		m.traceViewport.GotoTop()
 
+	case xrefDoneMsg:
+		m.xrefLoading = false
+		m.xrefErr = msg.err
+		m.xrefTitle = msg.title
+		m.xrefGroups = msg.groups
+		m.xrefViewport.SetContent(m.renderXref())
+		m.xrefViewport.GotoTop()
+
 	case errMsg:
 		m.err = msg.err
 		m.loading = false
@@ -665,6 +710,19 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.traceViewport.LineUp(1)
 		case "down", "j":
 			m.traceViewport.LineDown(1)
+		}
+		return m, nil
+	}
+
+	// Cross-reference overlay: capture scrolling keys.
+	if m.showXref {
+		switch key {
+		case "esc", "q", "x":
+			m.showXref = false
+		case "up", "k":
+			m.xrefViewport.LineUp(1)
+		case "down", "j":
+			m.xrefViewport.LineDown(1)
 		}
 		return m, nil
 	}
@@ -858,6 +916,12 @@ func (m *Model) handleResourceTableKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			}
 		}
 		return m, nil
+	case "x":
+		// Cross-reference ("where used") for the selected resource.
+		if id := m.selectedResourceID(); id != "" {
+			return m, m.loadXref(id)
+		}
+		return m, nil
 	case "enter":
 		maps := m.resourceMaps[m.activeResource]
 		idx := m.resourceTable.Cursor()
@@ -977,6 +1041,28 @@ func (m *Model) updateTableSizes() {
 	if len(m.traceResult.Hops) > 0 {
 		m.traceViewport.SetContent(m.renderTraceResult())
 	}
+
+	// Cross-reference overlay mirrors the same sizing.
+	m.xrefViewport.Width = dvW
+	m.xrefViewport.Height = dvH - 2
+	if m.xrefViewport.Height < 3 {
+		m.xrefViewport.Height = 3
+	}
+	if len(m.xrefGroups) > 0 {
+		m.xrefViewport.SetContent(m.renderXref())
+	}
+}
+
+// selectedResourceID returns the primary ID of the resource currently selected
+// in the resource table, resolved from its map row (so it works regardless of
+// which column is shown first).
+func (m *Model) selectedResourceID() string {
+	maps := m.resourceMaps[m.activeResource]
+	idx := m.resourceTable.Cursor()
+	if idx < 0 || idx >= len(maps) {
+		return ""
+	}
+	return firstID(maps[idx])
 }
 
 // firstID returns a human-readable identifier from a resource map, trying
@@ -1023,6 +1109,10 @@ func (m *Model) View() string {
 
 	if m.showFindings {
 		return m.viewFindingsOverlay(content)
+	}
+
+	if m.showXref {
+		return m.viewXrefOverlay(content)
 	}
 
 	if m.showTraceInput {
@@ -1458,6 +1548,66 @@ func (m *Model) renderTraceResult() string {
 	return b.String()
 }
 
+func (m *Model) viewXrefOverlay(bg string) string {
+	title := lipgloss.NewStyle().
+		Bold(true).
+		Foreground(lipgloss.Color(ui.ColorHeading())).
+		Render("Where used: " + m.xrefTitle)
+
+	hint := lipgloss.NewStyle().
+		Foreground(lipgloss.Color(ui.ColorMuted())).
+		Render("↑/↓ scroll  •  Esc/x close")
+
+	var body string
+	switch {
+	case m.xrefLoading:
+		body = m.spinner.View() + "  Resolving relationships…"
+	case m.xrefErr != nil:
+		body = lipgloss.NewStyle().Foreground(lipgloss.Color(ui.ColorError())).
+			Render("Error: " + m.xrefErr.Error())
+	default:
+		body = m.xrefViewport.View()
+	}
+
+	inner := lipgloss.JoinVertical(lipgloss.Left, title, "", body, "", hint)
+
+	overlay := lipgloss.NewStyle().
+		BorderStyle(lipgloss.RoundedBorder()).
+		BorderForeground(lipgloss.Color(ui.ColorBorderFocus())).
+		Foreground(lipgloss.Color(ui.ColorText())).
+		Padding(1, 2).
+		Render(inner)
+
+	if m.width > 0 && m.height > 0 {
+		return lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center, overlay)
+	}
+	return overlay
+}
+
+// renderXref builds the scrollable body of the cross-reference overlay: each
+// relationship group with its members.
+func (m *Model) renderXref() string {
+	if len(m.xrefGroups) == 0 {
+		return lipgloss.NewStyle().Foreground(lipgloss.Color(ui.ColorMuted())).
+			Render("No related resources found in this VPC.")
+	}
+	groupStyle := lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color(ui.ColorAccent()))
+	itemStyle := lipgloss.NewStyle().Foreground(lipgloss.Color(ui.ColorText()))
+
+	var b strings.Builder
+	for i, g := range m.xrefGroups {
+		if i > 0 {
+			b.WriteString("\n\n")
+		}
+		b.WriteString(groupStyle.Render(g.Label) + lipgloss.NewStyle().
+			Foreground(lipgloss.Color(ui.ColorMuted())).Render(fmt.Sprintf("  (%d)", len(g.Items))))
+		for _, it := range g.Items {
+			b.WriteString("\n  • " + itemStyle.Render(it))
+		}
+	}
+	return b.String()
+}
+
 func (m *Model) viewScanStatus() string {
 	if m.loading && m.scanning {
 		return m.spinner.View() + fmt.Sprintf("  Scanning %d/%d regions…", m.scanDone, m.scanTotal)
@@ -1503,7 +1653,7 @@ func (m *Model) viewStatusBar() string {
 		case focusCategory:
 			hint = "↑↓=navigate  Enter=load  Tab=resource table  F=findings  Esc=back  ?=help  q=quit"
 		case focusResourceTable:
-			hint = "↑↓=nav  <>=cols  Enter=detail  c=copy  F=findings  t=trace  r=refresh  Tab=cats  Esc=back  q=quit"
+			hint = "↑↓=nav  Enter=detail  x=where-used  c=copy  F=findings  t=trace  r=refresh  Tab=cats  Esc=back  q=quit"
 		}
 	}
 
@@ -1537,6 +1687,7 @@ func (m *Model) helpText() string {
 		"  c        Copy resource ID to clipboard",
 		"  F        Run the VPC findings linter (security/routing/capacity issues)",
 		"  t        Trace connectivity from the selected network interface",
+		"  x        Cross-reference the selected resource (where used)",
 		"  r        Refresh current resource list",
 		"  Esc      Go back to VPC list",
 		"",
