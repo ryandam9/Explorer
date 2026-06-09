@@ -775,7 +775,10 @@ func (m *Model) viewVPCListState() string {
 }
 
 func (m *Model) viewResourceBrowserState() string {
-	panelH := m.height - 1 // reserve 1 for status bar
+	// Each panel is wrapped in a rounded border (+2 rows) and the status bar
+	// sits below (+1 row). Reserve all 3 so the panels — including their top
+	// border and title row — stay on screen instead of scrolling off the top.
+	panelH := m.height - 3
 	if panelH < 5 {
 		panelH = 5
 	}
