@@ -11,6 +11,7 @@ import (
 	"github.com/charmbracelet/bubbles/viewport"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
+	"github.com/charmbracelet/x/ansi"
 	"github.com/user/aws_explorer/internal/config"
 	"github.com/user/aws_explorer/internal/display"
 	"github.com/user/aws_explorer/internal/table"
@@ -910,6 +911,13 @@ func (m *Model) viewResourcePanel(height int) string {
 
 	content := lipgloss.JoinVertical(lipgloss.Left, titleStyle.Render(title), "", body)
 
+	// A resource table can be wider than the panel on narrow terminals. Clip
+	// each line to the panel's inner width so the rightmost column truncates
+	// instead of the line wrapping — wrapping mangles the ANSI-styled selected
+	// row and breaks column alignment. Inner width = panel width minus the two
+	// padding columns added below.
+	content = clipLines(content, rightWidth-2)
+
 	borderColor := ui.ColorBorder()
 	if m.focus == focusResourceTable {
 		borderColor = ui.ColorBorderFocus()
@@ -1045,4 +1053,21 @@ func min(a, b int) int {
 		return a
 	}
 	return b
+}
+
+// clipLines truncates every line of s to at most w display columns, in an
+// ANSI-aware way so styled (e.g. highlighted) lines keep their escape codes
+// intact. It prevents width-constrained containers from wrapping over-wide
+// table rows, which would otherwise break column alignment.
+func clipLines(s string, w int) string {
+	if w <= 0 {
+		return s
+	}
+	lines := strings.Split(s, "\n")
+	for i, ln := range lines {
+		if ansi.StringWidth(ln) > w {
+			lines[i] = ansi.Truncate(ln, w, "")
+		}
+	}
+	return strings.Join(lines, "\n")
 }
