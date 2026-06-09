@@ -58,6 +58,11 @@ type resourcesLoadedMsg struct {
 
 type errMsg struct{ err error }
 
+type findingsLoadedMsg struct {
+	findings []Finding
+	err      error
+}
+
 // ---------------------------------------------------------------------------
 // Model
 // ---------------------------------------------------------------------------
@@ -106,6 +111,13 @@ type Model struct {
 	showDetail     bool
 	detailViewport viewport.Model
 	detailTitle    string
+
+	// Findings overlay (VPC linter)
+	showFindings     bool
+	findings         []Finding
+	findingsErr      error
+	findingsLoading  bool
+	findingsViewport viewport.Model
 
 	// UI dimensions
 	width  int
@@ -189,6 +201,7 @@ func NewModel(
 	)
 
 	m.detailViewport = viewport.New(80, 20)
+	m.findingsViewport = viewport.New(80, 20)
 
 	return m, nil
 }
@@ -335,6 +348,83 @@ func (m *Model) refreshResources() tea.Cmd {
 	return m.loadResources(m.activeResource)
 }
 
+// loadFindings gathers a networking snapshot of the selected VPC and runs the
+// findings analyzer, opening the findings overlay with the result.
+func (m *Model) loadFindings() tea.Cmd {
+	if m.selectedVPC == nil {
+		return nil
+	}
+	m.showFindings = true
+	m.findingsLoading = true
+	m.findingsErr = nil
+	m.findings = nil
+	client := m.client
+	vpcID := m.selectedVPC.ID
+	return func() tea.Msg {
+		snap, err := buildVPCSnapshot(client, vpcID)
+		if err != nil {
+			return findingsLoadedMsg{err: err}
+		}
+		return findingsLoadedMsg{findings: analyzeVPC(snap)}
+	}
+}
+
+// buildVPCSnapshot fetches the networking resources analyzed by the findings
+// engine. It is best-effort: a single resource type that fails (e.g. missing
+// permissions) does not abort the rest. It only returns an error if every
+// fetch failed.
+func buildVPCSnapshot(c *VPCClient, vpcID string) (vpcSnapshot, error) {
+	snap := vpcSnapshot{VPCID: vpcID}
+	var firstErr error
+	ok := 0
+	record := func(err error) {
+		if err != nil {
+			if firstErr == nil {
+				firstErr = err
+			}
+			return
+		}
+		ok++
+	}
+
+	subnets, err := c.ListSubnets(vpcID)
+	record(err)
+	snap.Subnets = subnets
+
+	sgs, err := c.ListSecurityGroups(vpcID)
+	record(err)
+	snap.SecurityGroups = sgs
+
+	rts, err := c.ListRouteTables(vpcID)
+	record(err)
+	snap.RouteTables = rts
+
+	igws, err := c.ListInternetGateways(vpcID)
+	record(err)
+	snap.InternetGateways = igws
+
+	nats, err := c.ListNatGateways(vpcID)
+	record(err)
+	snap.NatGateways = nats
+
+	nacls, err := c.ListNetworkACLs(vpcID)
+	record(err)
+	snap.NetworkACLs = nacls
+
+	peerings, err := c.ListPeeringConnections(vpcID)
+	record(err)
+	snap.Peerings = peerings
+
+	endpoints, err := c.ListVPCEndpoints(vpcID)
+	record(err)
+	snap.Endpoints = endpoints
+
+	if ok == 0 && firstErr != nil {
+		return snap, firstErr
+	}
+	return snap, nil
+}
+
 func (m *Model) enterVPC(vpc VPCInfo) tea.Cmd {
 	m.selectedVPC = &vpc
 	if vpc.Region != "" && vpc.Region != m.region {
@@ -434,6 +524,13 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 		}
 
+	case findingsLoadedMsg:
+		m.findingsLoading = false
+		m.findingsErr = msg.err
+		m.findings = msg.findings
+		m.findingsViewport.SetContent(m.renderFindings())
+		m.findingsViewport.GotoTop()
+
 	case errMsg:
 		m.err = msg.err
 		m.loading = false
@@ -465,6 +562,27 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 
+	// Findings overlay: capture scrolling keys.
+	if m.showFindings {
+		switch key {
+		case "esc", "q", "F":
+			m.showFindings = false
+		case "up", "k":
+			m.findingsViewport.LineUp(1)
+		case "down", "j":
+			m.findingsViewport.LineDown(1)
+		case "pgup":
+			m.findingsViewport.HalfViewUp()
+		case "pgdown", " ":
+			m.findingsViewport.HalfViewDown()
+		case "g", "home":
+			m.findingsViewport.GotoTop()
+		case "G", "end":
+			m.findingsViewport.GotoBottom()
+		}
+		return m, nil
+	}
+
 	// Help overlay.
 	if m.showHelp {
 		m.showHelp = false
@@ -481,6 +599,11 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case ui.KeySettings:
 		m.showSettings = true
 		return m, nil
+	case "F":
+		// Run the VPC findings linter (resource browser only).
+		if m.state == stateResourceBrowser && m.selectedVPC != nil {
+			return m, m.loadFindings()
+		}
 	}
 
 	switch m.focus {
@@ -714,6 +837,17 @@ func (m *Model) updateTableSizes() {
 	}
 	m.detailViewport.Width = dvW
 	m.detailViewport.Height = dvH
+
+	// Findings overlay viewport: leave room for the border, title and footer.
+	m.findingsViewport.Width = dvW
+	m.findingsViewport.Height = dvH - 2
+	if m.findingsViewport.Height < 3 {
+		m.findingsViewport.Height = 3
+	}
+	// Re-wrap the findings content to the new width when already loaded.
+	if len(m.findings) > 0 {
+		m.findingsViewport.SetContent(m.renderFindings())
+	}
 }
 
 // firstID returns a human-readable identifier from a resource map, trying
@@ -756,6 +890,10 @@ func (m *Model) View() string {
 
 	if m.showDetail {
 		return m.viewDetailOverlay(content)
+	}
+
+	if m.showFindings {
+		return m.viewFindingsOverlay(content)
 	}
 
 	return content
@@ -989,6 +1127,101 @@ func (m *Model) viewDetailOverlay(bg string) string {
 	return overlay
 }
 
+func (m *Model) viewFindingsOverlay(bg string) string {
+	var titleText string
+	if m.findingsLoading {
+		titleText = "VPC Findings"
+	} else {
+		crit, warn, info := countBySeverity(m.findings)
+		titleText = fmt.Sprintf("VPC Findings — %d critical, %d warning, %d info", crit, warn, info)
+	}
+	title := lipgloss.NewStyle().
+		Bold(true).
+		Foreground(lipgloss.Color(ui.ColorHeading())).
+		Render(titleText)
+
+	hint := lipgloss.NewStyle().
+		Foreground(lipgloss.Color(ui.ColorMuted())).
+		Render("↑/↓ scroll  •  Esc/F close")
+
+	var bodyView string
+	switch {
+	case m.findingsLoading:
+		bodyView = m.spinner.View() + "  Analyzing VPC…"
+	case m.findingsErr != nil:
+		bodyView = lipgloss.NewStyle().Foreground(lipgloss.Color(ui.ColorError())).
+			Render("Error: " + m.findingsErr.Error())
+	default:
+		bodyView = m.findingsViewport.View()
+	}
+
+	inner := lipgloss.JoinVertical(lipgloss.Left, title, "", bodyView, "", hint)
+
+	overlay := lipgloss.NewStyle().
+		BorderStyle(lipgloss.RoundedBorder()).
+		BorderForeground(lipgloss.Color(ui.ColorBorderFocus())).
+		Foreground(lipgloss.Color(ui.ColorText())).
+		Padding(1, 2).
+		Render(inner)
+
+	if m.width > 0 && m.height > 0 {
+		return lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center, overlay)
+	}
+	return overlay
+}
+
+// renderFindings builds the scrollable body of the findings overlay: a coloured,
+// numbered list grouped from most to least severe.
+func (m *Model) renderFindings() string {
+	if len(m.findings) == 0 {
+		return lipgloss.NewStyle().Foreground(lipgloss.Color(ui.ColorMuted())).
+			Render("No issues detected. ✓")
+	}
+
+	sevStyle := func(s Severity) lipgloss.Style {
+		switch s {
+		case SevCritical:
+			return lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color(ui.ColorError()))
+		case SevWarning:
+			return lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color(ui.ColorWarning()))
+		default:
+			return lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color(ui.ColorMuted()))
+		}
+	}
+	label := map[Severity]string{SevCritical: "🔴 CRITICAL", SevWarning: "🟡 WARNING", SevInfo: "🔵 INFO"}
+	muted := lipgloss.NewStyle().Foreground(lipgloss.Color(ui.ColorMuted()))
+	heading := lipgloss.NewStyle().Foreground(lipgloss.Color(ui.ColorText()))
+
+	// Wrap the detail/fix paragraphs to the overlay width and indent them, so
+	// long sentences wrap instead of being truncated by the viewport.
+	wrapW := m.findingsViewport.Width
+	if wrapW <= 0 {
+		wrapW = 80
+	}
+	indented := func(text, prefix string) string {
+		wrapped := lipgloss.NewStyle().Width(wrapW - len(prefix)).Render(text)
+		lines := strings.Split(wrapped, "\n")
+		for i, ln := range lines {
+			lines[i] = prefix + ln
+		}
+		return strings.Join(lines, "\n")
+	}
+
+	var b strings.Builder
+	for i, f := range m.findings {
+		if i > 0 {
+			b.WriteString("\n\n")
+		}
+		b.WriteString(sevStyle(f.Severity).Render(label[f.Severity]) + "  " +
+			heading.Render(f.Title) + muted.Render("  ["+f.Resource+"]"))
+		b.WriteString("\n" + indented(f.Detail, "  "))
+		if f.Fix != "" {
+			b.WriteString("\n" + muted.Render(indented("Fix: "+f.Fix, "  ")))
+		}
+	}
+	return b.String()
+}
+
 func (m *Model) viewScanStatus() string {
 	if m.loading && m.scanning {
 		return m.spinner.View() + fmt.Sprintf("  Scanning %d/%d regions…", m.scanDone, m.scanTotal)
@@ -1032,9 +1265,9 @@ func (m *Model) viewStatusBar() string {
 	case stateResourceBrowser:
 		switch m.focus {
 		case focusCategory:
-			hint = "↑↓=navigate  Enter=load  Tab=resource table  Esc=back  ?=help  q=quit"
+			hint = "↑↓=navigate  Enter=load  Tab=resource table  F=findings  Esc=back  ?=help  q=quit"
 		case focusResourceTable:
-			hint = "↑↓=navigate  <>=scroll cols  Enter=detail  c=copy  r=refresh  Tab=categories  Esc=back  ?=help  q=quit"
+			hint = "↑↓=navigate  <>=scroll cols  Enter=detail  c=copy  F=findings  r=refresh  Tab=categories  Esc=back  q=quit"
 		}
 	}
 
@@ -1066,6 +1299,7 @@ func (m *Model) helpText() string {
 		"  Tab      Switch focus between sidebar and resource table",
 		"  Enter    Load resource type (sidebar) / open detail (table)",
 		"  c        Copy resource ID to clipboard",
+		"  F        Run the VPC findings linter (security/routing/capacity issues)",
 		"  r        Refresh current resource list",
 		"  Esc      Go back to VPC list",
 		"",
