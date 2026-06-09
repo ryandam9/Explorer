@@ -548,6 +548,9 @@ func (m *Model) handleCategoryKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case "esc":
 		m.state = stateVPCList
 		m.focus = focusVPCList
+		m.selectedVPC = nil
+		m.resourceTable.Blur()
+		m.vpcTable.Focus()
 		return m, nil
 	case "tab", "right", "l":
 		m.focus = focusResourceTable
@@ -582,6 +585,9 @@ func (m *Model) handleResourceTableKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case "esc":
 		m.state = stateVPCList
 		m.focus = focusVPCList
+		m.selectedVPC = nil
+		m.resourceTable.Blur()
+		m.vpcTable.Focus()
 		return m, nil
 	case "tab", "left", "h":
 		m.focus = focusCategory
