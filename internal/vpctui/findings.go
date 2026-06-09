@@ -77,6 +77,7 @@ func analyzeVPC(snap vpcSnapshot) []Finding {
 	checkInternetGateways(snap, &out)
 	checkNACLs(snap, &out)
 	checkPeerings(snap, &out)
+	checkQuotas(snap, &out)
 
 	sort.SliceStable(out, func(i, j int) bool {
 		if out[i].Severity != out[j].Severity {
@@ -496,4 +497,108 @@ func cidrsOverlap(a, b string) bool {
 		return false
 	}
 	return na.Contains(nb.IP) || nb.Contains(na.IP)
+}
+
+// ---------------------------------------------------------------------------
+// Capacity / service quotas
+//
+// AWS enforces per-resource limits whose breach produces cryptic API errors.
+// These are the well-known default values (all adjustable via Service Quotas);
+// we flag usage that is approaching or at the default ceiling.
+// ---------------------------------------------------------------------------
+
+const (
+	quotaRulesPerSGDir  = 60  // inbound or outbound rules per security group
+	quotaRoutesPerTable = 50  // non-propagated routes per route table
+	quotaSGsPerENI      = 5   // security groups per network interface (max 16)
+	quotaSubnetsPerVPC  = 200 // subnets per VPC
+	quotaWarnFraction   = 0.8 // warn once usage reaches this fraction of the limit
+)
+
+func checkQuotas(snap vpcSnapshot, out *[]Finding) {
+	warnAt := func(limit int) int { return int(float64(limit) * quotaWarnFraction) }
+
+	// Rules per security group, per direction.
+	for _, sg := range snap.SecurityGroups {
+		in, eg := 0, 0
+		for _, r := range sg.Rules {
+			if strings.EqualFold(r.Direction, "Inbound") {
+				in++
+			} else {
+				eg++
+			}
+		}
+		for _, d := range []struct {
+			name  string
+			count int
+		}{{"inbound", in}, {"outbound", eg}} {
+			if d.count < warnAt(quotaRulesPerSGDir) {
+				continue
+			}
+			sev := SevWarning
+			if d.count >= quotaRulesPerSGDir {
+				sev = SevCritical
+			}
+			*out = append(*out, Finding{
+				Severity: sev,
+				Resource: sg.ID,
+				Title:    "Security group is approaching its rule limit",
+				Detail: fmt.Sprintf("%s has %d %s rules (default limit %d per direction).",
+					sgLabel(sg), d.count, d.name, quotaRulesPerSGDir),
+				Fix: "Consolidate rules (e.g. use prefix lists or referenced security groups) or request a quota increase.",
+			})
+		}
+	}
+
+	// Routes per route table.
+	for _, rt := range snap.RouteTables {
+		n := len(rt.Routes)
+		if n < warnAt(quotaRoutesPerTable) {
+			continue
+		}
+		sev := SevWarning
+		if n >= quotaRoutesPerTable {
+			sev = SevCritical
+		}
+		*out = append(*out, Finding{
+			Severity: sev,
+			Resource: rt.ID,
+			Title:    "Route table is approaching its route limit",
+			Detail:   fmt.Sprintf("%s has %d routes (default limit %d).", rtLabelName(rt), n, quotaRoutesPerTable),
+			Fix:      "Consolidate CIDRs, use prefix lists, or request a route-table quota increase.",
+		})
+	}
+
+	// Security groups per network interface.
+	for _, e := range snap.NetworkInterfaces {
+		if len(e.SecurityGroups) >= quotaSGsPerENI {
+			*out = append(*out, Finding{
+				Severity: SevInfo,
+				Resource: e.ID,
+				Title:    "Network interface is at the default security-group limit",
+				Detail: fmt.Sprintf("%s uses %d security groups (default limit %d, raisable to 16).",
+					e.ID, len(e.SecurityGroups), quotaSGsPerENI),
+				Fix: "Request a quota increase if more groups are needed, or consolidate rules into fewer groups.",
+			})
+		}
+	}
+
+	// Subnets per VPC.
+	if n := len(snap.Subnets); n >= warnAt(quotaSubnetsPerVPC) {
+		sev := SevWarning
+		if n >= quotaSubnetsPerVPC {
+			sev = SevCritical
+		}
+		res := snap.VPCID
+		if res == "" {
+			res = "-"
+		}
+		*out = append(*out, Finding{
+			Severity: sev,
+			Resource: res,
+			Title:    "VPC is approaching its subnet limit",
+			Detail:   fmt.Sprintf("this VPC has %d subnets (default limit %d).", n, quotaSubnetsPerVPC),
+			Fix:      "Request a subnets-per-VPC quota increase, or split workloads across VPCs.",
+		})
+	}
 }
