@@ -8,6 +8,41 @@ type Config struct {
 	Filters  FilterConfig             `mapstructure:"filters"`
 	Output   OutputConfig             `mapstructure:"output"`
 	UI       UIConfig                 `mapstructure:"ui"`
+	Display  DisplayConfig            `mapstructure:"display"`
+}
+
+// DisplayConfig controls which attributes are shown for each resource type.
+// Each module (vpc, s3) maps resource-type keys to column/detail field lists.
+// When a list is empty the built-in defaults are used.
+//
+// Example config.yaml:
+//
+//	display:
+//	  vpc:
+//	    ec2_instances:
+//	      columns: [instance_id, name, state, type, private_ip, az, iam_role]
+//	      detail:  [instance_id, name, state, type, platform, private_ip, public_ip,
+//	                az, subnet_id, vpc_id, iam_role, ami_id, key_pair, launch_time, tags]
+//	  s3:
+//	    objects:
+//	      columns: [name, size, last_modified, storage_class]
+//	    buckets:
+//	      columns: [name, region, creation_date]
+type DisplayConfig struct {
+	VPC map[string]ResourceDisplay `mapstructure:"vpc"`
+	S3  S3DisplayConfig            `mapstructure:"s3"`
+}
+
+// ResourceDisplay holds the field key lists for one resource type.
+type ResourceDisplay struct {
+	Columns []string `mapstructure:"columns"`
+	Detail  []string `mapstructure:"detail"`
+}
+
+// S3DisplayConfig holds display settings for the two S3 views.
+type S3DisplayConfig struct {
+	Objects ResourceDisplay `mapstructure:"objects"`
+	Buckets ResourceDisplay `mapstructure:"buckets"`
 }
 
 type AppConfig struct {
