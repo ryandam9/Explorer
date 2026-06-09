@@ -114,6 +114,10 @@ var EndpointFields = []FieldMeta{
 	{Key: "service", Title: "Service", Width: 40, DefaultCol: true, DefaultDetail: true},
 	{Key: "ep_type", Title: "Type", Width: 12, DefaultCol: true, DefaultDetail: true},
 	{Key: "state", Title: "State", Width: 12, DefaultCol: true, DefaultDetail: true},
+	{Key: "private_dns", Title: "Private DNS", Width: 12, DefaultCol: false, DefaultDetail: true},
+	{Key: "route_tables", Title: "Route Tables", Width: 30, DefaultCol: false, DefaultDetail: true},
+	{Key: "subnets", Title: "Subnets", Width: 30, DefaultCol: false, DefaultDetail: true},
+	{Key: "security_groups", Title: "Security Groups", Width: 30, DefaultCol: false, DefaultDetail: true},
 	{Key: "vpc_id", Title: "VPC ID", Width: 22, DefaultCol: false, DefaultDetail: true},
 	{Key: "tags", Title: "Tags", Width: 0, DefaultCol: false, DefaultDetail: true},
 }
