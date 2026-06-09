@@ -63,6 +63,11 @@ type findingsLoadedMsg struct {
 	err      error
 }
 
+type traceDoneMsg struct {
+	result traceResult
+	err    error
+}
+
 // ---------------------------------------------------------------------------
 // Model
 // ---------------------------------------------------------------------------
@@ -118,6 +123,16 @@ type Model struct {
 	findingsErr      error
 	findingsLoading  bool
 	findingsViewport viewport.Model
+
+	// Connectivity path tracer
+	showTraceInput  bool
+	traceInput      textinput.Model
+	traceSourceID   string
+	showTraceResult bool
+	traceLoading    bool
+	traceErr        error
+	traceResult     traceResult
+	traceViewport   viewport.Model
 
 	// UI dimensions
 	width  int
@@ -202,6 +217,15 @@ func NewModel(
 
 	m.detailViewport = viewport.New(80, 20)
 	m.findingsViewport = viewport.New(80, 20)
+	m.traceViewport = viewport.New(80, 20)
+
+	m.traceInput = textinput.New()
+	m.traceInput.Placeholder = "10.0.1.20:3306  (or internet:443)"
+	m.traceInput.CharLimit = 64
+	m.traceInput.Width = 40
+	m.traceInput.PromptStyle = lipgloss.NewStyle().Foreground(lipgloss.Color(ui.ColorAccent())).Bold(true)
+	m.traceInput.TextStyle = lipgloss.NewStyle().Foreground(lipgloss.Color(ui.ColorText()))
+	m.traceInput.Cursor.Style = lipgloss.NewStyle().Foreground(lipgloss.Color(ui.ColorAccent()))
 
 	return m, nil
 }
@@ -369,6 +393,38 @@ func (m *Model) loadFindings() tea.Cmd {
 	}
 }
 
+// runTrace gathers a VPC snapshot and traces connectivity from the chosen
+// source ENI to the requested destination, opening the result overlay.
+func (m *Model) runTrace(req traceRequest) tea.Cmd {
+	m.showTraceInput = false
+	m.showTraceResult = true
+	m.traceLoading = true
+	m.traceErr = nil
+	client := m.client
+	vpcID := m.selectedVPC.ID
+	return func() tea.Msg {
+		snap, err := buildVPCSnapshot(client, vpcID)
+		if err != nil {
+			return traceDoneMsg{err: err}
+		}
+		return traceDoneMsg{result: tracePath(snap, req)}
+	}
+}
+
+// parseTraceTarget parses a "host[:port]" destination. A missing port yields
+// -1 (any port). "internet" is accepted as the host.
+func parseTraceTarget(s string) (destIP string, port int) {
+	s = strings.TrimSpace(s)
+	port = -1
+	if i := strings.LastIndex(s, ":"); i >= 0 {
+		if p, ok := atoiPort(strings.TrimSpace(s[i+1:])); ok {
+			port = p
+			s = s[:i]
+		}
+	}
+	return strings.TrimSpace(s), port
+}
+
 // buildVPCSnapshot fetches the networking resources analyzed by the findings
 // engine. It is best-effort: a single resource type that fails (e.g. missing
 // permissions) does not abort the rest. It only returns an error if every
@@ -418,6 +474,10 @@ func buildVPCSnapshot(c *VPCClient, vpcID string) (vpcSnapshot, error) {
 	endpoints, err := c.ListVPCEndpoints(vpcID)
 	record(err)
 	snap.Endpoints = endpoints
+
+	enis, err := c.ListNetworkInterfaces(vpcID)
+	record(err)
+	snap.NetworkInterfaces = enis
 
 	if ok == 0 && firstErr != nil {
 		return snap, firstErr
@@ -531,6 +591,13 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.findingsViewport.SetContent(m.renderFindings())
 		m.findingsViewport.GotoTop()
 
+	case traceDoneMsg:
+		m.traceLoading = false
+		m.traceErr = msg.err
+		m.traceResult = msg.result
+		m.traceViewport.SetContent(m.renderTraceResult())
+		m.traceViewport.GotoTop()
+
 	case errMsg:
 		m.err = msg.err
 		m.loading = false
@@ -558,6 +625,46 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.detailViewport.HalfViewUp()
 		case "pgdown":
 			m.detailViewport.HalfViewDown()
+		}
+		return m, nil
+	}
+
+	// Trace destination input: capture typing.
+	if m.showTraceInput {
+		switch key {
+		case "esc":
+			m.showTraceInput = false
+			m.traceInput.Blur()
+			return m, nil
+		case "enter":
+			destIP, port := parseTraceTarget(m.traceInput.Value())
+			if destIP == "" {
+				m.showTraceInput = false
+				return m, nil
+			}
+			m.traceInput.Blur()
+			return m, m.runTrace(traceRequest{
+				SourceENIID: m.traceSourceID,
+				DestIP:      destIP,
+				Protocol:    "tcp",
+				Port:        port,
+			})
+		default:
+			var cmd tea.Cmd
+			m.traceInput, cmd = m.traceInput.Update(msg)
+			return m, cmd
+		}
+	}
+
+	// Trace result overlay: capture scrolling keys.
+	if m.showTraceResult {
+		switch key {
+		case "esc", "q", "t":
+			m.showTraceResult = false
+		case "up", "k":
+			m.traceViewport.LineUp(1)
+		case "down", "j":
+			m.traceViewport.LineDown(1)
 		}
 		return m, nil
 	}
@@ -739,6 +846,18 @@ func (m *Model) handleResourceTableKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.statusMsg = "Copied: " + row[1]
 		}
 		return m, nil
+	case "t":
+		// Start a connectivity trace from the selected network interface.
+		if m.activeResource == rtNetworkInterfaces {
+			row := m.resourceTable.SelectedRow()
+			if len(row) >= 2 && row[1] != "" {
+				m.traceSourceID = row[1]
+				m.showTraceInput = true
+				m.traceInput.SetValue("")
+				return m, m.traceInput.Focus()
+			}
+		}
+		return m, nil
 	case "enter":
 		maps := m.resourceMaps[m.activeResource]
 		idx := m.resourceTable.Cursor()
@@ -848,6 +967,16 @@ func (m *Model) updateTableSizes() {
 	if len(m.findings) > 0 {
 		m.findingsViewport.SetContent(m.renderFindings())
 	}
+
+	// Trace result viewport mirrors the findings overlay sizing.
+	m.traceViewport.Width = dvW
+	m.traceViewport.Height = dvH - 2
+	if m.traceViewport.Height < 3 {
+		m.traceViewport.Height = 3
+	}
+	if len(m.traceResult.Hops) > 0 {
+		m.traceViewport.SetContent(m.renderTraceResult())
+	}
 }
 
 // firstID returns a human-readable identifier from a resource map, trying
@@ -894,6 +1023,14 @@ func (m *Model) View() string {
 
 	if m.showFindings {
 		return m.viewFindingsOverlay(content)
+	}
+
+	if m.showTraceInput {
+		return m.viewTraceInputOverlay(content)
+	}
+
+	if m.showTraceResult {
+		return m.viewTraceResultOverlay(content)
 	}
 
 	return content
@@ -1222,6 +1359,105 @@ func (m *Model) renderFindings() string {
 	return b.String()
 }
 
+func (m *Model) viewTraceInputOverlay(bg string) string {
+	title := lipgloss.NewStyle().
+		Bold(true).
+		Foreground(lipgloss.Color(ui.ColorHeading())).
+		Render("Trace connectivity from " + m.traceSourceID)
+
+	prompt := lipgloss.NewStyle().Foreground(lipgloss.Color(ui.ColorText())).
+		Render("Destination:")
+	hint := lipgloss.NewStyle().
+		Foreground(lipgloss.Color(ui.ColorMuted())).
+		Render("Enter an IP and port (e.g. 10.0.1.20:3306) or internet:443  •  Enter run  •  Esc cancel")
+
+	inner := lipgloss.JoinVertical(lipgloss.Left, title, "", prompt+" "+m.traceInput.View(), "", hint)
+
+	overlay := lipgloss.NewStyle().
+		BorderStyle(lipgloss.RoundedBorder()).
+		BorderForeground(lipgloss.Color(ui.ColorBorderFocus())).
+		Padding(1, 2).
+		Render(inner)
+
+	if m.width > 0 && m.height > 0 {
+		return lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center, overlay)
+	}
+	return overlay
+}
+
+func (m *Model) viewTraceResultOverlay(bg string) string {
+	title := lipgloss.NewStyle().
+		Bold(true).
+		Foreground(lipgloss.Color(ui.ColorHeading())).
+		Render("Connectivity Trace")
+
+	hint := lipgloss.NewStyle().
+		Foreground(lipgloss.Color(ui.ColorMuted())).
+		Render("↑/↓ scroll  •  Esc/t close")
+
+	var body string
+	switch {
+	case m.traceLoading:
+		body = m.spinner.View() + "  Tracing path…"
+	case m.traceErr != nil:
+		body = lipgloss.NewStyle().Foreground(lipgloss.Color(ui.ColorError())).
+			Render("Error: " + m.traceErr.Error())
+	default:
+		body = m.traceViewport.View()
+	}
+
+	inner := lipgloss.JoinVertical(lipgloss.Left, title, "", body, "", hint)
+
+	overlay := lipgloss.NewStyle().
+		BorderStyle(lipgloss.RoundedBorder()).
+		BorderForeground(lipgloss.Color(ui.ColorBorderFocus())).
+		Foreground(lipgloss.Color(ui.ColorText())).
+		Padding(1, 2).
+		Render(inner)
+
+	if m.width > 0 && m.height > 0 {
+		return lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center, overlay)
+	}
+	return overlay
+}
+
+// renderTraceResult builds the scrollable body of the trace result overlay: a
+// summary line followed by each evaluated hop.
+func (m *Model) renderTraceResult() string {
+	summaryColor := ui.ColorWarning()
+	if m.traceResult.Reachable {
+		summaryColor = ui.ColorAccent()
+	}
+	if strings.HasPrefix(m.traceResult.Summary, "❌") {
+		summaryColor = ui.ColorError()
+	}
+
+	var b strings.Builder
+	b.WriteString(lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color(summaryColor)).
+		Render(m.traceResult.Summary))
+	b.WriteString("\n")
+
+	glyph := map[hopStatus]string{hopPass: "✓", hopFail: "✗", hopNote: "•"}
+	style := func(s hopStatus) lipgloss.Style {
+		switch s {
+		case hopFail:
+			return lipgloss.NewStyle().Foreground(lipgloss.Color(ui.ColorError()))
+		case hopPass:
+			return lipgloss.NewStyle().Foreground(lipgloss.Color(ui.ColorAccent()))
+		default:
+			return lipgloss.NewStyle().Foreground(lipgloss.Color(ui.ColorMuted()))
+		}
+	}
+	muted := lipgloss.NewStyle().Foreground(lipgloss.Color(ui.ColorMuted()))
+	for _, h := range m.traceResult.Hops {
+		b.WriteString("\n" + style(h.Status).Render(glyph[h.Status]+" "+h.Name))
+		if h.Detail != "" {
+			b.WriteString("\n    " + muted.Render(h.Detail))
+		}
+	}
+	return b.String()
+}
+
 func (m *Model) viewScanStatus() string {
 	if m.loading && m.scanning {
 		return m.spinner.View() + fmt.Sprintf("  Scanning %d/%d regions…", m.scanDone, m.scanTotal)
@@ -1267,7 +1503,7 @@ func (m *Model) viewStatusBar() string {
 		case focusCategory:
 			hint = "↑↓=navigate  Enter=load  Tab=resource table  F=findings  Esc=back  ?=help  q=quit"
 		case focusResourceTable:
-			hint = "↑↓=navigate  <>=scroll cols  Enter=detail  c=copy  F=findings  r=refresh  Tab=categories  Esc=back  q=quit"
+			hint = "↑↓=nav  <>=cols  Enter=detail  c=copy  F=findings  t=trace  r=refresh  Tab=cats  Esc=back  q=quit"
 		}
 	}
 
@@ -1300,6 +1536,7 @@ func (m *Model) helpText() string {
 		"  Enter    Load resource type (sidebar) / open detail (table)",
 		"  c        Copy resource ID to clipboard",
 		"  F        Run the VPC findings linter (security/routing/capacity issues)",
+		"  t        Trace connectivity from the selected network interface",
 		"  r        Refresh current resource list",
 		"  Esc      Go back to VPC list",
 		"",
