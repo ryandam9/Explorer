@@ -264,6 +264,7 @@ func (m tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.focus = focusTable
 				m.table = m.table.Focused(true)
 			}
+			return m, tea.Batch(cmds...)
 
 		case "tab":
 			m.cycleFocus(1)
