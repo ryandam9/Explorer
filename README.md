@@ -145,7 +145,30 @@ what you see in the bar is always what works right now.
 ## Summary Usage
 
 `summary` produces a single, numbered inventory of **every** discovered resource
-across all configured regions. Each row carries five columns:
+across all configured regions, spanning **all AWS services** — not just the ones
+with a built-in collector.
+
+It combines two sources and merges them by ARN:
+
+1. **The 15 typed collectors** (EC2, S3, RDS, …) for rich data — state,
+   availability zone, and service-specific summary fields.
+2. **A universal sweep via the [Resource Groups Tagging API]** (`tag:GetResources`),
+   which returns ARNs and tags for taggable resources across hundreds of
+   services in each region. This is what gives the long tail (KMS keys, subnets,
+   EBS volumes, Step Functions, API Gateways, CloudFront, …) coverage without a
+   bespoke collector per service.
+
+When both sources describe the same ARN, the richer typed entry wins. Use
+`--typed-only` to skip the universal sweep.
+
+> **Coverage & permissions.** The Tagging API only returns resources that
+> support tagging and are registered with the tagging service — broad, but not
+> literally 100% of every service. The sweep needs the `tag:GetResources` IAM
+> permission; if it's denied, the typed-collector results are still shown.
+
+[Resource Groups Tagging API]: https://docs.aws.amazon.com/resourcegroupstagging/latest/APIReference/API_GetResources.html
+
+Each row carries five columns:
 
 | Column | Description |
 |--------|-------------|
@@ -168,6 +191,7 @@ Accepts the same `--config`, `--profile`, `--auth-method`, `--role-arn`, and
 |------|---------|-------------|
 | `--output` / `-o` | `table` | Output format: `table`, `json`, or `csv` |
 | `--tui` | `false` | Explore the same inventory interactively instead of printing |
+| `--typed-only` | `false` | Skip the all-services Tagging API sweep; use only the built-in typed collectors |
 
 ### Examples
 

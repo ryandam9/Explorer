@@ -29,11 +29,15 @@ type Row struct {
 const placeholder = "-"
 
 // BuildRows converts collected resources into numbered summary rows. Resources
-// are sorted by service, type, name and region so serial numbers are stable
-// regardless of collection order.
+// sharing an ARN are deduplicated (richer entry wins) so the broad Tagging API
+// sweep and the rich typed collectors can be merged freely. The result is sorted
+// by service, type, name and region so serial numbers are stable regardless of
+// collection order.
 func BuildRows(resources []model.Resource) []Row {
-	sorted := make([]model.Resource, len(resources))
-	copy(sorted, resources)
+	deduped := Dedupe(resources)
+
+	sorted := make([]model.Resource, len(deduped))
+	copy(sorted, deduped)
 	sort.SliceStable(sorted, func(i, j int) bool {
 		a, b := sorted[i], sorted[j]
 		if a.Service != b.Service {
@@ -59,6 +63,50 @@ func BuildRows(resources []model.Resource) []Row {
 		})
 	}
 	return rows
+}
+
+// Dedupe collapses resources that share a (non-empty) ARN, keeping the richer
+// entry. Resources without an ARN cannot be matched and are all retained. This
+// lets the universal Tagging API sweep be merged with the typed collectors: when
+// both describe the same ARN, the typed entry (with state, AZ, summary fields)
+// wins.
+func Dedupe(resources []model.Resource) []model.Resource {
+	byARN := make(map[string]int) // ARN -> index into out
+	out := make([]model.Resource, 0, len(resources))
+	for _, r := range resources {
+		if r.ARN == "" {
+			out = append(out, r)
+			continue
+		}
+		if idx, seen := byARN[r.ARN]; seen {
+			if richness(r) > richness(out[idx]) {
+				out[idx] = r
+			}
+			continue
+		}
+		byARN[r.ARN] = len(out)
+		out = append(out, r)
+	}
+	return out
+}
+
+// richness scores how much detail a resource carries, used to pick a winner when
+// two entries share an ARN. Typed collectors populate state/AZ/summary/detail and
+// therefore outscore the ARN-and-tags-only entries from the Tagging API.
+func richness(r model.Resource) int {
+	score := 0
+	if r.State != "" {
+		score++
+	}
+	if r.AZ != "" {
+		score++
+	}
+	if r.CreatedAt != nil {
+		score++
+	}
+	score += len(r.Summary)
+	score += len(r.Details)
+	return score
 }
 
 // resourceType renders the resource type as "service/type" (e.g. "ec2/instance",

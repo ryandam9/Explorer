@@ -59,6 +59,61 @@ func SQSARNFromURL(queueURL string) string {
 	return fmt.Sprintf("arn:aws:sqs:%s:%s:%s", region, account, name)
 }
 
+// ARN holds the parsed components of an AWS ARN.
+type ARN struct {
+	Partition    string
+	Service      string
+	Region       string
+	AccountID    string
+	ResourceType string
+	ResourceID   string
+}
+
+// ParseARN splits an ARN into its components. ARNs have the shape
+//
+//	arn:partition:service:region:account-id:resource
+//
+// where the trailing resource segment is one of "id", "type/id" or "type:id"
+// (and the id itself may contain further "/" separators, e.g. an ELB ARN).
+// Returns false if the string is not a well-formed ARN.
+func ParseARN(arn string) (ARN, bool) {
+	parts := strings.SplitN(arn, ":", 6)
+	if len(parts) < 6 || parts[0] != "arn" {
+		return ARN{}, false
+	}
+	out := ARN{
+		Partition: parts[1],
+		Service:   parts[2],
+		Region:    parts[3],
+		AccountID: parts[4],
+	}
+	resource := parts[5]
+	switch {
+	case strings.Contains(resource, "/"):
+		i := strings.IndexByte(resource, '/')
+		out.ResourceType = resource[:i]
+		out.ResourceID = resource[i+1:]
+	case strings.Contains(resource, ":"):
+		i := strings.IndexByte(resource, ':')
+		out.ResourceType = resource[:i]
+		out.ResourceID = resource[i+1:]
+	default:
+		out.ResourceID = resource
+	}
+	return out, true
+}
+
+// ARNName returns a human-friendly name for a parsed ARN: the last path segment
+// of its resource ID (e.g. "i-0abc" from "instance/i-0abc", or the final
+// component of a multi-segment ELB resource ID).
+func (a ARN) ARNName() string {
+	id := a.ResourceID
+	if i := strings.LastIndexByte(id, '/'); i >= 0 {
+		id = id[i+1:]
+	}
+	return id
+}
+
 // sqsRegionFromURL extracts the region from an SQS URL of the form
 // https://sqs.<region>.amazonaws.com/...
 func sqsRegionFromURL(queueURL string) string {

@@ -8,14 +8,19 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/spf13/cobra"
 
+	"github.com/user/aws_explorer/internal/discovery"
 	"github.com/user/aws_explorer/internal/engine"
+	"github.com/user/aws_explorer/internal/model"
 	"github.com/user/aws_explorer/internal/output"
 	"github.com/user/aws_explorer/internal/summary"
 	"github.com/user/aws_explorer/internal/tui"
 	"github.com/user/aws_explorer/internal/ui"
 )
 
-var summaryTUI bool
+var (
+	summaryTUI       bool
+	summaryTypedOnly bool
+)
 
 var summaryCmd = &cobra.Command{
 	Use:   "summary",
@@ -41,7 +46,14 @@ formats). Pass --tui to explore the same data interactively.`,
 
 		if summaryTUI {
 			ui.InitFromConfig(AppConfig.UI)
-			m := tui.NewModel(ctx, eng, configFilePath(), AppConfig)
+			// Gather the all-services sweep up front and seed the TUI with it;
+			// the typed collectors then stream in and merge (deduped by ARN).
+			var seed []model.Resource
+			if !summaryTypedOnly {
+				fmt.Fprintln(os.Stderr, "Discovering resources across all services…")
+				seed, _ = discovery.Discover(ctx, eng.AWSConfig, eng.EffectiveRegions(), AppConfig.App.MaxConcurrency)
+			}
+			m := tui.NewModelWithSeed(ctx, eng, configFilePath(), AppConfig, seed)
 			p := tea.NewProgram(m, tea.WithAltScreen(), tea.WithMouseCellMotion(), tea.WithContext(ctx))
 			if _, err := p.Run(); err != nil {
 				fmt.Fprintf(os.Stderr, "Error running summary TUI: %v\n", err)
@@ -56,11 +68,23 @@ formats). Pass --tui to explore the same data interactively.`,
 			os.Exit(1)
 		}
 
-		if len(result.Errors) > 0 {
-			output.PrintErrors(os.Stderr, result.Errors)
+		resources := result.Resources
+		errs := result.Errors
+
+		// Universal sweep across all services via the Resource Groups Tagging
+		// API, merged with the rich typed collectors above (deduped by ARN).
+		if !summaryTypedOnly {
+			discovered, dErrs := discovery.Discover(
+				ctx, eng.AWSConfig, eng.EffectiveRegions(), AppConfig.App.MaxConcurrency)
+			resources = append(resources, discovered...)
+			errs = append(errs, dErrs...)
 		}
 
-		rows := summary.BuildRows(result.Resources)
+		if len(errs) > 0 {
+			output.PrintErrors(os.Stderr, errs)
+		}
+
+		rows := summary.BuildRows(resources)
 		if len(rows) == 0 {
 			fmt.Println("No resources found.")
 			return
@@ -94,5 +118,6 @@ func applyGlobalAWSOverrides() {
 
 func init() {
 	summaryCmd.Flags().BoolVar(&summaryTUI, "tui", false, "Explore the inventory interactively instead of printing a table")
+	summaryCmd.Flags().BoolVar(&summaryTypedOnly, "typed-only", false, "Only use the built-in typed collectors; skip the all-services Tagging API sweep")
 	rootCmd.AddCommand(summaryCmd)
 }

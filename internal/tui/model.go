@@ -19,6 +19,7 @@ import (
 	"github.com/user/aws_explorer/internal/config"
 	"github.com/user/aws_explorer/internal/engine"
 	"github.com/user/aws_explorer/internal/model"
+	"github.com/user/aws_explorer/internal/summary"
 	"github.com/user/aws_explorer/internal/table"
 	"github.com/user/aws_explorer/internal/ui"
 )
@@ -80,6 +81,7 @@ type tuiModel struct {
 	chunks chan model.ResultChunk
 
 	// Data
+	seed    []model.Resource // pre-fetched resources (e.g. the all-services sweep) merged with streamed results
 	results []model.Resource
 	sorted  []model.Resource // results sorted by service+name; rebuilt only when results change
 	errors  []model.ExploreError
@@ -146,6 +148,13 @@ type tuiModel struct {
 // file on disk (used by the settings panel to persist changes); cfg is the
 // already-loaded config struct.
 func NewModel(ctx context.Context, eng *engine.Engine, configPath string, cfg *config.Config) tea.Model {
+	return NewModelWithSeed(ctx, eng, configPath, cfg, nil)
+}
+
+// NewModelWithSeed is like NewModel but pre-populates the table with seed
+// resources (e.g. the all-services Tagging API sweep) which are merged and
+// deduplicated with the resources streamed from the engine's typed collectors.
+func NewModelWithSeed(ctx context.Context, eng *engine.Engine, configPath string, cfg *config.Config, seed []model.Resource) tea.Model {
 	chunks := make(chan model.ResultChunk, 64)
 	sp := spinner.New()
 	sp.Spinner = spinner.MiniDot
@@ -155,6 +164,7 @@ func NewModel(ctx context.Context, eng *engine.Engine, configPath string, cfg *c
 	m := tuiModel{
 		ctx:        ctx,
 		engine:     eng,
+		seed:       seed,
 		loading:    true,
 		chunks:     chunks,
 		focus:      focusTable,
@@ -182,6 +192,11 @@ func NewModel(ctx context.Context, eng *engine.Engine, configPath string, cfg *c
 		table.WithHeight(10),
 		table.WithStyles(ui.TableStyles()),
 	)
+
+	// Surface seed resources immediately; typed results stream in and merge.
+	if len(seed) > 0 {
+		m.onResultsChanged()
+	}
 	return m
 }
 
@@ -371,7 +386,7 @@ func (m tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 
 		case "/":
-			if m.focus == focusTable && len(m.results) > 0 {
+			if m.focus == focusTable && len(m.sorted) > 0 {
 				m.filtering = true
 				m.filterInput.Focus()
 				m.syncTableLayout()
@@ -379,7 +394,7 @@ func (m tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 
 		case "f":
-			if !m.showFilter && len(m.results) > 0 {
+			if !m.showFilter && len(m.sorted) > 0 {
 				m.filterForm = m.buildFilterForm()
 				m.showFilter = true
 				cmds = append(cmds, m.filterForm.Init())
@@ -502,9 +517,13 @@ func matchesTextFilter(query string, cells ...string) bool {
 // chunks arrive, then rebuilds the visible rows. Filter changes alone only
 // need rebuildAllRows, which reuses the cached sorted slice.
 func (m *tuiModel) onResultsChanged() {
+	// Merge the pre-fetched seed (all-services sweep) with the streamed typed
+	// results, deduping by ARN so the richer typed entry wins.
+	combined := summary.Dedupe(append(append([]model.Resource{}, m.seed...), m.results...))
+
 	// Rebuild service list.
 	svcSet := map[string]bool{}
-	for _, r := range m.results {
+	for _, r := range combined {
 		svcSet[r.Service] = true
 	}
 	names := make([]string, 0, len(svcSet)+1)
@@ -520,10 +539,9 @@ func (m *tuiModel) onResultsChanged() {
 		m.activeService = 0
 	}
 
-	// Sort a copy of the results (by service, then name) so the table renders
+	// Sort the combined resources (by service, then name) so the table renders
 	// in a stable, grouped order regardless of arrival order.
-	m.sorted = make([]model.Resource, len(m.results))
-	copy(m.sorted, m.results)
+	m.sorted = combined
 	sort.SliceStable(m.sorted, func(i, j int) bool {
 		if m.sorted[i].Service != m.sorted[j].Service {
 			return m.sorted[i].Service < m.sorted[j].Service
@@ -770,12 +788,12 @@ func (m tuiModel) helpView() string {
 func (m tuiModel) View() string {
 	var output string
 
-	if m.loading && len(m.results) == 0 {
+	if m.loading && len(m.sorted) == 0 {
 		output = fmt.Sprintf("\n  %s  Loading AWS resources…\n", m.spinner.View())
 		return m.zones.Scan(output)
 	}
 
-	if len(m.errors) > 0 && len(m.results) == 0 && m.done {
+	if len(m.errors) > 0 && len(m.sorted) == 0 && m.done {
 		output = m.renderPrivilegeErrors() + "\n\nPress q to quit."
 		return m.zones.Scan(output)
 	}
@@ -831,7 +849,7 @@ func (m tuiModel) renderHeader() string {
 	status := "streaming"
 	if m.done {
 		status = "complete"
-	} else if m.loading && len(m.results) == 0 {
+	} else if m.loading && len(m.sorted) == 0 {
 		status = m.spinner.View() + " loading"
 	}
 
@@ -851,7 +869,7 @@ func (m tuiModel) renderHeader() string {
 	}
 
 	title := fmt.Sprintf("  AWS Explorer  ·  %s  ·  %d resources  ·  %d errors%s",
-		status, len(m.results), len(m.errors), filterInfo)
+		status, len(m.sorted), len(m.errors), filterInfo)
 
 	w := m.width - 2
 	if w < 10 {
@@ -988,7 +1006,7 @@ func (m tuiModel) statusBar() string {
 	}
 
 	left := fmt.Sprintf("Service: %s  ·  Resources: %d  ·  Errors: %d  ·  %s",
-		svc, len(m.results), len(m.errors), status)
+		svc, len(m.sorted), len(m.errors), status)
 
 	return ui.StatusBar(w, left, m.statusHints())
 }
