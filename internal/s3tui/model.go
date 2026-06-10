@@ -210,11 +210,11 @@ type Model struct {
 	showVersions bool
 
 	// Actions
-	allowDelete      bool
+	allowDelete         bool
 	confirmingDelete    bool
 	deleteConfirmErrMsg string // set when user presses Enter with wrong text
 	deleteConfirm       textinput.Model
-	deleteKey        string
+	deleteKey           string
 
 	copyMenuActive bool
 	copyContent    string
