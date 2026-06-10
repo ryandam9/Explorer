@@ -87,7 +87,9 @@ func ParseARN(arn string) (ARN, bool) {
 		Region:    parts[3],
 		AccountID: parts[4],
 	}
-	resource := parts[5]
+	// Some services (e.g. API Gateway) use a leading-slash resource of the form
+	// "/restapis/<id>"; trim it so the first segment is treated as the type.
+	resource := strings.TrimPrefix(parts[5], "/")
 	switch {
 	case strings.Contains(resource, "/"):
 		i := strings.IndexByte(resource, '/')

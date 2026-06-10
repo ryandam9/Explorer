@@ -9,6 +9,7 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
+	"github.com/charmbracelet/x/ansi"
 	"github.com/mattn/go-runewidth"
 
 	"github.com/charmbracelet/bubbles/help"
@@ -613,7 +614,27 @@ func (m Model) headersView() string {
 		renderedCell := style.Render(runewidth.Truncate(col.Title, col.Width, "…"))
 		s = append(s, m.styles.Header.Render(renderedCell))
 	}
-	return lipgloss.JoinHorizontal(lipgloss.Top, s...)
+	return m.clipToWidth(lipgloss.JoinHorizontal(lipgloss.Top, s...))
+}
+
+// clipToWidth hard-truncates every line of s to the table's render width so a
+// row can never be wider than the table — even when a single auto-fit column is
+// wider than the whole view (the "always show at least one column" rule can
+// otherwise force an overflow). Without this, the surrounding panel wraps the
+// excess onto a new line and corrupts the layout. A width of 0 means
+// unconstrained, so nothing is clipped.
+func (m Model) clipToWidth(s string) string {
+	if m.width <= 0 {
+		return s
+	}
+	if !strings.Contains(s, "\n") {
+		return ansi.Truncate(s, m.width, "")
+	}
+	lines := strings.Split(s, "\n")
+	for i, ln := range lines {
+		lines[i] = ansi.Truncate(ln, m.width, "")
+	}
+	return strings.Join(lines, "\n")
 }
 
 func (m *Model) renderRow(r int) string {
@@ -649,7 +670,7 @@ func (m *Model) renderRow(r int) string {
 		s = append(s, renderedCell)
 	}
 
-	return lipgloss.JoinHorizontal(lipgloss.Top, s...)
+	return m.clipToWidth(lipgloss.JoinHorizontal(lipgloss.Top, s...))
 }
 
 func clamp(v, low, high int) int {
