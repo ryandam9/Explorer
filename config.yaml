@@ -10,8 +10,10 @@ app:
 aws:
     profile: default
     authmethod: auto
-    regions:
-        - us-east-1
+    # Regions to scan. Leave empty ([]) to use the region from your active AWS
+    # profile / AWS_REGION. List explicit regions to override, or add "all" to
+    # scan every region.
+    regions: []
     allregions: false
     sts:
         rolearn: ""
