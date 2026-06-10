@@ -55,6 +55,7 @@ func (c *Collector) mapCluster(region string, cluster types.ClusterSummary, deta
 		Region:  region,
 		ID:      id,
 		Name:    name,
+		ARN:     aws.ToString(cluster.ClusterArn),
 		State:   state,
 		Summary: map[string]string{
 			"normalizedInstanceHours": fmt.Sprintf("%d", aws.ToInt32(cluster.NormalizedInstanceHours)),

@@ -10,6 +10,7 @@ import (
 
 	"github.com/aws/aws-sdk-go-v2/aws"
 	awsec2 "github.com/aws/aws-sdk-go-v2/service/ec2"
+	"github.com/aws/aws-sdk-go-v2/service/sts"
 	"golang.org/x/sync/errgroup"
 
 	"github.com/user/aws_explorer/internal/auth"
@@ -40,6 +41,7 @@ type Engine struct {
 	AWSConfig       aws.Config
 	registry        *services.Registry
 	ResolvedRegions []string
+	AccountID       string
 }
 
 // NewEngine creates a new scanning engine.
@@ -81,6 +83,12 @@ func NewEngine(ctx context.Context, cfg *config.Config) (*Engine, error) {
 		slog.Info("Resolved all AWS regions", "count", len(resolvedRegions))
 	}
 
+	// Resolve the caller's account ID once so collectors can construct ARNs for
+	// resources AWS doesn't return ARNs for (EC2, S3, SQS, …). Best-effort: if
+	// the lookup fails (e.g. missing sts:GetCallerIdentity), constructed ARNs
+	// are simply omitted while AWS-provided ARNs still work.
+	accountID := resolveAccountID(ctx, awscfg)
+
 	registry := services.NewRegistry()
 	registry.Register(ec2.NewCollector())
 	registry.Register(s3.NewCollector())
@@ -103,7 +111,20 @@ func NewEngine(ctx context.Context, cfg *config.Config) (*Engine, error) {
 		AWSConfig:       awscfg,
 		registry:        registry,
 		ResolvedRegions: resolvedRegions,
+		AccountID:       accountID,
 	}, nil
+}
+
+// resolveAccountID returns the AWS account ID for the active credentials, or ""
+// if it cannot be determined. Errors are logged but not fatal — the account ID
+// is only used to enrich constructed ARNs.
+func resolveAccountID(ctx context.Context, awscfg aws.Config) string {
+	out, err := sts.NewFromConfig(awscfg).GetCallerIdentity(ctx, &sts.GetCallerIdentityInput{})
+	if err != nil {
+		slog.Warn("Unable to resolve account ID; constructed ARNs will be omitted", "error", err.Error())
+		return ""
+	}
+	return aws.ToString(out.Account)
 }
 
 func resolveAllRegions(ctx context.Context, awscfg aws.Config) ([]string, error) {
@@ -200,6 +221,7 @@ func (e *Engine) StreamRun(ctx context.Context, chunks chan<- model.ResultChunk)
 					Config:    e.Config,
 					AWSConfig: regionalConfig,
 					Region:    r,
+					AccountID: e.AccountID,
 					Filters: model.Filter{
 						Regions: e.Config.Filters.Regions,
 						States:  e.Config.Filters.States,

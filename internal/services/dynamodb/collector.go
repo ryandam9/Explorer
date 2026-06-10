@@ -83,6 +83,7 @@ func (c *Collector) mapTable(region string, table *types.TableDescription, detai
 		Region:  region,
 		ID:      id,
 		Name:    name,
+		ARN:     aws.ToString(table.TableArn),
 		State:   state,
 		Summary: map[string]string{
 			"billingMode": billingMode,

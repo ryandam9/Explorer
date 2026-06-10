@@ -7,6 +7,7 @@ import (
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/service/route53"
 	"github.com/aws/aws-sdk-go-v2/service/route53/types"
+	"github.com/user/aws_explorer/internal/awsutil"
 	"github.com/user/aws_explorer/internal/model"
 	"github.com/user/aws_explorer/internal/services"
 )
@@ -62,6 +63,7 @@ func (c *Collector) mapZone(zone types.HostedZone, detail services.DetailLevel) 
 		Region:  "global",
 		ID:      id,
 		Name:    name,
+		ARN:     awsutil.Route53ZoneARN(id),
 		Summary: map[string]string{
 			"privateZone": fmt.Sprintf("%t", zone.Config.PrivateZone),
 			"recordCount": fmt.Sprintf("%d", aws.ToInt64(zone.ResourceRecordSetCount)),

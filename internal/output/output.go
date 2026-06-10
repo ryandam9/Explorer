@@ -104,6 +104,12 @@ func printJSON(resources []model.Resource) {
 	}
 }
 
+// PrintErrors writes collection errors to w, grouping access-denied errors into
+// a distinct "Insufficient Privileges" section.
+func PrintErrors(w io.Writer, errs []model.ExploreError) {
+	printErrors(w, errs)
+}
+
 // printErrors writes errors to w, grouping access-denied errors into a distinct
 // "Insufficient Privileges" section so users know exactly what permissions to add.
 func printErrors(w io.Writer, errs []model.ExploreError) {

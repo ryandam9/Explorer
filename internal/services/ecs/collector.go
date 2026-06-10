@@ -66,6 +66,7 @@ func (c *Collector) mapCluster(region string, cluster types.Cluster, detail serv
 		Region:  region,
 		ID:      id,
 		Name:    name,
+		ARN:     id, // ClusterArn is used as the resource ID
 		State:   state,
 		Summary: map[string]string{
 			"runningTasks":   fmt.Sprintf("%d", cluster.RunningTasksCount),
