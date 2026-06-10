@@ -40,6 +40,10 @@ const (
 	sidebarInner  = 16 // inner content width of the sidebar panel
 	detailInner   = 34 // inner content width of the detail panel
 	minTableInner = 40 // table panel keeps at least this much content width
+	// tablePanelHPad is the table panel's horizontal padding (Padding(0,1) =>
+	// 1 left + 1 right). The table content must be sized this much narrower than
+	// the panel's Width, or lipgloss wraps the last columns onto a new line.
+	tablePanelHPad = 2
 )
 
 // ── Zone IDs ─────────────────────────────────────────────────────────────────
@@ -610,7 +614,7 @@ func (m tuiModel) columns() []table.Column {
 	// plus each column's cell padding (2 × 7 columns).
 	const fixed = 4 + 10 + 12 + 13 + 10
 	const padding = 2 * 7
-	rem := m.tableInnerWidth() - fixed - padding
+	rem := m.tableInnerWidth() - tablePanelHPad - fixed - padding
 	idW := rem * 2 / 5
 	nameW := rem - idW
 	if idW < 10 {
@@ -674,7 +678,9 @@ func (m *tuiModel) syncTableLayout() {
 		tableH-- // the filter line sits under the table inside the panel
 	}
 	m.table.SetColumns(m.columns())
-	m.table.SetWidth(inner)
+	// The table content sits inside the panel's horizontal padding, so it must
+	// be narrower than the panel Width by that padding (see renderTablePanel).
+	m.table.SetWidth(inner - tablePanelHPad)
 	m.table.SetHeight(max(tableH, 4))
 	// SetColumns resets the horizontal scroll; keep the row set in sync.
 	m.updateTableRows()

@@ -62,6 +62,11 @@ func TestParseARN(t *testing.T) {
 			"arn:aws:elasticloadbalancing:us-east-1:123:loadbalancer/app/my-alb/abc123",
 			"elasticloadbalancing", "us-east-1", "123", "loadbalancer", "app/my-alb/abc123",
 		},
+		{
+			// API Gateway uses a leading-slash resource; the first segment is the type.
+			"arn:aws:apigateway:us-east-1::/restapis/37koc78zhe",
+			"apigateway", "us-east-1", "", "restapis", "37koc78zhe",
+		},
 	}
 	for _, c := range cases {
 		got, ok := ParseARN(c.arn)
