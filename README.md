@@ -13,7 +13,9 @@ Discover, monitor, and display AWS resources across accounts and regions via CLI
 - **Output formats**: Table (default), JSON
 - **Filtering**: By region, state, tags, name, and IDs
 - **Concurrent**: Bounded goroutine pool (default 8) for parallel collection across services and regions
-- **Themes**: 12 built-in bird-themed color schemes for the TUI
+- **Themes**: 12 built-in bird-themed color schemes with 24 individually customizable color roles (table header, borders, status bar, alerts, …) — editable live in the in-app settings panel
+- **Context-aware shortcuts**: the status bar in every TUI shows only the keys that work on the current screen
+- **Uniform tables**: every table shares one theme and scrolls horizontally (`<` / `>`) when columns don't fit
 
 ## Prerequisites
 
@@ -118,13 +120,23 @@ Accepts the same `--config`, `--profile`, `--auth-method`, `--role-arn`, and `--
 
 ### TUI Keyboard Shortcuts
 
+The status bar at the bottom is **context-aware**: it lists only the shortcuts
+that are usable on the current screen (and with the current panel focus), so
+what you see in the bar is always what works right now.
+
 | Key | Action |
 |-----|--------|
 | `↑` / `↓` / `j` / `k` | Navigate rows |
-| `←` / `→` | Switch sidebar panels (services / regions) |
-| `Enter` | Select / expand item |
-| `/` | Search / filter |
-| `c` | Copy selected resource ID to clipboard |
+| `[` / `]` | Move through the service sidebar / scroll the detail panel |
+| `Tab` / `Shift+Tab` | Switch focus between sidebar, table and detail panel |
+| `<` / `>` (or `,` / `.`) | Scroll table columns when the table is wider than the panel |
+| `Enter` | Select service / open the detail panel for the selected resource |
+| `/` | Quick text filter (matches any column) |
+| `f` | Advanced filter (region / state) |
+| `r` | Reset all filters |
+| `S` | Settings panel (themes & colors) |
+| `?` | Help overlay |
+| `Esc` | Close detail panel / overlay |
 | `q` / `Ctrl+C` | Quit |
 
 ## VPC Explorer TUI Usage
@@ -217,7 +229,10 @@ Inside any overlay, `↑` / `↓` scroll and `Esc` (or the same trigger key) clo
 Wide tables (e.g. Security Groups, with ~106 columns of data) don't truncate or
 drop columns on narrow terminals. The leading identifier columns stay **pinned**
 while the remaining columns scroll with `<` / `>`; a `◀ N more cols ▶` indicator
-in the panel header shows when columns are hidden off either edge.
+shows when columns are hidden off either edge, and the status bar advertises
+`</>` only while there is something to scroll to. This works the same in every
+table of the application — the summary TUI, the S3 browser and the VPC
+explorer.
 
 ---
 
@@ -670,23 +685,53 @@ Each theme configures granular color roles so that changing one part of the UI
 never bleeds into another. Set only the roles you want to change — any role you
 leave out falls back to a sensible related role (noted below).
 
+**General**
+
 | Role | Used for | Fallback |
 |------|----------|----------|
 | `heading` | Titles and section headers | — |
 | `text` | Body / foreground text | — |
 | `background` | Panel backgrounds (empty = terminal default) | — |
+| `muted` | De-emphasised / secondary text | — |
+| `accent` | Decorative rails, input prompts and cursors | `heading` |
 | `border` | Borders of unfocused panels | — |
 | `borderFocus` | Border of the focused panel | `heading` |
-| `highlight` | Selected table-row background | — |
-| `highlightText` | Text on the selected row | — |
-| `muted` | De-emphasised / secondary text | — |
+| `highlight` | Selected item background (lists, menus) | — |
+| `highlightText` | Text on the selected item | — |
+
+**Tables** (every table in the app shares these, so all tables look identical)
+
+| Role | Used for | Fallback |
+|------|----------|----------|
 | `tableHeader` | Table column header text | `muted` |
+| `tableHeaderBg` | Table column header background | `background` |
 | `tableHeaderLine` | Rule drawn under table headers | `border` |
+| `tableText` | Table cell text | `text` |
+| `tableBorder` | Border drawn around table panels | `border` |
+| `tableSelectedBg` | Selected table-row background | `highlight` |
+| `tableSelectedText` | Text on the selected table row | `highlightText` |
+
+**Status bar & shortcut hints**
+
+| Role | Used for | Fallback |
+|------|----------|----------|
 | `statusBarBg` | Status bar background | `highlight` |
 | `statusBarText` | Status bar text | `highlightText` |
-| `accent` | Decorative rails, input prompts and cursors | `heading` |
+| `hintKey` | Shortcut keys (e.g. `Enter`) in the status bar hints | `statusBarText` |
+| `hintText` | Shortcut descriptions (e.g. *open*) in the hints | `statusBarText` |
+
+**Alerts**
+
+| Role | Used for | Fallback |
+|------|----------|----------|
 | `error` | Error messages and indicators | — |
 | `warning` | Warning messages and indicators | — |
+| `success` | Success / confirmation messages (e.g. *reachable*, *no issues*) | `accent` |
+| `info` | Informational messages and indicators | `muted` |
+
+(The authoritative list lives in the `Roles` registry in
+`internal/ui/theme.go`; role names in `config.yaml` are matched
+case-insensitively.)
 
 Override any role in `config.yaml` — for example, to recolor just the table
 header of the `oriole` theme without touching anything else:

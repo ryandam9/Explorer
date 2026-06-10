@@ -17,32 +17,128 @@ import (
 // Colors are taken from the "feathers" palettes (color schemes inspired by the
 // plumage of Australian birds — https://github.com/shandiya/feathers, the same
 // data rendered at https://ryandam.net/demos/feathers_palettes/). Each role is
-// granular so editing one UI area never bleeds into another. Roles past the
-// first nine were added so areas that previously shared a single color (table
-// headers, focused borders, the status bar, decorative accents) can each be
-// themed independently.
+// granular so editing one UI area never bleeds into another. Roles that are
+// empty fall back to a related role at render time (see Roles), so themes and
+// user configs only need to set the knobs they care about.
 type ThemeColors struct {
-	Heading         string // titles, section headers
-	Text            string // body text / foreground
-	Background      string // panel background (empty = terminal default)
-	Border          string // borders of unfocused panels
-	BorderFocus     string // border of the focused panel
-	Highlight       string // selected row background
-	HighlightText   string // text on the selected row
-	Muted           string // de-emphasised / secondary text
-	TableHeader     string // table column header text
-	TableHeaderLine string // rule drawn under table headers
-	StatusBarBg     string // status bar background
-	StatusBarText   string // status bar text
-	Accent          string // decorative rails, input prompts and cursors
-	Error           string // error messages and indicators
-	Warning         string // warning messages and indicators
+	Heading       string // titles, section headers
+	Text          string // body text / foreground
+	Background    string // panel background (empty = terminal default)
+	Border        string // borders of unfocused panels
+	BorderFocus   string // border of the focused panel
+	Highlight     string // selected item background (lists, menus)
+	HighlightText string // text on the selected item
+	Muted         string // de-emphasised / secondary text
+	Accent        string // decorative rails, input prompts and cursors
+
+	// Table roles. These theme every table in the application identically.
+	TableHeader       string // table column header text
+	TableHeaderBg     string // table column header background
+	TableHeaderLine   string // rule drawn under table headers
+	TableText         string // table cell text
+	TableBorder       string // border drawn around table panels
+	TableSelectedBg   string // selected table row background
+	TableSelectedText string // selected table row text
+
+	// Status bar roles, including the context-shortcut hints rendered in it.
+	StatusBarBg   string // status bar background
+	StatusBarText string // status bar text
+	HintKey       string // shortcut key (e.g. "Enter") in the status bar hints
+	HintText      string // shortcut description (e.g. "open") in the hints
+
+	// Alert roles.
+	Error   string // error messages and indicators
+	Warning string // warning messages and indicators
+	Success string // success / confirmation messages and indicators
+	Info    string // informational messages and indicators
 }
 
 // Theme holds a named theme with its full color palette.
 type Theme struct {
 	Name   string
 	Colors ThemeColors
+}
+
+// RoleSpec describes one themable color role: its canonical config key, a
+// short human description (shown in the settings panel), an accessor for the
+// backing ThemeColors field, and the role its value falls back to when unset.
+type RoleSpec struct {
+	// Name is the canonical key used in themes.yaml and config.yaml
+	// (ui.themes.<theme>.<name>). Matching is case-insensitive.
+	Name string
+	// Desc is a short description shown in the settings panel.
+	Desc string
+	// Ptr returns the address of the backing field inside a ThemeColors.
+	Ptr func(*ThemeColors) *string
+	// Fallback is the Name of the role consulted when this one is empty.
+	// Empty means "no fallback" (the terminal default is used).
+	Fallback string
+}
+
+// Roles is the registry of every themable color role. It is the single place
+// new roles are declared: the settings panel, config overrides and themes.yaml
+// parsing all iterate this list.
+var Roles = []RoleSpec{
+	{"heading", "titles & section headers", func(c *ThemeColors) *string { return &c.Heading }, ""},
+	{"text", "body text", func(c *ThemeColors) *string { return &c.Text }, ""},
+	{"background", "panel background", func(c *ThemeColors) *string { return &c.Background }, ""},
+	{"muted", "secondary text", func(c *ThemeColors) *string { return &c.Muted }, ""},
+	{"accent", "rails, prompts, cursors", func(c *ThemeColors) *string { return &c.Accent }, "heading"},
+	{"border", "unfocused panel border", func(c *ThemeColors) *string { return &c.Border }, ""},
+	{"borderFocus", "focused panel border", func(c *ThemeColors) *string { return &c.BorderFocus }, "heading"},
+	{"highlight", "selected item background", func(c *ThemeColors) *string { return &c.Highlight }, ""},
+	{"highlightText", "selected item text", func(c *ThemeColors) *string { return &c.HighlightText }, ""},
+	{"tableHeader", "table header text", func(c *ThemeColors) *string { return &c.TableHeader }, "muted"},
+	{"tableHeaderBg", "table header background", func(c *ThemeColors) *string { return &c.TableHeaderBg }, "background"},
+	{"tableHeaderLine", "rule under table header", func(c *ThemeColors) *string { return &c.TableHeaderLine }, "border"},
+	{"tableText", "table cell text", func(c *ThemeColors) *string { return &c.TableText }, "text"},
+	{"tableBorder", "table panel border", func(c *ThemeColors) *string { return &c.TableBorder }, "border"},
+	{"tableSelectedBg", "selected row background", func(c *ThemeColors) *string { return &c.TableSelectedBg }, "highlight"},
+	{"tableSelectedText", "selected row text", func(c *ThemeColors) *string { return &c.TableSelectedText }, "highlightText"},
+	{"statusBarBg", "status bar background", func(c *ThemeColors) *string { return &c.StatusBarBg }, "highlight"},
+	{"statusBarText", "status bar text", func(c *ThemeColors) *string { return &c.StatusBarText }, "highlightText"},
+	{"hintKey", "shortcut key in status bar", func(c *ThemeColors) *string { return &c.HintKey }, "statusBarText"},
+	{"hintText", "shortcut label in status bar", func(c *ThemeColors) *string { return &c.HintText }, "statusBarText"},
+	{"error", "errors", func(c *ThemeColors) *string { return &c.Error }, ""},
+	{"warning", "warnings", func(c *ThemeColors) *string { return &c.Warning }, ""},
+	{"success", "success messages", func(c *ThemeColors) *string { return &c.Success }, "accent"},
+	{"info", "informational messages", func(c *ThemeColors) *string { return &c.Info }, "muted"},
+}
+
+// roleIndex returns the index of the role with the given name (matched
+// case-insensitively), or -1 when no such role exists.
+func roleIndex(name string) int {
+	for i, r := range Roles {
+		if strings.EqualFold(r.Name, name) {
+			return i
+		}
+	}
+	return -1
+}
+
+// ResolveRole returns the effective color for a role in the active theme,
+// walking the fallback chain until a non-empty value is found. An empty
+// result means "terminal default".
+func ResolveRole(name string) string {
+	return ResolveRoleAt(getActiveTheme(), name)
+}
+
+// ResolveRoleAt resolves a role's effective color for an arbitrary theme index
+// (not just the active theme), walking the fallback chain. Used by the
+// settings panel to preview "auto" values.
+func ResolveRoleAt(themeIdx int, name string) string {
+	c := Themes[themeIdx].Colors
+	for hops := 0; name != "" && hops <= len(Roles); hops++ {
+		i := roleIndex(name)
+		if i < 0 {
+			return ""
+		}
+		if v := *Roles[i].Ptr(&c); v != "" {
+			return v
+		}
+		name = Roles[i].Fallback
+	}
+	return ""
 }
 
 // themesYAML holds the built-in theme palettes. It is the single source of
@@ -52,28 +148,6 @@ type Theme struct {
 //go:embed themes.yaml
 var themesYAML []byte
 
-// themeDef mirrors one entry in themes.yaml. Keeping a dedicated type (rather
-// than reusing config.ThemeColorConfig) keeps the embedded-defaults format
-// decoupled from the user-facing config schema.
-type themeDef struct {
-	Name            string `yaml:"name"`
-	Heading         string `yaml:"heading"`
-	Text            string `yaml:"text"`
-	Background      string `yaml:"background"`
-	Border          string `yaml:"border"`
-	BorderFocus     string `yaml:"borderFocus"`
-	Highlight       string `yaml:"highlight"`
-	HighlightText   string `yaml:"highlightText"`
-	Muted           string `yaml:"muted"`
-	TableHeader     string `yaml:"tableHeader"`
-	TableHeaderLine string `yaml:"tableHeaderLine"`
-	StatusBarBg     string `yaml:"statusBarBg"`
-	StatusBarText   string `yaml:"statusBarText"`
-	Accent          string `yaml:"accent"`
-	Error           string `yaml:"error"`
-	Warning         string `yaml:"warning"`
-}
-
 // Themes is the list of built-in themes (named after Australian birds), loaded
 // from the embedded themes.yaml at startup. Order is significant — callers and
 // tests refer to themes by index — and is preserved from the file.
@@ -82,7 +156,9 @@ type themeDef struct {
 var Themes = mustLoadBuiltinThemes()
 
 func mustLoadBuiltinThemes() []Theme {
-	var defs []themeDef
+	// Each entry is a flat map of role name (plus "name") to value, so adding
+	// a role to the registry automatically makes it loadable from the file.
+	var defs []map[string]string
 	if err := yaml.Unmarshal(themesYAML, &defs); err != nil {
 		// The file is embedded at compile time, so a parse failure is a
 		// programming error in themes.yaml, not a runtime/user condition.
@@ -90,17 +166,21 @@ func mustLoadBuiltinThemes() []Theme {
 	}
 	themes := make([]Theme, len(defs))
 	for i, d := range defs {
-		themes[i] = Theme{
-			Name: d.Name,
-			Colors: ThemeColors{
-				Heading: d.Heading, Text: d.Text, Background: d.Background,
-				Border: d.Border, BorderFocus: d.BorderFocus,
-				Highlight: d.Highlight, HighlightText: d.HighlightText, Muted: d.Muted,
-				TableHeader: d.TableHeader, TableHeaderLine: d.TableHeaderLine,
-				StatusBarBg: d.StatusBarBg, StatusBarText: d.StatusBarText, Accent: d.Accent,
-				Error: d.Error, Warning: d.Warning,
-			},
+		t := Theme{Name: d["name"]}
+		if t.Name == "" {
+			panic(fmt.Sprintf("ui: themes.yaml entry %d has no name", i))
 		}
+		for key, val := range d {
+			if key == "name" || val == "" {
+				continue
+			}
+			ri := roleIndex(key)
+			if ri < 0 {
+				panic(fmt.Sprintf("ui: themes.yaml theme %q has unknown role %q", t.Name, key))
+			}
+			*Roles[ri].Ptr(&t.Colors) = val
+		}
+		themes[i] = t
 	}
 	return themes
 }
@@ -121,56 +201,21 @@ func getActiveTheme() int {
 // theme and merges any per-theme color overrides from the config file.
 func InitFromConfig(ui config.UIConfig) {
 	// Apply per-theme color overrides from config before setting active theme.
-	for name, cfg := range ui.Themes {
+	// Role keys are matched case-insensitively because viper lower-cases all
+	// config keys.
+	for name, overrides := range ui.Themes {
 		idx, ok := LookupTheme(name)
 		if !ok {
 			continue
 		}
 		c := &Themes[idx].Colors
-		if cfg.Heading != "" {
-			c.Heading = cfg.Heading
-		}
-		if cfg.Text != "" {
-			c.Text = cfg.Text
-		}
-		if cfg.Background != "" {
-			c.Background = cfg.Background
-		}
-		if cfg.Border != "" {
-			c.Border = cfg.Border
-		}
-		if cfg.BorderFocus != "" {
-			c.BorderFocus = cfg.BorderFocus
-		}
-		if cfg.Highlight != "" {
-			c.Highlight = cfg.Highlight
-		}
-		if cfg.HighlightText != "" {
-			c.HighlightText = cfg.HighlightText
-		}
-		if cfg.Muted != "" {
-			c.Muted = cfg.Muted
-		}
-		if cfg.TableHeader != "" {
-			c.TableHeader = cfg.TableHeader
-		}
-		if cfg.TableHeaderLine != "" {
-			c.TableHeaderLine = cfg.TableHeaderLine
-		}
-		if cfg.StatusBarBg != "" {
-			c.StatusBarBg = cfg.StatusBarBg
-		}
-		if cfg.StatusBarText != "" {
-			c.StatusBarText = cfg.StatusBarText
-		}
-		if cfg.Accent != "" {
-			c.Accent = cfg.Accent
-		}
-		if cfg.Error != "" {
-			c.Error = cfg.Error
-		}
-		if cfg.Warning != "" {
-			c.Warning = cfg.Warning
+		for key, val := range overrides {
+			if val == "" {
+				continue
+			}
+			if ri := roleIndex(key); ri >= 0 {
+				*Roles[ri].Ptr(c) = val
+			}
 		}
 	}
 
@@ -212,63 +257,35 @@ func ActiveThemeColors() ThemeColors {
 	return Themes[getActiveTheme()].Colors
 }
 
-// Named color accessors — use these instead of FeatherColor in new code.
+// Named color accessors — use these instead of FeatherColor in new code. Each
+// resolves through the role registry, so the fallback chains declared in Roles
+// apply automatically.
 
-func ColorHeading() string       { return Themes[getActiveTheme()].Colors.Heading }
-func ColorText() string          { return Themes[getActiveTheme()].Colors.Text }
-func ColorBackground() string    { return Themes[getActiveTheme()].Colors.Background }
-func ColorBorder() string        { return Themes[getActiveTheme()].Colors.Border }
-func ColorHighlight() string     { return Themes[getActiveTheme()].Colors.Highlight }
-func ColorHighlightText() string { return Themes[getActiveTheme()].Colors.HighlightText }
-func ColorMuted() string         { return Themes[getActiveTheme()].Colors.Muted }
-func ColorError() string         { return Themes[getActiveTheme()].Colors.Error }
-func ColorWarning() string       { return Themes[getActiveTheme()].Colors.Warning }
+func ColorHeading() string       { return ResolveRole("heading") }
+func ColorText() string          { return ResolveRole("text") }
+func ColorBackground() string    { return ResolveRole("background") }
+func ColorBorder() string        { return ResolveRole("border") }
+func ColorHighlight() string     { return ResolveRole("highlight") }
+func ColorHighlightText() string { return ResolveRole("highlightText") }
+func ColorMuted() string         { return ResolveRole("muted") }
+func ColorError() string         { return ResolveRole("error") }
+func ColorWarning() string       { return ResolveRole("warning") }
+func ColorSuccess() string       { return ResolveRole("success") }
+func ColorInfo() string          { return ResolveRole("info") }
 
-// Granular accessors. Each falls back to a related role when its own value is
-// unset, so configs that only specify the original nine roles keep working and
-// users can override just the knobs they care about.
-
-func ColorBorderFocus() string {
-	if c := Themes[getActiveTheme()].Colors.BorderFocus; c != "" {
-		return c
-	}
-	return ColorHeading()
-}
-
-func ColorTableHeader() string {
-	if c := Themes[getActiveTheme()].Colors.TableHeader; c != "" {
-		return c
-	}
-	return ColorMuted()
-}
-
-func ColorTableHeaderLine() string {
-	if c := Themes[getActiveTheme()].Colors.TableHeaderLine; c != "" {
-		return c
-	}
-	return ColorBorder()
-}
-
-func ColorStatusBarBg() string {
-	if c := Themes[getActiveTheme()].Colors.StatusBarBg; c != "" {
-		return c
-	}
-	return ColorHighlight()
-}
-
-func ColorStatusBarText() string {
-	if c := Themes[getActiveTheme()].Colors.StatusBarText; c != "" {
-		return c
-	}
-	return ColorHighlightText()
-}
-
-func ColorAccent() string {
-	if c := Themes[getActiveTheme()].Colors.Accent; c != "" {
-		return c
-	}
-	return ColorHeading()
-}
+func ColorBorderFocus() string       { return ResolveRole("borderFocus") }
+func ColorAccent() string            { return ResolveRole("accent") }
+func ColorTableHeader() string       { return ResolveRole("tableHeader") }
+func ColorTableHeaderBg() string     { return ResolveRole("tableHeaderBg") }
+func ColorTableHeaderLine() string   { return ResolveRole("tableHeaderLine") }
+func ColorTableText() string         { return ResolveRole("tableText") }
+func ColorTableBorder() string       { return ResolveRole("tableBorder") }
+func ColorTableSelectedBg() string   { return ResolveRole("tableSelectedBg") }
+func ColorTableSelectedText() string { return ResolveRole("tableSelectedText") }
+func ColorStatusBarBg() string       { return ResolveRole("statusBarBg") }
+func ColorStatusBarText() string     { return ResolveRole("statusBarText") }
+func ColorHintKey() string           { return ResolveRole("hintKey") }
+func ColorHintText() string          { return ResolveRole("hintText") }
 
 // FeatherColor returns theme colors by shade index for backwards compatibility.
 // shade 0 → Heading (primary), shade 1 → Border (secondary).
@@ -349,8 +366,12 @@ func ErrorStyle() lipgloss.Style {
 	return lipgloss.NewStyle().Foreground(lipgloss.Color(ColorError()))
 }
 
+func SuccessStyle() lipgloss.Style {
+	return lipgloss.NewStyle().Foreground(lipgloss.Color(ColorSuccess()))
+}
+
 func InfoStyle() lipgloss.Style {
-	return lipgloss.NewStyle().Foreground(lipgloss.Color(ColorMuted()))
+	return lipgloss.NewStyle().Foreground(lipgloss.Color(ColorInfo()))
 }
 
 func LoadingBoxStyle() lipgloss.Style {
@@ -378,7 +399,7 @@ func ModalStyle(width, height int) lipgloss.Style {
 		Padding(1, 2)
 }
 
-// StatusBarStyle returns a full-width bar with highlight background and text.
+// StatusBarStyle returns a full-width bar with the status bar colors.
 func StatusBarStyle(width int) lipgloss.Style {
 	if width < 1 {
 		width = 1

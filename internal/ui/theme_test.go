@@ -3,7 +3,14 @@ package ui
 import (
 	"strings"
 	"testing"
+
+	"github.com/user/aws_explorer/internal/config"
 )
+
+// configUI builds a UIConfig with overrides for a single theme.
+func configUI(theme string, overrides map[string]string) config.UIConfig {
+	return config.UIConfig{Themes: map[string]map[string]string{theme: overrides}}
+}
 
 // All built-in theme names must be hyphenated single tokens (no spaces), so
 // they work as unquoted shell arguments to --theme.
@@ -97,10 +104,80 @@ func TestGranularRoleFallbacks(t *testing.T) {
 		{"StatusBarBg->Highlight", ColorStatusBarBg(), base.Highlight},
 		{"StatusBarText->HighlightText", ColorStatusBarText(), base.HighlightText},
 		{"Accent->Heading", ColorAccent(), base.Heading},
+		// Granular table roles fall back to the general roles.
+		{"TableText->Text", ColorTableText(), base.Text},
+		{"TableBorder->Border", ColorTableBorder(), base.Border},
+		{"TableSelectedBg->Highlight", ColorTableSelectedBg(), base.Highlight},
+		{"TableSelectedText->HighlightText", ColorTableSelectedText(), base.HighlightText},
+		// Multi-hop chains: hintKey -> statusBarText -> highlightText, and
+		// success -> accent -> heading.
+		{"HintKey->StatusBarText->HighlightText", ColorHintKey(), base.HighlightText},
+		{"HintText->StatusBarText->HighlightText", ColorHintText(), base.HighlightText},
+		{"Success->Accent->Heading", ColorSuccess(), base.Heading},
+		{"Info->Muted", ColorInfo(), base.Muted},
 	}
 	for _, c := range cases {
 		if c.got != c.wantSame {
 			t.Errorf("%s = %q, want fallback %q", c.name, c.got, c.wantSame)
 		}
+	}
+}
+
+// The role registry must be internally consistent: unique names, and every
+// fallback must name another registered role (no cycles back to itself).
+func TestRoleRegistryConsistent(t *testing.T) {
+	seen := map[string]bool{}
+	for _, r := range Roles {
+		key := strings.ToLower(r.Name)
+		if seen[key] {
+			t.Errorf("duplicate role name %q", r.Name)
+		}
+		seen[key] = true
+		if r.Fallback != "" {
+			if roleIndex(r.Fallback) < 0 {
+				t.Errorf("role %q falls back to unknown role %q", r.Name, r.Fallback)
+			}
+			if strings.EqualFold(r.Fallback, r.Name) {
+				t.Errorf("role %q falls back to itself", r.Name)
+			}
+		}
+		// Ptr must address a distinct field per role.
+		var c ThemeColors
+		*r.Ptr(&c) = "probe"
+		count := 0
+		for _, r2 := range Roles {
+			if *r2.Ptr(&c) == "probe" {
+				count++
+			}
+		}
+		if count != 1 {
+			t.Errorf("role %q shares a backing field with another role", r.Name)
+		}
+	}
+}
+
+// Config overrides must apply through the registry, matching role names
+// case-insensitively (viper lower-cases config keys).
+func TestInitFromConfigOverridesRoles(t *testing.T) {
+	base := ThemeColors{Heading: "#101010", Text: "#202020"}
+	Themes = append(Themes, Theme{Name: "override-probe", Colors: base})
+	defer func() { Themes = Themes[:len(Themes)-1] }()
+
+	InitFromConfig(configUI("override-probe", map[string]string{
+		"tableheaderbg":     "#aaaaaa", // lower-cased, as viper delivers it
+		"tableSelectedText": "#bbbbbb",
+		"notARole":          "#ffffff", // silently ignored
+	}))
+
+	idx, _ := LookupTheme("override-probe")
+	c := Themes[idx].Colors
+	if c.TableHeaderBg != "#aaaaaa" {
+		t.Errorf("TableHeaderBg = %q, want #aaaaaa", c.TableHeaderBg)
+	}
+	if c.TableSelectedText != "#bbbbbb" {
+		t.Errorf("TableSelectedText = %q, want #bbbbbb", c.TableSelectedText)
+	}
+	if c.Heading != "#101010" {
+		t.Errorf("Heading = %q, want untouched #101010", c.Heading)
 	}
 }

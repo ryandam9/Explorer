@@ -18,42 +18,16 @@ type SettingsSavedMsg struct{ Theme string }
 // SettingsErrMsg carries a save error back to the main model.
 type SettingsErrMsg struct{ Err error }
 
-// settingsField enumerates the editable color roles.
-type settingsField int
-
-const (
-	sfHeading settingsField = iota
-	sfText
-	sfBackground
-	sfBorder
-	sfBorderFocus
-	sfHighlight
-	sfHighlightText
-	sfMuted
-	sfTableHeader
-	sfTableHeaderLine
-	sfStatusBarBg
-	sfStatusBarText
-	sfAccent
-	sfError
-	sfWarning
-	sfFieldCount
-)
-
-var settingsFieldNames = [sfFieldCount]string{
-	"Heading", "Text", "Background", "Border", "BorderFocus",
-	"Highlight", "HighlightText", "Muted", "TableHeader", "TableHeaderLine",
-	"StatusBarBg", "StatusBarText", "Accent", "Error", "Warning",
-}
-
-// SettingsModel drives the settings overlay panel.
+// SettingsModel drives the settings overlay panel. The list of editable color
+// roles comes from the Roles registry in theme.go, so adding a role there
+// automatically makes it editable here.
 type SettingsModel struct {
 	// Width / height of the terminal.
 	width, height int
 
 	// Theme list navigation.
 	themeIdx int // index into Themes
-	fieldIdx int // which color role is being edited (0-based)
+	fieldIdx int // which color role is being edited (index into Roles)
 	editMode bool
 	editBuf  string // in-progress text while editing
 
@@ -79,78 +53,13 @@ func NewSettingsModel(width, height int, configPath string, cfg *config.Config) 
 func (s SettingsModel) EditMode() bool { return s.editMode }
 
 // colorForField reads the current in-memory color for a role from Themes[].
-func (s SettingsModel) colorForField(themeIdx int, f settingsField) string {
-	c := Themes[themeIdx].Colors
-	switch f {
-	case sfHeading:
-		return c.Heading
-	case sfText:
-		return c.Text
-	case sfBackground:
-		return c.Background
-	case sfBorder:
-		return c.Border
-	case sfBorderFocus:
-		return c.BorderFocus
-	case sfHighlight:
-		return c.Highlight
-	case sfHighlightText:
-		return c.HighlightText
-	case sfMuted:
-		return c.Muted
-	case sfTableHeader:
-		return c.TableHeader
-	case sfTableHeaderLine:
-		return c.TableHeaderLine
-	case sfStatusBarBg:
-		return c.StatusBarBg
-	case sfStatusBarText:
-		return c.StatusBarText
-	case sfAccent:
-		return c.Accent
-	case sfError:
-		return c.Error
-	case sfWarning:
-		return c.Warning
-	}
-	return ""
+func (s SettingsModel) colorForField(themeIdx, fieldIdx int) string {
+	return *Roles[fieldIdx].Ptr(&Themes[themeIdx].Colors)
 }
 
 // setColorForField updates the in-memory Themes[] entry.
-func setColorForField(themeIdx int, f settingsField, val string) {
-	c := &Themes[themeIdx].Colors
-	switch f {
-	case sfHeading:
-		c.Heading = val
-	case sfText:
-		c.Text = val
-	case sfBackground:
-		c.Background = val
-	case sfBorder:
-		c.Border = val
-	case sfBorderFocus:
-		c.BorderFocus = val
-	case sfHighlight:
-		c.Highlight = val
-	case sfHighlightText:
-		c.HighlightText = val
-	case sfMuted:
-		c.Muted = val
-	case sfTableHeader:
-		c.TableHeader = val
-	case sfTableHeaderLine:
-		c.TableHeaderLine = val
-	case sfStatusBarBg:
-		c.StatusBarBg = val
-	case sfStatusBarText:
-		c.StatusBarText = val
-	case sfAccent:
-		c.Accent = val
-	case sfError:
-		c.Error = val
-	case sfWarning:
-		c.Warning = val
-	}
+func setColorForField(themeIdx, fieldIdx int, val string) {
+	*Roles[fieldIdx].Ptr(&Themes[themeIdx].Colors) = val
 }
 
 func (s SettingsModel) Update(msg tea.Msg) (SettingsModel, tea.Cmd) {
@@ -171,7 +80,7 @@ func (s SettingsModel) updateNavMode(msg tea.KeyMsg) (SettingsModel, tea.Cmd) {
 			s.fieldIdx--
 		}
 	case "down", "j":
-		if s.fieldIdx < int(sfFieldCount)-1 {
+		if s.fieldIdx < len(Roles)-1 {
 			s.fieldIdx++
 		}
 	case "left", "h":
@@ -184,7 +93,7 @@ func (s SettingsModel) updateNavMode(msg tea.KeyMsg) (SettingsModel, tea.Cmd) {
 		}
 	case "enter", "e":
 		s.editMode = true
-		s.editBuf = s.colorForField(s.themeIdx, settingsField(s.fieldIdx))
+		s.editBuf = s.colorForField(s.themeIdx, s.fieldIdx)
 	case "ctrl+s", "w":
 		return s, s.saveCmd()
 	}
@@ -194,7 +103,7 @@ func (s SettingsModel) updateNavMode(msg tea.KeyMsg) (SettingsModel, tea.Cmd) {
 func (s SettingsModel) updateEditMode(msg tea.KeyMsg) (SettingsModel, tea.Cmd) {
 	switch msg.String() {
 	case "enter":
-		setColorForField(s.themeIdx, settingsField(s.fieldIdx), strings.TrimSpace(s.editBuf))
+		setColorForField(s.themeIdx, s.fieldIdx, strings.TrimSpace(s.editBuf))
 		s.editMode = false
 	case "esc":
 		s.editMode = false
@@ -217,29 +126,21 @@ func (s SettingsModel) saveCmd() tea.Cmd {
 			return SettingsErrMsg{fmt.Errorf("config path not set")}
 		}
 
-		// Build the updated UI config from the in-memory Themes slice.
+		// Build the updated UI config from the in-memory Themes slice. Only
+		// non-empty roles are written, so roles left on "auto" keep following
+		// their fallback chain.
 		uiCfg := config.UIConfig{
 			Theme:  Themes[s.themeIdx].Name,
-			Themes: make(map[string]config.ThemeColorConfig, len(Themes)),
+			Themes: make(map[string]map[string]string, len(Themes)),
 		}
 		for _, t := range Themes {
-			uiCfg.Themes[t.Name] = config.ThemeColorConfig{
-				Heading:         t.Colors.Heading,
-				Text:            t.Colors.Text,
-				Background:      t.Colors.Background,
-				Border:          t.Colors.Border,
-				BorderFocus:     t.Colors.BorderFocus,
-				Highlight:       t.Colors.Highlight,
-				HighlightText:   t.Colors.HighlightText,
-				Muted:           t.Colors.Muted,
-				TableHeader:     t.Colors.TableHeader,
-				TableHeaderLine: t.Colors.TableHeaderLine,
-				StatusBarBg:     t.Colors.StatusBarBg,
-				StatusBarText:   t.Colors.StatusBarText,
-				Accent:          t.Colors.Accent,
-				Error:           t.Colors.Error,
-				Warning:         t.Colors.Warning,
+			colors := make(map[string]string, len(Roles))
+			for _, r := range Roles {
+				if v := *r.Ptr(&t.Colors); v != "" {
+					colors[r.Name] = v
+				}
 			}
+			uiCfg.Themes[t.Name] = colors
 		}
 
 		// Update the full config and marshal to YAML.
@@ -259,15 +160,56 @@ func (s SettingsModel) saveCmd() tea.Cmd {
 	}
 }
 
+// settingsHints returns the context-aware shortcuts for the panel's current
+// input mode.
+func (s SettingsModel) settingsHints() []KeyHint {
+	if s.editMode {
+		return []KeyHint{
+			H("Enter", "confirm"),
+			H("Esc", "cancel"),
+		}
+	}
+	return []KeyHint{
+		H("←/→", "theme"),
+		H("↑/↓", "role"),
+		H("Enter", "edit"),
+		H("Ctrl+S", "save"),
+		H("Esc", "close"),
+	}
+}
+
+// renderRoleRow renders one role line: name, color swatch and value (or the
+// in-progress edit buffer).
+func (s SettingsModel) renderRoleRow(i, nameW int, heading, muted, selected lipgloss.Style) string {
+	r := Roles[i]
+	val := s.colorForField(s.themeIdx, i)
+
+	// "auto" rows preview the color the fallback chain resolves to.
+	text := val
+	swatchColor := val
+	if val == "" {
+		text = "auto"
+		swatchColor = ResolveRoleAt(s.themeIdx, r.Name)
+	}
+
+	label := fmt.Sprintf("%-*s", nameW, r.Name)
+	// The swatch carries its own background color, so it is appended outside
+	// the row style to keep the selection highlight intact.
+	switch {
+	case s.editMode && s.fieldIdx == i:
+		return heading.Render(fmt.Sprintf(" %s %s█", label, s.editBuf))
+	case s.fieldIdx == i:
+		return selected.Render(fmt.Sprintf(" %s %-8s", label, text)) + " " + renderSwatch(swatchColor)
+	default:
+		return " " + muted.Render(label) + " " + fmt.Sprintf("%-8s", text) + " " + renderSwatch(swatchColor)
+	}
+}
+
 // View renders the settings overlay.
 func (s SettingsModel) View() string {
 	panelW := s.width - 4
-	if panelW < 40 {
-		panelW = 40
-	}
-	panelH := s.height - 4
-	if panelH < 20 {
-		panelH = 20
+	if panelW < 72 {
+		panelW = 72
 	}
 
 	heading := lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color(ColorHeading()))
@@ -280,39 +222,33 @@ func (s SettingsModel) View() string {
 	// ── Theme list (top section) ──────────────────────────────────────────────
 	themeListStr := wrapThemeList(Themes, s.themeIdx, panelW-4, selected, muted)
 
-	// ── Color roles (bottom section) ──────────────────────────────────────────
-	var colorRows strings.Builder
-	for i := 0; i < int(sfFieldCount); i++ {
-		f := settingsField(i)
-		name := settingsFieldNames[f]
-		val := s.colorForField(s.themeIdx, f)
-
-		var valueStr string
-		if s.editMode && s.fieldIdx == i {
-			valueStr = s.editBuf + "█"
-		} else {
-			swatch := renderSwatch(val)
-			valueStr = val + " " + swatch
+	// ── Color roles (bottom section, two columns) ─────────────────────────────
+	nameW := 0
+	for _, r := range Roles {
+		if len(r.Name) > nameW {
+			nameW = len(r.Name)
 		}
-
-		var row string
-		label := fmt.Sprintf("%-14s", name)
-		if s.fieldIdx == i && !s.editMode {
-			row = selected.Render(fmt.Sprintf("  %s  %s", label, valueStr))
-		} else if s.editMode && s.fieldIdx == i {
-			row = heading.Render(fmt.Sprintf("  %s  %s", label, valueStr))
-		} else {
-			row = fmt.Sprintf("  %s  %s", muted.Render(label), valueStr)
-		}
-		colorRows.WriteString(row + "\n")
 	}
+	half := (len(Roles) + 1) / 2
+	var leftRows, rightRows []string
+	for i := 0; i < half; i++ {
+		leftRows = append(leftRows, s.renderRoleRow(i, nameW, heading, muted, selected))
+	}
+	for i := half; i < len(Roles); i++ {
+		rightRows = append(rightRows, s.renderRoleRow(i, nameW, heading, muted, selected))
+	}
+	colW := (panelW - 6) / 2
+	leftCol := lipgloss.NewStyle().Width(colW).Render(strings.Join(leftRows, "\n"))
+	rightCol := lipgloss.NewStyle().Width(colW).Render(strings.Join(rightRows, "\n"))
+	colorRows := lipgloss.JoinHorizontal(lipgloss.Top, leftCol, "  ", rightCol)
 
-	// ── Hint bar ──────────────────────────────────────────────────────────────
-	var hints string
-	if s.editMode {
-		hints = "Enter:confirm  Esc:cancel"
-	} else {
-		hints = "←→:theme  ↑↓:role  Enter/e:edit  Ctrl+S / w:save  Esc:close"
+	fallbackNote := ""
+	if !s.editMode {
+		r := Roles[s.fieldIdx]
+		fallbackNote = r.Desc
+		if r.Fallback != "" {
+			fallbackNote += "  ·  auto = follows " + r.Fallback
+		}
 	}
 
 	body := lipgloss.JoinVertical(lipgloss.Left,
@@ -322,11 +258,20 @@ func (s SettingsModel) View() string {
 		themeListStr,
 		"",
 		heading.Render("Color Roles  (↑/↓ to select, Enter/e to edit)"),
-		colorRows.String(),
+		colorRows,
+		"",
+		muted.Render(fallbackNote),
 	)
 
-	panel := ModalStyle(panelW, panelH).Render(body)
-	hintBar := StatusBarStyle(s.width - 4).Render(hints)
+	panel := lipgloss.NewStyle().
+		Width(panelW).
+		MaxWidth(panelW+2).
+		BorderStyle(lipgloss.RoundedBorder()).
+		BorderForeground(lipgloss.Color(ColorBorderFocus())).
+		Foreground(lipgloss.Color(ColorText())).
+		Padding(1, 2).
+		Render(body)
+	hintBar := StatusBar(panelW+2, "", s.settingsHints())
 	return lipgloss.JoinVertical(lipgloss.Left, panel, hintBar)
 }
 
@@ -362,7 +307,7 @@ func wrapThemeList(themes []Theme, activeIdx, maxW int, sel, muted lipgloss.Styl
 // placeholder if the color is empty.
 func renderSwatch(hex string) string {
 	if hex == "" {
-		return lipgloss.NewStyle().Foreground(lipgloss.Color(ColorMuted())).Render("(default)")
+		return lipgloss.NewStyle().Foreground(lipgloss.Color(ColorMuted())).Render("··")
 	}
 	return lipgloss.NewStyle().
 		Background(lipgloss.Color(hex)).

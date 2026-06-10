@@ -427,19 +427,7 @@ func (m *Model) detailFields(rt resourceType) []display.FieldMeta {
 }
 
 func (m *Model) applyTableStyle(t *table.Model) {
-	s := table.DefaultStyles()
-	s.Header = s.Header.
-		Foreground(lipgloss.Color(ui.ColorTableHeader())).
-		BorderStyle(lipgloss.NormalBorder()).
-		BorderForeground(lipgloss.Color(ui.ColorTableHeaderLine())).
-		BorderBottom(true).
-		Bold(true)
-	s.Cell = s.Cell.Foreground(lipgloss.Color(ui.ColorText()))
-	s.Selected = s.Selected.
-		Foreground(lipgloss.Color(ui.ColorHighlightText())).
-		Background(lipgloss.Color(ui.ColorHighlight())).
-		Bold(true)
-	t.SetStyles(s)
+	t.SetStyles(ui.TableStyles())
 }
 
 func (m *Model) restyleForTheme() {
@@ -1209,6 +1197,12 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 func (m *Model) handleVPCListKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	key := msg.String()
 	switch key {
+	case ">", ".":
+		m.vpcTable.ScrollRight()
+		return m, nil
+	case "<", ",":
+		m.vpcTable.ScrollLeft()
+		return m, nil
 	case "/":
 		m.inVPCSearch = true
 		m.focus = focusVPCSearch
@@ -1424,8 +1418,10 @@ func (m *Model) updateTableSizes() {
 		tableH = 1
 	}
 
-	// VPC list table uses full width in stateVPCList.
+	// VPC list table uses full width in stateVPCList. Constrain it so columns
+	// that do not fit scroll horizontally (< / >) instead of wrapping.
 	m.vpcTable.SetHeight(tableH)
+	m.vpcTable.SetWidth(max(20, m.width-4))
 
 	// Resource table: right panel = total - left panel - middle panel - borders.
 	// The panel adds 2 for borders; the content area has title + separator (2 lines)
@@ -1589,6 +1585,9 @@ func (m *Model) viewVPCListState() string {
 		Render("VPC Explorer")
 
 	header := lipgloss.JoinHorizontal(lipgloss.Center, title, "  ", m.viewScanStatus())
+	if ind := ui.TableScrollIndicator(&m.vpcTable); ind != "" {
+		header = lipgloss.JoinHorizontal(lipgloss.Center, header, "  ", ind)
+	}
 
 	tableView := m.vpcTable.View()
 
@@ -1734,16 +1733,8 @@ func (m *Model) viewResourcePanel(height int) string {
 	// Column-scroll indicator: shows arrows when columns are hidden off either
 	// edge so the user knows there is more to scroll to with < / >.
 	var scrollHint string
-	if hiddenLeft, hiddenRight := m.resourceTable.ColScrollInfo(); hiddenLeft+hiddenRight > 0 {
-		left, right := " ", " "
-		if hiddenLeft > 0 {
-			left = "◀"
-		}
-		if hiddenRight > 0 {
-			right = "▶"
-		}
-		scrollHint = lipgloss.NewStyle().Foreground(lipgloss.Color(ui.ColorMuted())).
-			Render(fmt.Sprintf("  %s %d more cols %s", left, hiddenLeft+hiddenRight, right))
+	if ind := ui.TableScrollIndicator(&m.resourceTable); ind != "" {
+		scrollHint = "  " + ind
 	}
 
 	var body string
@@ -1842,8 +1833,7 @@ func (m *Model) viewFindingsOverlay(bg string) string {
 // numbered list grouped from most to least severe.
 func (m *Model) renderFindings() string {
 	if len(m.findings) == 0 {
-		return lipgloss.NewStyle().Foreground(lipgloss.Color(ui.ColorMuted())).
-			Render("No issues detected. ✓")
+		return ui.SuccessStyle().Render("No issues detected. ✓")
 	}
 
 	sevStyle := func(s Severity) lipgloss.Style {
@@ -1853,7 +1843,7 @@ func (m *Model) renderFindings() string {
 		case SevWarning:
 			return lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color(ui.ColorWarning()))
 		default:
-			return lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color(ui.ColorMuted()))
+			return lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color(ui.ColorInfo()))
 		}
 	}
 	label := map[Severity]string{SevCritical: "🔴 CRITICAL", SevWarning: "🟡 WARNING", SevInfo: "🔵 INFO"}
@@ -1909,7 +1899,7 @@ func (m *Model) viewTraceResultOverlay(bg string) string {
 func (m *Model) renderTraceResult() string {
 	summaryColor := ui.ColorWarning()
 	if m.traceResult.Reachable {
-		summaryColor = ui.ColorAccent()
+		summaryColor = ui.ColorSuccess()
 	}
 	if strings.HasPrefix(m.traceResult.Summary, "❌") {
 		summaryColor = ui.ColorError()
@@ -2106,10 +2096,9 @@ func (m *Model) viewDiffOverlay(bg string) string {
 // renderDiff builds the scrollable body of the snapshot-diff overlay.
 func (m *Model) renderDiff() string {
 	if len(m.snapDiff) == 0 {
-		return lipgloss.NewStyle().Foreground(lipgloss.Color(ui.ColorMuted())).
-			Render("No changes since the baseline snapshot. ✓")
+		return ui.SuccessStyle().Render("No changes since the baseline snapshot. ✓")
 	}
-	addStyle := lipgloss.NewStyle().Foreground(lipgloss.Color(ui.ColorAccent()))
+	addStyle := lipgloss.NewStyle().Foreground(lipgloss.Color(ui.ColorSuccess()))
 	remStyle := lipgloss.NewStyle().Foreground(lipgloss.Color(ui.ColorError()))
 	modStyle := lipgloss.NewStyle().Foreground(lipgloss.Color(ui.ColorWarning()))
 
@@ -2192,7 +2181,7 @@ func (m *Model) renderAnalyzerList() string {
 	glyphStyle := func(a NetInsightsAnalysis) lipgloss.Style {
 		switch analysisVerdict(a) {
 		case "reachable":
-			return lipgloss.NewStyle().Foreground(lipgloss.Color(ui.ColorAccent()))
+			return lipgloss.NewStyle().Foreground(lipgloss.Color(ui.ColorSuccess()))
 		case "not reachable", "failed":
 			return lipgloss.NewStyle().Foreground(lipgloss.Color(ui.ColorError()))
 		default:
@@ -2241,11 +2230,6 @@ func (m *Model) viewScanStatus() string {
 }
 
 func (m *Model) viewStatusBar() string {
-	style := lipgloss.NewStyle().
-		Background(lipgloss.Color(ui.ColorStatusBarBg())).
-		Foreground(lipgloss.Color(ui.ColorStatusBarText())).
-		Padding(0, 1)
-
 	var parts []string
 	if m.selectedVPC != nil {
 		parts = append(parts, m.selectedVPC.ID)
@@ -2260,34 +2244,86 @@ func (m *Model) viewStatusBar() string {
 		parts = append(parts, m.statusMsg)
 	}
 
-	hint := "?=help  S=settings  q=quit"
-	switch m.state {
-	case stateVPCList:
-		hint = "Enter=select  /=search  r=refresh  ?=help  S=settings  q=quit"
-	case stateResourceBrowser:
-		switch m.focus {
-		case focusCategory:
-			hint = "↑↓=nav  Enter=load  F=findings  P=exposure  A=analyzer  D=dns  w=changes  Tab=table  Esc=back  q=quit"
-		case focusResourceTable:
-			hint = "↑↓=nav  Enter=detail  x=where-used  e=eff-rules  F=findings  D=dns  w=changes  t=trace  Esc=back  q=quit"
+	left := strings.Join(parts, "  │  ")
+	return ui.StatusBar(max(m.width, 20), left, m.statusHints())
+}
+
+// statusHints returns only the shortcuts usable in the current state and
+// focus. Overlays render their own footer hints (see overlayFrame), so this
+// covers the two main screens plus the VPC search input.
+func (m *Model) statusHints() []ui.KeyHint {
+	if m.inVPCSearch {
+		return []ui.KeyHint{
+			ui.H("type", "to filter"),
+			ui.H("Enter", "keep filter"),
+			ui.H("Esc", "clear"),
 		}
 	}
 
-	left := strings.Join(parts, "  │  ")
-	leftW := ansi.StringWidth(left)
-	hintW := ansi.StringWidth(hint)
-	barW := m.width
-	if barW < leftW+hintW+4 {
-		barW = leftW + hintW + 4
+	switch m.state {
+	case stateVPCList:
+		hints := []ui.KeyHint{
+			ui.H("↑/↓", "navigate"),
+			ui.H("Enter", "open VPC"),
+			ui.H("/", "search"),
+		}
+		hints = append(hints, colScrollHints(&m.vpcTable)...)
+		return append(hints,
+			ui.H("r", "refresh"),
+			ui.H("S", "theme"),
+			ui.H("q", "quit"),
+			ui.H("?", "help"),
+		)
+	case stateResourceBrowser:
+		switch m.focus {
+		case focusCategory:
+			return []ui.KeyHint{
+				ui.H("↑/↓", "navigate"),
+				ui.H("Enter", "load resources"),
+				ui.H("Tab", "to table"),
+				ui.H("F", "findings"),
+				ui.H("P", "exposure"),
+				ui.H("D", "dns"),
+				ui.H("A", "analyzer"),
+				ui.H("w", "changes"),
+				ui.H("E", "export"),
+				ui.H("Esc", "back"),
+				ui.H("?", "help"),
+			}
+		case focusResourceTable:
+			hints := []ui.KeyHint{
+				ui.H("↑/↓", "navigate"),
+				ui.H("Enter", "detail"),
+			}
+			hints = append(hints, colScrollHints(&m.resourceTable)...)
+			hints = append(hints,
+				ui.H("c", "copy ID"),
+				ui.H("x", "where used"),
+			)
+			// Trace and effective-rules only operate on network interfaces, so
+			// only advertise them when they would actually do something.
+			if m.activeResource == rtNetworkInterfaces {
+				hints = append(hints, ui.H("t", "trace"), ui.H("e", "eff rules"))
+			}
+			return append(hints,
+				ui.H("F", "findings"),
+				ui.H("r", "refresh"),
+				ui.H("Tab", "to sidebar"),
+				ui.H("Esc", "back"),
+				ui.H("?", "help"),
+			)
+		}
 	}
+	return []ui.KeyHint{ui.H("S", "theme"), ui.H("q", "quit"), ui.H("?", "help")}
+}
 
-	gap := barW - leftW - hintW - 2
-	if gap < 1 {
-		gap = 1
+// colScrollHints advertises horizontal column scrolling only when the table
+// actually has columns hidden off-screen.
+func colScrollHints(t *table.Model) []ui.KeyHint {
+	if l, r := t.ColScrollInfo(); l+r > 0 {
+		return []ui.KeyHint{ui.H("</>", fmt.Sprintf("cols (%d more)", l+r))}
 	}
-
-	bar := left + strings.Repeat(" ", gap) + hint
-	return style.Width(barW).Render(bar)
+	return nil
 }
 
 func (m *Model) helpText() string {
@@ -2295,6 +2331,7 @@ func (m *Model) helpText() string {
 		lipgloss.NewStyle().Foreground(lipgloss.Color(ui.ColorMuted())).Render("VPC List"),
 		"  Enter    Open resource browser for selected VPC",
 		"  /        Filter VPCs by name/ID",
+		"  < >      Scroll table columns left/right (when wider than screen)",
 		"  r        Refresh VPC list",
 		"",
 		lipgloss.NewStyle().Foreground(lipgloss.Color(ui.ColorMuted())).Render("Resource Browser"),
