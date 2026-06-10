@@ -335,6 +335,11 @@ func (m *Model) SetRows(r []Row) {
 	if m.cursor > len(m.rows)-1 {
 		m.cursor = len(m.rows) - 1
 	}
+	// Recover from an empty row set (cursor -1) once rows arrive, so the
+	// first row is selected without requiring a cursor movement first.
+	if m.cursor < 0 && len(m.rows) > 0 {
+		m.cursor = 0
+	}
 
 	m.UpdateViewport()
 }

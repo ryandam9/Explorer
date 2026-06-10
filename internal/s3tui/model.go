@@ -378,19 +378,25 @@ func (m *Model) bucketColFields() []display.FieldMeta {
 }
 
 func (m *Model) applyTableStyle(t *table.Model) {
-	s := table.DefaultStyles()
-	s.Header = s.Header.
-		Foreground(lipgloss.Color(ui.ColorTableHeader())).
-		BorderStyle(lipgloss.NormalBorder()).
-		BorderForeground(lipgloss.Color(ui.ColorTableHeaderLine())).
-		BorderBottom(true).
-		Bold(true)
-	s.Cell = s.Cell.Foreground(lipgloss.Color(ui.ColorText()))
-	s.Selected = s.Selected.
-		Foreground(lipgloss.Color(ui.ColorHighlightText())).
-		Background(lipgloss.Color(ui.ColorHighlight())).
-		Bold(true)
-	t.SetStyles(s)
+	t.SetStyles(ui.TableStyles())
+}
+
+// tableViewWidth is the inner width available to a full-width table: terminal
+// width minus the AppStyle margins (2×2) and the panel border + padding (2+2).
+func (m *Model) tableViewWidth() int {
+	return max(30, m.width-8)
+}
+
+// activeTable returns the table the current state navigates, or nil when no
+// table has focus (e.g. while typing into an input).
+func (m *Model) activeTable() *table.Model {
+	switch {
+	case m.state == stateBucketList && m.focus == focusBuckets:
+		return &m.bucketTable
+	case m.state == stateObjectList && m.focus == focusObjects:
+		return &m.objectTable
+	}
+	return nil
 }
 
 func (m *Model) initBucketTable() {
@@ -475,15 +481,18 @@ func (m *Model) sortObjects(objs []map[string]string) {
 
 func (m *Model) updateObjectColumns() {
 	fields := m.objectColFields()
-	// Distribute any extra terminal width to the name column.
-	objectWidth := max(40, m.width-10)
+	// Distribute any extra terminal width to the name column. Each column
+	// also occupies 2 cells of padding, which must be subtracted so the
+	// stretched table exactly fits the panel instead of overflowing into a
+	// permanent one-column horizontal scroll.
+	padding := 2 * (len(fields) + 1)
 	fixedW := 4 // # col
 	for _, f := range fields {
 		if f.Key != "name" {
 			fixedW += f.Width
 		}
 	}
-	nameWidth := max(18, objectWidth-fixedW)
+	nameWidth := max(18, m.tableViewWidth()-fixedW-padding)
 	cols := make([]table.Column, 0, len(fields)+1)
 	cols = append(cols, table.Column{Title: "#", Width: 4})
 	for i, f := range fields {
@@ -844,10 +853,11 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			bucketTableHeight = 5
 		}
 		m.bucketTable.SetHeight(bucketTableHeight)
-		bucketWidth := max(30, m.width-10)
+		// Fixed columns (4+16+22) plus 2 cells of padding per column; the
+		// name column stretches to fill the rest of the panel exactly.
 		m.bucketTable.SetColumns([]table.Column{
 			{Title: "#", Width: 4},
-			{Title: "Name", Width: max(20, bucketWidth-54)},
+			{Title: "Name", Width: max(20, m.tableViewWidth()-42-8)},
 			{Title: "Region", Width: 16},
 			{Title: "Creation Date", Width: 22},
 		})
@@ -858,6 +868,11 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		m.objectTable.SetHeight(tableHeight)
 		m.updateObjectColumns()
+
+		// Constrain both tables to the visible width: columns that do not fit
+		// scroll horizontally (< / >) instead of overflowing the panel.
+		m.bucketTable.SetWidth(m.tableViewWidth())
+		m.objectTable.SetWidth(m.tableViewWidth())
 
 	case tea.KeyMsg:
 		// Handle modals / overlays first
@@ -1044,6 +1059,18 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 		// State-specific keys
 		switch msg.String() {
+		case ">", ".":
+			if t := m.activeTable(); t != nil {
+				t.ScrollRight()
+				return m, nil
+			}
+
+		case "<", ",":
+			if t := m.activeTable(); t != nil {
+				t.ScrollLeft()
+				return m, nil
+			}
+
 		case "esc":
 			m.err = nil
 			if m.state == stateObjectList {
@@ -1576,13 +1603,11 @@ func (m *Model) renderStatusBar() string {
 	barWidth := max(12, m.width-4)
 
 	var left string
-	var hints string
 
 	switch m.state {
 	case stateBucketDetail:
 		tabNames := []string{"Overview", "Access & Security", "Data Protection", "Operational", "Tags"}
 		left = fmt.Sprintf("Bucket: %s  |  %s", m.detailBucket, tabNames[m.detailTabIdx])
-		hints = "Tab  Shift+Tab  Esc"
 	case stateBucketList:
 		switch {
 		case m.statusMsg != "":
@@ -1592,7 +1617,6 @@ func (m *Model) renderStatusBar() string {
 		default:
 			left = fmt.Sprintf("Buckets: %d", len(m.allBucketRows))
 		}
-		hints = "↑/↓ Enter  d  /  r  S  ?  q"
 	case stateObjectList:
 		if m.downloading {
 			ds := m.downloadState
@@ -1615,29 +1639,100 @@ func (m *Model) renderStatusBar() string {
 				left += "  [VERSIONS]"
 			}
 		}
-		hints = "↑/↓ Enter  /  p  y  g  D  f  s  r  S  Esc  ?  q"
-		if m.allowDelete {
-			hints = "↑/↓ Enter  /  p  y  g  D  x Delete  f  s  r  S  Esc  ?  q"
-		}
 	default:
 		left = m.statusMsg
-		hints = "↑/↓  q"
 	}
 
-	lw := lipgloss.Width(left)
-	rw := lipgloss.Width(hints)
-	inner := barWidth - 2
-	gap := inner - lw - rw
-	if gap < 2 {
-		gap = 2
+	return ui.StatusBar(barWidth, left, m.statusHints())
+}
+
+// statusHints returns only the shortcuts that are usable right now, given the
+// open overlay, current state and focus. Hints are ordered most-important
+// first; the bar elides from the tail when the terminal is narrow, always
+// keeping the final hint visible.
+func (m *Model) statusHints() []ui.KeyHint {
+	// Overlays and inputs capture the keyboard, so only their keys are shown.
+	switch {
+	case m.confirmingDelete:
+		return []ui.KeyHint{ui.H("type 'delete'", ""), ui.H("Enter", "confirm"), ui.H("Esc", "cancel")}
+	case m.showPresigned:
+		return []ui.KeyHint{ui.H("Esc", "close")}
+	case m.copyMenuActive:
+		return []ui.KeyHint{ui.H("y/Esc", "close")}
+	case m.showHelp:
+		return []ui.KeyHint{ui.H("?/Esc", "close help")}
+	case m.showPreview:
+		return []ui.KeyHint{ui.H("↑/↓", "scroll"), ui.H("PgUp/PgDn", "page"), ui.H("Esc", "close")}
+	case m.inBucketSearch:
+		return []ui.KeyHint{ui.H("type", "to filter"), ui.H("Enter", "open first match"), ui.H("Esc", "cancel")}
+	case m.focus == focusPrefixInput:
+		return []ui.KeyHint{ui.H("Enter", "go to prefix"), ui.H("Esc", "cancel")}
 	}
 
-	content := left + strings.Repeat(" ", gap) + hints
-	return ui.StatusBarStyle(barWidth).Render(content)
+	switch m.state {
+	case stateBucketDetail:
+		return []ui.KeyHint{
+			ui.H("Tab/Shift+Tab", "switch tab"),
+			ui.H("Esc", "back"),
+			ui.H("q", "quit"),
+		}
+	case stateBucketList:
+		hints := []ui.KeyHint{
+			ui.H("↑/↓", "navigate"),
+			ui.H("Enter", "open bucket"),
+			ui.H("d", "details"),
+			ui.H("/", "search"),
+		}
+		hints = append(hints, colScrollHints(&m.bucketTable)...)
+		return append(hints, ui.H("r", "refresh"), ui.H("S", "theme"), ui.H("q", "quit"), ui.H("?", "help"))
+	case stateObjectList:
+		hints := []ui.KeyHint{
+			ui.H("↑/↓", "navigate"),
+			ui.H("Enter", "open"),
+			ui.H("p", "preview"),
+		}
+		hints = append(hints, colScrollHints(&m.objectTable)...)
+		hints = append(hints,
+			ui.H("/", "prefix"),
+			ui.H("D", "download"),
+		)
+		if m.allowDelete {
+			hints = append(hints, ui.H("x", "delete"))
+		}
+		hints = append(hints,
+			ui.H("y", "copy URI"),
+			ui.H("g", "presign"),
+			ui.H("s", "sort"),
+			ui.H("f", "flat"),
+			ui.H("r", "refresh"),
+			ui.H("Esc", "back"),
+		)
+		return append(hints, ui.H("?", "help"))
+	}
+	return []ui.KeyHint{ui.H("q", "quit")}
+}
+
+// colScrollHints advertises horizontal column scrolling only when the table
+// actually has columns hidden off-screen.
+func colScrollHints(t *table.Model) []ui.KeyHint {
+	if l, r := t.ColScrollInfo(); l+r > 0 {
+		return []ui.KeyHint{ui.H("</>", fmt.Sprintf("cols (%d more)", l+r))}
+	}
+	return nil
+}
+
+// tablePanel wraps a table in the shared themed panel, appending the
+// horizontal-scroll indicator when columns are hidden off-screen.
+func tablePanel(t *table.Model, focused bool) string {
+	view := t.View()
+	if ind := ui.TableScrollIndicator(t); ind != "" {
+		view = lipgloss.JoinVertical(lipgloss.Left, view, ind)
+	}
+	return ui.TablePanelStyle(focused).Render(view)
 }
 
 func (m *Model) bucketListView() string {
-	tableSection := ui.SelectedPanelStyle().Render(m.bucketTable.View())
+	tableSection := tablePanel(&m.bucketTable, m.focus == focusBuckets)
 
 	const detailsHeight = 10
 	detailsWidth := max(20, m.width-4)
@@ -1721,11 +1816,7 @@ func (m *Model) objectListView() string {
 		m.prefixInput.View(),
 	)
 
-	tableStyle := ui.PanelStyle()
-	if m.focus == focusObjects {
-		tableStyle = ui.SelectedPanelStyle()
-	}
-	tableSection := tableStyle.Render(m.objectTable.View())
+	tableSection := tablePanel(&m.objectTable, m.focus == focusObjects)
 
 	// Details Panel — always render two fixed-size boxes so nothing below shifts.
 	const detailsHeight = 10
@@ -2023,40 +2114,61 @@ func (m *Model) deleteConfirmView() string {
 	return ui.ModalStyle(width, 10).Render(content)
 }
 
+// helpView renders the help overlay. It is context-aware: only the sections
+// that apply to the current screen are shown, so the bucket list never
+// advertises object shortcuts and vice versa.
 func (m *Model) helpView() string {
-	deleteSection := ""
-	if m.allowDelete {
-		deleteSection = "\n  x                  Delete selected object (requires confirmation)"
-	}
-	body := lipgloss.JoinVertical(lipgloss.Left,
+	sections := []string{
 		"Navigation",
 		"  ↑/↓, PgUp/PgDn     Move selection",
+		"  </>                Scroll table columns (when more columns than fit)",
 		"  Enter              Open bucket, prefix, or object preview",
 		"  Esc                Back, close preview/help, or clear prefix input",
-		"",
-		"Buckets",
-		"  /                  Search/filter buckets",
-		"  d                  Full bucket detail view",
-		"  r                  Refresh bucket list",
-		"",
-		"Objects",
-		"  /                  Jump to prefix",
-		"  p                  Preview selected object",
-		"  y                  Copy S3 URI to clipboard",
-		"  g                  Generate presigned URL (1 hour)",
-		"  D                  Download object (to app.downloadDir, default current dir)",
-		"  f                  Toggle flat mode (show all objects)",
-		"  v                  Toggle versions indicator",
-		"  s                  Cycle sort column",
-		"  R                  Reverse sort direction",
-		"  r                  Refresh object list"+deleteSection,
+	}
+
+	title := "S3 Explorer Help"
+	switch m.state {
+	case stateBucketList, stateBucketDetail:
+		title = "S3 Explorer Help — Buckets"
+		sections = append(sections,
+			"",
+			"Buckets",
+			"  /                  Search/filter buckets",
+			"  d                  Full bucket detail view",
+			"  Tab / Shift+Tab    Switch tabs (in detail view)",
+			"  r                  Refresh bucket list",
+		)
+	case stateObjectList:
+		title = "S3 Explorer Help — Objects"
+		deleteSection := ""
+		if m.allowDelete {
+			deleteSection = "\n  x                  Delete selected object (requires confirmation)"
+		}
+		sections = append(sections,
+			"",
+			"Objects",
+			"  /                  Jump to prefix",
+			"  p                  Preview selected object",
+			"  y                  Copy S3 URI to clipboard",
+			"  g                  Generate presigned URL (1 hour)",
+			"  D                  Download object (to app.downloadDir, default current dir)",
+			"  f                  Toggle flat mode (show all objects)",
+			"  v                  Toggle versions indicator",
+			"  s                  Cycle sort column",
+			"  R                  Reverse sort direction",
+			"  r                  Refresh object list"+deleteSection,
+		)
+	}
+
+	sections = append(sections,
 		"",
 		"Utility",
 		"  S                  Settings (theme & colors)",
 		"  ?                  Toggle this help",
 		"  q, Ctrl+C          Quit",
 	)
-	return ui.HelpView("S3 Explorer Help", body, min(72, max(32, m.width-12)))
+	body := lipgloss.JoinVertical(lipgloss.Left, sections...)
+	return ui.HelpView(title, body, min(72, max(32, m.width-12)))
 }
 
 func (m *Model) previewView() string {

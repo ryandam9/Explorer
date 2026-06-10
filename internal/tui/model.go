@@ -8,30 +8,18 @@ import (
 	"time"
 
 	"github.com/charmbracelet/bubbles/spinner"
+	"github.com/charmbracelet/bubbles/textinput"
 	"github.com/charmbracelet/bubbles/viewport"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/huh"
 	"github.com/charmbracelet/lipgloss"
-	btable "github.com/evertras/bubble-table/table"
 	zone "github.com/lrstanley/bubblezone"
 
 	"github.com/user/aws_explorer/internal/config"
 	"github.com/user/aws_explorer/internal/engine"
 	"github.com/user/aws_explorer/internal/model"
+	"github.com/user/aws_explorer/internal/table"
 	"github.com/user/aws_explorer/internal/ui"
-)
-
-// ── Column keys ──────────────────────────────────────────────────────────────
-
-const (
-	colNum     = "num"
-	colService = "service"
-	colType    = "type"
-	colRegion  = "region"
-	colID      = "id"
-	colName    = "name"
-	colState   = "state"
-	colMeta    = "__resource"
 )
 
 // ── Focus ────────────────────────────────────────────────────────────────────
@@ -103,9 +91,17 @@ type tuiModel struct {
 	services      []string
 	activeService int
 
-	// Resource table (evertras)
-	table   btable.Model
-	allRows map[string][]btable.Row
+	// Resource table (shared themed table with horizontal column scrolling).
+	// allRows / allRes are parallel: allRes[svc][i] is the resource shown in
+	// allRows[svc][i], so the cursor maps straight to a resource.
+	table   table.Model
+	allRows map[string][]table.Row
+	allRes  map[string][]model.Resource
+
+	// Quick text filter ("/"): matches any cell of a row.
+	filtering   bool
+	filterInput textinput.Model
+	filterText  string
 
 	// Detail panel
 	showDetail     bool
@@ -161,12 +157,28 @@ func NewModel(ctx context.Context, eng *engine.Engine, configPath string, cfg *c
 		focus:      focusTable,
 		spinner:    sp,
 		zones:      zoneM,
-		allRows:    make(map[string][]btable.Row),
+		allRows:    make(map[string][]table.Row),
+		allRes:     make(map[string][]model.Resource),
 		configPath: configPath,
 		cfg:        cfg,
 	}
 	m.settings = ui.NewSettingsModel(0, 0, configPath, cfg)
-	m.table = m.makeTable()
+
+	m.filterInput = textinput.New()
+	m.filterInput.Placeholder = "Filter resources..."
+	m.filterInput.CharLimit = 128
+	m.filterInput.Width = 32
+	m.filterInput.PromptStyle = lipgloss.NewStyle().Foreground(lipgloss.Color(ui.ColorAccent())).Bold(true)
+	m.filterInput.TextStyle = lipgloss.NewStyle().Foreground(lipgloss.Color(ui.ColorText()))
+	m.filterInput.PlaceholderStyle = lipgloss.NewStyle().Foreground(lipgloss.Color(ui.ColorMuted()))
+	m.filterInput.Cursor.Style = lipgloss.NewStyle().Foreground(lipgloss.Color(ui.ColorAccent()))
+
+	m.table = table.New(
+		table.WithColumns(m.columns()),
+		table.WithFocused(true),
+		table.WithHeight(10),
+		table.WithStyles(ui.TableStyles()),
+	)
 	return m
 }
 
@@ -192,9 +204,8 @@ func (m tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.showSettings = false
 			m.setToast("Theme saved: " + msg.Theme)
 			cmds = append(cmds, toastCmd(3*time.Second))
-			// Rebuild table styles to pick up new theme colors.
-			rows := m.currentRows()
-			m.table = m.makeTable().WithRows(rows)
+			// Restyle the table to pick up the new theme colors.
+			m.table.SetStyles(ui.TableStyles())
 			return m, tea.Batch(cmds...)
 		case ui.SettingsErrMsg:
 			m.showSettings = false
@@ -241,13 +252,39 @@ func (m tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, tea.Batch(cmds...)
 	}
 
+	// Route keys to the quick-filter input while it is active.
+	if m.filtering {
+		if key, ok := msg.(tea.KeyMsg); ok {
+			switch key.String() {
+			case "enter":
+				m.filtering = false
+				m.filterInput.Blur()
+				m.syncTableLayout()
+				return m, nil
+			case "esc":
+				m.filtering = false
+				m.filterInput.Blur()
+				m.filterInput.SetValue("")
+				m.filterText = ""
+				m.rebuildAllRows()
+				m.syncTableLayout()
+				return m, nil
+			default:
+				var cmd tea.Cmd
+				m.filterInput, cmd = m.filterInput.Update(msg)
+				m.filterText = m.filterInput.Value()
+				m.rebuildAllRows()
+				m.updateTableRows()
+				return m, cmd
+			}
+		}
+	}
+
 	switch msg := msg.(type) {
 	case tea.WindowSizeMsg:
 		m.width = msg.Width
 		m.height = msg.Height
-		// Rebuild table with new dimensions.
-		rows := m.currentRows()
-		m.table = m.makeTable().WithRows(rows)
+		m.syncTableLayout()
 		if m.showDetail && m.detail != nil {
 			m.syncDetailViewport()
 		}
@@ -262,33 +299,35 @@ func (m tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.showDetail = false
 				m.detail = nil
 				m.focus = focusTable
-				m.table = m.table.Focused(true)
+				m.table.Focus()
+				m.syncTableLayout()
 			}
 			return m, tea.Batch(cmds...)
 
 		case "tab":
 			m.cycleFocus(1)
+			return m, tea.Batch(cmds...)
 
 		case "shift+tab":
 			m.cycleFocus(-1)
+			return m, tea.Batch(cmds...)
 
 		case "enter":
 			switch m.focus {
 			case focusSidebar:
 				m.focus = focusTable
-				m.table = m.table.Focused(true)
+				m.table.Focus()
 			case focusTable:
-				row := m.table.HighlightedRow()
-				if row.Data != nil {
-					if res, ok := row.Data[colMeta].(model.Resource); ok {
-						m.detail = &res
-						m.showDetail = true
-						m.focus = focusDetail
-						m.table = m.table.Focused(false)
-						m.syncDetailViewport()
-					}
+				if res, ok := m.selectedResource(); ok {
+					m.detail = &res
+					m.showDetail = true
+					m.focus = focusDetail
+					m.table.Blur()
+					m.syncTableLayout()
+					m.syncDetailViewport()
 				}
 			}
+			return m, tea.Batch(cmds...)
 
 		case "[", "up":
 			if m.focus == focusDetail {
@@ -316,27 +355,53 @@ func (m tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				return m, nil
 			}
 
+		case ">", ".":
+			if m.focus == focusTable {
+				m.table.ScrollRight()
+				return m, nil
+			}
+
+		case "<", ",":
+			if m.focus == focusTable {
+				m.table.ScrollLeft()
+				return m, nil
+			}
+
+		case "/":
+			if m.focus == focusTable && len(m.results) > 0 {
+				m.filtering = true
+				m.filterInput.Focus()
+				m.syncTableLayout()
+				return m, nil
+			}
+
 		case "f":
 			if !m.showFilter && len(m.results) > 0 {
 				m.filterForm = m.buildFilterForm()
 				m.showFilter = true
 				cmds = append(cmds, m.filterForm.Init())
 			}
+			return m, tea.Batch(cmds...)
 
 		case "r":
 			m.filterRegion = ""
 			m.filterState = ""
+			m.filterText = ""
+			m.filterInput.SetValue("")
 			m.rebuildAllRows()
-			m.updateTableRows()
+			m.syncTableLayout()
 			m.setToast("Filters cleared")
 			cmds = append(cmds, toastCmd(3*time.Second))
+			return m, tea.Batch(cmds...)
 
 		case ui.KeySettings:
 			m.settings = ui.NewSettingsModel(m.width, m.height, m.configPath, m.cfg)
 			m.showSettings = true
+			return m, tea.Batch(cmds...)
 
 		case ui.KeyHelp:
 			m.showHelp = true
+			return m, tea.Batch(cmds...)
 		}
 
 	case tea.MouseMsg:
@@ -349,7 +414,7 @@ func (m tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					m.updateTableRows()
 				}
 				m.focus = focusTable
-				m.table = m.table.Focused(true)
+				m.table.Focus()
 				break
 			}
 		}
@@ -377,7 +442,7 @@ func (m tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		cmds = append(cmds, cmd)
 	}
 
-	// Forward events to the table when it has focus.
+	// Forward remaining events (navigation keys) to the table when it has focus.
 	if m.focus == focusTable {
 		var cmd tea.Cmd
 		m.table, cmd = m.table.Update(msg)
@@ -396,7 +461,11 @@ func (m *tuiModel) cycleFocus(dir int) {
 	}
 	next := panelFocus((int(m.focus) + dir + panels) % panels)
 	m.focus = next
-	m.table = m.table.Focused(m.focus == focusTable)
+	if m.focus == focusTable {
+		m.table.Focus()
+	} else {
+		m.table.Blur()
+	}
 }
 
 // ── Toast helpers ─────────────────────────────────────────────────────────────
@@ -411,6 +480,21 @@ func toastCmd(d time.Duration) tea.Cmd {
 }
 
 // ── Data helpers ──────────────────────────────────────────────────────────────
+
+// matchesTextFilter reports whether any of the row's cells contains the quick
+// filter text (case-insensitive).
+func matchesTextFilter(query string, cells ...string) bool {
+	if query == "" {
+		return true
+	}
+	q := strings.ToLower(query)
+	for _, c := range cells {
+		if strings.Contains(strings.ToLower(c), q) {
+			return true
+		}
+	}
+	return false
+}
 
 func (m *tuiModel) rebuildAllRows() {
 	// Rebuild service list.
@@ -431,80 +515,74 @@ func (m *tuiModel) rebuildAllRows() {
 		m.activeService = 0
 	}
 
-	// Build rows grouped by service, applying structured filters.
-	m.allRows = make(map[string][]btable.Row, len(names))
-	for i, r := range m.results {
+	// Sort a copy of the results (by service, then name) so the table renders
+	// in a stable, grouped order regardless of arrival order.
+	sorted := make([]model.Resource, len(m.results))
+	copy(sorted, m.results)
+	sort.SliceStable(sorted, func(i, j int) bool {
+		if sorted[i].Service != sorted[j].Service {
+			return sorted[i].Service < sorted[j].Service
+		}
+		return sorted[i].Name < sorted[j].Name
+	})
+
+	// Build rows grouped by service, applying the structured filters and the
+	// quick text filter.
+	m.allRows = make(map[string][]table.Row, len(names))
+	m.allRes = make(map[string][]model.Resource, len(names))
+	for _, r := range sorted {
 		if m.filterRegion != "" && r.Region != m.filterRegion {
 			continue
 		}
 		if m.filterState != "" && r.State != m.filterState {
 			continue
 		}
-		row := btable.NewRow(btable.RowData{
-			colNum:     fmt.Sprintf("%d", i+1),
-			colService: r.Service,
-			colType:    r.Type,
-			colRegion:  r.Region,
-			colID:      r.ID,
-			colName:    r.Name,
-			colState:   r.State,
-			colMeta:    r,
-		})
-		m.allRows["All"] = append(m.allRows["All"], row)
-		m.allRows[r.Service] = append(m.allRows[r.Service], row)
+		if !matchesTextFilter(m.filterText, r.Service, r.Type, r.Region, r.ID, r.Name, r.State) {
+			continue
+		}
+		for _, key := range []string{"All", r.Service} {
+			row := table.Row{
+				fmt.Sprintf("%d", len(m.allRows[key])+1),
+				r.Service, r.Type, r.Region, r.ID, r.Name, r.State,
+			}
+			m.allRows[key] = append(m.allRows[key], row)
+			m.allRes[key] = append(m.allRes[key], r)
+		}
 	}
 }
 
-func (m tuiModel) currentRows() []btable.Row {
+func (m tuiModel) currentService() string {
 	if len(m.services) == 0 || m.activeService >= len(m.services) {
-		return nil
+		return "All"
 	}
-	return m.allRows[m.services[m.activeService]]
+	return m.services[m.activeService]
+}
+
+// selectedResource returns the resource under the table cursor.
+func (m tuiModel) selectedResource() (model.Resource, bool) {
+	res := m.allRes[m.currentService()]
+	idx := m.table.Cursor()
+	if idx < 0 || idx >= len(res) {
+		return model.Resource{}, false
+	}
+	return res[idx], true
 }
 
 func (m *tuiModel) updateTableRows() {
-	m.table = m.table.WithRows(m.currentRows())
+	m.table.SetRows(m.allRows[m.currentService()])
 }
 
-// ── Table construction ────────────────────────────────────────────────────────
+// ── Table layout ──────────────────────────────────────────────────────────────
 
-func (m tuiModel) makeTable() btable.Model {
-	w := m.tableWidth()
-	pageRows := m.tableHeight() - 4
-	if pageRows < 5 {
-		pageRows = 5
-	}
-
-	hlStyle := lipgloss.NewStyle().
-		Foreground(lipgloss.Color(ui.ColorHighlightText())).
-		Background(lipgloss.Color(ui.ColorHighlight())).
-		Bold(true)
-
-	hdrStyle := lipgloss.NewStyle().
-		Bold(true).
-		Foreground(lipgloss.Color(ui.ColorTableHeader()))
-
-	return btable.New(m.columns(w)).
-		WithPageSize(pageRows).
-		WithPaginationWrapping(false).
-		Focused(m.focus == focusTable).
-		Filtered(true).
-		WithTargetWidth(w).
-		HighlightStyle(hlStyle).
-		HeaderStyle(hdrStyle).
-		WithBaseStyle(lipgloss.NewStyle().Align(lipgloss.Left)).
-		SortByAsc(colService)
-}
-
-func (m tuiModel) columns(tableWidth int) []btable.Column {
-	// Fixed widths: #(4) Service(10) Type(12) Region(13) State(10) = 49
-	// Remaining split between ID and Name.
-	fixed := 4 + 10 + 12 + 13 + 10
-	border := 10 // evertras draws borders and separators
-	rem := tableWidth - fixed - border
-	if rem < 24 {
-		rem = 24
-	}
+// columns returns the table columns sized for the current width. ID and Name
+// flex to fill leftover space; when the panel is too narrow for everything,
+// the table scrolls horizontally instead of truncating columns away.
+func (m tuiModel) columns() []table.Column {
+	// Fixed widths: #(4) Service(10) Type(12) Region(13) State(10) = 49,
+	// plus each column's cell padding (2 × 7 columns).
+	const fixed = 4 + 10 + 12 + 13 + 10
+	const padding = 2 * 7
+	rem := m.tableInnerWidth() - fixed - padding
 	idW := rem * 2 / 5
 	nameW := rem - idW
 	if idW < 10 {
@@ -514,27 +592,28 @@ func (m tuiModel) columns(tableWidth int) []btable.Column {
 		nameW = 10
 	}
 
-	return []btable.Column{
-		btable.NewColumn(colNum, "#", 4),
-		btable.NewColumn(colService, "Service", 10).WithFiltered(true),
-		btable.NewColumn(colType, "Type", 12).WithFiltered(true),
-		btable.NewColumn(colRegion, "Region", 13).WithFiltered(true),
-		btable.NewColumn(colID, "ID", idW).WithFiltered(true),
-		btable.NewColumn(colName, "Name", nameW).WithFiltered(true),
-		btable.NewColumn(colState, "State", 10).WithFiltered(true),
+	return []table.Column{
+		{Title: "#", Width: 4},
+		{Title: "Service", Width: 10},
+		{Title: "Type", Width: 12},
+		{Title: "Region", Width: 13},
+		{Title: "ID", Width: idW},
+		{Title: "Name", Width: nameW},
+		{Title: "State", Width: 10},
 	}
 }
 
-func (m tuiModel) tableWidth() int {
-	// sidebar panel: border(2) + padding(2) + content(sidebarInner) = sidebarInner+4
+// tableInnerWidth is the content width inside the table panel: terminal width
+// minus the sidebar panel, the table panel's own border + padding, and the
+// detail panel when visible.
+func (m tuiModel) tableInnerWidth() int {
 	sidebarOuter := sidebarInner + 4
-	w := m.width - sidebarOuter - 2
+	w := m.width - sidebarOuter - 2 - 4
 	if m.showDetail {
-		// detail panel: border(2) + padding(2) + content(detailInner) = detailInner+4
 		w -= detailInner + 4
 	}
-	if w < 60 {
-		return 60
+	if w < 40 {
+		return 40
 	}
 	return w
 }
@@ -545,6 +624,20 @@ func (m tuiModel) tableHeight() int {
 		return 8
 	}
 	return h
+}
+
+// syncTableLayout resizes the table to the current terminal dimensions.
+func (m *tuiModel) syncTableLayout() {
+	inner := m.tableInnerWidth()
+	tableH := m.tableHeight() + 2
+	if m.filtering || m.filterText != "" {
+		tableH-- // the filter line sits under the table inside the panel
+	}
+	m.table.SetColumns(m.columns())
+	m.table.SetWidth(inner)
+	m.table.SetHeight(max(tableH, 4))
+	// SetColumns resets the horizontal scroll; keep the row set in sync.
+	m.updateTableRows()
 }
 
 // ── Filter form ───────────────────────────────────────────────────────────────
@@ -616,19 +709,20 @@ func (m *tuiModel) syncDetailViewport() {
 // ── View ──────────────────────────────────────────────────────────────────────
 
 // helpView renders the keybinding help overlay for the summary explorer,
-// using the shared themed renderer so it matches the S3 browser's help.
+// using the shared themed renderer so it matches the other browsers' help.
 func (m tuiModel) helpView() string {
 	body := lipgloss.JoinVertical(lipgloss.Left,
 		"Navigation",
 		"  ↑/↓, [ ]           Move selection / scroll detail",
+		"  < >                Scroll table columns (when more columns than fit)",
 		"  Tab / Shift+Tab    Switch panel focus",
 		"  Enter              Select service / open detail",
 		"  Esc                Close detail or overlay",
 		"",
 		"Resources",
-		"  /                  Filter",
-		"  f                  Advanced filter",
-		"  r                  Reset filters",
+		"  /                  Quick text filter",
+		"  f                  Advanced filter (region / state)",
+		"  r                  Reset all filters",
 		"",
 		"Utility",
 		"  S                  Settings (theme & colors)",
@@ -713,6 +807,9 @@ func (m tuiModel) renderHeader() string {
 	if m.filterState != "" {
 		filterParts = append(filterParts, "state:"+m.filterState)
 	}
+	if m.filterText != "" {
+		filterParts = append(filterParts, "text:"+m.filterText)
+	}
 	filterInfo := ""
 	if len(filterParts) > 0 {
 		filterInfo = "  [" + strings.Join(filterParts, ", ") + "]"
@@ -776,24 +873,25 @@ func (m tuiModel) renderSidebar() string {
 }
 
 func (m tuiModel) renderTablePanel() string {
-	// Update column widths and page size to match current terminal dimensions.
-	w := m.tableWidth()
-	pageRows := m.tableHeight() - 4
-	if pageRows < 5 {
-		pageRows = 5
-	}
-	m.table = m.table.
-		WithColumns(m.columns(w)).
-		WithTargetWidth(w).
-		WithPageSize(pageRows)
+	inner := m.tableInnerWidth()
+	innerH := m.tableHeight() + 2
 
-	borderColor := lipgloss.Color(ui.ColorBorder())
-	if m.focus == focusTable {
-		borderColor = lipgloss.Color(ui.ColorBorderFocus())
+	parts := []string{m.table.View()}
+	if m.filtering || m.filterText != "" {
+		parts = append(parts, lipgloss.NewStyle().
+			Foreground(lipgloss.Color(ui.ColorMuted())).Render("Filter: ")+
+			m.filterInput.View())
 	}
-	_ = borderColor // evertras draws its own border; we note focus via highlight style
+	if ind := ui.TableScrollIndicator(&m.table); ind != "" {
+		parts[0] = lipgloss.JoinVertical(lipgloss.Left, parts[0], ind)
+	}
+	content := lipgloss.JoinVertical(lipgloss.Left, parts...)
 
-	return m.table.View()
+	return ui.TablePanelStyle(m.focus == focusTable).
+		Width(inner).
+		Height(innerH).
+		MaxHeight(innerH + 2).
+		Render(content)
 }
 
 func (m tuiModel) renderDetailPanel() string {
@@ -834,25 +932,73 @@ func (m tuiModel) statusBar() string {
 	left := fmt.Sprintf("Service: %s  ·  Resources: %d  ·  Errors: %d  ·  %s",
 		svc, len(m.results), len(m.errors), status)
 
-	var hints string
-	switch m.focus {
-	case focusSidebar:
-		hints = "↑↓:service  Tab:panel  Enter:select  S:settings  ?:help  q:quit"
-	case focusTable:
-		hints = "↑↓:nav  Enter:detail  /:filter  r:reset  S:settings  ?:help  Tab  q"
-	case focusDetail:
-		hints = "[]:scroll  Esc:close  S:settings  ?:help  Tab:panel  q:quit"
+	return ui.StatusBar(w, left, m.statusHints())
+}
+
+// statusHints returns only the shortcuts usable right now, given the open
+// overlay and panel focus.
+func (m tuiModel) statusHints() []ui.KeyHint {
+	switch {
+	case m.showSettings:
+		// The settings panel renders its own hint bar.
+		return nil
+	case m.showHelp:
+		return []ui.KeyHint{ui.H("?/Esc", "close help")}
+	case m.showFilter:
+		return []ui.KeyHint{
+			ui.H("↑/↓", "choose"),
+			ui.H("Enter", "apply"),
+			ui.H("Esc", "cancel"),
+		}
+	case m.filtering:
+		return []ui.KeyHint{
+			ui.H("type", "to filter"),
+			ui.H("Enter", "keep filter"),
+			ui.H("Esc", "clear"),
+		}
 	}
 
-	lw := lipgloss.Width(left)
-	rw := lipgloss.Width(hints)
-	inner := w - 2
-	gap := inner - lw - rw
-	if gap < 2 {
-		gap = 2
+	switch m.focus {
+	case focusSidebar:
+		return []ui.KeyHint{
+			ui.H("↑/↓", "service"),
+			ui.H("Enter", "select"),
+			ui.H("Tab", "panel"),
+			ui.H("S", "theme"),
+			ui.H("q", "quit"),
+			ui.H("?", "help"),
+		}
+	case focusTable:
+		hints := []ui.KeyHint{
+			ui.H("↑/↓", "navigate"),
+			ui.H("Enter", "detail"),
+		}
+		if l, r := m.table.ColScrollInfo(); l+r > 0 {
+			hints = append(hints, ui.H("</>", fmt.Sprintf("cols (%d more)", l+r)))
+		}
+		hints = append(hints,
+			ui.H("/", "filter"),
+			ui.H("f", "adv filter"),
+		)
+		if m.filterRegion != "" || m.filterState != "" || m.filterText != "" {
+			hints = append(hints, ui.H("r", "reset filters"))
+		}
+		return append(hints,
+			ui.H("Tab", "panel"),
+			ui.H("S", "theme"),
+			ui.H("q", "quit"),
+			ui.H("?", "help"),
+		)
+	case focusDetail:
+		return []ui.KeyHint{
+			ui.H("↑/↓ or [ ]", "scroll"),
+			ui.H("Esc", "close"),
+			ui.H("Tab", "panel"),
+			ui.H("q", "quit"),
+			ui.H("?", "help"),
+		}
 	}
-	content := left + strings.Repeat(" ", gap) + hints
-	return ui.StatusBarStyle(w).Render(content)
+	return []ui.KeyHint{ui.H("?", "help")}
 }
 
 // ── Detail renderer ───────────────────────────────────────────────────────────
