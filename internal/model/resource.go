@@ -7,6 +7,7 @@ type Resource struct {
 	Service   string            `json:"service"`
 	Type      string            `json:"type"`
 	Region    string            `json:"region"`
+	AZ        string            `json:"az,omitempty"`
 	AccountID string            `json:"accountId,omitempty"`
 	ID        string            `json:"id"`
 	Name      string            `json:"name,omitempty"`

@@ -1088,6 +1088,7 @@ func (m tuiModel) renderDetail(r model.Resource, width int) string {
 		{"Service", r.Service},
 		{"Type", r.Type},
 		{"Region", r.Region},
+		{"AZ", r.AZ},
 		{"Account", r.AccountID},
 		{"ID", r.ID},
 		{"Name", r.Name},

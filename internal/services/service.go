@@ -23,6 +23,7 @@ type CollectInput struct {
 	Config      *config.Config
 	AWSConfig   aws.Config
 	Region      string
+	AccountID   string
 	Filters     model.Filter
 	DetailLevel DetailLevel
 }

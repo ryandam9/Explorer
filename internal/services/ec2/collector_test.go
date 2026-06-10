@@ -21,13 +21,14 @@ func TestMapInstance_BasicFields(t *testing.T) {
 		VpcId:            aws.String("vpc-abc"),
 		SubnetId:         aws.String("subnet-abc"),
 		LaunchTime:       &launch,
+		Placement:        &types.Placement{AvailabilityZone: aws.String("us-east-1a")},
 		Tags: []types.Tag{
 			{Key: aws.String("Name"), Value: aws.String("my-server")},
 			{Key: aws.String("env"), Value: aws.String("prod")},
 		},
 	}
 
-	res := c.mapInstance("us-east-1", instance, services.DetailLevelSummary)
+	res := c.mapInstance("us-east-1", "123456789012", instance, services.DetailLevelSummary)
 
 	if res.ID != "i-0abc123" {
 		t.Errorf("ID = %q, want %q", res.ID, "i-0abc123")
@@ -40,6 +41,12 @@ func TestMapInstance_BasicFields(t *testing.T) {
 	}
 	if res.Region != "us-east-1" {
 		t.Errorf("Region = %q, want %q", res.Region, "us-east-1")
+	}
+	if res.AZ != "us-east-1a" {
+		t.Errorf("AZ = %q, want %q", res.AZ, "us-east-1a")
+	}
+	if want := "arn:aws:ec2:us-east-1:123456789012:instance/i-0abc123"; res.ARN != want {
+		t.Errorf("ARN = %q, want %q", res.ARN, want)
 	}
 	if res.Tags["env"] != "prod" {
 		t.Errorf("Tags[env] = %q, want %q", res.Tags["env"], "prod")
@@ -67,7 +74,7 @@ func TestMapInstance_DetailLevel(t *testing.T) {
 		ImageId:      aws.String("ami-0abc"),
 	}
 
-	res := c.mapInstance("eu-west-1", instance, services.DetailLevelDetailed)
+	res := c.mapInstance("eu-west-1", "123456789012", instance, services.DetailLevelDetailed)
 
 	if res.Details == nil {
 		t.Fatal("expected Details to be populated at detailed level")
@@ -89,10 +96,13 @@ func TestMapVpc_BasicFields(t *testing.T) {
 		},
 	}
 
-	res := c.mapVpc("us-west-2", vpc, services.DetailLevelSummary)
+	res := c.mapVpc("us-west-2", "123456789012", vpc, services.DetailLevelSummary)
 
 	if res.ID != "vpc-0abc123" {
 		t.Errorf("ID = %q, want %q", res.ID, "vpc-0abc123")
+	}
+	if want := "arn:aws:ec2:us-west-2:123456789012:vpc/vpc-0abc123"; res.ARN != want {
+		t.Errorf("ARN = %q, want %q", res.ARN, want)
 	}
 	if res.Name != "main-vpc" {
 		t.Errorf("Name = %q, want %q", res.Name, "main-vpc")
@@ -117,7 +127,7 @@ func TestMapVpc_NoNameTag(t *testing.T) {
 		IsDefault: aws.Bool(false),
 	}
 
-	res := c.mapVpc("ap-southeast-1", vpc, services.DetailLevelSummary)
+	res := c.mapVpc("ap-southeast-1", "123456789012", vpc, services.DetailLevelSummary)
 
 	if res.Name != "" {
 		t.Errorf("expected empty name, got %q", res.Name)

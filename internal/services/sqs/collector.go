@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"github.com/aws/aws-sdk-go-v2/service/sqs"
+	"github.com/user/aws_explorer/internal/awsutil"
 	"github.com/user/aws_explorer/internal/model"
 	"github.com/user/aws_explorer/internal/services"
 )
@@ -56,6 +57,7 @@ func (c *Collector) mapQueue(region string, queueURL string) model.Resource {
 		Region:  region,
 		ID:      queueURL,
 		Name:    name,
+		ARN:     awsutil.SQSARNFromURL(queueURL),
 		Summary: map[string]string{
 			"url": queueURL,
 		},

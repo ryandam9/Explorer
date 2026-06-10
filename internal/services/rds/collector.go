@@ -57,8 +57,10 @@ func (c *Collector) mapInstance(region string, instance types.DBInstance, detail
 		Service: "rds",
 		Type:    "instance",
 		Region:  region,
+		AZ:      aws.ToString(instance.AvailabilityZone),
 		ID:      id,
 		Name:    id,
+		ARN:     aws.ToString(instance.DBInstanceArn),
 		State:   state,
 		Summary: map[string]string{
 			"instanceClass": iClass,

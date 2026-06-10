@@ -42,7 +42,7 @@ func (c *Collector) Collect(ctx context.Context, input services.CollectInput) ([
 
 		for _, reservation := range page.Reservations {
 			for _, instance := range reservation.Instances {
-				resources = append(resources, c.mapInstance(input.Region, instance, input.DetailLevel))
+				resources = append(resources, c.mapInstance(input.Region, input.AccountID, instance, input.DetailLevel))
 			}
 		}
 	}
@@ -55,14 +55,14 @@ func (c *Collector) Collect(ctx context.Context, input services.CollectInput) ([
 			return nil, fmt.Errorf("failed to describe VPCs: %w", err)
 		}
 		for _, vpc := range page.Vpcs {
-			resources = append(resources, c.mapVpc(input.Region, vpc, input.DetailLevel))
+			resources = append(resources, c.mapVpc(input.Region, input.AccountID, vpc, input.DetailLevel))
 		}
 	}
 
 	return resources, nil
 }
 
-func (c *Collector) mapInstance(region string, instance types.Instance, detail services.DetailLevel) model.Resource {
+func (c *Collector) mapInstance(region, account string, instance types.Instance, detail services.DetailLevel) model.Resource {
 	id := aws.ToString(instance.InstanceId)
 	state := ""
 	if instance.State != nil {
@@ -70,17 +70,25 @@ func (c *Collector) mapInstance(region string, instance types.Instance, detail s
 	}
 	iType := string(instance.InstanceType)
 
+	az := ""
+	if instance.Placement != nil {
+		az = aws.ToString(instance.Placement.AvailabilityZone)
+	}
+
 	name := awsutil.EC2TagName(instance.Tags)
 	tags := awsutil.EC2TagsToMap(instance.Tags)
 
 	res := model.Resource{
-		Service: "ec2",
-		Type:    "instance",
-		Region:  region,
-		ID:      id,
-		Name:    name,
-		State:   state,
-		Tags:    tags,
+		Service:   "ec2",
+		Type:      "instance",
+		Region:    region,
+		AZ:        az,
+		AccountID: account,
+		ID:        id,
+		Name:      name,
+		ARN:       awsutil.EC2ARN(region, account, "instance", id),
+		State:     state,
+		Tags:      tags,
 		Summary: map[string]string{
 			"instanceType": iType,
 			"privateIp":    aws.ToString(instance.PrivateIpAddress),
@@ -103,7 +111,7 @@ func (c *Collector) mapInstance(region string, instance types.Instance, detail s
 	return res
 }
 
-func (c *Collector) mapVpc(region string, vpc types.Vpc, detail services.DetailLevel) model.Resource {
+func (c *Collector) mapVpc(region, account string, vpc types.Vpc, detail services.DetailLevel) model.Resource {
 	id := aws.ToString(vpc.VpcId)
 	state := string(vpc.State)
 
@@ -111,13 +119,15 @@ func (c *Collector) mapVpc(region string, vpc types.Vpc, detail services.DetailL
 	tags := awsutil.EC2TagsToMap(vpc.Tags)
 
 	res := model.Resource{
-		Service: "ec2",
-		Type:    "vpc",
-		Region:  region,
-		ID:      id,
-		Name:    name,
-		State:   state,
-		Tags:    tags,
+		Service:   "ec2",
+		Type:      "vpc",
+		Region:    region,
+		AccountID: account,
+		ID:        id,
+		Name:      name,
+		ARN:       awsutil.EC2ARN(region, account, "vpc", id),
+		State:     state,
+		Tags:      tags,
 		Summary: map[string]string{
 			"cidrBlock": aws.ToString(vpc.CidrBlock),
 			"isDefault": fmt.Sprintf("%t", aws.ToBool(vpc.IsDefault)),

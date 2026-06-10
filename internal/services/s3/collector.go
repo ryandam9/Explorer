@@ -9,6 +9,7 @@ import (
 	"github.com/aws/aws-sdk-go-v2/service/s3"
 	"golang.org/x/sync/errgroup"
 
+	"github.com/user/aws_explorer/internal/awsutil"
 	"github.com/user/aws_explorer/internal/model"
 	"github.com/user/aws_explorer/internal/services"
 )
@@ -54,6 +55,7 @@ func (c *Collector) Collect(ctx context.Context, input services.CollectInput) ([
 				Region:  "global",
 				ID:      name,
 				Name:    name,
+				ARN:     awsutil.S3BucketARN(name),
 				Summary: map[string]string{
 					"creationDate": "",
 				},

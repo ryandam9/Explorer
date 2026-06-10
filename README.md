@@ -36,6 +36,9 @@ make build          # produces bin/aws_explorer
 # Run interactive TUI
 ./bin/aws_explorer tui
 
+# List every resource across all regions (SNO, Name, Type, ARN, Region/AZ)
+./bin/aws_explorer summary --all-regions
+
 # Run the VPC Explorer TUI
 ./bin/aws_explorer vpc --region us-east-1
 
@@ -138,6 +141,54 @@ what you see in the bar is always what works right now.
 | `?` | Help overlay |
 | `Esc` | Close detail panel / overlay |
 | `q` / `Ctrl+C` | Quit |
+
+## Summary Usage
+
+`summary` produces a single, numbered inventory of **every** discovered resource
+across all configured regions. Each row carries five columns:
+
+| Column | Description |
+|--------|-------------|
+| `SNO` | Serial number (1-based, assigned after sorting) |
+| `NAME` | Resource name (bucket name, EC2 `Name` tag, VPC name, …) or `-` when none |
+| `TYPE` | Resource type as `service/type` (e.g. `ec2/instance`, `s3/bucket`) |
+| `ARN` | Full ARN — returned by AWS where available, otherwise constructed |
+| `REGION/AZ` | Region, plus the availability zone for zonal resources (e.g. `us-east-1 / us-east-1a`) |
+
+```bash
+./bin/aws_explorer summary [flags]
+```
+
+Accepts the same `--config`, `--profile`, `--auth-method`, `--role-arn`, and
+`--all-regions` flags as the CLI command.
+
+### Summary Flags
+
+| Flag | Default | Description |
+|------|---------|-------------|
+| `--output` / `-o` | `table` | Output format: `table`, `json`, or `csv` |
+| `--tui` | `false` | Explore the same inventory interactively instead of printing |
+
+### Examples
+
+```bash
+# Table of every resource in every region
+./bin/aws_explorer summary --all-regions
+
+# Export the inventory as CSV
+./bin/aws_explorer summary --all-regions -o csv > inventory.csv
+
+# As JSON
+./bin/aws_explorer summary -o json
+
+# Explore interactively
+./bin/aws_explorer summary --tui
+```
+
+> Constructing ARNs for resources AWS doesn't return them for (EC2, S3, SQS, …)
+> requires the account ID, which is resolved once via `sts:GetCallerIdentity`.
+> If that call is denied, those ARNs are shown as `-` while AWS-provided ARNs
+> still appear.
 
 ## VPC Explorer TUI Usage
 
