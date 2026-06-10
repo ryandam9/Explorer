@@ -19,6 +19,7 @@ import (
 	"github.com/aws/smithy-go"
 
 	"github.com/user/aws_explorer/internal/auth"
+	"github.com/user/aws_explorer/internal/awsutil"
 	"github.com/user/aws_explorer/internal/config"
 )
 
@@ -51,34 +52,17 @@ func NewS3Client(ctx context.Context, awsCfg *config.AWSConfig, region, endpoint
 	}, nil
 }
 
-// fallbackRegions is used when EC2 DescribeRegions is unavailable.
-var fallbackRegions = []string{
-	"af-south-1",
-	"ap-east-1", "ap-northeast-1", "ap-northeast-2", "ap-northeast-3",
-	"ap-south-1", "ap-south-2",
-	"ap-southeast-1", "ap-southeast-2", "ap-southeast-3", "ap-southeast-4",
-	"ca-central-1", "ca-west-1",
-	"eu-central-1", "eu-central-2",
-	"eu-north-1", "eu-south-1", "eu-south-2",
-	"eu-west-1", "eu-west-2", "eu-west-3",
-	"il-central-1",
-	"me-central-1", "me-south-1",
-	"mx-central-1",
-	"sa-east-1",
-	"us-east-1", "us-east-2", "us-west-1", "us-west-2",
-}
-
 // ListRegions returns all available AWS regions. It queries EC2 DescribeRegions
-// and falls back to a hardcoded list if that call fails.
+// and falls back to the shared static list if that call fails.
 func ListRegions(ctx context.Context, awsCfg *config.AWSConfig) []string {
 	cfg, err := auth.BuildAWSConfig(ctx, awsCfg, "")
 	if err != nil {
-		return fallbackRegions
+		return awsutil.FallbackRegions
 	}
 	client := awsec2.NewFromConfig(cfg)
 	output, err := client.DescribeRegions(ctx, &awsec2.DescribeRegionsInput{})
 	if err != nil {
-		return fallbackRegions
+		return awsutil.FallbackRegions
 	}
 	regions := make([]string, 0, len(output.Regions))
 	for _, r := range output.Regions {
@@ -88,7 +72,7 @@ func ListRegions(ctx context.Context, awsCfg *config.AWSConfig) []string {
 	}
 	sort.Strings(regions)
 	if len(regions) == 0 {
-		return fallbackRegions
+		return awsutil.FallbackRegions
 	}
 	return regions
 }
