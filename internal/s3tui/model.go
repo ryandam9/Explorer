@@ -211,8 +211,9 @@ type Model struct {
 
 	// Actions
 	allowDelete      bool
-	confirmingDelete bool
-	deleteConfirm    textinput.Model
+	confirmingDelete    bool
+	deleteConfirmErrMsg string // set when user presses Enter with wrong text
+	deleteConfirm       textinput.Model
 	deleteKey        string
 
 	copyMenuActive bool
@@ -889,12 +890,15 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					key := m.deleteKey
 					m.confirmingDelete = false
 					m.deleteKey = ""
+					m.deleteConfirmErrMsg = ""
 					m.deleteConfirm.SetValue("")
 					m.deleteConfirm.Blur()
 					cmds = append(cmds, m.deleteObjectCmd(key))
 					return m, tea.Batch(cmds...)
 				}
+				m.deleteConfirmErrMsg = "Type exactly 'delete' (lowercase) to confirm"
 			default:
+				m.deleteConfirmErrMsg = ""
 				m.deleteConfirm, cmd = m.deleteConfirm.Update(msg)
 				cmds = append(cmds, cmd)
 				return m, tea.Batch(cmds...)
@@ -1585,7 +1589,7 @@ func (m *Model) View() string {
 		content = lipgloss.Place(m.width-4, max(8, m.height-8), lipgloss.Center, lipgloss.Top, searchBox)
 	}
 
-	return ui.AppStyle().Render(lipgloss.JoinVertical(lipgloss.Left,
+	out := ui.AppStyle().Render(lipgloss.JoinVertical(lipgloss.Left,
 		header,
 		ui.FeatherRail(max(12, m.width-4)),
 		"",
@@ -1593,6 +1597,10 @@ func (m *Model) View() string {
 		"",
 		m.renderStatusBar(),
 	))
+	if m.width > 0 && m.height > 0 {
+		out = ui.ClipToSize(out, m.width, m.height)
+	}
+	return out
 }
 
 // ---------------------------------------------------------------------------
@@ -2102,16 +2110,27 @@ func (m *Model) presignedURLView() string {
 
 func (m *Model) deleteConfirmView() string {
 	width := min(70, max(40, m.width-12))
-	content := lipgloss.JoinVertical(lipgloss.Left,
+	errLine := ""
+	if m.deleteConfirmErrMsg != "" {
+		errLine = ui.ErrorStyle().Render("  ✗ " + m.deleteConfirmErrMsg)
+	}
+	rows := []string{
 		ui.BoldStyle().Render(fmt.Sprintf("DELETE OBJECT: %s", m.deleteKey)),
 		"",
 		lipgloss.NewStyle().Foreground(lipgloss.Color(ui.ColorError())).Render("This action is PERMANENT and cannot be undone."),
 		"",
 		m.deleteConfirm.View(),
-		"",
-		ui.MutedStyle().Render("Type 'delete' and press Enter to confirm. Esc to cancel."),
-	)
-	return ui.ModalStyle(width, 10).Render(content)
+	}
+	if errLine != "" {
+		rows = append(rows, errLine)
+	}
+	rows = append(rows, "", ui.MutedStyle().Render("Type 'delete' and press Enter to confirm. Esc to cancel."))
+	content := lipgloss.JoinVertical(lipgloss.Left, rows...)
+	h := 10
+	if errLine != "" {
+		h = 12
+	}
+	return ui.ModalStyle(width, h).Render(content)
 }
 
 // helpView renders the help overlay. It is context-aware: only the sections

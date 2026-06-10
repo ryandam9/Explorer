@@ -756,6 +756,13 @@ func (m *Model) enterVPC(vpc VPCInfo) tea.Cmd {
 		m.client = client
 	}
 	m.resourceMaps = make(map[resourceType][]map[string]string)
+	m.resourceErr = nil
+	// Reset sidebar to the first selectable item so stale state from a
+	// previously browsed VPC is never shown while the new VPC loads.
+	if firstIdx := nextSelectableIdx(m.sidebarItems, -1, 1); firstIdx >= 0 {
+		m.activeSidebarIdx = firstIdx
+		m.activeResource = m.sidebarItems[firstIdx].rt
+	}
 	m.state = stateResourceBrowser
 	m.focus = focusCategory
 	return m.loadResources(m.activeResource)
@@ -1581,7 +1588,7 @@ func (m *Model) View() string {
 		return m.viewTraceResultOverlay(content)
 	}
 
-	return content
+	return ui.ClipToSize(content, m.width, m.height)
 }
 
 func (m *Model) viewVPCListState() string {
