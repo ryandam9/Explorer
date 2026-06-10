@@ -601,14 +601,13 @@ func (m *Model) exportReport() tea.Cmd {
 	}
 	m.statusMsg = "Exporting VPC report…"
 	client := m.client
-	vpcID := m.selectedVPC.ID
-	region := m.selectedVPC.Region
+	vpc := *m.selectedVPC
 	return func() tea.Msg {
-		snap, err := buildVPCSnapshot(client, vpcID)
+		data, err := buildFullExport(client, vpc)
 		if err != nil {
 			return exportDoneMsg{err: err}
 		}
-		path, err := writeExport(snap, analyzeVPC(snap), region, time.Now())
+		path, err := writeExport(data, analyzeVPC(data.Snap), time.Now())
 		return exportDoneMsg{path: path, err: err}
 	}
 }
@@ -736,6 +735,38 @@ func buildVPCSnapshot(c *VPCClient, vpcID string) (vpcSnapshot, error) {
 		return snap, firstErr
 	}
 	return snap, nil
+}
+
+// buildFullExport gathers everything needed for the complete Markdown report:
+// the VPC's own attributes, the networking snapshot, and the workload resources
+// (flow logs, EC2, Lambda, RDS, load balancers) that live in the VPC. The
+// workload fetches are best-effort — a single failure (e.g. missing
+// permissions) leaves that section empty rather than aborting the export.
+func buildFullExport(c *VPCClient, vpc VPCInfo) (fullExport, error) {
+	snap, err := buildVPCSnapshot(c, vpc.ID)
+	if err != nil {
+		return fullExport{}, err
+	}
+	snap.Region = vpc.Region
+	snap.OwnerID = vpc.OwnerId
+	data := fullExport{VPC: vpc, Snap: snap}
+
+	var wg sync.WaitGroup
+	run := func(fetch func()) {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			fetch()
+		}()
+	}
+	run(func() { data.FlowLogs, _ = c.ListFlowLogs(vpc.ID) })
+	run(func() { data.EC2, _ = c.ListEC2Instances(vpc.ID) })
+	run(func() { data.Lambdas, _ = c.ListLambdaFunctions(vpc.ID) })
+	run(func() { data.RDS, _ = c.ListRDSInstances(vpc.ID) })
+	run(func() { data.LBs, _ = c.ListLoadBalancers(vpc.ID) })
+	wg.Wait()
+
+	return data, nil
 }
 
 // staleVPCMsg reports whether an async reply produced for vpcID no longer
