@@ -35,6 +35,11 @@ type Model struct {
 	colOffset  int
 	frozenCols int
 
+	// baseWidths holds each column's configured width, captured before any
+	// content-based auto-fit. It is the floor a column may shrink to; columns
+	// grow past it to fit their widest cell so values are never truncated.
+	baseWidths []int
+
 	viewport viewport.Model
 	start    int
 	end      int
@@ -159,9 +164,43 @@ func New(opts ...Option) Model {
 		opt(&m)
 	}
 
+	m.fitColumns()
 	m.UpdateViewport()
 
 	return m
+}
+
+// fitColumns grows every visible column (one with a configured width > 0) so it
+// is at least as wide as its widest cell and its header. Columns never shrink
+// below their configured width (the floor captured in baseWidths), and columns
+// configured with width 0 stay hidden. Because cells are sized to fit, the
+// per-cell truncation in renderRow never elides content; tables that overflow
+// the view scroll horizontally by whole columns instead (see ScrollRight).
+func (m *Model) fitColumns() {
+	if len(m.baseWidths) != len(m.cols) {
+		m.baseWidths = make([]int, len(m.cols))
+		for i, c := range m.cols {
+			m.baseWidths[i] = c.Width
+		}
+	}
+
+	for i := range m.cols {
+		base := m.baseWidths[i]
+		if base <= 0 {
+			// Width-0 columns are intentionally hidden from the table.
+			m.cols[i].Width = base
+			continue
+		}
+		w := max(base, runewidth.StringWidth(m.cols[i].Title))
+		for _, row := range m.rows {
+			if i < len(row) {
+				if cw := runewidth.StringWidth(row[i]); cw > w {
+					w = cw
+				}
+			}
+		}
+		m.cols[i].Width = w
+	}
 }
 
 // WithColumns sets the table columns (headers).
@@ -341,13 +380,19 @@ func (m *Model) SetRows(r []Row) {
 		m.cursor = 0
 	}
 
+	m.fitColumns()
+	if max := m.maxColOffset(); m.colOffset > max {
+		m.colOffset = max
+	}
 	m.UpdateViewport()
 }
 
 // SetColumns sets a new columns state.
 func (m *Model) SetColumns(c []Column) {
 	m.cols = c
-	m.colOffset = 0 // new column set: start scrolled fully left
+	m.baseWidths = nil // recapture configured widths for the new column set
+	m.colOffset = 0    // new column set: start scrolled fully left
+	m.fitColumns()
 	m.UpdateViewport()
 }
 
