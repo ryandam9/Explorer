@@ -36,6 +36,8 @@ var tuiCmd = &cobra.Command{
 		}
 
 		ui.InitFromConfig(AppConfig.UI)
+		// The TUI owns the screen; keep scan logs from corrupting it.
+		SilenceLogsForTUI()
 
 		eng, err := engine.NewEngine(ctx, AppConfig)
 		if err != nil {

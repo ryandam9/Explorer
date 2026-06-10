@@ -138,6 +138,45 @@ func TestResetHintOnlyWithActiveFilter(t *testing.T) {
 	}
 }
 
+func TestErrorsOverlay(t *testing.T) {
+	m := newTestModel(t, 140, 40)
+
+	// With no errors, 'e' is a no-op and no errors hint is offered.
+	if hasHint(m.statusHints(), "e") {
+		t.Error("errors hint shown with no errors collected")
+	}
+	m = update(m, key("e"))
+	if m.showErrors {
+		t.Fatal("'e' should do nothing when there are no errors")
+	}
+
+	// Feed an access-denied error, then open the overlay.
+	m = update(m, chunkMsg(model.ResultChunk{Errors: []model.ExploreError{{
+		Service: "rds", Region: "us-east-1", Code: "AccessDenied",
+		Message: "Insufficient privileges — required IAM permission: rds:DescribeDBInstances",
+	}}}))
+	if !hasHint(m.statusHints(), "e") {
+		t.Error("errors hint missing once an error was collected")
+	}
+
+	m = update(m, key("e"))
+	if !m.showErrors {
+		t.Fatal("'e' should open the errors overlay when errors exist")
+	}
+	plain := ansi.Strip(m.View())
+	for _, want := range []string{"INSUFFICIENT PRIVILEGES", "RDS", "rds:DescribeDBInstances"} {
+		if !strings.Contains(plain, want) {
+			t.Errorf("errors overlay missing %q", want)
+		}
+	}
+
+	// Esc closes it again.
+	m = update(m, key("esc"))
+	if m.showErrors {
+		t.Error("esc should close the errors overlay")
+	}
+}
+
 func hasHint(hints []ui.KeyHint, key string) bool {
 	for _, h := range hints {
 		if h.Key == key {

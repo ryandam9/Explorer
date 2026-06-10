@@ -46,6 +46,8 @@ formats). Pass --tui to explore the same data interactively.`,
 
 		if summaryTUI {
 			ui.InitFromConfig(AppConfig.UI)
+			// The TUI owns the screen; keep scan logs from corrupting it.
+			SilenceLogsForTUI()
 			// Gather the all-services sweep up front and seed the TUI with it;
 			// the typed collectors then stream in and merge (deduped by ARN).
 			var seed []model.Resource
