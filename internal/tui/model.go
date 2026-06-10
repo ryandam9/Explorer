@@ -13,6 +13,7 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/huh"
 	"github.com/charmbracelet/lipgloss"
+	"github.com/charmbracelet/x/ansi"
 	zone "github.com/lrstanley/bubblezone"
 
 	"github.com/user/aws_explorer/internal/config"
@@ -35,8 +36,9 @@ const (
 // ── Layout constants ─────────────────────────────────────────────────────────
 
 const (
-	sidebarInner = 16 // inner content width of the sidebar panel
-	detailInner  = 34 // inner content width of the detail panel
+	sidebarInner  = 16 // inner content width of the sidebar panel
+	detailInner   = 34 // inner content width of the detail panel
+	minTableInner = 40 // table panel keeps at least this much content width
 )
 
 // ── Zone IDs ─────────────────────────────────────────────────────────────────
@@ -611,23 +613,35 @@ func (m tuiModel) columns() []table.Column {
 	}
 }
 
+// detailInline reports whether the detail panel fits beside the sidebar and
+// table. On narrower terminals it is drawn as a centered overlay instead, so
+// body lines never exceed the terminal width (the terminal would wrap them
+// and scroll the header off screen).
+func (m tuiModel) detailInline() bool {
+	return m.width >= (sidebarInner+4)+(minTableInner+6)+(detailInner+4)
+}
+
 // tableInnerWidth is the content width inside the table panel: terminal width
 // minus the sidebar panel, the table panel's own border + padding, and the
-// detail panel when visible.
+// detail panel when shown inline.
 func (m tuiModel) tableInnerWidth() int {
 	sidebarOuter := sidebarInner + 4
 	w := m.width - sidebarOuter - 2 - 4
-	if m.showDetail {
+	if m.showDetail && m.detailInline() {
 		w -= detailInner + 4
 	}
-	if w < 40 {
-		return 40
+	if w < minTableInner {
+		return minTableInner
 	}
 	return w
 }
 
 func (m tuiModel) tableHeight() int {
-	h := m.height - 6 // header(2) + status bar(1) + panel borders(2) + breathing room
+	// Total frame budget: header text(1) + header margin(1) + panel
+	// borders(2) + the +2 added back by syncTableLayout/renderTablePanel +
+	// status bar(1) = 7. Anything less tall than the terminal and Bubble Tea
+	// trims the frame from the top, hiding the header.
+	h := m.height - 7
 	if h < 8 {
 		return 8
 	}
@@ -710,8 +724,14 @@ func (m *tuiModel) syncDetailViewport() {
 	if vpHeight < 4 {
 		vpHeight = 4
 	}
+	// Preserve scroll position across resizes so the user doesn't jump back
+	// to the top when the terminal is resized while reading the detail panel.
+	savedOffset := m.detailViewport.YOffset
 	m.detailViewport = viewport.New(vpWidth, vpHeight)
 	m.detailViewport.SetContent(m.renderDetail(*m.detail, vpWidth))
+	if savedOffset > 0 {
+		m.detailViewport.SetYOffset(savedOffset)
+	}
 }
 
 // ── View ──────────────────────────────────────────────────────────────────────
@@ -797,6 +817,13 @@ func (m tuiModel) View() string {
 		}
 	}
 
+	// Hard-clip the final frame to the terminal dimensions. If the rendered
+	// output is taller than the terminal, Bubble Tea cuts lines from the TOP,
+	// which hides the header. If a line is wider than the terminal it wraps
+	// and adds a phantom row, pushing subsequent rows down.
+	if m.width > 0 && m.height > 0 {
+		output = ui.ClipToSize(output, m.width, m.height)
+	}
 	return m.zones.Scan(output)
 }
 
@@ -830,17 +857,27 @@ func (m tuiModel) renderHeader() string {
 	if w < 10 {
 		w = 10
 	}
+	// Truncate instead of letting lipgloss wrap: a wrapped header makes the
+	// frame taller than the terminal and the top of the screen scrolls away.
+	title = ansi.Truncate(title, w-2, "…") // -2 for the style's padding
 	return ui.HeaderStyle().Width(w).Render(title)
 }
 
 func (m tuiModel) renderBody() string {
 	sidebar := m.renderSidebar()
 	tbl := m.renderTablePanel()
+	body := lipgloss.JoinHorizontal(lipgloss.Top, sidebar, tbl)
 	if m.showDetail && m.detail != nil {
 		detail := m.renderDetailPanel()
-		return lipgloss.JoinHorizontal(lipgloss.Top, sidebar, tbl, detail)
+		if m.detailInline() {
+			return lipgloss.JoinHorizontal(lipgloss.Top, sidebar, tbl, detail)
+		}
+		// Narrow terminal: float the detail panel centered over the body
+		// instead of widening the layout past the terminal edge.
+		return lipgloss.Place(lipgloss.Width(body), lipgloss.Height(body),
+			lipgloss.Center, lipgloss.Center, detail)
 	}
-	return lipgloss.JoinHorizontal(lipgloss.Top, sidebar, tbl)
+	return body
 }
 
 func (m tuiModel) renderSidebar() string {
@@ -885,7 +922,19 @@ func (m tuiModel) renderTablePanel() string {
 	inner := m.tableInnerWidth()
 	innerH := m.tableHeight() + 2
 
-	parts := []string{m.table.View()}
+	filterActive := m.filterText != "" || m.filterRegion != "" || m.filterState != ""
+	tableView := m.table.View()
+
+	// When a filter is active but nothing matched, replace the empty table
+	// body with a helpful message so the user isn't staring at a blank panel.
+	if filterActive && len(m.allRows[m.currentService()]) == 0 {
+		hint := lipgloss.NewStyle().
+			Foreground(lipgloss.Color(ui.ColorMuted())).
+			Render("  No resources match current filter  •  press r to reset")
+		tableView = lipgloss.JoinVertical(lipgloss.Left, tableView, hint)
+	}
+
+	parts := []string{tableView}
 	if m.filtering || m.filterText != "" {
 		parts = append(parts, lipgloss.NewStyle().
 			Foreground(lipgloss.Color(ui.ColorMuted())).Render("Filter: ")+
