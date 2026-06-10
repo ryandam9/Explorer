@@ -145,6 +145,9 @@ type Model struct {
 	// VPC list (stateVPCList)
 	vpcTable   table.Model
 	allVPCRows []table.Row
+	// vpcRowText[i] is allVPCRows[i] joined and lower-cased once, so the
+	// search filter doesn't re-lowercase every cell on every keystroke.
+	vpcRowText []string
 	allVPCs    []VPCInfo
 
 	// Multi-region scan
@@ -1212,6 +1215,7 @@ func (m *Model) handleVPCListKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case "r":
 		m.allVPCs = nil
 		m.allVPCRows = nil
+		m.vpcRowText = nil
 		return m, m.loadVPCs()
 	case "enter":
 		row := m.vpcTable.SelectedRow()
@@ -1387,6 +1391,12 @@ func (m *Model) rebuildVPCTable(vpcs []VPCInfo) {
 	}
 	rows = seqRows(rows)
 	m.allVPCRows = rows
+	// Pre-lowercase each row's cells (NUL-joined so a query can't match
+	// across cell boundaries); the search filter then only scans these.
+	m.vpcRowText = make([]string, len(rows))
+	for i, r := range rows {
+		m.vpcRowText[i] = strings.ToLower(strings.Join(r, "\x00"))
+	}
 	m.vpcTable.SetRows(rows)
 }
 
@@ -1397,12 +1407,9 @@ func (m *Model) filterVPCTable(query string) {
 	}
 	q := strings.ToLower(query)
 	var filtered []table.Row
-	for _, r := range m.allVPCRows {
-		for _, cell := range r {
-			if strings.Contains(strings.ToLower(cell), q) {
-				filtered = append(filtered, r)
-				break
-			}
+	for i, r := range m.allVPCRows {
+		if strings.Contains(m.vpcRowText[i], q) {
+			filtered = append(filtered, r)
 		}
 	}
 	m.vpcTable.SetRows(filtered)
@@ -1634,6 +1641,15 @@ func (m *Model) viewVPCPanel(height int) string {
 		Foreground(lipgloss.Color(ui.ColorHeading())).
 		Render("VPCs")
 
+	idleStyle := lipgloss.NewStyle().
+		Foreground(lipgloss.Color(ui.ColorText())).
+		Width(vpcPanelInner)
+	selectedStyle := lipgloss.NewStyle().
+		Foreground(lipgloss.Color(ui.ColorHighlightText())).
+		Background(lipgloss.Color(ui.ColorHighlight())).
+		Bold(true).
+		Width(vpcPanelInner)
+
 	var lines []string
 	for _, vpc := range m.allVPCs {
 		label := vpc.ID
@@ -1643,14 +1659,11 @@ func (m *Model) viewVPCPanel(height int) string {
 		if ansi.StringWidth(label) > vpcPanelInner-2 {
 			label = ansi.Truncate(label, vpcPanelInner-2, "...")
 		}
-		style := lipgloss.NewStyle().Foreground(lipgloss.Color(ui.ColorText()))
+		style := idleStyle
 		if m.selectedVPC != nil && vpc.ID == m.selectedVPC.ID {
-			style = lipgloss.NewStyle().
-				Foreground(lipgloss.Color(ui.ColorHighlightText())).
-				Background(lipgloss.Color(ui.ColorHighlight())).
-				Bold(true)
+			style = selectedStyle
 		}
-		lines = append(lines, style.Width(vpcPanelInner).Render(label))
+		lines = append(lines, style.Render(label))
 	}
 
 	content := lipgloss.JoinVertical(lipgloss.Left, append([]string{title, ""}, lines...)...)
@@ -1671,14 +1684,26 @@ func (m *Model) viewCategoryPanel(height int) string {
 		Foreground(lipgloss.Color(ui.ColorHeading())).
 		Render("Resources")
 
+	headerStyle := lipgloss.NewStyle().
+		Foreground(lipgloss.Color(ui.ColorMuted())).
+		Bold(true).
+		Width(catPanelInner)
+	activeStyle := lipgloss.NewStyle().
+		Foreground(lipgloss.Color(ui.ColorHighlightText())).
+		Background(lipgloss.Color(ui.ColorHighlight())).
+		Bold(true).
+		Width(catPanelInner)
+	currentStyle := lipgloss.NewStyle().
+		Foreground(lipgloss.Color(ui.ColorAccent())).
+		Width(catPanelInner)
+	idleStyle := lipgloss.NewStyle().
+		Foreground(lipgloss.Color(ui.ColorText())).
+		Width(catPanelInner)
+
 	var lines []string
 	for i, item := range m.sidebarItems {
 		if item.isHeader {
-			lines = append(lines, lipgloss.NewStyle().
-				Foreground(lipgloss.Color(ui.ColorMuted())).
-				Bold(true).
-				Width(catPanelInner).
-				Render("▸ "+item.label))
+			lines = append(lines, headerStyle.Render("▸ "+item.label))
 		} else {
 			label := item.label
 			if ansi.StringWidth(label) > catPanelInner-2 {
@@ -1686,19 +1711,11 @@ func (m *Model) viewCategoryPanel(height int) string {
 			}
 			var style lipgloss.Style
 			if i == m.activeSidebarIdx {
-				style = lipgloss.NewStyle().
-					Foreground(lipgloss.Color(ui.ColorHighlightText())).
-					Background(lipgloss.Color(ui.ColorHighlight())).
-					Bold(true).
-					Width(catPanelInner)
+				style = activeStyle
 			} else if item.rt == m.activeResource {
-				style = lipgloss.NewStyle().
-					Foreground(lipgloss.Color(ui.ColorAccent())).
-					Width(catPanelInner)
+				style = currentStyle
 			} else {
-				style = lipgloss.NewStyle().
-					Foreground(lipgloss.Color(ui.ColorText())).
-					Width(catPanelInner)
+				style = idleStyle
 			}
 			lines = append(lines, style.Render("  "+label))
 		}

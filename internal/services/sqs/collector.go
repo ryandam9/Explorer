@@ -3,6 +3,7 @@ package sqs
 import (
 	"context"
 	"fmt"
+	"strings"
 
 	"github.com/aws/aws-sdk-go-v2/service/sqs"
 	"github.com/user/aws_explorer/internal/model"
@@ -43,13 +44,10 @@ func (c *Collector) Collect(ctx context.Context, input services.CollectInput) ([
 }
 
 func (c *Collector) mapQueue(region string, queueURL string) model.Resource {
-	name := queueURL
 	// Extract queue name from URL (last segment)
-	for i := len(queueURL) - 1; i >= 0; i-- {
-		if queueURL[i] == '/' {
-			name = queueURL[i+1:]
-			break
-		}
+	name := queueURL
+	if i := strings.LastIndexByte(queueURL, '/'); i >= 0 {
+		name = queueURL[i+1:]
 	}
 
 	res := model.Resource{

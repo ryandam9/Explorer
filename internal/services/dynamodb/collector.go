@@ -7,9 +7,15 @@ import (
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/service/dynamodb"
 	"github.com/aws/aws-sdk-go-v2/service/dynamodb/types"
+	"golang.org/x/sync/errgroup"
+
 	"github.com/user/aws_explorer/internal/model"
 	"github.com/user/aws_explorer/internal/services"
 )
+
+// describeConcurrency bounds parallel DescribeTable calls so large accounts
+// don't serialize on per-table round-trips or trip API throttling.
+const describeConcurrency = 8
 
 type Collector struct{}
 
@@ -27,24 +33,35 @@ func (c *Collector) IsGlobal() bool {
 
 func (c *Collector) Collect(ctx context.Context, input services.CollectInput) ([]model.Resource, error) {
 	client := dynamodb.NewFromConfig(input.AWSConfig)
-	var resources []model.Resource
 
+	var tableNames []string
 	paginator := dynamodb.NewListTablesPaginator(client, &dynamodb.ListTablesInput{})
 	for paginator.HasMorePages() {
 		page, err := paginator.NextPage(ctx)
 		if err != nil {
 			return nil, fmt.Errorf("failed to list DynamoDB tables: %w", err)
 		}
+		tableNames = append(tableNames, page.TableNames...)
+	}
 
-		for _, tableName := range page.TableNames {
-			desc, err := client.DescribeTable(ctx, &dynamodb.DescribeTableInput{
+	// Describe tables concurrently; indexed writes keep list order.
+	resources := make([]model.Resource, len(tableNames))
+	g, gctx := errgroup.WithContext(ctx)
+	g.SetLimit(describeConcurrency)
+	for i, tableName := range tableNames {
+		g.Go(func() error {
+			desc, err := client.DescribeTable(gctx, &dynamodb.DescribeTableInput{
 				TableName: aws.String(tableName),
 			})
 			if err != nil {
-				return nil, fmt.Errorf("failed to describe table %s: %w", tableName, err)
+				return fmt.Errorf("failed to describe table %s: %w", tableName, err)
 			}
-			resources = append(resources, c.mapTable(input.Region, desc.Table, input.DetailLevel))
-		}
+			resources[i] = c.mapTable(input.Region, desc.Table, input.DetailLevel)
+			return nil
+		})
+	}
+	if err := g.Wait(); err != nil {
+		return nil, err
 	}
 
 	return resources, nil

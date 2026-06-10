@@ -7,9 +7,16 @@ import (
 
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/service/s3"
+	"golang.org/x/sync/errgroup"
+
 	"github.com/user/aws_explorer/internal/model"
 	"github.com/user/aws_explorer/internal/services"
 )
+
+// bucketDetailConcurrency bounds how many buckets have their details fetched
+// at once. Each bucket already fans out ~8 API calls internally, so this
+// keeps total in-flight requests at a moderate level (~32).
+const bucketDetailConcurrency = 4
 
 // Collector implements the services.Collector interface for S3.
 type Collector struct{}
@@ -57,12 +64,22 @@ func (c *Collector) Collect(ctx context.Context, input services.CollectInput) ([
 				res.Summary["creationDate"] = bucket.CreationDate.Format("2006-01-02 15:04:05")
 			}
 
-			if input.DetailLevel == services.DetailLevelDetailed || input.DetailLevel == services.DetailLevelRaw {
-				res.Details = fetchBucketDetails(ctx, client, name)
-			}
-
 			resources = append(resources, res)
 		}
+	}
+
+	// Detail fetching makes ~8 API calls per bucket; run buckets concurrently
+	// (bounded) instead of one bucket at a time.
+	if input.DetailLevel == services.DetailLevelDetailed || input.DetailLevel == services.DetailLevelRaw {
+		g, gctx := errgroup.WithContext(ctx)
+		g.SetLimit(bucketDetailConcurrency)
+		for i := range resources {
+			g.Go(func() error {
+				resources[i].Details = fetchBucketDetails(gctx, client, resources[i].Name)
+				return nil
+			})
+		}
+		_ = g.Wait() // detail fetches swallow per-call errors; nothing to return
 	}
 
 	return resources, nil
