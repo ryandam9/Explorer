@@ -56,6 +56,8 @@ var vpcCmd = &cobra.Command{
 			activeTheme = AppConfig.UI.Theme
 		}
 		ui.InitFromConfig(AppConfig.UI)
+		// The TUI owns the screen; keep scan logs from corrupting it.
+		SilenceLogsForTUI()
 
 		scanAll := vpcAllRegions
 		if AppConfig != nil && AppConfig.AWS.AllRegions {

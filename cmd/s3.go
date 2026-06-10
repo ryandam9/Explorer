@@ -61,6 +61,8 @@ var s3Cmd = &cobra.Command{
 			activeTheme = AppConfig.UI.Theme
 		}
 		ui.InitFromConfig(AppConfig.UI)
+		// The TUI owns the screen; keep scan logs from corrupting it.
+		SilenceLogsForTUI()
 
 		m, err := s3tui.NewModel(ctx, s3Cfg, s3Region, s3Bucket, s3Prefix, activeTheme, s3AllowDelete, s3EndpointURL, configFilePath(), AppConfig)
 		if err != nil {

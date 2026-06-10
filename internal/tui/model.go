@@ -141,6 +141,11 @@ type tuiModel struct {
 	showSettings bool
 	settings     ui.SettingsModel
 
+	// Errors overlay: lists access-denied / collection errors so they can be
+	// read even when some resources were returned. Scrollable when long.
+	showErrors     bool
+	errorsViewport viewport.Model
+
 	// Config (path + loaded struct) needed to (re)build the settings panel.
 	configPath string
 	cfg        *config.Config
@@ -246,6 +251,24 @@ func (m tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if key, ok := msg.(tea.KeyMsg); ok {
 			if s := key.String(); s == "esc" || s == ui.KeyHelp || s == "q" {
 				m.showHelp = false
+			}
+		}
+		return m, nil
+	}
+
+	// While the errors overlay is open, allow scrolling and close on Esc/e/q.
+	if m.showErrors {
+		if key, ok := msg.(tea.KeyMsg); ok {
+			switch key.String() {
+			case "esc", "e", "q":
+				m.showErrors = false
+				return m, nil
+			case "up", "k", "[":
+				m.errorsViewport.LineUp(3)
+				return m, nil
+			case "down", "j", "]":
+				m.errorsViewport.LineDown(3)
+				return m, nil
 			}
 		}
 		return m, nil
@@ -423,6 +446,12 @@ func (m tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 		case ui.KeyHelp:
 			m.showHelp = true
+			return m, tea.Batch(cmds...)
+
+		case "e":
+			if len(m.errors) > 0 {
+				m.openErrorsOverlay()
+			}
 			return m, tea.Batch(cmds...)
 		}
 
@@ -777,6 +806,7 @@ func (m tuiModel) helpView() string {
 		"  r                  Reset all filters",
 		"",
 		"Utility",
+		"  e                  View access / scan errors",
 		"  S                  Settings (theme & colors)",
 		"  ?                  Toggle this help",
 		"  q, Ctrl+C          Quit",
@@ -809,6 +839,9 @@ func (m tuiModel) View() string {
 
 	if m.showHelp {
 		centered := lipgloss.Place(m.width, m.height-4, lipgloss.Center, lipgloss.Center, m.helpView())
+		output = lipgloss.JoinVertical(lipgloss.Left, header, centered, status)
+	} else if m.showErrors {
+		centered := lipgloss.Place(m.width, m.height-4, lipgloss.Center, lipgloss.Center, m.errorsOverlay())
 		output = lipgloss.JoinVertical(lipgloss.Left, header, centered, status)
 	} else if m.showSettings {
 		settingsView := m.settings.View()
@@ -1026,6 +1059,8 @@ func (m tuiModel) statusHints() []ui.KeyHint {
 		return nil
 	case m.showHelp:
 		return []ui.KeyHint{ui.H("?/Esc", "close help")}
+	case m.showErrors:
+		return []ui.KeyHint{ui.H("↑/↓", "scroll"), ui.H("Esc/e", "close")}
 	case m.showFilter:
 		return []ui.KeyHint{
 			ui.H("↑/↓", "choose"),
@@ -1064,6 +1099,9 @@ func (m tuiModel) statusHints() []ui.KeyHint {
 		)
 		if m.filterRegion != "" || m.filterState != "" || m.filterText != "" {
 			hints = append(hints, ui.H("r", "reset filters"))
+		}
+		if len(m.errors) > 0 {
+			hints = append(hints, ui.H("e", fmt.Sprintf("errors (%d)", len(m.errors))))
 		}
 		return append(hints,
 			ui.H("Tab", "panel"),
@@ -1182,7 +1220,9 @@ func (m tuiModel) renderDetail(r model.Resource, width int) string {
 
 // ── Error renderer ────────────────────────────────────────────────────────────
 
-func (m tuiModel) renderPrivilegeErrors() string {
+// errorsBody formats the collected scan errors (access-denied first, then
+// everything else) as a plain string, without any surrounding frame.
+func (m tuiModel) errorsBody() string {
 	var authErrs, otherErrs []model.ExploreError
 	for _, e := range m.errors {
 		if e.Code == "AccessDenied" {
@@ -1211,7 +1251,42 @@ func (m tuiModel) renderPrivilegeErrors() string {
 			b.WriteString(fmt.Sprintf("  [%s|%s] %s: %s\n", e.Service, e.Region, e.Code, e.Message))
 		}
 	}
-	return privilegeErrorStyle().Render(b.String())
+	return b.String()
+}
+
+// renderPrivilegeErrors renders the scan errors in a bordered box for the
+// full-screen "nothing was returned" state.
+func (m tuiModel) renderPrivilegeErrors() string {
+	return privilegeErrorStyle().Render(m.errorsBody())
+}
+
+// openErrorsOverlay (re)builds the scrollable errors overlay sized to the
+// current terminal so the access-denied details stay readable even when some
+// resources were returned.
+func (m *tuiModel) openErrorsOverlay() {
+	w := m.width - 12
+	if w > 80 {
+		w = 80
+	}
+	if w < 32 {
+		w = 32
+	}
+	h := m.height - 8
+	if h < 6 {
+		h = 6
+	}
+	m.errorsViewport = viewport.New(w, h)
+	m.errorsViewport.SetContent(m.errorsBody())
+	m.showErrors = true
+}
+
+// errorsOverlay renders the errors overlay (title + scrollable body) inside a
+// themed modal frame.
+func (m tuiModel) errorsOverlay() string {
+	title := privilegeTitleStyle().Render(fmt.Sprintf("ACCESS / SCAN ERRORS (%d)", len(m.errors)))
+	hint := privilegeHintStyle().Render("↑/↓ scroll · Esc/e close")
+	body := lipgloss.JoinVertical(lipgloss.Left, title, "", m.errorsViewport.View(), "", hint)
+	return privilegeErrorStyle().Render(body)
 }
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
