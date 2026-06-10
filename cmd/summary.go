@@ -20,6 +20,7 @@ import (
 var (
 	summaryTUI       bool
 	summaryTypedOnly bool
+	summaryRegion    string
 )
 
 var summaryCmd = &cobra.Command{
@@ -116,10 +117,21 @@ func applyGlobalAWSOverrides() {
 			AppConfig.AWS.AuthMethod = "sts"
 		}
 	}
+
+	// --region pins the scan to a single region. It wins over every other
+	// region setting: the config's aws.regions, aws.allRegions, --all-regions,
+	// and any filters.regions narrowing. Applied last so it overrides the
+	// --all-regions handling above.
+	if summaryRegion != "" {
+		AppConfig.AWS.Regions = []string{summaryRegion}
+		AppConfig.AWS.AllRegions = false
+		AppConfig.Filters.Regions = nil
+	}
 }
 
 func init() {
 	summaryCmd.Flags().BoolVar(&summaryTUI, "tui", false, "Explore the inventory interactively instead of printing a table")
 	summaryCmd.Flags().BoolVar(&summaryTypedOnly, "typed-only", false, "Only use the built-in typed collectors; skip the all-services Tagging API sweep")
+	summaryCmd.Flags().StringVarP(&summaryRegion, "region", "r", "", "Scan only this region, overriding all other region settings (aws.regions, --all-regions, filters.regions)")
 	rootCmd.AddCommand(summaryCmd)
 }
