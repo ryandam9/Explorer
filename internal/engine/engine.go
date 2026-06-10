@@ -15,6 +15,7 @@ import (
 
 	"github.com/user/aws_explorer/internal/auth"
 	"github.com/user/aws_explorer/internal/awserr"
+	"github.com/user/aws_explorer/internal/awsutil"
 	"github.com/user/aws_explorer/internal/config"
 	"github.com/user/aws_explorer/internal/model"
 	"github.com/user/aws_explorer/internal/services"
@@ -76,10 +77,7 @@ func NewEngine(ctx context.Context, cfg *config.Config) (*Engine, error) {
 	// Resolve all regions if requested
 	resolvedRegions := regions
 	if allRegions {
-		resolvedRegions, err = resolveAllRegions(ctx, awscfg)
-		if err != nil {
-			return nil, fmt.Errorf("unable to resolve all AWS regions: %w", err)
-		}
+		resolvedRegions = resolveAllRegions(ctx, awscfg)
 		slog.Info("Resolved all AWS regions", "count", len(resolvedRegions))
 	}
 
@@ -127,11 +125,24 @@ func resolveAccountID(ctx context.Context, awscfg aws.Config) string {
 	return aws.ToString(out.Account)
 }
 
-func resolveAllRegions(ctx context.Context, awscfg aws.Config) ([]string, error) {
+// resolveAllRegions returns every region to scan for "--all-regions". It calls
+// ec2:DescribeRegions, but that API is itself permission-gated: when the caller
+// lacks ec2:DescribeRegions (or the call otherwise fails) we fall back to the
+// canonical static region list with a warning rather than aborting the whole
+// run, so the scan still proceeds best-effort.
+func resolveAllRegions(ctx context.Context, awscfg aws.Config) []string {
 	client := awsec2.NewFromConfig(awscfg)
 	result, err := client.DescribeRegions(ctx, &awsec2.DescribeRegionsInput{})
 	if err != nil {
-		return nil, fmt.Errorf("failed to describe regions: %w", err)
+		if awserr.IsAuthError(err) {
+			slog.Warn("Not authorized to call ec2:DescribeRegions; "+
+				"falling back to the built-in region list",
+				"regions", len(awsutil.FallbackRegions))
+		} else {
+			slog.Warn("Unable to list AWS regions; falling back to the built-in region list",
+				"error", err.Error(), "regions", len(awsutil.FallbackRegions))
+		}
+		return awsutil.FallbackRegions
 	}
 	regions := make([]string, 0, len(result.Regions))
 	for _, region := range result.Regions {
@@ -140,7 +151,10 @@ func resolveAllRegions(ctx context.Context, awscfg aws.Config) ([]string, error)
 		}
 	}
 	sort.Strings(regions)
-	return regions, nil
+	if len(regions) == 0 {
+		return awsutil.FallbackRegions
+	}
+	return regions
 }
 
 // Run executes all configured scanners concurrently and returns the combined results.
