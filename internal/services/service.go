@@ -29,6 +29,11 @@ type CollectInput struct {
 }
 
 // Collector is the interface that every AWS service collector must implement.
+//
+// Collect is best-effort: when it fails partway through (a later page throttles,
+// a per-item describe is denied, …) it returns the resources gathered so far
+// together with the error, instead of discarding them. Callers must therefore
+// consume the resource slice even when the error is non-nil.
 type Collector interface {
 	Name() string
 	IsGlobal() bool

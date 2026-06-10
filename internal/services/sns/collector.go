@@ -32,7 +32,7 @@ func (c *Collector) Collect(ctx context.Context, input services.CollectInput) ([
 	for paginator.HasMorePages() {
 		page, err := paginator.NextPage(ctx)
 		if err != nil {
-			return nil, fmt.Errorf("failed to list SNS topics: %w", err)
+			return resources, fmt.Errorf("failed to list SNS topics: %w", err)
 		}
 
 		for _, topic := range page.Topics {

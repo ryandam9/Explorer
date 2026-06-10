@@ -13,6 +13,7 @@ Discover, monitor, and display AWS resources across accounts and regions via CLI
 - **Output formats**: Table (default), JSON
 - **Filtering**: By region, state, tags, name, and IDs
 - **Concurrent**: Bounded goroutine pool (default 8) for parallel collection across services and regions
+- **Resilient**: Best-effort collection — a throttle or denied call mid-scan keeps everything already gathered (flagged as partial) instead of dropping the service/region, with configurable retry attempts and adaptive backoff
 - **Themes**: 12 built-in bird-themed color schemes with 24 individually customizable color roles (table header, borders, status bar, alerts, …) — editable live in the in-app settings panel
 - **Context-aware shortcuts**: the status bar in every TUI shows only the keys that work on the current screen
 - **Uniform tables**: every table shares one theme and scrolls horizontally (`<` / `>`) when columns don't fit
@@ -623,6 +624,12 @@ aws:
     secretAccessKey: ""
     sessionToken: ""          # optional; for temporary credentials
 
+  # Retry tuning for every AWS API call (applies to all auth methods)
+  retry:
+    maxAttempts: 0            # total attempts per call (1 = no retries); 0 = SDK default (3)
+    mode: ""                  # standard (default) | adaptive (adds client-side
+                              # rate limiting; best for accounts that hit throttling)
+
   allRegions: false           # true = query all available regions
   regions:
     - us-east-1
@@ -677,6 +684,30 @@ display:
 ```
 
 Any resource type you omit keeps its built-in defaults.
+
+### Resilient scanning (retries & partial results)
+
+Collection is **best-effort**. When a service/region fails partway through —
+a later page throttles, or a per-item describe call is denied — everything
+collected before the failure is kept and shown, and the error is reported as
+*partial* (`partial results kept` on the CLI, `"partial": true` in JSON
+errors, and a note in the TUI errors overlay). Previously a single failed page
+discarded the whole service/region.
+
+For large accounts that hit AWS throttling (`RequestLimitExceeded`,
+`ThrottlingException`), tune the SDK retry behaviour under `aws.retry`:
+
+```yaml
+aws:
+  retry:
+    maxAttempts: 8       # keep retrying longer than the default 3 attempts
+    mode: adaptive       # client-side rate limiting that backs off automatically
+```
+
+`adaptive` mode wraps the standard exponential backoff with a client-side
+token bucket that slows the request rate after throttle responses — usually
+the right choice for `--all-regions` sweeps of busy accounts. Leave the block
+unset to keep the AWS SDK defaults (3 attempts, standard mode).
 
 ## Authentication
 

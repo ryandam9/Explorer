@@ -1238,7 +1238,11 @@ func (m tuiModel) errorsBody() string {
 		for _, e := range authErrs {
 			b.WriteString(detailKeyStyle().Render(fmt.Sprintf("%-12s", "Service")) +
 				" " + strings.ToUpper(e.Service) + " (" + e.Region + ")\n")
-			b.WriteString(privilegeHintStyle().Render(e.Message) + "\n\n")
+			msg := e.Message
+			if e.Partial {
+				msg += " Resources collected before the failure were kept."
+			}
+			b.WriteString(privilegeHintStyle().Render(msg) + "\n\n")
 		}
 		b.WriteString("Attach the missing permissions to your IAM user or role.\n")
 	}
@@ -1248,7 +1252,11 @@ func (m tuiModel) errorsBody() string {
 		}
 		b.WriteString("Other errors:\n")
 		for _, e := range otherErrs {
-			b.WriteString(fmt.Sprintf("  [%s|%s] %s: %s\n", e.Service, e.Region, e.Code, e.Message))
+			code := e.Code
+			if e.Partial {
+				code += ", partial results kept"
+			}
+			b.WriteString(fmt.Sprintf("  [%s|%s] %s: %s\n", e.Service, e.Region, code, e.Message))
 		}
 	}
 	return b.String()

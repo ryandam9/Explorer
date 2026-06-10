@@ -18,4 +18,7 @@ type ExploreError struct {
 	Region  string `json:"region"`
 	Code    string `json:"code"`
 	Message string `json:"message"`
+	// Partial is true when the failing collector still returned some
+	// resources (collected before the failure) and those were kept.
+	Partial bool `json:"partial,omitempty"`
 }

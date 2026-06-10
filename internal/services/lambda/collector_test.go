@@ -1,10 +1,15 @@
 package lambda
 
 import (
+	"context"
+	"errors"
+	"io"
+	"net/http"
 	"strings"
 	"testing"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
+	"github.com/aws/aws-sdk-go-v2/credentials"
 	lambdatypes "github.com/aws/aws-sdk-go-v2/service/lambda/types"
 	"github.com/user/aws_explorer/internal/services"
 )
@@ -119,5 +124,49 @@ func TestMapFunction_ZeroMemoryAndTimeout(t *testing.T) {
 	}
 	if !strings.HasSuffix(res.Summary["timeout"], "s") {
 		t.Errorf("Summary[timeout] = %q, expected to end with 's'", res.Summary["timeout"])
+	}
+}
+
+// pagedStubClient serves one successful ListFunctions page, then fails every
+// subsequent HTTP call, simulating mid-pagination throttling or an outage.
+type pagedStubClient struct {
+	calls int
+}
+
+func (s *pagedStubClient) Do(req *http.Request) (*http.Response, error) {
+	s.calls++
+	if s.calls > 1 {
+		return nil, errors.New("simulated network failure")
+	}
+	body := `{"Functions":[{"FunctionArn":"arn:aws:lambda:us-east-1:123:function:fn1","FunctionName":"fn1"}],"NextMarker":"page2"}`
+	return &http.Response{
+		StatusCode: 200,
+		Header:     http.Header{"Content-Type": []string{"application/json"}},
+		Body:       io.NopCloser(strings.NewReader(body)),
+	}, nil
+}
+
+func TestCollect_KeepsPartialResultsWhenPaginationFails(t *testing.T) {
+	c := NewCollector()
+	input := services.CollectInput{
+		AWSConfig: aws.Config{
+			Region:           "us-east-1",
+			Credentials:      credentials.NewStaticCredentialsProvider("AKID", "SECRET", ""),
+			HTTPClient:       &pagedStubClient{},
+			RetryMaxAttempts: 1,
+		},
+		Region: "us-east-1",
+	}
+
+	resources, err := c.Collect(context.Background(), input)
+
+	if err == nil {
+		t.Fatal("expected the second page failure to be reported")
+	}
+	if len(resources) != 1 {
+		t.Fatalf("expected the resource from the first page to be kept, got %d", len(resources))
+	}
+	if resources[0].Name != "fn1" {
+		t.Errorf("Name = %q, want fn1", resources[0].Name)
 	}
 }

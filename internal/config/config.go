@@ -63,6 +63,19 @@ type AWSConfig struct {
 	AllRegions bool              `mapstructure:"allRegions"`
 	STS        STSConfig         `mapstructure:"sts"`
 	Static     StaticCredentials `mapstructure:"static"`
+	Retry      RetryConfig       `mapstructure:"retry"`
+}
+
+// RetryConfig tunes how AWS API calls are retried. Large accounts hitting
+// throttling can raise maxAttempts and switch to the adaptive mode, which
+// client-side rate-limits to back off automatically.
+type RetryConfig struct {
+	// MaxAttempts is the total number of attempts per API call (1 = no
+	// retries). 0 means use the AWS SDK default (3).
+	MaxAttempts int `mapstructure:"maxAttempts"`
+	// Mode selects the SDK retry strategy: "standard" (default) or
+	// "adaptive" (standard plus client-side rate limiting on throttle).
+	Mode string `mapstructure:"mode"`
 }
 
 // STSConfig holds settings for the "sts" auth method (AssumeRole).

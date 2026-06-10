@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"strings"
 	"time"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
@@ -35,7 +36,7 @@ func BuildAWSConfig(ctx context.Context, cfg *config.AWSConfig, region string) (
 	case "profile":
 		return buildProfile(ctx, cfg, region)
 	case "env":
-		return buildEnv(ctx, region)
+		return buildEnv(ctx, cfg, region)
 	case "static":
 		return buildStatic(ctx, cfg, region)
 	case "sts":
@@ -45,18 +46,35 @@ func BuildAWSConfig(ctx context.Context, cfg *config.AWSConfig, region string) (
 	}
 }
 
-func regionOpts(region string) []func(*awsconfig.LoadOptions) error {
-	if region == "" {
-		return nil
+// baseOpts returns the load options shared by every auth method: the region
+// plus the aws.retry settings (max attempts and standard/adaptive mode).
+func baseOpts(cfg *config.AWSConfig, region string) ([]func(*awsconfig.LoadOptions) error, error) {
+	var opts []func(*awsconfig.LoadOptions) error
+	if region != "" {
+		opts = append(opts, awsconfig.WithRegion(region))
 	}
-	return []func(*awsconfig.LoadOptions) error{
-		awsconfig.WithRegion(region),
+	if cfg.Retry.MaxAttempts > 0 {
+		opts = append(opts, awsconfig.WithRetryMaxAttempts(cfg.Retry.MaxAttempts))
 	}
+	switch strings.ToLower(cfg.Retry.Mode) {
+	case "":
+		// AWS SDK default (standard).
+	case string(aws.RetryModeStandard):
+		opts = append(opts, awsconfig.WithRetryMode(aws.RetryModeStandard))
+	case string(aws.RetryModeAdaptive):
+		opts = append(opts, awsconfig.WithRetryMode(aws.RetryModeAdaptive))
+	default:
+		return nil, fmt.Errorf("unknown aws.retry.mode %q — valid values: standard, adaptive", cfg.Retry.Mode)
+	}
+	return opts, nil
 }
 
 // buildAuto uses the AWS SDK default credential chain with an optional profile.
 func buildAuto(ctx context.Context, cfg *config.AWSConfig, region string) (aws.Config, error) {
-	opts := regionOpts(region)
+	opts, err := baseOpts(cfg, region)
+	if err != nil {
+		return aws.Config{}, err
+	}
 	if cfg.Profile != "" && cfg.Profile != "default" {
 		opts = append(opts, awsconfig.WithSharedConfigProfile(cfg.Profile))
 	}
@@ -68,19 +86,25 @@ func buildProfile(ctx context.Context, cfg *config.AWSConfig, region string) (aw
 	if cfg.Profile == "" {
 		return aws.Config{}, fmt.Errorf("authMethod \"profile\" requires aws.profile to be set")
 	}
-	opts := regionOpts(region)
+	opts, err := baseOpts(cfg, region)
+	if err != nil {
+		return aws.Config{}, err
+	}
 	opts = append(opts, awsconfig.WithSharedConfigProfile(cfg.Profile))
 	return awsconfig.LoadDefaultConfig(ctx, opts...)
 }
 
 // buildEnv forces credentials from environment variables only.
-func buildEnv(ctx context.Context, region string) (aws.Config, error) {
+func buildEnv(ctx context.Context, cfg *config.AWSConfig, region string) (aws.Config, error) {
 	accessKeyID := os.Getenv("AWS_ACCESS_KEY_ID")
 	secretKey := os.Getenv("AWS_SECRET_ACCESS_KEY")
 	if accessKeyID == "" || secretKey == "" {
 		return aws.Config{}, fmt.Errorf("authMethod \"env\" requires AWS_ACCESS_KEY_ID and AWS_SECRET_ACCESS_KEY to be set")
 	}
-	opts := regionOpts(region)
+	opts, err := baseOpts(cfg, region)
+	if err != nil {
+		return aws.Config{}, err
+	}
 	opts = append(opts, awsconfig.WithCredentialsProvider(
 		credentials.NewStaticCredentialsProvider(accessKeyID, secretKey, os.Getenv("AWS_SESSION_TOKEN")),
 	))
@@ -92,7 +116,10 @@ func buildStatic(ctx context.Context, cfg *config.AWSConfig, region string) (aws
 	if cfg.Static.AccessKeyID == "" || cfg.Static.SecretAccessKey == "" {
 		return aws.Config{}, fmt.Errorf("authMethod \"static\" requires aws.static.accessKeyId and aws.static.secretAccessKey")
 	}
-	opts := regionOpts(region)
+	opts, err := baseOpts(cfg, region)
+	if err != nil {
+		return aws.Config{}, err
+	}
 	opts = append(opts, awsconfig.WithCredentialsProvider(
 		credentials.NewStaticCredentialsProvider(
 			cfg.Static.AccessKeyID,

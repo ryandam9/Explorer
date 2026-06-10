@@ -37,7 +37,7 @@ func (c *Collector) Collect(ctx context.Context, input services.CollectInput) ([
 	for paginator.HasMorePages() {
 		page, err := paginator.NextPage(ctx)
 		if err != nil {
-			return nil, fmt.Errorf("failed to describe EC2 instances: %w", err)
+			return resources, fmt.Errorf("failed to describe EC2 instances: %w", err)
 		}
 
 		for _, reservation := range page.Reservations {
@@ -52,7 +52,7 @@ func (c *Collector) Collect(ctx context.Context, input services.CollectInput) ([
 	for vpcPaginator.HasMorePages() {
 		page, err := vpcPaginator.NextPage(ctx)
 		if err != nil {
-			return nil, fmt.Errorf("failed to describe VPCs: %w", err)
+			return resources, fmt.Errorf("failed to describe VPCs: %w", err)
 		}
 		for _, vpc := range page.Vpcs {
 			resources = append(resources, c.mapVpc(input.Region, input.AccountID, vpc, input.DetailLevel))

@@ -43,7 +43,7 @@ func (c *Collector) Collect(ctx context.Context, input services.CollectInput) ([
 	for paginator.HasMorePages() {
 		page, err := paginator.NextPage(ctx)
 		if err != nil {
-			return nil, fmt.Errorf("failed to list S3 buckets: %w", err)
+			return resources, fmt.Errorf("failed to list S3 buckets: %w", err)
 		}
 
 		for _, bucket := range page.Buckets {

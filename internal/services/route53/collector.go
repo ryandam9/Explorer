@@ -37,7 +37,7 @@ func (c *Collector) Collect(ctx context.Context, input services.CollectInput) ([
 		}
 		output, err := client.ListHostedZones(ctx, listInput)
 		if err != nil {
-			return nil, fmt.Errorf("failed to list Route53 hosted zones: %w", err)
+			return resources, fmt.Errorf("failed to list Route53 hosted zones: %w", err)
 		}
 
 		for _, zone := range output.HostedZones {
