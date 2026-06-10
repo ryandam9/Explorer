@@ -37,6 +37,61 @@ func TestRoute53ZoneARN(t *testing.T) {
 	}
 }
 
+func TestParseARN(t *testing.T) {
+	cases := []struct {
+		arn                                 string
+		service, region, account, rtype, id string
+	}{
+		{
+			"arn:aws:ec2:us-east-1:123456789012:instance/i-0abc",
+			"ec2", "us-east-1", "123456789012", "instance", "i-0abc",
+		},
+		{
+			"arn:aws:s3:::my-bucket",
+			"s3", "", "", "", "my-bucket",
+		},
+		{
+			"arn:aws:iam::123456789012:role/admin",
+			"iam", "", "123456789012", "role", "admin",
+		},
+		{
+			"arn:aws:sqs:us-east-1:123456789012:my-queue",
+			"sqs", "us-east-1", "123456789012", "", "my-queue",
+		},
+		{
+			"arn:aws:elasticloadbalancing:us-east-1:123:loadbalancer/app/my-alb/abc123",
+			"elasticloadbalancing", "us-east-1", "123", "loadbalancer", "app/my-alb/abc123",
+		},
+	}
+	for _, c := range cases {
+		got, ok := ParseARN(c.arn)
+		if !ok {
+			t.Errorf("ParseARN(%q) returned ok=false", c.arn)
+			continue
+		}
+		if got.Service != c.service || got.Region != c.region || got.AccountID != c.account ||
+			got.ResourceType != c.rtype || got.ResourceID != c.id {
+			t.Errorf("ParseARN(%q) = %+v, want service=%q region=%q account=%q type=%q id=%q",
+				c.arn, got, c.service, c.region, c.account, c.rtype, c.id)
+		}
+	}
+
+	if _, ok := ParseARN("not-an-arn"); ok {
+		t.Error("ParseARN(non-arn) returned ok=true")
+	}
+}
+
+func TestARNName(t *testing.T) {
+	a, _ := ParseARN("arn:aws:elasticloadbalancing:us-east-1:123:loadbalancer/app/my-alb/abc123")
+	if got := a.ARNName(); got != "abc123" {
+		t.Errorf("ARNName = %q, want abc123", got)
+	}
+	b, _ := ParseARN("arn:aws:s3:::my-bucket")
+	if got := b.ARNName(); got != "my-bucket" {
+		t.Errorf("ARNName = %q, want my-bucket", got)
+	}
+}
+
 func TestSQSARNFromURL(t *testing.T) {
 	url := "https://sqs.us-east-1.amazonaws.com/123456789012/my-queue"
 	want := "arn:aws:sqs:us-east-1:123456789012:my-queue"

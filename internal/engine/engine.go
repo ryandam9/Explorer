@@ -156,17 +156,10 @@ func (e *Engine) Run(ctx context.Context) (model.ExploreResult, error) {
 	return result, nil
 }
 
-// StreamRun emits results to the channel as they arrive, then closes it.
-func (e *Engine) StreamRun(ctx context.Context, chunks chan<- model.ResultChunk) {
-	defer close(chunks)
-
-	g, gCtx := errgroup.WithContext(ctx)
-	maxConcurrency := e.Config.App.MaxConcurrency
-	if maxConcurrency <= 0 {
-		maxConcurrency = 8
-	}
-	g.SetLimit(maxConcurrency)
-
+// EffectiveRegions returns the regions to scan: the resolved region list
+// narrowed by any filters.regions configured. It always returns at least one
+// region.
+func (e *Engine) EffectiveRegions() []string {
 	regions := e.ResolvedRegions
 	if len(regions) == 0 {
 		regions = []string{"us-east-1"}
@@ -185,6 +178,21 @@ func (e *Engine) StreamRun(ctx context.Context, chunks chan<- model.ResultChunk)
 		}
 		regions = filtered
 	}
+	return regions
+}
+
+// StreamRun emits results to the channel as they arrive, then closes it.
+func (e *Engine) StreamRun(ctx context.Context, chunks chan<- model.ResultChunk) {
+	defer close(chunks)
+
+	g, gCtx := errgroup.WithContext(ctx)
+	maxConcurrency := e.Config.App.MaxConcurrency
+	if maxConcurrency <= 0 {
+		maxConcurrency = 8
+	}
+	g.SetLimit(maxConcurrency)
+
+	regions := e.EffectiveRegions()
 
 	for _, srv := range e.registry.GetAll() {
 		srvCfg, ok := e.Config.Services[srv.Name()]

@@ -34,6 +34,7 @@ var servicePermissions = map[string][]string{
 	"sns":            {"sns:ListTopics"},
 	"cloudwatch":     {"cloudwatch:DescribeAlarms"},
 	"route53":        {"route53:ListHostedZones"},
+	"resourcegroups": {"tag:GetResources"},
 }
 
 // IsAuthError reports whether err is an AWS insufficient-privilege error.
