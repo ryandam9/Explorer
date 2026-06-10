@@ -52,33 +52,53 @@ func NewEngine(ctx context.Context, cfg *config.Config) (*Engine, error) {
 		"profile", cfg.AWS.Profile,
 	)
 
-	// Resolve regions from config or default
-	regions := cfg.AWS.Regions
-	if len(regions) == 0 {
-		regions = []string{"us-east-1"}
-	}
+	// Resolve which regions to scan.
+	//
+	// An explicit aws.regions list (or "all") wins. When none is configured we
+	// fall back to the region the active profile / environment resolves to —
+	// not a hardcoded default — so a profile pointing at ap-southeast-2 scans
+	// ap-southeast-2.
+	configuredRegions := cfg.AWS.Regions
 
-	// Check if "all" is in the regions list
 	allRegions := cfg.AWS.AllRegions
-	bootstrapRegion := regions[0]
-	for _, r := range regions {
+	for _, r := range configuredRegions {
 		if strings.ToLower(r) == "all" {
 			allRegions = true
-			bootstrapRegion = "us-east-1"
 			break
 		}
+	}
+
+	// Bootstrap region for loading the AWS config: the first explicitly
+	// configured region, else empty so the SDK resolves it from the profile /
+	// AWS_REGION. (The all-regions sweep only needs a working region to call
+	// DescribeRegions, so it leaves this empty too.)
+	bootstrapRegion := ""
+	if len(configuredRegions) > 0 && !allRegions {
+		bootstrapRegion = configuredRegions[0]
 	}
 
 	awscfg, err := auth.BuildAWSConfig(ctx, &cfg.AWS, bootstrapRegion)
 	if err != nil {
 		return nil, fmt.Errorf("unable to load AWS config: %w", err)
 	}
+	// Guarantee a usable region downstream even when neither the config nor the
+	// profile/environment supplied one.
+	if awscfg.Region == "" {
+		awscfg.Region = "us-east-1"
+	}
 
-	// Resolve all regions if requested
-	resolvedRegions := regions
-	if allRegions {
+	// Resolve the final region list to scan.
+	var resolvedRegions []string
+	switch {
+	case allRegions:
 		resolvedRegions = resolveAllRegions(ctx, awscfg)
 		slog.Info("Resolved all AWS regions", "count", len(resolvedRegions))
+	case len(configuredRegions) > 0:
+		resolvedRegions = configuredRegions
+	default:
+		resolvedRegions = []string{awscfg.Region}
+		slog.Info("No regions configured; scanning the active profile/environment region",
+			"region", awscfg.Region)
 	}
 
 	// Resolve the caller's account ID once so collectors can construct ARNs for
