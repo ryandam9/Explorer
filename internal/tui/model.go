@@ -79,6 +79,7 @@ type tuiModel struct {
 
 	// Data
 	results []model.Resource
+	sorted  []model.Resource // results sorted by service+name; rebuilt only when results change
 	errors  []model.ExploreError
 	loading bool
 	done    bool
@@ -423,7 +424,7 @@ func (m tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.loading = false
 		m.results = append(m.results, msg.Resources...)
 		m.errors = append(m.errors, msg.Errors...)
-		m.rebuildAllRows()
+		m.onResultsChanged()
 		m.updateTableRows()
 		cmds = append(cmds, waitForChunk(m.chunks))
 		return m, tea.Batch(cmds...)
@@ -482,21 +483,23 @@ func toastCmd(d time.Duration) tea.Cmd {
 // ── Data helpers ──────────────────────────────────────────────────────────────
 
 // matchesTextFilter reports whether any of the row's cells contains the quick
-// filter text (case-insensitive).
+// filter text. query must already be lower-cased; matching is case-insensitive.
 func matchesTextFilter(query string, cells ...string) bool {
 	if query == "" {
 		return true
 	}
-	q := strings.ToLower(query)
 	for _, c := range cells {
-		if strings.Contains(strings.ToLower(c), q) {
+		if strings.Contains(strings.ToLower(c), query) {
 			return true
 		}
 	}
 	return false
 }
 
-func (m *tuiModel) rebuildAllRows() {
+// onResultsChanged re-derives the service list and the sorted view after new
+// chunks arrive, then rebuilds the visible rows. Filter changes alone only
+// need rebuildAllRows, which reuses the cached sorted slice.
+func (m *tuiModel) onResultsChanged() {
 	// Rebuild service list.
 	svcSet := map[string]bool{}
 	for _, r := range m.results {
@@ -517,27 +520,32 @@ func (m *tuiModel) rebuildAllRows() {
 
 	// Sort a copy of the results (by service, then name) so the table renders
 	// in a stable, grouped order regardless of arrival order.
-	sorted := make([]model.Resource, len(m.results))
-	copy(sorted, m.results)
-	sort.SliceStable(sorted, func(i, j int) bool {
-		if sorted[i].Service != sorted[j].Service {
-			return sorted[i].Service < sorted[j].Service
+	m.sorted = make([]model.Resource, len(m.results))
+	copy(m.sorted, m.results)
+	sort.SliceStable(m.sorted, func(i, j int) bool {
+		if m.sorted[i].Service != m.sorted[j].Service {
+			return m.sorted[i].Service < m.sorted[j].Service
 		}
-		return sorted[i].Name < sorted[j].Name
+		return m.sorted[i].Name < m.sorted[j].Name
 	})
 
+	m.rebuildAllRows()
+}
+
+func (m *tuiModel) rebuildAllRows() {
 	// Build rows grouped by service, applying the structured filters and the
 	// quick text filter.
-	m.allRows = make(map[string][]table.Row, len(names))
-	m.allRes = make(map[string][]model.Resource, len(names))
-	for _, r := range sorted {
+	query := strings.ToLower(m.filterText)
+	m.allRows = make(map[string][]table.Row, len(m.services))
+	m.allRes = make(map[string][]model.Resource, len(m.services))
+	for _, r := range m.sorted {
 		if m.filterRegion != "" && r.Region != m.filterRegion {
 			continue
 		}
 		if m.filterState != "" && r.State != m.filterState {
 			continue
 		}
-		if !matchesTextFilter(m.filterText, r.Service, r.Type, r.Region, r.ID, r.Name, r.State) {
+		if !matchesTextFilter(query, r.Service, r.Type, r.Region, r.ID, r.Name, r.State) {
 			continue
 		}
 		for _, key := range []string{"All", r.Service} {
@@ -839,6 +847,14 @@ func (m tuiModel) renderSidebar() string {
 	var b strings.Builder
 	b.WriteString(ui.PanelTitleStyle().Render("SERVICES") + "\n\n")
 
+	activeStyle := lipgloss.NewStyle().
+		Foreground(lipgloss.Color(ui.ColorHighlightText())).
+		Background(lipgloss.Color(ui.ColorHighlight())).
+		Width(sidebarInner - 2)
+	idleStyle := lipgloss.NewStyle().
+		Foreground(lipgloss.Color(ui.ColorText())).
+		Width(sidebarInner - 2)
+
 	for i, svc := range m.services {
 		zID := fmt.Sprintf("%s%d", zoneSvc, i)
 		label := svc
@@ -847,16 +863,9 @@ func (m tuiModel) renderSidebar() string {
 		}
 		var line string
 		if i == m.activeService {
-			line = lipgloss.NewStyle().
-				Foreground(lipgloss.Color(ui.ColorHighlightText())).
-				Background(lipgloss.Color(ui.ColorHighlight())).
-				Width(sidebarInner - 2).
-				Render("▶ " + label)
+			line = activeStyle.Render("▶ " + label)
 		} else {
-			line = lipgloss.NewStyle().
-				Foreground(lipgloss.Color(ui.ColorText())).
-				Width(sidebarInner - 2).
-				Render("  " + label)
+			line = idleStyle.Render("  " + label)
 		}
 		b.WriteString(m.zones.Mark(zID, line) + "\n")
 	}

@@ -3,6 +3,7 @@ package sns
 import (
 	"context"
 	"fmt"
+	"strings"
 
 	"github.com/aws/aws-sdk-go-v2/service/sns"
 	"github.com/user/aws_explorer/internal/model"
@@ -46,11 +47,8 @@ func (c *Collector) mapTopic(topicArn *string) model.Resource {
 	arn := *topicArn
 	// Extract topic name from ARN (last segment after :)
 	name := arn
-	for i := len(arn) - 1; i >= 0; i-- {
-		if arn[i] == ':' {
-			name = arn[i+1:]
-			break
-		}
+	if i := strings.LastIndexByte(arn, ':'); i >= 0 {
+		name = arn[i+1:]
 	}
 
 	res := model.Resource{
