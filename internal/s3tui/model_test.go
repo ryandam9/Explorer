@@ -36,10 +36,10 @@ func TestFormatAndParseSize(t *testing.T) {
 func TestSortObjectsKeepsDirectoriesFirstAndSortsSize(t *testing.T) {
 	m := &Model{sortCol: 1, sortAsc: true}
 	objs := []map[string]string{
-		{"name": "z.txt",    "type": "FILE", "size": "2.0 MB", "last_modified": "2026-01-01", "storage_class": "STANDARD", "etag": "etag-z"},
-		{"name": "photos/",  "type": "DIR",  "size": "-",      "last_modified": "-",          "storage_class": "DIR",      "etag": "-"},
-		{"name": "a.txt",    "type": "FILE", "size": "10 B",   "last_modified": "2026-01-01", "storage_class": "STANDARD", "etag": "etag-a"},
-		{"name": "b.txt",    "type": "FILE", "size": "1.5 KB", "last_modified": "2026-01-01", "storage_class": "STANDARD", "etag": "etag-b"},
+		{"name": "z.txt", "type": "FILE", "size": "2.0 MB", "last_modified": "2026-01-01", "storage_class": "STANDARD", "etag": "etag-z"},
+		{"name": "photos/", "type": "DIR", "size": "-", "last_modified": "-", "storage_class": "DIR", "etag": "-"},
+		{"name": "a.txt", "type": "FILE", "size": "10 B", "last_modified": "2026-01-01", "storage_class": "STANDARD", "etag": "etag-a"},
+		{"name": "b.txt", "type": "FILE", "size": "1.5 KB", "last_modified": "2026-01-01", "storage_class": "STANDARD", "etag": "etag-b"},
 	}
 
 	m.sortObjects(objs)
@@ -55,8 +55,8 @@ func TestSortObjectsKeepsDirectoriesFirstAndSortsSize(t *testing.T) {
 func TestSortObjectsNameDescendingCaseInsensitive(t *testing.T) {
 	m := &Model{sortCol: 0, sortAsc: false}
 	objs := []map[string]string{
-		{"name": "alpha.txt",   "type": "FILE", "size": "1 B", "storage_class": "STANDARD"},
-		{"name": "Bravo.txt",   "type": "FILE", "size": "1 B", "storage_class": "STANDARD"},
+		{"name": "alpha.txt", "type": "FILE", "size": "1 B", "storage_class": "STANDARD"},
+		{"name": "Bravo.txt", "type": "FILE", "size": "1 B", "storage_class": "STANDARD"},
 		{"name": "charlie.txt", "type": "FILE", "size": "1 B", "storage_class": "STANDARD"},
 	}
 
