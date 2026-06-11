@@ -58,13 +58,13 @@ func TestRoleGroupsCoverEveryRole(t *testing.T) {
 
 func TestRoleLabel(t *testing.T) {
 	tests := map[string]string{
-		"heading":           "HEADING",
-		"tableSelectedBg":   "TABLE SELECTED BG",
-		"statusBarText":     "STATUS BAR TEXT",
-		"borderFocus":       "BORDER FOCUS",
-		"highlightText":     "HIGHLIGHT TEXT",
-		"tableHeaderLine":   "TABLE HEADER LINE",
-		"tableSelectedText": "TABLE SELECTED TEXT",
+		"heading":           "Heading",
+		"tableSelectedBg":   "Table selected background",
+		"statusBarText":     "Status bar text",
+		"borderFocus":       "Border focus",
+		"highlightText":     "Highlight text",
+		"tableHeaderLine":   "Table header line",
+		"tableSelectedText": "Table selected text",
 	}
 	for in, want := range tests {
 		if got := roleLabel(in); got != want {
@@ -184,7 +184,7 @@ func TestQuickAutoInNavMode(t *testing.T) {
 	}
 }
 
-// The console must render in both modes without panicking, contain the
+// The panel must render in both modes without panicking, contain the
 // signature sections, and never exceed the requested width.
 func TestConsoleViewRenders(t *testing.T) {
 	s := NewSettingsModel(100, 40, "", nil)
@@ -194,13 +194,13 @@ func TestConsoleViewRenders(t *testing.T) {
 			s, _ = s.Update(key("enter"))
 		}
 		view := s.View()
-		for _, want := range []string{"THEME CONSOLE", "SUBSYSTEM", "SIGNAL MONITOR", "ACTIVE THEME"} {
+		for _, want := range []string{"Appearance", "Theme", "Section", "Preview"} {
 			if !strings.Contains(view, want) {
 				t.Errorf("%s view missing %q", mode, want)
 			}
 		}
 		if mode == "tune" {
-			for _, want := range []string{"HUE", "SAT", "LUM", "HEX", "APPLY"} {
+			for _, want := range []string{"Hue", "Sat", "Lum", "Hex", "apply"} {
 				if !strings.Contains(view, want) {
 					t.Errorf("tune view missing %q", want)
 				}

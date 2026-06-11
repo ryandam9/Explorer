@@ -12,14 +12,16 @@ import (
 	"github.com/user/aws_explorer/internal/config"
 )
 
-// The settings overlay is styled as a sci-fi mission console: a HUD frame
-// floated over the live app, a theme selector, segmented subsystem tabs, one
-// slider row per color role (the knob position is the color's hue), a quick
-// swatch palette for one-keystroke color changes, an interactive HUE/SAT/LUM
-// tuner, and a "signal monitor" preview strip. Every row is a control:
-// ↑/↓ selects a row, ←/→ changes its value — instantly.
+// The settings overlay is an "Appearance" panel floated over the live app,
+// laid out like a design-tool settings dialog: a theme selector and section
+// tabs up top, then two columns — the section's color roles on the left
+// (name, dot leaders, value, swatch) and a bordered live-preview card on the
+// right showing a miniature header, table and status bar in the edited theme.
+// Below them sits a context strip: a quick swatch palette in nav mode, the
+// theme bank on the theme row, and gradient Hue/Sat/Lum faders while tuning.
+// Every row is a control: ↑/↓ selects, ←/→ changes its value — instantly.
 //
-// The console never resizes: its width and height are fixed regardless of
+// The panel never resizes: its width and height are fixed regardless of
 // terminal size, active tab or input mode.
 
 // SettingsSavedMsg is sent after a successful config save.
@@ -28,17 +30,18 @@ type SettingsSavedMsg struct{ Theme string }
 // SettingsErrMsg carries a save error back to the main model.
 type SettingsErrMsg struct{ Err error }
 
-// ── Fixed console geometry ───────────────────────────────────────────────────
+// ── Fixed panel geometry ─────────────────────────────────────────────────────
 
 const (
 	consoleWidth = 86           // outer panel width (excluding border)
 	consoleInner = consoleWidth // content width inside Padding(0,1)
 	ctrlZoneRows = 6            // tuner / palette zone height
+	leftColWidth = 42           // role-list column width in the two-column body
 )
 
-// ── Subsystem groups ─────────────────────────────────────────────────────────
+// ── Section groups ───────────────────────────────────────────────────────────
 
-// roleGroup is one segmented tab of the console: a named subset of the Roles
+// roleGroup is one section tab of the panel: a named subset of the Roles
 // registry. Membership is derived from role names, so new roles added to the
 // registry land in the right tab automatically.
 type roleGroup struct {
@@ -50,10 +53,10 @@ var settingsGroups = buildRoleGroups()
 
 func buildRoleGroups() []roleGroup {
 	groups := []roleGroup{
-		{name: "GENERAL"},
-		{name: "TABLES"},
-		{name: "STATUS BAR"},
-		{name: "ALERTS"},
+		{name: "General"},
+		{name: "Tables"},
+		{name: "Status bar"},
+		{name: "Alerts"},
 	}
 	for i, r := range Roles {
 		gi := 0
@@ -70,8 +73,8 @@ func buildRoleGroups() []roleGroup {
 	return groups
 }
 
-// maxGroupRows is the row count of the largest subsystem tab; smaller tabs are
-// padded to it so the console height never changes when switching tabs.
+// maxGroupRows is the row count of the largest section tab; smaller tabs are
+// padded to it so the panel height never changes when switching tabs.
 var maxGroupRows = func() int {
 	m := 0
 	for _, g := range settingsGroups {
@@ -82,17 +85,25 @@ var maxGroupRows = func() int {
 	return m
 }()
 
-// roleLabel renders a camelCase role name as a spaced, uppercase console
-// label: "tableSelectedBg" → "TABLE SELECTED BG".
+// roleLabel renders a camelCase role name as a spaced, sentence-case label
+// with abbreviations expanded: "tableSelectedBg" → "Table selected background".
 func roleLabel(name string) string {
-	var b strings.Builder
+	var words []string
+	start := 0
 	for i, r := range name {
 		if i > 0 && r >= 'A' && r <= 'Z' {
-			b.WriteByte(' ')
+			words = append(words, strings.ToLower(name[start:i]))
+			start = i
 		}
-		b.WriteRune(r)
 	}
-	return strings.ToUpper(b.String())
+	words = append(words, strings.ToLower(name[start:]))
+	for i, w := range words {
+		if w == "bg" {
+			words[i] = "background"
+		}
+	}
+	out := strings.Join(words, " ")
+	return strings.ToUpper(out[:1]) + out[1:]
 }
 
 // ── Quick palette ────────────────────────────────────────────────────────────
@@ -532,8 +543,8 @@ func (s SettingsModel) saveCmd() tea.Cmd {
 func (s SettingsModel) settingsHints() []KeyHint {
 	if s.tuneMode {
 		return []KeyHint{
-			H("↑/↓", "knob"),
-			H("←/→", "turn"),
+			H("↑/↓", "channel"),
+			H("←/→", "adjust"),
 			H("Shift+←/→", "coarse"),
 			H("a", "auto"),
 			H("Enter", "apply"),
@@ -543,7 +554,7 @@ func (s SettingsModel) settingsHints() []KeyHint {
 	return []KeyHint{
 		H("↑/↓", "row"),
 		H("←/→", "change"),
-		H("Tab/1-4", "subsystem"),
+		H("Tab/1-4", "section"),
 		H("Enter", "tune"),
 		H("a", "auto"),
 		H("Ctrl+S", "save"),
@@ -551,28 +562,47 @@ func (s SettingsModel) settingsHints() []KeyHint {
 	}
 }
 
-// ── Console rendering helpers ────────────────────────────────────────────────
+// ── Panel rendering helpers ──────────────────────────────────────────────────
 
-// renderSlider draws a horizontal control: a filled run, a knob, and the
-// remaining track, like a console fader. frac is the knob position in [0,1];
-// fill is the color of the filled run and knob.
-func renderSlider(width int, frac float64, fill string) string {
+// knobFg picks a knob color that stays visible on top of the given cell
+// color: black on light cells, white on dark ones.
+func knobFg(hex string) string {
+	if _, _, l, ok := hexToHSL(hex); ok && l > 60 {
+		return "#000000"
+	}
+	return "#ffffff"
+}
+
+// renderFader draws a gradient fader: every cell is painted with the color
+// that position would produce (via colorAt, f in [0,1]), so the control shows
+// the actual range being chosen rather than an abstract track. The knob sits
+// at frac.
+func renderFader(width int, frac float64, colorAt func(f float64) string) string {
 	if width < 3 {
 		width = 3
 	}
 	pos := int(clampF(frac, 0, 1)*float64(width-1) + 0.5)
-	fillSt := lipgloss.NewStyle().Foreground(lipgloss.Color(fill))
-	trackSt := lipgloss.NewStyle().Foreground(lipgloss.Color(ColorBorder()))
-
 	var b strings.Builder
-	if pos > 0 {
-		b.WriteString(fillSt.Render(strings.Repeat("━", pos)))
-	}
-	b.WriteString(fillSt.Bold(true).Render("●"))
-	if rest := width - 1 - pos; rest > 0 {
-		b.WriteString(trackSt.Render(strings.Repeat("─", rest)))
+	for i := 0; i < width; i++ {
+		f := float64(i) / float64(width-1)
+		c := colorAt(f)
+		cell := lipgloss.NewStyle().Background(lipgloss.Color(c))
+		if i == pos {
+			b.WriteString(cell.Foreground(lipgloss.Color(knobFg(c))).Bold(true).Render("●"))
+		} else {
+			b.WriteString(cell.Render(" "))
+		}
 	}
 	return b.String()
+}
+
+// padTo pads s with spaces to exactly w terminal cells (ANSI-aware), so
+// multi-column layouts stay aligned regardless of styling.
+func padTo(s string, w int) string {
+	if gap := w - lipgloss.Width(s); gap > 0 {
+		return s + strings.Repeat(" ", gap)
+	}
+	return s
 }
 
 // renderIdleTrack draws a dimmed, dashed track for roles set to "auto" — no
@@ -598,8 +628,8 @@ func renderSwatch(hex string) string {
 		Render("  ")
 }
 
-// consoleRule draws a section rule with an embedded uppercase label:
-// "── SIGNAL MONITOR ─────────────".
+// consoleRule draws a section rule with an embedded label:
+// "── Palette · Heading ─────────────".
 func consoleRule(width int, label string) string {
 	line := lipgloss.NewStyle().Foreground(lipgloss.Color(ColorBorder()))
 	if label == "" {
@@ -615,16 +645,7 @@ func consoleRule(width int, label string) string {
 		" " + line.Render(strings.Repeat("─", tail))
 }
 
-// consoleButton renders one bottom-row action button: ⟨ LABEL KEY ⟩.
-func consoleButton(label, key string) string {
-	br := lipgloss.NewStyle().Foreground(lipgloss.Color(ColorBorder()))
-	return br.Render("⟨ ") +
-		lipgloss.NewStyle().Foreground(lipgloss.Color(ColorText())).Bold(true).Render(label) +
-		" " + lipgloss.NewStyle().Foreground(lipgloss.Color(ColorAccent())).Bold(true).Render(key) +
-		br.Render(" ⟩")
-}
-
-// padZone pads (or truncates) a section to exactly rows lines, so the console
+// padZone pads (or truncates) a section to exactly rows lines, so the panel
 // height never changes between modes and tabs.
 func padZone(lines []string, rows int) []string {
 	for len(lines) < rows {
@@ -635,7 +656,7 @@ func padZone(lines []string, rows int) []string {
 
 // ── View ─────────────────────────────────────────────────────────────────────
 
-// View renders the settings console overlay at its fixed size.
+// View renders the Appearance panel overlay at its fixed size.
 func (s SettingsModel) View() string {
 	iw := consoleInner - 2 // inside the panel's Padding(0,1)
 
@@ -643,20 +664,18 @@ func (s SettingsModel) View() string {
 	muted := lipgloss.NewStyle().Foreground(lipgloss.Color(ColorMuted()))
 	text := lipgloss.NewStyle().Foreground(lipgloss.Color(ColorText()))
 	accent := lipgloss.NewStyle().Foreground(lipgloss.Color(ColorAccent())).Bold(true)
-	box := lipgloss.NewStyle().Foreground(lipgloss.Color(ColorBorder()))
 
 	var lines []string
 	add := func(parts ...string) { lines = append(lines, strings.Join(parts, "")) }
 
-	// ── Title bar with a live-status LED ──
-	title := accent.Render("⟦ ") + heading.Render("THEME CONSOLE") + accent.Render(" ⟧") +
-		muted.Render("  DISPLAY CALIBRATION")
-	led := SuccessStyle().Bold(true).Render("● LIVE")
-	gap := iw - lipgloss.Width(title) - lipgloss.Width(led)
+	// ── Title row ──
+	title := heading.Render("Appearance")
+	note := muted.Render("changes apply live · Ctrl+S saves")
+	gap := iw - lipgloss.Width(title) - lipgloss.Width(note)
 	if gap < 1 {
 		gap = 1
 	}
-	add(title, strings.Repeat(" ", gap), led)
+	add(title, strings.Repeat(" ", gap), note)
 	add(consoleRule(iw, ""))
 
 	// ── Theme selector (a control row: ←/→ switches and applies live) ──
@@ -669,21 +688,22 @@ func (s SettingsModel) View() string {
 	themeMarker := "  "
 	themeLabelSt := muted
 	if s.onTheme && !s.tuneMode {
-		themeMarker = accent.Render("▶ ")
+		themeMarker = accent.Render("❯ ")
 		themeLabelSt = heading
 	}
+	dots := s.renderThemeDots(6)
+	// Chevrons hug the name; the row is padded after them so the counter and
+	// palette dots stay put while cycling through themes.
+	themeName := accent.Render("‹ ") + text.Bold(true).Render(Themes[s.themeIdx].Name) + accent.Render(" ›")
 	add(
 		themeMarker,
-		themeLabelSt.Render(fmt.Sprintf("%-13s", "ACTIVE THEME")),
-		accent.Render("◄ "),
-		box.Render("[ "),
-		text.Bold(true).Render(fmt.Sprintf("%-*s", nameW, strings.ToUpper(Themes[s.themeIdx].Name))),
-		box.Render(" ▼ ]"),
-		accent.Render(" ►"),
-		muted.Render(fmt.Sprintf("   %02d/%02d", s.themeIdx+1, len(Themes))),
+		themeLabelSt.Render(fmt.Sprintf("%-10s", "Theme")),
+		padTo(themeName, nameW+4),
+		muted.Render(fmt.Sprintf("  %2d/%d", s.themeIdx+1, len(Themes))),
+		"   ", dots,
 	)
 
-	// ── Subsystem tabs (segmented buttons) ──
+	// ── Section tabs ──
 	var tabs []string
 	for gi, g := range settingsGroups {
 		label := fmt.Sprintf(" %s ", g.name)
@@ -693,31 +713,83 @@ func (s SettingsModel) View() string {
 				Background(lipgloss.Color(ColorHighlight())).
 				Bold(true).Render(label))
 		} else {
-			tabs = append(tabs, box.Render("[")+muted.Render(label)+box.Render("]"))
+			tabs = append(tabs, muted.Render(label))
 		}
 	}
-	add("  ", muted.Render(fmt.Sprintf("%-13s", "SUBSYSTEM")), strings.Join(tabs, " "))
+	add("  ", muted.Render(fmt.Sprintf("%-10s", "Section")), strings.Join(tabs, " "))
 	add("")
 
-	// ── Role sliders (padded to the largest tab, so height is constant) ──
-	labelW := 0
-	for _, r := range Roles {
-		if l := len(roleLabel(r.Name)); l > labelW {
-			labelW = l
-		}
+	// ── Two-column body: role list left, live preview card right ──
+	leftLines := s.renderRoleList(leftColWidth)
+	rightLines := s.renderPreviewCard(iw - leftColWidth - 2)
+	bodyRows := max(maxGroupRows, len(rightLines))
+	leftLines = padZone(leftLines, bodyRows)
+	rightLines = padZone(rightLines, bodyRows)
+	for i := 0; i < bodyRows; i++ {
+		add(padTo(leftLines[i], leftColWidth), "  ", rightLines[i])
 	}
-	// marker(2) + label + gap(1) + slider + gap(2) + readout(7) + gap(1) + swatch(2)
-	sliderW := iw - 2 - labelW - 1 - 2 - 7 - 1 - 2
-	if sliderW < 10 {
-		sliderW = 10
+	add("")
+
+	// ── Context strip: tuner, quick palette, or theme bank (fixed height) ──
+	switch {
+	case s.tuneMode:
+		lines = append(lines, padZone(s.renderTuner(iw), ctrlZoneRows)...)
+	case s.onTheme:
+		lines = append(lines, padZone(s.renderThemeBank(iw), ctrlZoneRows)...)
+	default:
+		lines = append(lines, padZone(s.renderQuickPalette(iw), ctrlZoneRows)...)
 	}
 
-	var roleLines []string
+	body := strings.Join(lines, "\n")
+	panel := lipgloss.NewStyle().
+		Width(consoleWidth).
+		MaxWidth(consoleWidth+2).
+		BorderStyle(lipgloss.RoundedBorder()).
+		BorderForeground(lipgloss.Color(ColorBorderFocus())).
+		Foreground(lipgloss.Color(ColorText())).
+		Padding(0, 1).
+		Render(body)
+	hintBar := StatusBar(consoleWidth+2, "", s.settingsHints())
+	return lipgloss.JoinVertical(lipgloss.Left, panel, hintBar)
+}
+
+// renderThemeDots draws up to n distinct color dots from the edited theme —
+// a one-glance fingerprint of the palette next to the theme name.
+func (s SettingsModel) renderThemeDots(n int) string {
+	var b strings.Builder
+	seen := map[string]bool{}
+	count := 0
+	for _, r := range Roles {
+		c := strings.ToLower(*r.Ptr(&Themes[s.themeIdx].Colors))
+		if c == "" || seen[c] || count >= n {
+			continue
+		}
+		if _, _, _, ok := parseHexColor(c); !ok {
+			continue
+		}
+		seen[c] = true
+		b.WriteString(lipgloss.NewStyle().Foreground(lipgloss.Color(c)).Render("●"))
+		b.WriteString(" ")
+		count++
+	}
+	return strings.TrimRight(b.String(), " ")
+}
+
+// renderRoleList draws the active section's color roles, one per row:
+// marker, label, dot leaders, value, swatch.
+func (s SettingsModel) renderRoleList(width int) []string {
+	heading := lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color(ColorHeading()))
+	muted := lipgloss.NewStyle().Foreground(lipgloss.Color(ColorMuted()))
+	text := lipgloss.NewStyle().Foreground(lipgloss.Color(ColorText()))
+	accent := lipgloss.NewStyle().Foreground(lipgloss.Color(ColorAccent())).Bold(true)
+	leader := lipgloss.NewStyle().Foreground(lipgloss.Color(ColorBorder()))
+
+	var rows []string
 	for _, ri := range s.group().roles {
 		role := Roles[ri]
 		val := s.colorForField(s.themeIdx, ri)
 		selected := ri == s.fieldIdx && !s.onTheme
-		// The row under the knobs tracks the tuner live, before apply.
+		// The row under the tuner tracks every adjustment live, before apply.
 		if s.tuneMode && selected {
 			if s.tuneAuto {
 				val = ""
@@ -729,69 +801,31 @@ func (s SettingsModel) View() string {
 		marker := "  "
 		labelSt := muted
 		if selected {
-			marker = accent.Render("▶ ")
+			marker = accent.Render("❯ ")
 			labelSt = heading
 		}
 
-		var track, readout string
+		var readout string
 		swatchColor := val
 		if val == "" {
-			track = renderIdleTrack(sliderW)
 			readout = muted.Render(fmt.Sprintf("%-7s", "auto"))
 			swatchColor = ResolveRoleAt(s.themeIdx, role.Name)
-		} else if h, _, _, ok := hexToHSL(val); ok {
-			track = renderSlider(sliderW, h/360, val)
-			readout = text.Render(fmt.Sprintf("%-7s", strings.ToLower(val)))
 		} else {
-			track = renderIdleTrack(sliderW)
-			readout = text.Render(fmt.Sprintf("%-7.7s", val))
+			readout = text.Render(fmt.Sprintf("%-7.7s", strings.ToLower(val)))
 		}
 
-		roleLines = append(roleLines,
-			marker+labelSt.Render(fmt.Sprintf("%-*s", labelW, roleLabel(role.Name)))+
-				" "+track+"  "+readout+" "+renderSwatch(swatchColor))
+		label := roleLabel(role.Name)
+		// marker(2) + label + sp + leaders + sp + value(7) + sp + swatch(2)
+		leaders := width - 2 - len(label) - 1 - 1 - 7 - 1 - 2
+		if leaders < 1 {
+			leaders = 1
+		}
+		rows = append(rows,
+			marker+labelSt.Render(label)+" "+
+				leader.Render(strings.Repeat("·", leaders))+" "+
+				readout+" "+renderSwatch(swatchColor))
 	}
-	lines = append(lines, padZone(roleLines, maxGroupRows)...)
-
-	// ── Control zone: tuner, quick palette, or theme bank (fixed height) ──
-	switch {
-	case s.tuneMode:
-		lines = append(lines, padZone(s.renderTuner(iw), ctrlZoneRows)...)
-	case s.onTheme:
-		lines = append(lines, padZone(s.renderThemeBank(iw), ctrlZoneRows)...)
-	default:
-		lines = append(lines, padZone(s.renderQuickPalette(iw), ctrlZoneRows)...)
-	}
-
-	// ── Signal monitor (live preview of the edited theme) ──
-	lines = append(lines, s.renderMonitor(iw)...)
-	add("")
-
-	// ── Action buttons ──
-	if s.tuneMode {
-		add("  ",
-			consoleButton("APPLY", "⏎"), "  ",
-			consoleButton("AUTO", "A"), "  ",
-			consoleButton("CANCEL", "ESC"))
-	} else {
-		add("  ",
-			consoleButton("TUNE", "⏎"), "  ",
-			consoleButton("AUTO", "A"), "  ",
-			consoleButton("SAVE & APPLY", "^S"), "  ",
-			consoleButton("CLOSE", "ESC"))
-	}
-
-	body := strings.Join(lines, "\n")
-	panel := lipgloss.NewStyle().
-		Width(consoleWidth).
-		MaxWidth(consoleWidth+2).
-		BorderStyle(lipgloss.DoubleBorder()).
-		BorderForeground(lipgloss.Color(ColorBorderFocus())).
-		Foreground(lipgloss.Color(ColorText())).
-		Padding(0, 1).
-		Render(body)
-	hintBar := StatusBar(consoleWidth+2, "", s.settingsHints())
-	return lipgloss.JoinVertical(lipgloss.Left, panel, hintBar)
+	return rows
 }
 
 // renderQuickPalette draws the swatch ring for the selected role with a caret
@@ -831,21 +865,34 @@ func (s SettingsModel) renderQuickPalette(iw int) []string {
 
 	note := role.Desc
 	if role.Fallback != "" {
-		note += "  ·  auto = follows " + role.Fallback
+		note += "  ·  auto follows " + roleLabel(role.Fallback)
 	}
 	return []string{
-		consoleRule(iw, "QUICK PALETTE · "+roleLabel(role.Name)),
+		consoleRule(iw, "Palette · "+roleLabel(role.Name)),
 		strip.String(),
 		caret.String(),
 		muted.Render("  " + note),
-		muted.Render("  ←/→ swap color (instant)  ·  Enter opens the HUE/SAT/LUM knobs"),
+		muted.Render("  ←/→ swap color instantly  ·  Enter opens the hue/sat/lum tuner"),
 	}
 }
 
-// renderThemeBank draws the control zone for the ACTIVE THEME row: the
-// selected theme's palette and what ←/→ does there.
+// renderThemeBank draws the context strip for the theme row: the neighbouring
+// theme names, the selected theme's palette and what ←/→ does there.
 func (s SettingsModel) renderThemeBank(iw int) []string {
 	muted := lipgloss.NewStyle().Foreground(lipgloss.Color(ColorMuted()))
+	text := lipgloss.NewStyle().Foreground(lipgloss.Color(ColorText())).Bold(true)
+	accent := lipgloss.NewStyle().Foreground(lipgloss.Color(ColorAccent())).Bold(true)
+
+	// Neighbour line: "prev-theme  ‹ current ›  next-theme".
+	var nav strings.Builder
+	nav.WriteString("  ")
+	if s.themeIdx > 0 {
+		nav.WriteString(muted.Render(Themes[s.themeIdx-1].Name) + "  ")
+	}
+	nav.WriteString(accent.Render("‹ ") + text.Render(Themes[s.themeIdx].Name) + accent.Render(" ›"))
+	if s.themeIdx < len(Themes)-1 {
+		nav.WriteString("  " + muted.Render(Themes[s.themeIdx+1].Name))
+	}
 
 	var strip strings.Builder
 	strip.WriteString("  ")
@@ -863,14 +910,17 @@ func (s SettingsModel) renderThemeBank(iw int) []string {
 	}
 
 	return []string{
-		consoleRule(iw, "THEME BANK · "+strings.ToUpper(Themes[s.themeIdx].Name)),
+		consoleRule(iw, "Themes"),
+		nav.String(),
 		strip.String(),
-		muted.Render("  " + fmt.Sprintf("%d bird palettes loaded — colors from the feathers project", len(Themes))),
-		muted.Render("  ←/→ switch theme — the whole app restyles instantly  ·  Ctrl+S persists"),
+		muted.Render("  " + fmt.Sprintf("%d bird palettes — colors from the feathers project", len(Themes))),
+		muted.Render("  ←/→ switch theme, the whole app restyles instantly  ·  Ctrl+S saves"),
 	}
 }
 
-// renderTuner draws the HUE/SAT/LUM/HEX knobs for the selected role.
+// renderTuner draws the Hue/Sat/Lum/Hex channels for the selected role. Each
+// fader is a true gradient — every cell painted with the color that position
+// would produce — so the control shows the range, not an abstract track.
 func (s SettingsModel) renderTuner(iw int) []string {
 	muted := lipgloss.NewStyle().Foreground(lipgloss.Color(ColorMuted()))
 	text := lipgloss.NewStyle().Foreground(lipgloss.Color(ColorText()))
@@ -880,22 +930,21 @@ func (s SettingsModel) renderTuner(iw int) []string {
 	staged := s.stagedHex()
 	role := Roles[s.fieldIdx]
 	var out []string
-	out = append(out, consoleRule(iw, "TUNE · "+roleLabel(role.Name)))
+	out = append(out, consoleRule(iw, "Tune · "+roleLabel(role.Name)))
 
-	// Channel rows: label, fader, readout. Each fader is tinted with the color
-	// it would produce, so the knobs feel physical.
+	// Channel rows: label, gradient fader, readout.
 	chanW := iw - 2 - 4 - 1 - 2 - 5 - 4
 	if chanW < 10 {
 		chanW = 10
 	}
-	row := func(ch int, name string, frac float64, fill, readout string) string {
+	row := func(ch int, name string, frac float64, colorAt func(float64) string, readout string) string {
 		marker := "  "
 		nameSt := muted
 		if s.tuneChan == ch {
-			marker = accent.Render("▶ ")
+			marker = accent.Render("❯ ")
 			nameSt = lipgloss.NewStyle().Foreground(lipgloss.Color(ColorHeading())).Bold(true)
 		}
-		track := renderSlider(chanW, frac, fill)
+		track := renderFader(chanW, frac, colorAt)
 		if s.tuneAuto {
 			track = renderIdleTrack(chanW)
 		}
@@ -903,9 +952,15 @@ func (s SettingsModel) renderTuner(iw int) []string {
 			text.Render(fmt.Sprintf("%5s", readout))
 	}
 	out = append(out,
-		row(chanHue, "HUE", s.tuneH/360, hslToHex(s.tuneH, 100, 50), fmt.Sprintf("%03d°", int(s.tuneH))),
-		row(chanSat, "SAT", s.tuneS/100, hslToHex(s.tuneH, s.tuneS, 50), fmt.Sprintf("%3d%%", int(s.tuneS))),
-		row(chanLum, "LUM", s.tuneL/100, hslToHex(0, 0, s.tuneL), fmt.Sprintf("%3d%%", int(s.tuneL))),
+		row(chanHue, "Hue", s.tuneH/360,
+			func(f float64) string { return hslToHex(f*360, 100, 50) },
+			fmt.Sprintf("%03d°", int(s.tuneH))),
+		row(chanSat, "Sat", s.tuneS/100,
+			func(f float64) string { return hslToHex(s.tuneH, f*100, 50) },
+			fmt.Sprintf("%3d%%", int(s.tuneS))),
+		row(chanLum, "Lum", s.tuneL/100,
+			func(f float64) string { return hslToHex(s.tuneH, s.tuneS, f*100) },
+			fmt.Sprintf("%3d%%", int(s.tuneL))),
 	)
 
 	// Hex row + staged output preview.
@@ -913,45 +968,48 @@ func (s SettingsModel) renderTuner(iw int) []string {
 	hexSt := muted
 	cursor := ""
 	if s.tuneChan == chanHex {
-		hexMarker = accent.Render("▶ ")
+		hexMarker = accent.Render("❯ ")
 		hexSt = lipgloss.NewStyle().Foreground(lipgloss.Color(ColorHeading())).Bold(true)
 		cursor = accent.Render("█")
 	}
 	stagedSt := lipgloss.NewStyle().Foreground(lipgloss.Color(staged))
-	out = append(out, hexMarker+hexSt.Render(fmt.Sprintf("%-4s", "HEX"))+" "+
+	out = append(out, hexMarker+hexSt.Render(fmt.Sprintf("%-4s", "Hex"))+" "+
 		text.Render(s.tuneHex)+cursor+
 		strings.Repeat(" ", max(2, 10-len(s.tuneHex)))+
-		stagedSt.Render("▉▉▉▉▉ sample"))
+		stagedSt.Render("▉▉▉▉▉ result"))
 
 	if s.tuneAuto {
-		note := "AUTO — value cleared on apply"
+		note := "auto — value cleared on apply"
 		if role.Fallback != "" {
-			note += "; follows " + role.Fallback
+			note += "; follows " + roleLabel(role.Fallback)
 		}
 		out = append(out, "  "+warn.Render(note))
 	}
 	return out
 }
 
-// renderMonitor draws the live preview strip: a miniature header, table and
-// status bar rendered with the edited theme's colors, so every adjustment is
-// visible before saving.
-func (s SettingsModel) renderMonitor(iw int) []string {
+// renderPreviewCard draws a bordered card containing a miniature app — header,
+// table, status bar and alerts — rendered with the edited theme's colors, so
+// every adjustment is visible in context before saving.
+func (s SettingsModel) renderPreviewCard(width int) []string {
 	pc := s.previewColor
 	fg := func(role string) lipgloss.Style {
 		return lipgloss.NewStyle().Foreground(lipgloss.Color(pc(role)))
 	}
+	border := lipgloss.NewStyle().Foreground(lipgloss.Color(ColorBorder()))
+	mutedB := lipgloss.NewStyle().Foreground(lipgloss.Color(ColorMuted())).Bold(true)
+	inner := width - 4 // borders + one space of padding each side
 
-	out := []string{consoleRule(iw, "SIGNAL MONITOR")}
+	var content []string
 
 	// Header sample: heading, body, muted and accent text side by side.
-	out = append(out, "  "+
-		fg("heading").Bold(true).Render("◈ AWS EXPLORER")+"  "+
-		fg("text").Render("body text")+"  "+
-		fg("muted").Render("muted text")+"  "+
-		fg("accent").Render("━ accent ━"))
+	content = append(content,
+		fg("heading").Bold(true).Render("◈ AWS Explorer")+"  "+
+			fg("text").Render("text")+" "+
+			fg("muted").Render("muted")+" "+
+			fg("accent").Render("accent"))
 
-	// Table sample: header row, a plain cell and the selected row.
+	// Table sample: header row, a plain row and the selected row.
 	hdr := lipgloss.NewStyle().
 		Foreground(lipgloss.Color(pc("tableHeader"))).
 		Background(lipgloss.Color(pc("tableHeaderBg"))).
@@ -959,12 +1017,13 @@ func (s SettingsModel) renderMonitor(iw int) []string {
 	sel := lipgloss.NewStyle().
 		Foreground(lipgloss.Color(pc("tableSelectedText"))).
 		Background(lipgloss.Color(pc("tableSelectedBg")))
-	out = append(out, "  "+
-		hdr.Render(" SERVICE  REGION     STATE   ")+"  "+
-		fg("tableText").Render("ec2  us-east-1  running")+"  "+
-		sel.Render(" ▶ s3  us-east-1  active "))
+	content = append(content,
+		hdr.Render(padTo(" SERVICE    REGION       STATE", inner)),
+		fg("tableText").Render(" ec2        us-east-1    running"),
+		sel.Render(padTo(" ❯ s3       us-east-1    active", inner)),
+		"")
 
-	// Status bar + alert samples.
+	// Status bar sample, padded to a full-width solid bar.
 	bar := lipgloss.NewStyle().
 		Foreground(lipgloss.Color(pc("statusBarText"))).
 		Background(lipgloss.Color(pc("statusBarBg")))
@@ -975,13 +1034,32 @@ func (s SettingsModel) renderMonitor(iw int) []string {
 	hint := lipgloss.NewStyle().
 		Foreground(lipgloss.Color(pc("hintText"))).
 		Background(lipgloss.Color(pc("statusBarBg")))
-	out = append(out, "  "+
-		bar.Render(" status ")+key.Render("Enter")+hint.Render(" open ")+
-		bar.Render(" ")+"  "+
-		fg("success").Render("✓ ok")+" "+
-		fg("warning").Render("⚠ warn")+" "+
-		fg("error").Render("✗ fail")+" "+
-		fg("info").Render("ℹ info"))
+	barLine := bar.Render(" ") + key.Render("Enter") + hint.Render(" open") +
+		bar.Render(" · ") + key.Render("q") + hint.Render(" quit")
+	if rest := inner - lipgloss.Width(barLine); rest > 0 {
+		barLine += bar.Render(strings.Repeat(" ", rest))
+	}
+	content = append(content, barLine)
 
+	// Alert samples.
+	content = append(content,
+		fg("success").Render("✓ ok")+"  "+
+			fg("warning").Render("⚠ warn")+"  "+
+			fg("error").Render("✗ fail")+"  "+
+			fg("info").Render("ℹ info"))
+
+	// Frame the card with an embedded "Preview" title.
+	titleStr := "Preview"
+	fill := width - 3 - len(titleStr) - 1 - 1
+	if fill < 1 {
+		fill = 1
+	}
+	out := []string{
+		border.Render("╭─ ") + mutedB.Render(titleStr) + border.Render(" "+strings.Repeat("─", fill)+"╮"),
+	}
+	for _, c := range content {
+		out = append(out, border.Render("│")+" "+padTo(c, inner)+" "+border.Render("│"))
+	}
+	out = append(out, border.Render("╰"+strings.Repeat("─", width-2)+"╯"))
 	return out
 }
