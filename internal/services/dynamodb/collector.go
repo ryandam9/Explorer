@@ -36,48 +36,56 @@ func (c *Collector) IsGlobal() bool {
 func (c *Collector) Collect(ctx context.Context, input services.CollectInput) ([]model.Resource, error) {
 	client := dynamodb.NewFromConfig(input.AWSConfig)
 
-	var tableNames []string
+	// Describe each list page's tables concurrently before fetching the next
+	// page, so memory stays bounded to a page and results can stream out
+	// page by page. Indexed writes keep list order. A failed describe drops
+	// only that table, not the whole region.
+	describePage := func(tableNames []string) ([]model.Resource, []error) {
+		described := make([]*model.Resource, len(tableNames))
+		var mu sync.Mutex
+		var describeErrs []error
+		var g errgroup.Group
+		g.SetLimit(describeConcurrency)
+		for i, tableName := range tableNames {
+			g.Go(func() error {
+				desc, err := client.DescribeTable(ctx, &dynamodb.DescribeTableInput{
+					TableName: aws.String(tableName),
+				})
+				if err != nil {
+					mu.Lock()
+					describeErrs = append(describeErrs, fmt.Errorf("failed to describe table %s: %w", tableName, err))
+					mu.Unlock()
+					return nil
+				}
+				res := c.mapTable(input.Region, desc.Table, input.DetailLevel)
+				described[i] = &res
+				return nil
+			})
+		}
+		_ = g.Wait()
+
+		batch := make([]model.Resource, 0, len(described))
+		for _, r := range described {
+			if r != nil {
+				batch = append(batch, *r)
+			}
+		}
+		return batch, describeErrs
+	}
+
+	var resources []model.Resource
 	var errs []error
 	paginator := dynamodb.NewListTablesPaginator(client, &dynamodb.ListTablesInput{})
 	for paginator.HasMorePages() {
 		page, err := paginator.NextPage(ctx)
 		if err != nil {
-			// Keep the tables listed so far and still describe them below.
+			// Keep everything described from earlier pages.
 			errs = append(errs, fmt.Errorf("failed to list DynamoDB tables: %w", err))
 			break
 		}
-		tableNames = append(tableNames, page.TableNames...)
-	}
-
-	// Describe tables concurrently; indexed writes keep list order. A failed
-	// describe drops only that table, not the whole region.
-	described := make([]*model.Resource, len(tableNames))
-	var mu sync.Mutex
-	var g errgroup.Group
-	g.SetLimit(describeConcurrency)
-	for i, tableName := range tableNames {
-		g.Go(func() error {
-			desc, err := client.DescribeTable(ctx, &dynamodb.DescribeTableInput{
-				TableName: aws.String(tableName),
-			})
-			if err != nil {
-				mu.Lock()
-				errs = append(errs, fmt.Errorf("failed to describe table %s: %w", tableName, err))
-				mu.Unlock()
-				return nil
-			}
-			res := c.mapTable(input.Region, desc.Table, input.DetailLevel)
-			described[i] = &res
-			return nil
-		})
-	}
-	_ = g.Wait()
-
-	resources := make([]model.Resource, 0, len(described))
-	for _, r := range described {
-		if r != nil {
-			resources = append(resources, *r)
-		}
+		batch, describeErrs := describePage(page.TableNames)
+		errs = append(errs, describeErrs...)
+		resources = input.EmitOrAppend(resources, batch)
 	}
 	return resources, errors.Join(errs...)
 }

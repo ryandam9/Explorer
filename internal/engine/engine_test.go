@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 	"testing"
 
 	"github.com/aws/smithy-go"
@@ -241,5 +242,114 @@ func TestStreamRun_AccessDeniedPartialKeepsResources(t *testing.T) {
 	}
 	if errs[0].Code != "AccessDenied" || !errs[0].Partial {
 		t.Errorf("expected a partial AccessDenied error, got %+v", errs[0])
+	}
+}
+
+// ── StreamRun page-level streaming behaviour ─────────────────────────────────
+
+// streamingCollector emits page batches through input.Emit (when streaming is
+// enabled) and then returns the residual resources and error, mimicking a
+// paginating collector.
+type streamingCollector struct {
+	name     string
+	pages    [][]model.Resource
+	residual []model.Resource
+	err      error
+}
+
+func (s *streamingCollector) Name() string   { return s.name }
+func (s *streamingCollector) IsGlobal() bool { return true }
+func (s *streamingCollector) Collect(_ context.Context, input services.CollectInput) ([]model.Resource, error) {
+	var acc []model.Resource
+	for _, p := range s.pages {
+		acc = input.EmitOrAppend(acc, p)
+	}
+	return append(acc, s.residual...), s.err
+}
+
+func TestStreamRun_StreamsOneChunkPerEmittedPage(t *testing.T) {
+	eng := newFakeEngine(&streamingCollector{
+		name: "fake",
+		pages: [][]model.Resource{
+			{{ID: "p1a"}, {ID: "p1b"}},
+			{{ID: "p2a"}},
+		},
+	})
+
+	chunks := make(chan model.ResultChunk, 16)
+	go eng.StreamRun(context.Background(), chunks)
+	var got []model.ResultChunk
+	for c := range chunks {
+		got = append(got, c)
+	}
+
+	if len(got) != 2 {
+		t.Fatalf("expected one chunk per emitted page, got %d: %+v", len(got), got)
+	}
+	if len(got[0].Resources) != 2 || got[0].Resources[0].ID != "p1a" {
+		t.Errorf("unexpected first page: %+v", got[0].Resources)
+	}
+	if len(got[1].Resources) != 1 || got[1].Resources[0].ID != "p2a" {
+		t.Errorf("unexpected second page: %+v", got[1].Resources)
+	}
+}
+
+func TestStreamRun_EmittedPagesAreFiltered(t *testing.T) {
+	eng := newFakeEngine(&streamingCollector{
+		name: "fake",
+		pages: [][]model.Resource{
+			{{ID: "r1", State: "running"}, {ID: "r2", State: "stopped"}},
+			{{ID: "r3", State: "stopped"}},
+		},
+	})
+	eng.Config.Filters.States = []string{"running"}
+
+	resources, errs := collectChunks(eng)
+
+	if len(resources) != 1 || resources[0].ID != "r1" {
+		t.Fatalf("expected only the running resource to be streamed, got %v", resources)
+	}
+	if len(errs) != 0 {
+		t.Fatalf("expected no errors, got %v", errs)
+	}
+}
+
+func TestStreamRun_PartialFlagSetWhenPagesWereStreamedBeforeError(t *testing.T) {
+	eng := newFakeEngine(&streamingCollector{
+		name:  "fake",
+		pages: [][]model.Resource{{{ID: "p1"}}},
+		err:   errors.New("throttled after first page"),
+	})
+
+	resources, errs := collectChunks(eng)
+
+	if len(resources) != 1 || resources[0].ID != "p1" {
+		t.Fatalf("expected the streamed page to be kept, got %v", resources)
+	}
+	if len(errs) != 1 {
+		t.Fatalf("expected 1 error, got %v", errs)
+	}
+	if !errs[0].Partial {
+		t.Error("expected Partial=true when pages were streamed before the failure")
+	}
+}
+
+func TestStreamRun_DeadlineExceededTaggedAsTimeout(t *testing.T) {
+	eng := newFakeEngine(&fakeCollector{
+		name: "fake",
+		err:  fmt.Errorf("operation failed: %w", context.DeadlineExceeded),
+	})
+	eng.Config.App.TimeoutSeconds = 30
+
+	_, errs := collectChunks(eng)
+
+	if len(errs) != 1 {
+		t.Fatalf("expected 1 error, got %v", errs)
+	}
+	if errs[0].Code != "Timeout" {
+		t.Errorf("Code = %q, want Timeout", errs[0].Code)
+	}
+	if !strings.Contains(errs[0].Message, "30s") {
+		t.Errorf("timeout message should mention the configured deadline, got %q", errs[0].Message)
 	}
 }

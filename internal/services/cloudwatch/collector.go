@@ -36,9 +36,11 @@ func (c *Collector) Collect(ctx context.Context, input services.CollectInput) ([
 			return resources, fmt.Errorf("failed to describe CloudWatch alarms: %w", err)
 		}
 
+		batch := make([]model.Resource, 0, len(page.MetricAlarms))
 		for _, alarm := range page.MetricAlarms {
-			resources = append(resources, c.mapAlarm(input.Region, alarm, input.DetailLevel))
+			batch = append(batch, c.mapAlarm(input.Region, alarm, input.DetailLevel))
 		}
+		resources = input.EmitOrAppend(resources, batch)
 	}
 
 	return resources, nil

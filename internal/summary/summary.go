@@ -79,7 +79,7 @@ func Dedupe(resources []model.Resource) []model.Resource {
 			continue
 		}
 		if idx, seen := byARN[r.ARN]; seen {
-			if richness(r) > richness(out[idx]) {
+			if Richness(r) > Richness(out[idx]) {
 				out[idx] = r
 			}
 			continue
@@ -90,10 +90,11 @@ func Dedupe(resources []model.Resource) []model.Resource {
 	return out
 }
 
-// richness scores how much detail a resource carries, used to pick a winner when
+// Richness scores how much detail a resource carries, used to pick a winner when
 // two entries share an ARN. Typed collectors populate state/AZ/summary/detail and
-// therefore outscore the ARN-and-tags-only entries from the Tagging API.
-func richness(r model.Resource) int {
+// therefore outscore the ARN-and-tags-only entries from the Tagging API. Exported
+// so streaming consumers (the TUI) can apply the same rule incrementally.
+func Richness(r model.Resource) int {
 	score := 0
 	if r.State != "" {
 		score++

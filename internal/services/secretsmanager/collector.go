@@ -36,9 +36,11 @@ func (c *Collector) Collect(ctx context.Context, input services.CollectInput) ([
 			return resources, fmt.Errorf("failed to list secrets: %w", err)
 		}
 
+		batch := make([]model.Resource, 0, len(page.SecretList))
 		for _, secret := range page.SecretList {
-			resources = append(resources, c.mapSecret(input.Region, secret, input.DetailLevel))
+			batch = append(batch, c.mapSecret(input.Region, secret, input.DetailLevel))
 		}
+		resources = input.EmitOrAppend(resources, batch)
 	}
 
 	return resources, nil

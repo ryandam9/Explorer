@@ -40,9 +40,11 @@ func (c *Collector) Collect(ctx context.Context, input services.CollectInput) ([
 			return resources, fmt.Errorf("failed to list Route53 hosted zones: %w", err)
 		}
 
+		batch := make([]model.Resource, 0, len(output.HostedZones))
 		for _, zone := range output.HostedZones {
-			resources = append(resources, c.mapZone(zone, input.DetailLevel))
+			batch = append(batch, c.mapZone(zone, input.DetailLevel))
 		}
+		resources = input.EmitOrAppend(resources, batch)
 
 		if !output.IsTruncated {
 			break

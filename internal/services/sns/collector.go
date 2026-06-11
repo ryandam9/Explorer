@@ -35,9 +35,11 @@ func (c *Collector) Collect(ctx context.Context, input services.CollectInput) ([
 			return resources, fmt.Errorf("failed to list SNS topics: %w", err)
 		}
 
+		batch := make([]model.Resource, 0, len(page.Topics))
 		for _, topic := range page.Topics {
-			resources = append(resources, c.mapTopic(topic.TopicArn))
+			batch = append(batch, c.mapTopic(topic.TopicArn))
 		}
+		resources = input.EmitOrAppend(resources, batch)
 	}
 
 	return resources, nil

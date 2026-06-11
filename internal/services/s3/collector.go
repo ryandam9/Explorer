@@ -39,6 +39,10 @@ func (c *Collector) Collect(ctx context.Context, input services.CollectInput) ([
 	client := s3.NewFromConfig(input.AWSConfig)
 	var resources []model.Resource
 
+	// At detailed levels the resources are enriched in place after listing,
+	// so pages can only be streamed out when no enrichment follows.
+	wantDetails := input.DetailLevel == services.DetailLevelDetailed || input.DetailLevel == services.DetailLevelRaw
+
 	paginator := s3.NewListBucketsPaginator(client, &s3.ListBucketsInput{})
 	for paginator.HasMorePages() {
 		page, err := paginator.NextPage(ctx)
@@ -46,6 +50,7 @@ func (c *Collector) Collect(ctx context.Context, input services.CollectInput) ([
 			return resources, fmt.Errorf("failed to list S3 buckets: %w", err)
 		}
 
+		batch := make([]model.Resource, 0, len(page.Buckets))
 		for _, bucket := range page.Buckets {
 			name := aws.ToString(bucket.Name)
 
@@ -66,13 +71,18 @@ func (c *Collector) Collect(ctx context.Context, input services.CollectInput) ([
 				res.Summary["creationDate"] = bucket.CreationDate.Format("2006-01-02 15:04:05")
 			}
 
-			resources = append(resources, res)
+			batch = append(batch, res)
+		}
+		if wantDetails {
+			resources = append(resources, batch...)
+		} else {
+			resources = input.EmitOrAppend(resources, batch)
 		}
 	}
 
 	// Detail fetching makes ~8 API calls per bucket; run buckets concurrently
 	// (bounded) instead of one bucket at a time.
-	if input.DetailLevel == services.DetailLevelDetailed || input.DetailLevel == services.DetailLevelRaw {
+	if wantDetails {
 		g, gctx := errgroup.WithContext(ctx)
 		g.SetLimit(bucketDetailConcurrency)
 		for i := range resources {

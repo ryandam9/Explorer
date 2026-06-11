@@ -12,8 +12,8 @@ Discover, monitor, and display AWS resources across accounts and regions via CLI
 - **5 auth methods**: auto (SDK default chain), profile, env vars, static credentials, STS AssumeRole
 - **Output formats**: Table (default), JSON
 - **Filtering**: By region, state, tags, name, and IDs
-- **Concurrent**: Bounded goroutine pool (default 8) for parallel collection across services and regions
-- **Resilient**: Best-effort collection — a throttle or denied call mid-scan keeps everything already gathered (flagged as partial) instead of dropping the service/region, with configurable retry attempts and adaptive backoff
+- **Concurrent**: Bounded goroutine pool (default 8) for parallel collection across services and regions; collectors stream results page-by-page, so the first resources appear after a single API round-trip instead of after the last page
+- **Resilient**: Best-effort collection — a throttle, timeout, or denied call mid-scan keeps everything already gathered (flagged as partial) instead of dropping the service/region, with configurable retry attempts and adaptive backoff
 - **Themes**: 12 built-in bird-themed color schemes with 24 individually customizable color roles (table header, borders, status bar, alerts, …) — editable live in the in-app settings panel
 - **Context-aware shortcuts**: the status bar in every TUI shows only the keys that work on the current screen
 - **Uniform tables**: every table shares one theme and scrolls horizontally (`<` / `>`) when columns don't fit

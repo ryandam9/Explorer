@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"sort"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
@@ -856,34 +857,64 @@ func (c *VPCClient) GetVPCDNSInfo(vpcID string) (VPCDNSInfo, error) {
 
 	info := VPCDNSInfo{VPCID: vpcID}
 
-	sup, err := c.ec2.DescribeVpcAttribute(ctx, &awsec2.DescribeVpcAttributeInput{
-		VpcId:     aws.String(vpcID),
-		Attribute: ec2types.VpcAttributeNameEnableDnsSupport,
-	})
-	if err != nil {
-		return info, err
+	// The two attribute lookups and the VPC describe are independent; run
+	// them concurrently (each goroutine fills a distinct info field) and keep
+	// the first error. Only the DHCP options lookup depends on a result.
+	var (
+		wg       sync.WaitGroup
+		errMu    sync.Mutex
+		firstErr error
+	)
+	fail := func(err error) {
+		errMu.Lock()
+		if firstErr == nil {
+			firstErr = err
+		}
+		errMu.Unlock()
 	}
-	if sup.EnableDnsSupport != nil {
-		info.EnableDnsSupport = aws.ToBool(sup.EnableDnsSupport.Value)
-	}
-
-	host, err := c.ec2.DescribeVpcAttribute(ctx, &awsec2.DescribeVpcAttributeInput{
-		VpcId:     aws.String(vpcID),
-		Attribute: ec2types.VpcAttributeNameEnableDnsHostnames,
-	})
-	if err != nil {
-		return info, err
-	}
-	if host.EnableDnsHostnames != nil {
-		info.EnableDnsHostnames = aws.ToBool(host.EnableDnsHostnames.Value)
-	}
-
-	vpcs, err := c.ec2.DescribeVpcs(ctx, &awsec2.DescribeVpcsInput{VpcIds: []string{vpcID}})
-	if err != nil {
-		return info, err
-	}
-	if len(vpcs.Vpcs) > 0 {
-		info.DhcpOptionsID = aws.ToString(vpcs.Vpcs[0].DhcpOptionsId)
+	wg.Add(3)
+	go func() {
+		defer wg.Done()
+		sup, err := c.ec2.DescribeVpcAttribute(ctx, &awsec2.DescribeVpcAttributeInput{
+			VpcId:     aws.String(vpcID),
+			Attribute: ec2types.VpcAttributeNameEnableDnsSupport,
+		})
+		if err != nil {
+			fail(err)
+			return
+		}
+		if sup.EnableDnsSupport != nil {
+			info.EnableDnsSupport = aws.ToBool(sup.EnableDnsSupport.Value)
+		}
+	}()
+	go func() {
+		defer wg.Done()
+		host, err := c.ec2.DescribeVpcAttribute(ctx, &awsec2.DescribeVpcAttributeInput{
+			VpcId:     aws.String(vpcID),
+			Attribute: ec2types.VpcAttributeNameEnableDnsHostnames,
+		})
+		if err != nil {
+			fail(err)
+			return
+		}
+		if host.EnableDnsHostnames != nil {
+			info.EnableDnsHostnames = aws.ToBool(host.EnableDnsHostnames.Value)
+		}
+	}()
+	go func() {
+		defer wg.Done()
+		vpcs, err := c.ec2.DescribeVpcs(ctx, &awsec2.DescribeVpcsInput{VpcIds: []string{vpcID}})
+		if err != nil {
+			fail(err)
+			return
+		}
+		if len(vpcs.Vpcs) > 0 {
+			info.DhcpOptionsID = aws.ToString(vpcs.Vpcs[0].DhcpOptionsId)
+		}
+	}()
+	wg.Wait()
+	if firstErr != nil {
+		return info, firstErr
 	}
 
 	if info.DhcpOptionsID != "" {
