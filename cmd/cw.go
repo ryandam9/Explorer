@@ -27,7 +27,9 @@ var (
 var cwCmd = &cobra.Command{
 	Use:   "cw",
 	Short: "Start the CloudWatch Logs Explorer TUI",
-	Long:  `Start a highly interactive terminal user interface (TUI) for exploring, filtering, searching and tailing CloudWatch log groups, streams and events.`,
+	Long: `Start a highly interactive terminal user interface (TUI) for exploring, filtering, searching and tailing CloudWatch log groups, streams and events.
+
+Scope: --region pins a single region; --all-regions (or aws.allRegions in the config) sweeps every enabled region and adds a Region column to the group list; otherwise the config's aws.regions list is used.`,
 	Run: func(cmd *cobra.Command, args []string) {
 		ctx, cancel := context.WithCancel(context.Background())
 		defer cancel()
@@ -67,18 +69,24 @@ var cwCmd = &cobra.Command{
 		// Redirect scan logging to keep TUI screen clean
 		SilenceLogsForTUI()
 
-		// If user specified region flag, use it, otherwise fall back to global config region
-		region := cwRegion
-		if region == "" && AppConfig != nil {
-			if len(AppConfig.AWS.Regions) > 0 {
-				region = AppConfig.AWS.Regions[0]
-			}
-		}
-		if region == "" {
-			region = "us-east-1" // ultimate default region
+		// Region scope: --region pins a single region and wins over
+		// everything; otherwise --all-regions / aws.allRegions sweeps every
+		// enabled region; otherwise the config's aws.regions list; otherwise
+		// us-east-1.
+		var regions []string
+		scanAll := false
+		switch {
+		case cwRegion != "":
+			regions = []string{cwRegion}
+		case allRegions || (AppConfig != nil && AppConfig.AWS.AllRegions):
+			scanAll = true
+		case AppConfig != nil && len(AppConfig.AWS.Regions) > 0:
+			regions = AppConfig.AWS.Regions
+		default:
+			regions = []string{"us-east-1"}
 		}
 
-		m, err := cwtui.NewModel(ctx, cwCfg, region, configFilePath(), AppConfig, cwGroup, cwStream, cwFilter)
+		m, err := cwtui.NewModel(ctx, cwCfg, regions, scanAll, configFilePath(), AppConfig, cwGroup, cwStream, cwFilter)
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "Error initializing CloudWatch Logs TUI: %v\n", err)
 			os.Exit(1)

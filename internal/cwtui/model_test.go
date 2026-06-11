@@ -107,10 +107,10 @@ func TestModelCycleFocus(t *testing.T) {
 func TestModelNavigateList(t *testing.T) {
 	m := &model{
 		focus: focusGroups,
-		filteredGroups: []types.LogGroup{
-			{LogGroupName: aws.String("group1")},
-			{LogGroupName: aws.String("group2")},
-			{LogGroupName: aws.String("group3")},
+		filteredGroups: []LogGroup{
+			{LogGroup: types.LogGroup{LogGroupName: aws.String("group1")}, Region: "us-east-1"},
+			{LogGroup: types.LogGroup{LogGroupName: aws.String("group2")}, Region: "us-east-1"},
+			{LogGroup: types.LogGroup{LogGroupName: aws.String("group3")}, Region: "us-east-1"},
 		},
 		selectedGroupIdx: 0,
 	}
@@ -142,10 +142,10 @@ func TestModelFilterGroupsAndStreams(t *testing.T) {
 	sSearch := textinput.New()
 
 	m := &model{
-		groups: []types.LogGroup{
-			{LogGroupName: aws.String("/aws/lambda/fn1")},
-			{LogGroupName: aws.String("/aws/lambda/fn2")},
-			{LogGroupName: aws.String("/aws/ecs/service")},
+		groups: []LogGroup{
+			{LogGroup: types.LogGroup{LogGroupName: aws.String("/aws/lambda/fn1")}, Region: "us-east-1"},
+			{LogGroup: types.LogGroup{LogGroupName: aws.String("/aws/lambda/fn2")}, Region: "us-east-1"},
+			{LogGroup: types.LogGroup{LogGroupName: aws.String("/aws/ecs/service")}, Region: "us-east-1"},
 		},
 		streams: []types.LogStream{
 			{LogStreamName: aws.String("stream-2026-06-11-01")},
@@ -199,8 +199,8 @@ func TestModelToast(t *testing.T) {
 func TestModelUpdateKeys(t *testing.T) {
 	m := &model{
 		focus: focusGroups,
-		filteredGroups: []types.LogGroup{
-			{LogGroupName: aws.String("g1")},
+		filteredGroups: []LogGroup{
+			{LogGroup: types.LogGroup{LogGroupName: aws.String("g1")}, Region: "us-east-1"},
 		},
 		groupSearch: textinput.New(),
 	}
@@ -241,7 +241,7 @@ func TestModelUpdateMsgTypes(t *testing.T) {
 	}
 
 	// Test groupsMsg success path
-	groups := []types.LogGroup{{LogGroupName: aws.String("g1")}}
+	groups := []LogGroup{{LogGroup: types.LogGroup{LogGroupName: aws.String("g1")}, Region: "us-east-1"}}
 	newModel, _ = m.Update(groupsMsg{groups: groups})
 	m4 := newModel.(*model)
 	if len(m4.groups) != 1 {
@@ -253,4 +253,56 @@ type testingError string
 
 func (e testingError) Error() string {
 	return string(e)
+}
+
+func TestFilterGroupsMatchesRegion(t *testing.T) {
+	m := &model{
+		groups: []LogGroup{
+			{LogGroup: types.LogGroup{LogGroupName: aws.String("/aws/lambda/fn1")}, Region: "us-east-1"},
+			{LogGroup: types.LogGroup{LogGroupName: aws.String("/aws/lambda/fn1")}, Region: "eu-west-1"},
+			{LogGroup: types.LogGroup{LogGroupName: aws.String("/aws/lambda/fn2")}, Region: "eu-west-1"},
+		},
+		groupSearch: textinput.New(),
+	}
+
+	m.groupSearch.SetValue("eu-west")
+	m.filterGroups()
+	if len(m.filteredGroups) != 2 {
+		t.Errorf("expected 2 groups matching region filter, got %d", len(m.filteredGroups))
+	}
+}
+
+func TestStreamsMsgDroppedForWrongRegion(t *testing.T) {
+	// The same log group name exists in two regions; a streams response for
+	// the non-selected region must be dropped.
+	m := &model{
+		filteredGroups: []LogGroup{
+			{LogGroup: types.LogGroup{LogGroupName: aws.String("/aws/lambda/fn1")}, Region: "eu-west-1"},
+		},
+		streamsLoading: true,
+	}
+
+	stale := streamsMsg{
+		groupName: "/aws/lambda/fn1",
+		region:    "us-east-1",
+		streams:   []types.LogStream{{LogStreamName: aws.String("stale")}},
+	}
+	newModel, _ := m.Update(stale)
+	m2 := newModel.(*model)
+	if !m2.streamsLoading || len(m2.streams) != 0 {
+		t.Errorf("stale-region streams response should be dropped, got loading=%v streams=%d",
+			m2.streamsLoading, len(m2.streams))
+	}
+
+	fresh := streamsMsg{
+		groupName: "/aws/lambda/fn1",
+		region:    "eu-west-1",
+		streams:   []types.LogStream{{LogStreamName: aws.String("fresh")}},
+	}
+	newModel, _ = m2.Update(fresh)
+	m3 := newModel.(*model)
+	if m3.streamsLoading || len(m3.streams) != 1 {
+		t.Errorf("matching-region streams response should apply, got loading=%v streams=%d",
+			m3.streamsLoading, len(m3.streams))
+	}
 }

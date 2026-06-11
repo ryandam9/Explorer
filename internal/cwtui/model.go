@@ -40,7 +40,7 @@ const (
 type model struct {
 	ctx        context.Context
 	awsCfg     *config.AWSConfig
-	region     string
+	regions    []string
 	configPath string
 	appCfg     *config.Config
 	client     *CWLogsClient
@@ -55,8 +55,8 @@ type model struct {
 	showDetail bool
 
 	// Log Groups Panel
-	groups            []types.LogGroup
-	filteredGroups    []types.LogGroup
+	groups            []LogGroup
+	filteredGroups    []LogGroup
 	selectedGroupIdx  int
 	groupSearch       textinput.Model
 	groupSearchActive bool
@@ -94,12 +94,13 @@ type model struct {
 
 // Msg types
 type groupsMsg struct {
-	groups []types.LogGroup
+	groups []LogGroup
 	err    error
 }
 
 type streamsMsg struct {
 	groupName string
+	region    string
 	streams   []types.LogStream
 	err       error
 }
@@ -112,11 +113,12 @@ type eventsMsg struct {
 type clearToastMsg struct{}
 type watchTickMsg struct{}
 
-// NewModel builds the CloudWatch Logs explorer. groupFilter, streamFilter and
+// NewModel builds the CloudWatch Logs explorer over one or more regions (all
+// enabled regions when allRegions is true). groupFilter, streamFilter and
 // eventPattern pre-populate the three search inputs (the event pattern is
 // applied server-side on the first event query).
-func NewModel(ctx context.Context, awsCfg *config.AWSConfig, region string, configPath string, appCfg *config.Config, groupFilter, streamFilter, eventPattern string) (tea.Model, error) {
-	client, err := NewCWLogsClient(ctx, awsCfg, region)
+func NewModel(ctx context.Context, awsCfg *config.AWSConfig, regions []string, allRegions bool, configPath string, appCfg *config.Config, groupFilter, streamFilter, eventPattern string) (tea.Model, error) {
+	client, err := NewCWLogsClient(ctx, awsCfg, regions, allRegions)
 	if err != nil {
 		return nil, err
 	}
@@ -144,7 +146,7 @@ func NewModel(ctx context.Context, awsCfg *config.AWSConfig, region string, conf
 	m := &model{
 		ctx:          ctx,
 		awsCfg:       awsCfg,
-		region:       region,
+		regions:      client.Regions(),
 		configPath:   configPath,
 		appCfg:       appCfg,
 		client:       client,
@@ -200,9 +202,12 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case streamsMsg:
 		// Drop responses for groups no longer selected (eager loads while
-		// arrowing through the group list race each other).
-		if len(m.filteredGroups) == 0 ||
-			msg.groupName != aws.ToString(m.filteredGroups[m.selectedGroupIdx].LogGroupName) {
+		// arrowing through the group list race each other). The same group
+		// name can exist in several regions, so match on both.
+		sel, ok := m.selectedGroup()
+		if !ok ||
+			msg.groupName != aws.ToString(sel.LogGroupName) ||
+			msg.region != sel.Region {
 			return m, tea.Batch(cmds...)
 		}
 		m.streamsLoading = false
@@ -524,8 +529,8 @@ func (m *model) handleExport(cmds *[]tea.Cmd) {
 	_ = os.MkdirAll(dir, 0755)
 
 	grpName := "unknown-group"
-	if len(m.filteredGroups) > 0 {
-		grpName = sanitizeFilename(aws.ToString(m.filteredGroups[m.selectedGroupIdx].LogGroupName))
+	if grp, ok := m.selectedGroup(); ok {
+		grpName = sanitizeFilename(grp.Region + "-" + aws.ToString(grp.LogGroupName))
 	}
 	streamName := "all_streams"
 	if !m.groupLevelSearch && len(m.filteredStreams) > 0 {
@@ -554,9 +559,10 @@ func (m *model) filterGroups() {
 	if term == "" {
 		m.filteredGroups = m.groups
 	} else {
-		var list []types.LogGroup
+		var list []LogGroup
 		for _, g := range m.groups {
-			if strings.Contains(strings.ToLower(aws.ToString(g.LogGroupName)), term) {
+			if strings.Contains(strings.ToLower(aws.ToString(g.LogGroupName)), term) ||
+				strings.Contains(g.Region, term) {
 				list = append(list, g)
 			}
 		}
@@ -594,22 +600,35 @@ func (m *model) loadGroupsCmd(prefix string) tea.Cmd {
 	}
 }
 
-func (m *model) loadStreamsCmd() tea.Cmd {
+// selectedGroup returns the highlighted log group, or false when the filtered
+// list is empty.
+func (m *model) selectedGroup() (LogGroup, bool) {
 	if len(m.filteredGroups) == 0 {
+		return LogGroup{}, false
+	}
+	return m.filteredGroups[m.selectedGroupIdx], true
+}
+
+func (m *model) loadStreamsCmd() tea.Cmd {
+	grp, ok := m.selectedGroup()
+	if !ok {
 		return nil
 	}
-	grpName := aws.ToString(m.filteredGroups[m.selectedGroupIdx].LogGroupName)
+	grpName := aws.ToString(grp.LogGroupName)
+	region := grp.Region
 	return func() tea.Msg {
-		streams, err := m.client.ListLogStreams(m.ctx, grpName, "")
-		return streamsMsg{groupName: grpName, streams: streams, err: err}
+		streams, err := m.client.ListLogStreams(m.ctx, region, grpName, "")
+		return streamsMsg{groupName: grpName, region: region, streams: streams, err: err}
 	}
 }
 
 func (m *model) loadEventsCmd() tea.Cmd {
-	if len(m.filteredGroups) == 0 {
+	grp, ok := m.selectedGroup()
+	if !ok {
 		return nil
 	}
-	grpName := aws.ToString(m.filteredGroups[m.selectedGroupIdx].LogGroupName)
+	grpName := aws.ToString(grp.LogGroupName)
+	region := grp.Region
 	var streamName string
 	if !m.groupLevelSearch && len(m.filteredStreams) > 0 {
 		streamName = aws.ToString(m.filteredStreams[m.selectedStreamIdx].LogStreamName)
@@ -617,7 +636,7 @@ func (m *model) loadEventsCmd() tea.Cmd {
 	pattern := m.eventSearch.Value()
 
 	return func() tea.Msg {
-		events, err := m.client.GetLogEvents(m.ctx, grpName, streamName, pattern, 100)
+		events, err := m.client.GetLogEvents(m.ctx, region, grpName, streamName, pattern, 100)
 		return eventsMsg{events: events, err: err}
 	}
 }
@@ -659,8 +678,12 @@ func (m *model) View() string {
 	sb.WriteString(mainLayout + "\n")
 
 	// Status bar
+	regionLabel := "all (" + fmt.Sprintf("%d", len(m.regions)) + " regions)"
+	if len(m.regions) == 1 {
+		regionLabel = m.regions[0]
+	}
 	statusText := fmt.Sprintf("Region: %s  ·  Groups: %d  ·  Streams: %d  ·  Events: %d",
-		m.region, len(m.filteredGroups), len(m.filteredStreams), len(m.events))
+		regionLabel, len(m.filteredGroups), len(m.filteredStreams), len(m.events))
 	if m.watchMode {
 		statusText += "  ·  [WATCH ACTIVE]"
 	}
@@ -720,18 +743,29 @@ func (m *model) renderSidebar(width int) string {
 		}
 		start, end := getVisibleRange(m.selectedGroupIdx, len(m.filteredGroups), visibleHeight)
 
+		// Single region: show stored size. Multiple regions: the region
+		// column matters more than size in the narrow sidebar.
+		multiRegion := len(m.regions) > 1
+		metaW := 6
+		if multiRegion {
+			metaW = 14
+		}
+
 		for i := start; i < end; i++ {
 			g := m.filteredGroups[i]
 			name := aws.ToString(g.LogGroupName)
 			// Truncate name to fit
-			maxNameW := width - 18
+			maxNameW := width - metaW - 5
 			if len(name) > maxNameW {
-				name = name[len(name)-maxNameW:] // keep the end as it has the function/service names
+				name = name[len(name)-maxNameW+3:] // keep the end as it has the function/service names
 				name = "..." + name
 			}
 
-			sizeStr := humanize.Bytes(uint64(aws.ToInt64(g.StoredBytes)))
-			item := fmt.Sprintf(" %-30s %6s", name, sizeStr)
+			meta := humanize.Bytes(uint64(aws.ToInt64(g.StoredBytes)))
+			if multiRegion {
+				meta = g.Region
+			}
+			item := fmt.Sprintf(" %-*s %*s", maxNameW, name, metaW, meta)
 
 			if i == m.selectedGroupIdx && m.focus == focusGroups {
 				b.WriteString(lipgloss.NewStyle().
@@ -764,8 +798,8 @@ func (m *model) renderStreamsPanel(width int) string {
 		Foreground(lipgloss.Color(ui.ColorHeading())).
 		Bold(true)
 
-	if len(m.filteredGroups) > 0 {
-		b.WriteString(headingStyle.Render(" LOG STREAMS: "+aws.ToString(m.filteredGroups[m.selectedGroupIdx].LogGroupName)) + "\n")
+	if grp, ok := m.selectedGroup(); ok {
+		b.WriteString(headingStyle.Render(" LOG STREAMS: "+aws.ToString(grp.LogGroupName)+" ["+grp.Region+"]") + "\n")
 	} else {
 		b.WriteString(headingStyle.Render(" LOG STREAMS") + "\n")
 	}
@@ -831,13 +865,14 @@ func (m *model) renderEventsPanel(width int) string {
 		Foreground(lipgloss.Color(ui.ColorHeading())).
 		Bold(true)
 
-	grpName := ""
-	if len(m.filteredGroups) > 0 {
-		grpName = aws.ToString(m.filteredGroups[m.selectedGroupIdx].LogGroupName)
+	grpName, grpRegion := "", ""
+	if grp, ok := m.selectedGroup(); ok {
+		grpName = aws.ToString(grp.LogGroupName)
+		grpRegion = " [" + grp.Region + "]"
 	}
-	title := " EVENTS: " + grpName
+	title := " EVENTS: " + grpName + grpRegion
 	if !m.groupLevelSearch && len(m.filteredStreams) > 0 {
-		title = " STREAM EVENTS: " + aws.ToString(m.filteredStreams[m.selectedStreamIdx].LogStreamName)
+		title = " STREAM EVENTS: " + aws.ToString(m.filteredStreams[m.selectedStreamIdx].LogStreamName) + grpRegion
 	}
 	if len(title) > width-10 {
 		title = title[:width-13] + "..."
