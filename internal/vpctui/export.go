@@ -7,6 +7,8 @@ import (
 	"sort"
 	"strings"
 	"time"
+
+	"github.com/user/aws_explorer/internal/csvexport"
 )
 
 // ---------------------------------------------------------------------------
@@ -561,4 +563,32 @@ func writeExport(data fullExport, findings []Finding, now time.Time) (string, er
 		return "", err
 	}
 	return path, nil
+}
+
+// exportResourceCSV writes the currently displayed resource table (full
+// column set, current display order) to a timestamped CSV and returns its
+// path. An empty path with nil error means there was nothing to export.
+func (m *Model) exportResourceCSV() (string, error) {
+	maps := m.resourceMaps[m.activeResource]
+	if len(maps) == 0 || m.selectedVPC == nil {
+		return "", nil
+	}
+	fields := m.colFields(m.activeResource)
+	header := make([]string, 0, len(fields))
+	for _, f := range fields {
+		header = append(header, f.Title)
+	}
+	rows := make([][]string, 0, len(maps))
+	for _, r := range maps {
+		row := make([]string, 0, len(fields))
+		for _, f := range fields {
+			row = append(row, r[f.Key])
+		}
+		rows = append(rows, row)
+	}
+	dir, err := csvexport.DefaultDir()
+	if err != nil {
+		return "", err
+	}
+	return csvexport.Write(dir, m.selectedVPC.ID+"-"+rtKey(m.activeResource), header, rows)
 }

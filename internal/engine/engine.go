@@ -171,6 +171,28 @@ func (e *Engine) Run(ctx context.Context) (model.ExploreResult, error) {
 	return result, nil
 }
 
+// PlannedTaskKeys returns one "service@region" key per collection task that
+// StreamRun will launch with the current configuration, in launch order. TUIs
+// use it to show real scan progress (done/total and what is still pending).
+func (e *Engine) PlannedTaskKeys() []string {
+	regions := e.EffectiveRegions()
+	var keys []string
+	for _, srv := range e.registry.GetAll() {
+		srvCfg, ok := e.Config.Services[srv.Name()]
+		if !ok || !srvCfg.Enabled {
+			continue
+		}
+		serviceRegions := regions
+		if srv.IsGlobal() {
+			serviceRegions = []string{"global"}
+		}
+		for _, region := range serviceRegions {
+			keys = append(keys, srv.Name()+"@"+region)
+		}
+	}
+	return keys
+}
+
 // EffectiveRegions returns the regions to scan: the resolved region list
 // narrowed by any filters.regions configured. It always returns at least one
 // region.
@@ -313,13 +335,17 @@ func (e *Engine) StreamRun(ctx context.Context, chunks chan<- model.ResultChunk)
 							Message: msg,
 							Partial: partial,
 						}},
+						Progress: &model.TaskProgress{Service: s.Name(), Region: r},
 					})
 					return nil
 				}
 
-				if len(filteredRes) > 0 {
-					send(model.ResultChunk{Resources: filteredRes})
-				}
+				// Always send the final chunk — even with zero resources —
+				// so the Progress marker reaches consumers for every task.
+				send(model.ResultChunk{
+					Resources: filteredRes,
+					Progress:  &model.TaskProgress{Service: s.Name(), Region: r},
+				})
 				return nil
 			})
 		}

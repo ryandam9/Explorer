@@ -149,9 +149,17 @@ func (c *S3Client) ListBuckets() ([]s3types.Bucket, error) {
 type ListObjectsResult struct {
 	Prefixes []s3types.CommonPrefix
 	Objects  []s3types.Object
+	// NextToken resumes the listing where this window stopped; nil means the
+	// listing is complete. The UI surfaces it as "truncated — L loads more".
+	NextToken *string
 }
 
-func (c *S3Client) ListObjects(bucket, prefix string) (*ListObjectsResult, error) {
+// listPageWindow is how many ListObjectsV2 pages (≤1,000 keys each) are
+// fetched per call, keeping huge buckets responsive. Listings that hit the
+// window report a continuation token instead of silently stopping.
+const listPageWindow = 5
+
+func (c *S3Client) ListObjects(bucket, prefix string, startToken *string) (*ListObjectsResult, error) {
 	ctx, cancel := c.requestContext()
 	defer cancel()
 
@@ -162,32 +170,11 @@ func (c *S3Client) ListObjects(bucket, prefix string) (*ListObjectsResult, error
 	if prefix != "" {
 		input.Prefix = aws.String(prefix)
 	}
-
-	paginator := s3.NewListObjectsV2Paginator(c.client, input)
-	var prefixes []s3types.CommonPrefix
-	var objects []s3types.Object
-
-	// Fetch up to 5 pages (5,000 items) to prevent hanging on massive buckets.
-	// Uses explicit MaxResults to minimize round trips.
-	pageCount := 0
-	for paginator.HasMorePages() && pageCount < 5 {
-		page, err := paginator.NextPage(ctx)
-		if err != nil {
-			return nil, err
-		}
-		prefixes = append(prefixes, page.CommonPrefixes...)
-		objects = append(objects, page.Contents...)
-		pageCount++
-	}
-
-	return &ListObjectsResult{
-		Prefixes: prefixes,
-		Objects:  objects,
-	}, nil
+	return c.listWindow(ctx, input, startToken)
 }
 
 // ListObjectsFlat lists objects without a delimiter (flat mode, no "directories").
-func (c *S3Client) ListObjectsFlat(bucket, prefix string) (*ListObjectsResult, error) {
+func (c *S3Client) ListObjectsFlat(bucket, prefix string, startToken *string) (*ListObjectsResult, error) {
 	ctx, cancel := c.requestContext()
 	defer cancel()
 
@@ -197,23 +184,29 @@ func (c *S3Client) ListObjectsFlat(bucket, prefix string) (*ListObjectsResult, e
 	if prefix != "" {
 		input.Prefix = aws.String(prefix)
 	}
+	return c.listWindow(ctx, input, startToken)
+}
 
-	paginator := s3.NewListObjectsV2Paginator(c.client, input)
-	var objects []s3types.Object
-
-	pageCount := 0
-	for paginator.HasMorePages() && pageCount < 5 {
-		page, err := paginator.NextPage(ctx)
+// listWindow fetches up to listPageWindow pages starting at startToken,
+// reporting the continuation token when the bucket has more keys.
+func (c *S3Client) listWindow(ctx context.Context, input *s3.ListObjectsV2Input, startToken *string) (*ListObjectsResult, error) {
+	res := &ListObjectsResult{}
+	token := startToken
+	for range listPageWindow {
+		input.ContinuationToken = token
+		out, err := c.client.ListObjectsV2(ctx, input)
 		if err != nil {
 			return nil, err
 		}
-		objects = append(objects, page.Contents...)
-		pageCount++
+		res.Prefixes = append(res.Prefixes, out.CommonPrefixes...)
+		res.Objects = append(res.Objects, out.Contents...)
+		if !aws.ToBool(out.IsTruncated) {
+			return res, nil
+		}
+		token = out.NextContinuationToken
 	}
-
-	return &ListObjectsResult{
-		Objects: objects,
-	}, nil
+	res.NextToken = token
+	return res, nil
 }
 
 type ObjectDetails struct {

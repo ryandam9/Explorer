@@ -2,11 +2,13 @@ package tui
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"sort"
 	"strings"
 	"time"
 
+	"github.com/atotto/clipboard"
 	"github.com/charmbracelet/bubbles/spinner"
 	"github.com/charmbracelet/bubbles/textinput"
 	"github.com/charmbracelet/bubbles/viewport"
@@ -16,7 +18,10 @@ import (
 	"github.com/charmbracelet/x/ansi"
 	zone "github.com/lrstanley/bubblezone"
 
+	"github.com/user/aws_explorer/internal/auth"
+	"github.com/user/aws_explorer/internal/awsutil"
 	"github.com/user/aws_explorer/internal/config"
+	"github.com/user/aws_explorer/internal/csvexport"
 	"github.com/user/aws_explorer/internal/engine"
 	"github.com/user/aws_explorer/internal/model"
 	"github.com/user/aws_explorer/internal/summary"
@@ -52,9 +57,24 @@ const zoneSvc = "svc-"
 
 // ── Message types ─────────────────────────────────────────────────────────────
 
-type chunkMsg model.ResultChunk
-type doneMsg struct{}
+// chunkMsg and doneMsg carry the scan generation they belong to, so chunks
+// from a scan that was cancelled (profile/region switch) are ignored when
+// they straggle in after the restart.
+type chunkMsg struct {
+	gen   int
+	chunk model.ResultChunk
+}
+type doneMsg struct{ gen int }
 type clearToastMsg struct{}
+
+// engineSwitchedMsg reports the result of rebuilding the engine for a new
+// profile/region selection.
+type engineSwitchedMsg struct {
+	eng     *engine.Engine
+	profile string
+	region  string
+	err     error
+}
 
 // ── Styles (theme-aware; resolved at render time via color accessors) ─────────
 
@@ -84,6 +104,13 @@ type tuiModel struct {
 	engine *engine.Engine
 	chunks chan model.ResultChunk
 
+	// Scan lifecycle: scanCtx bounds the running StreamRun goroutine so a
+	// profile/region switch can cancel it; scanGen tags chunk messages so
+	// stragglers from a cancelled scan are dropped.
+	scanCtx    context.Context
+	scanCancel context.CancelFunc
+	scanGen    int
+
 	// Data. sorted is the single store of every resource (seed + streamed),
 	// deduped by ARN and kept sorted by service+name: incoming chunks are
 	// merged in (O(n+k)) instead of re-sorting the world on every arrival.
@@ -91,9 +118,29 @@ type tuiModel struct {
 	searchText []string       // searchText[i] is sorted[i]'s filterable cells, pre-joined and lower-cased
 	byARN      map[string]int // ARN -> index into sorted, for richer-entry dedupe (see summary.Dedupe)
 	svcSet     map[string]bool
+	svcTotals  map[string]int // unfiltered resource count per service (and "All"), for the filter match indicator
+	svcErrs    map[string]int // error count per service, for the sidebar badges
 	errors     []model.ExploreError
 	loading    bool
 	done       bool
+
+	// Scan progress: planned task keys ("service@region") not yet finished.
+	tasksPending map[string]bool
+	tasksTotal   int
+	tasksDone    int
+
+	// Column sorting: s cycles the column, R flips the direction.
+	// sortCol -1 is the natural service+name order.
+	sortCol int
+	sortAsc bool
+
+	// Raw JSON detail view ("J" in the detail panel).
+	detailRaw bool
+
+	// Profile / region switcher overlay ("P").
+	showSwitcher bool
+	switcherForm *huh.Form
+	switching    bool
 
 	// Terminal size
 	width  int
@@ -173,9 +220,12 @@ func NewModelWithSeed(ctx context.Context, eng *engine.Engine, configPath string
 
 	zoneM := zone.New()
 
+	scanCtx, scanCancel := context.WithCancel(ctx)
 	m := tuiModel{
 		ctx:        ctx,
 		engine:     eng,
+		scanCtx:    scanCtx,
+		scanCancel: scanCancel,
 		loading:    true,
 		chunks:     chunks,
 		focus:      focusTable,
@@ -183,11 +233,16 @@ func NewModelWithSeed(ctx context.Context, eng *engine.Engine, configPath string
 		zones:      zoneM,
 		byARN:      make(map[string]int),
 		svcSet:     make(map[string]bool),
+		svcTotals:  make(map[string]int),
+		svcErrs:    make(map[string]int),
 		allRows:    make(map[string][]table.Row),
 		allRes:     make(map[string][]model.Resource),
+		sortCol:    -1,
+		sortAsc:    true,
 		configPath: configPath,
 		cfg:        cfg,
 	}
+	m.resetTaskProgress()
 	m.settings = ui.NewSettingsModel(0, 0, configPath, cfg)
 
 	m.filterInput = textinput.New()
@@ -215,8 +270,24 @@ func NewModelWithSeed(ctx context.Context, eng *engine.Engine, configPath string
 }
 
 func (m tuiModel) Init() tea.Cmd {
-	go m.engine.StreamRun(m.ctx, m.chunks)
-	return tea.Batch(waitForChunk(m.chunks), m.spinner.Tick)
+	go m.engine.StreamRun(m.scanCtx, m.chunks)
+	return tea.Batch(waitForChunk(m.chunks, m.scanGen), m.spinner.Tick)
+}
+
+// resetTaskProgress (re)derives the planned task set from the engine so the
+// header can show real done/total scan progress.
+func (m *tuiModel) resetTaskProgress() {
+	m.tasksPending = make(map[string]bool)
+	m.tasksDone = 0
+	m.tasksTotal = 0
+	if m.engine == nil {
+		return
+	}
+	keys := m.engine.PlannedTaskKeys()
+	m.tasksTotal = len(keys)
+	for _, k := range keys {
+		m.tasksPending[k] = true
+	}
 }
 
 // ── Update ────────────────────────────────────────────────────────────────────
@@ -277,6 +348,26 @@ func (m tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 		}
 		return m, nil
+	}
+
+	// Route all events to the profile/region switcher form when it is open.
+	if m.showSwitcher && m.switcherForm != nil {
+		newForm, formCmd := m.switcherForm.Update(msg)
+		if f, ok := newForm.(*huh.Form); ok {
+			m.switcherForm = f
+		}
+		cmds = append(cmds, formCmd)
+
+		switch m.switcherForm.State {
+		case huh.StateCompleted:
+			m.showSwitcher = false
+			cmds = append(cmds, m.applySwitcher(
+				m.switcherForm.GetString("profile"),
+				m.switcherForm.GetString("region")))
+		case huh.StateAborted:
+			m.showSwitcher = false
+		}
+		return m, tea.Batch(cmds...)
 	}
 
 	// Route all events to the filter form when it is open.
@@ -444,6 +535,85 @@ func (m tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			cmds = append(cmds, toastCmd(3*time.Second))
 			return m, tea.Batch(cmds...)
 
+		case "s":
+			if m.focus == focusTable && len(m.sorted) > 0 {
+				// Cycle: natural order → Service → … → State → natural.
+				m.sortCol++
+				if m.sortCol == 0 { // skip the row-number column
+					m.sortCol = 1
+				}
+				if m.sortCol > 6 {
+					m.sortCol = -1
+				}
+				m.invalidateRows()
+				m.syncTableLayout()
+			}
+			return m, tea.Batch(cmds...)
+
+		case "R":
+			if m.focus == focusTable && m.sortCol > 0 {
+				m.sortAsc = !m.sortAsc
+				m.invalidateRows()
+				m.syncTableLayout()
+			}
+			return m, tea.Batch(cmds...)
+
+		case "y", "Y":
+			res, ok := m.selectedResource()
+			if m.showDetail && m.detail != nil {
+				// The open detail is the source of truth; the cursor may
+				// have moved under it (e.g. a filter edit).
+				res, ok = *m.detail, true
+			}
+			if ok {
+				text, what := res.ARN, "ARN"
+				switch {
+				case msg.String() == "Y":
+					text, what = res.ID, "ID"
+				case m.showDetail && m.detailRaw && m.focus == focusDetail:
+					// In the raw JSON view, y grabs the whole document.
+					if data, err := json.MarshalIndent(res, "", "  "); err == nil {
+						text, what = string(data), "JSON"
+					}
+				case text == "":
+					text, what = res.ID, "ID (no ARN)"
+				}
+				if err := clipboard.WriteAll(text); err != nil {
+					m.setToast("Copy failed: " + err.Error())
+				} else {
+					m.setToast("Copied " + what)
+				}
+				cmds = append(cmds, toastCmd(3*time.Second))
+			}
+			return m, tea.Batch(cmds...)
+
+		case "J":
+			if m.showDetail && m.detail != nil {
+				m.detailRaw = !m.detailRaw
+				m.syncDetailViewport()
+			}
+			return m, tea.Batch(cmds...)
+
+		case "C":
+			if rows := m.rowsFor(m.currentService()); len(rows) > 0 {
+				path, err := m.exportCurrentView()
+				if err != nil {
+					m.setToast("Export failed: " + err.Error())
+				} else {
+					m.setToast("Exported " + path)
+				}
+				cmds = append(cmds, toastCmd(5*time.Second))
+			}
+			return m, tea.Batch(cmds...)
+
+		case "P":
+			if !m.switching {
+				m.switcherForm = m.buildSwitcherForm()
+				m.showSwitcher = true
+				cmds = append(cmds, m.switcherForm.Init())
+			}
+			return m, tea.Batch(cmds...)
+
 		case ui.KeySettings:
 			m.settings = ui.NewSettingsModel(m.width, m.height, m.configPath, m.cfg)
 			m.showSettings = true
@@ -476,8 +646,13 @@ func (m tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 
 	case chunkMsg:
+		if msg.gen != m.scanGen {
+			// Straggler from a scan that was cancelled by a profile/region
+			// switch; its data belongs to the old account/region view.
+			return m, tea.Batch(cmds...)
+		}
 		m.loading = false
-		m.applyChunk(model.ResultChunk(msg))
+		m.applyChunk(msg.chunk)
 		// Drain whatever else is already buffered so a burst of page-level
 		// chunks costs one merge + view rebuild instead of one per chunk.
 		closed := false
@@ -499,13 +674,29 @@ func (m tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if closed {
 			m.done = true
 		} else {
-			cmds = append(cmds, waitForChunk(m.chunks))
+			cmds = append(cmds, waitForChunk(m.chunks, m.scanGen))
 		}
 		return m, tea.Batch(cmds...)
 
 	case doneMsg:
+		if msg.gen != m.scanGen {
+			return m, tea.Batch(cmds...)
+		}
 		m.loading = false
 		m.done = true
+
+	case engineSwitchedMsg:
+		m.switching = false
+		if msg.err != nil {
+			m.setToast("Switch failed: " + msg.err.Error())
+			cmds = append(cmds, toastCmd(5*time.Second))
+			return m, tea.Batch(cmds...)
+		}
+		m.engine = msg.eng
+		cmds = append(cmds, m.restartScan())
+		m.setToast(fmt.Sprintf("Switched to profile %q · %s — rescanning", msg.profile, msg.region))
+		cmds = append(cmds, toastCmd(4*time.Second))
+		return m, tea.Batch(cmds...)
 
 	case clearToastMsg:
 		m.toast = ""
@@ -576,6 +767,16 @@ func searchTextFor(r model.Resource) string {
 func (m *tuiModel) applyChunk(c model.ResultChunk) {
 	m.mergeResources(c.Resources)
 	m.errors = append(m.errors, c.Errors...)
+	for _, e := range c.Errors {
+		m.svcErrs[e.Service]++
+	}
+	if c.Progress != nil {
+		key := c.Progress.Service + "@" + c.Progress.Region
+		if m.tasksPending[key] {
+			delete(m.tasksPending, key)
+			m.tasksDone++
+		}
+	}
 }
 
 // mergeResources folds newly arrived resources into the sorted view. It
@@ -702,6 +903,14 @@ func (m *tuiModel) onResultsChanged() {
 		m.activeService = 0
 	}
 
+	// Unfiltered per-service totals for the "14/3201" filter indicator.
+	totals := make(map[string]int, len(m.svcSet)+1)
+	for _, r := range m.sorted {
+		totals[r.Service]++
+	}
+	totals["All"] = len(m.sorted)
+	m.svcTotals = totals
+
 	m.invalidateRows()
 }
 
@@ -713,15 +922,34 @@ func (m *tuiModel) invalidateRows() {
 	m.allRes = make(map[string][]model.Resource)
 }
 
-// rowsFor returns the filtered rows for svc, building and caching the group on
-// first access. Only mutates the (shared) cache maps, so it is safe to call
-// from value-receiver render methods.
+// sortField returns the cell a table sort column maps to.
+func sortField(r model.Resource, col int) string {
+	switch col {
+	case 1:
+		return r.Service
+	case 2:
+		return r.Type
+	case 3:
+		return r.Region
+	case 4:
+		return r.ID
+	case 5:
+		return r.Name
+	case 6:
+		return r.State
+	}
+	return ""
+}
+
+// rowsFor returns the filtered (and, when active, column-sorted) rows for
+// svc, building and caching the group on first access. Only mutates the
+// (shared) cache maps, so it is safe to call from value-receiver render
+// methods.
 func (m *tuiModel) rowsFor(svc string) []table.Row {
 	if rows, ok := m.allRows[svc]; ok {
 		return rows
 	}
 	query := strings.ToLower(m.filterText)
-	rows := []table.Row{}
 	var res []model.Resource
 	for i, r := range m.sorted {
 		if svc != "All" && r.Service != svc {
@@ -736,11 +964,30 @@ func (m *tuiModel) rowsFor(svc string) []table.Row {
 		if query != "" && !strings.Contains(m.searchText[i], query) {
 			continue
 		}
+		res = append(res, r)
+	}
+
+	// m.sorted is already in natural (service, name) order; a column sort
+	// reorders the visible group only. Stable, so equal keys keep natural
+	// order as the tie-break.
+	if m.sortCol > 0 {
+		col, asc := m.sortCol, m.sortAsc
+		sort.SliceStable(res, func(i, j int) bool {
+			a := strings.ToLower(sortField(res[i], col))
+			b := strings.ToLower(sortField(res[j], col))
+			if asc {
+				return a < b
+			}
+			return a > b
+		})
+	}
+
+	rows := []table.Row{}
+	for _, r := range res {
 		rows = append(rows, table.Row{
 			fmt.Sprintf("%d", len(rows)+1),
 			r.Service, r.Type, r.Region, r.ID, r.Name, r.State,
 		})
-		res = append(res, r)
 	}
 	m.allRows[svc] = rows
 	m.allRes[svc] = res
@@ -789,7 +1036,7 @@ func (m tuiModel) columns() []table.Column {
 		nameW = 10
 	}
 
-	return []table.Column{
+	cols := []table.Column{
 		{Title: "#", Width: 4},
 		{Title: "Service", Width: 10},
 		{Title: "Type", Width: 12},
@@ -798,6 +1045,14 @@ func (m tuiModel) columns() []table.Column {
 		{Title: "Name", Width: nameW},
 		{Title: "State", Width: 10},
 	}
+	if m.sortCol > 0 && m.sortCol < len(cols) {
+		arrow := " ↑"
+		if !m.sortAsc {
+			arrow = " ↓"
+		}
+		cols[m.sortCol].Title += arrow
+	}
+	return cols
 }
 
 // detailInline reports whether the detail panel fits beside the sidebar and
@@ -899,6 +1154,163 @@ func (m tuiModel) buildFilterForm() *huh.Form {
 	)
 }
 
+// ── Profile / region switcher ─────────────────────────────────────────────────
+
+// buildSwitcherForm builds the "P" overlay: pick a shared-config profile and
+// a region scope, then rescan without restarting the binary.
+func (m tuiModel) buildSwitcherForm() *huh.Form {
+	profileOpts := []huh.Option[string]{huh.NewOption("— keep current —", "")}
+	for _, p := range auth.ListProfiles() {
+		profileOpts = append(profileOpts, huh.NewOption(p, p))
+	}
+
+	regionOpts := []huh.Option[string]{
+		huh.NewOption("— keep current —", ""),
+		huh.NewOption("All regions", "all"),
+	}
+	// Offer the engine's resolved regions first (already scanned), then the
+	// full fallback list for anything else.
+	seen := map[string]bool{"": true, "all": true}
+	var regions []string
+	if m.engine != nil {
+		regions = append(regions, m.engine.ResolvedRegions...)
+	}
+	regions = append(regions, awsutil.FallbackRegions...)
+	for _, r := range regions {
+		if seen[r] {
+			continue
+		}
+		seen[r] = true
+		regionOpts = append(regionOpts, huh.NewOption(r, r))
+	}
+
+	return huh.NewForm(
+		huh.NewGroup(
+			huh.NewSelect[string]().
+				Key("profile").
+				Title("AWS profile").
+				Options(profileOpts...),
+			huh.NewSelect[string]().
+				Key("region").
+				Title("Region scope").
+				Options(regionOpts...),
+		),
+	)
+}
+
+// applySwitcher mutates the config for the chosen profile/region and rebuilds
+// the engine off-thread (STS/identity calls block), reporting back via
+// engineSwitchedMsg.
+func (m *tuiModel) applySwitcher(profile, region string) tea.Cmd {
+	if profile == "" && region == "" {
+		return nil // nothing to change
+	}
+	if profile != "" {
+		m.cfg.AWS.Profile = profile
+		// A named profile only takes effect through the profile/auto chains.
+		if m.cfg.AWS.AuthMethod != "" && m.cfg.AWS.AuthMethod != "auto" && m.cfg.AWS.AuthMethod != "profile" {
+			m.cfg.AWS.AuthMethod = "profile"
+		}
+	}
+	switch region {
+	case "":
+		// keep current scope
+	case "all":
+		m.cfg.AWS.AllRegions = true
+		m.cfg.AWS.Regions = nil
+		m.cfg.Filters.Regions = nil
+	default:
+		m.cfg.AWS.AllRegions = false
+		m.cfg.AWS.Regions = []string{region}
+		m.cfg.Filters.Regions = nil
+	}
+
+	m.switching = true
+	m.setToast("Switching — resolving credentials…")
+	ctx, cfg := m.ctx, m.cfg
+	shownProfile := m.cfg.AWS.Profile
+	shownRegion := region
+	if shownRegion == "" {
+		shownRegion = "current regions"
+	} else if shownRegion == "all" {
+		shownRegion = "all regions"
+	}
+	return tea.Batch(toastCmd(4*time.Second), func() tea.Msg {
+		eng, err := engine.NewEngine(ctx, cfg)
+		return engineSwitchedMsg{eng: eng, profile: shownProfile, region: shownRegion, err: err}
+	})
+}
+
+// restartScan cancels the running scan, clears all collected data, and starts
+// a fresh StreamRun against the (possibly new) engine. The generation counter
+// makes any stragglers from the old scan inert.
+func (m *tuiModel) restartScan() tea.Cmd {
+	if m.scanCancel != nil {
+		m.scanCancel()
+	}
+	m.scanCtx, m.scanCancel = context.WithCancel(m.ctx)
+	m.scanGen++
+
+	m.sorted = nil
+	m.searchText = nil
+	m.byARN = make(map[string]int)
+	m.svcSet = make(map[string]bool)
+	m.svcTotals = make(map[string]int)
+	m.svcErrs = make(map[string]int)
+	m.errors = nil
+	m.services = nil
+	m.activeService = 0
+	m.showDetail = false
+	m.detail = nil
+	m.loading = true
+	m.done = false
+	m.resetTaskProgress()
+	m.invalidateRows()
+	m.updateTableRows()
+
+	m.chunks = make(chan model.ResultChunk, 64)
+	go m.engine.StreamRun(m.scanCtx, m.chunks)
+	return tea.Batch(waitForChunk(m.chunks, m.scanGen), m.spinner.Tick)
+}
+
+// ── CSV export ────────────────────────────────────────────────────────────────
+
+// inventoryCSV builds the header and rows for exporting resources — full,
+// untruncated values rather than the on-screen cells.
+func inventoryCSV(res []model.Resource) ([]string, [][]string) {
+	header := []string{"Service", "Type", "Region", "AZ", "Account", "ID", "Name", "State", "ARN", "Created", "Tags"}
+	rows := make([][]string, 0, len(res))
+	for _, r := range res {
+		created := ""
+		if r.CreatedAt != nil {
+			created = r.CreatedAt.Format("2006-01-02 15:04:05")
+		}
+		tags := make([]string, 0, len(r.Tags))
+		for k, v := range r.Tags {
+			tags = append(tags, k+"="+v)
+		}
+		sort.Strings(tags)
+		rows = append(rows, []string{
+			r.Service, r.Type, r.Region, r.AZ, r.AccountID,
+			r.ID, r.Name, r.State, r.ARN, created, strings.Join(tags, "; "),
+		})
+	}
+	return header, rows
+}
+
+// exportCurrentView writes the displayed service's filtered rows to a
+// timestamped CSV under ~/.aws_explorer/exports and returns the path.
+func (m *tuiModel) exportCurrentView() (string, error) {
+	svc := m.currentService()
+	m.rowsFor(svc) // ensure the group cache (and its order) is current
+	header, rows := inventoryCSV(m.allRes[svc])
+	dir, err := csvexport.DefaultDir()
+	if err != nil {
+		return "", err
+	}
+	return csvexport.Write(dir, "inventory-"+svc, header, rows)
+}
+
 // ── Detail viewport ───────────────────────────────────────────────────────────
 
 func (m *tuiModel) syncDetailViewport() {
@@ -937,11 +1349,16 @@ func (m tuiModel) helpView() string {
 		"  Esc                Close detail or overlay",
 		"",
 		"Resources",
-		"  /                  Quick text filter",
+		"  /                  Quick text filter (shows match count)",
 		"  f                  Advanced filter (region / state)",
 		"  r                  Reset all filters",
+		"  s / R              Sort by next column / reverse sort order",
+		"  y / Y              Copy ARN / ID of the selected resource",
+		"  J                  Toggle raw JSON in the detail panel (y copies it)",
+		"  C                  Export current view to CSV (~/.aws_explorer/exports)",
 		"",
 		"Utility",
+		"  P                  Switch AWS profile / region and rescan",
 		"  e                  View access / scan errors",
 		"  S                  Settings (theme & colors)",
 		"  ?                  Toggle this help",
@@ -989,6 +1406,12 @@ func (m tuiModel) View() string {
 		formView := ui.ModalStyle(formW, formH).Render(m.filterForm.View())
 		modal := lipgloss.Place(m.width, m.height-4, lipgloss.Center, lipgloss.Center, formView)
 		output = lipgloss.JoinVertical(lipgloss.Left, header, modal, status)
+	} else if m.showSwitcher && m.switcherForm != nil {
+		formW := 56
+		formH := 16
+		formView := ui.ModalStyle(formW, formH).Render(m.switcherForm.View())
+		modal := lipgloss.Place(m.width, m.height-4, lipgloss.Center, lipgloss.Center, formView)
+		output = lipgloss.JoinVertical(lipgloss.Left, header, modal, status)
 	} else {
 		body := m.renderBody()
 		output = lipgloss.JoinVertical(lipgloss.Left, header, body, status)
@@ -1020,12 +1443,32 @@ func (m tuiModel) View() string {
 	return m.zones.Scan(output)
 }
 
-func (m tuiModel) renderHeader() string {
-	status := "streaming"
+// scanStatus describes the scan for the header/status bar: real done/total
+// task progress while running (with the stragglers named when only a few
+// remain), "complete" when finished.
+func (m tuiModel) scanStatus() string {
 	if m.done {
-		status = "complete"
-	} else if m.loading && len(m.sorted) == 0 {
-		status = m.spinner.View() + " loading"
+		return "complete"
+	}
+	if m.tasksTotal == 0 {
+		return "streaming"
+	}
+	status := fmt.Sprintf("scanning %d/%d", m.tasksDone, m.tasksTotal)
+	if rem := m.tasksTotal - m.tasksDone; rem > 0 && rem <= 3 {
+		var waiting []string
+		for k := range m.tasksPending {
+			waiting = append(waiting, k)
+		}
+		sort.Strings(waiting)
+		status += "  waiting: " + strings.Join(waiting, ", ")
+	}
+	return status
+}
+
+func (m tuiModel) renderHeader() string {
+	status := m.scanStatus()
+	if m.loading && len(m.sorted) == 0 {
+		status = m.spinner.View() + " " + status
 	}
 
 	var filterParts []string
@@ -1043,8 +1486,17 @@ func (m tuiModel) renderHeader() string {
 		filterInfo = "  [" + strings.Join(filterParts, ", ") + "]"
 	}
 
-	title := fmt.Sprintf("  AWS Explorer  ·  %s  ·  %d resources  ·  %d errors%s",
-		status, len(m.sorted), len(m.errors), filterInfo)
+	title := fmt.Sprintf("  AWS Explorer  ·  %s  ·  %d resources%s",
+		status, len(m.sorted), filterInfo)
+	// The error badge goes last (in error color) so a failed scan is
+	// impossible to miss; nothing follows it, so the embedded color reset
+	// cannot bleed into other header text.
+	if n := len(m.errors); n > 0 {
+		title += "  " + lipgloss.NewStyle().
+			Foreground(lipgloss.Color(ui.ColorError())).
+			Bold(true).
+			Render(fmt.Sprintf("⚠ %d errors — press e", n))
+	}
 
 	w := m.width - 2
 	if w < 10 {
@@ -1085,16 +1537,32 @@ func (m tuiModel) renderSidebar() string {
 		Foreground(lipgloss.Color(ui.ColorText())).
 		Width(sidebarInner - 2)
 
+	// Services whose collectors reported errors carry a warning badge so a
+	// permission/throttle problem is visible without opening the errors
+	// overlay. "All" aggregates every error.
+	warnStyle := idleStyle.Foreground(lipgloss.Color(ui.ColorWarning()))
+
 	for i, svc := range m.services {
 		zID := fmt.Sprintf("%s%d", zoneSvc, i)
+		errCount := m.svcErrs[svc]
+		if svc == "All" {
+			errCount = len(m.errors)
+		}
+		badge := ""
+		if errCount > 0 {
+			badge = fmt.Sprintf(" ⚠%d", errCount)
+		}
 		label := svc
-		if len(label) > sidebarInner-3 {
-			label = label[:sidebarInner-4] + "…"
+		if maxLabel := sidebarInner - 3 - len(badge); len(label) > maxLabel {
+			label = label[:maxLabel-1] + "…"
 		}
 		var line string
-		if i == m.activeService {
-			line = activeStyle.Render("▶ " + label)
-		} else {
+		switch {
+		case i == m.activeService:
+			line = activeStyle.Render("▶ " + label + badge)
+		case errCount > 0:
+			line = warnStyle.Render("  " + label + badge)
+		default:
 			line = idleStyle.Render("  " + label)
 		}
 		b.WriteString(m.zones.Mark(zID, line) + "\n")
@@ -1129,9 +1597,11 @@ func (m tuiModel) renderTablePanel() string {
 
 	parts := []string{tableView}
 	if m.filtering || m.filterText != "" {
+		matches := fmt.Sprintf("  ·  %d/%d match", len(m.rowsFor(m.currentService())), m.svcTotals[m.currentService()])
 		parts = append(parts, lipgloss.NewStyle().
 			Foreground(lipgloss.Color(ui.ColorMuted())).Render("Filter: ")+
-			m.filterInput.View())
+			m.filterInput.View()+
+			lipgloss.NewStyle().Foreground(lipgloss.Color(ui.ColorMuted())).Render(matches))
 	}
 	if ind := ui.TableScrollIndicator(&m.table); ind != "" {
 		parts[0] = lipgloss.JoinVertical(lipgloss.Left, parts[0], ind)
@@ -1175,13 +1645,16 @@ func (m tuiModel) statusBar() string {
 	if len(m.services) > 0 && m.activeService < len(m.services) {
 		svc = m.services[m.activeService]
 	}
-	status := "streaming…"
-	if m.done {
-		status = "complete"
+
+	shown := len(m.rowsFor(svc))
+	total := m.svcTotals[svc]
+	count := fmt.Sprintf("%d", shown)
+	if shown != total {
+		count = fmt.Sprintf("%d/%d", shown, total) // a filter is hiding rows
 	}
 
-	left := fmt.Sprintf("Service: %s  ·  Resources: %d  ·  Errors: %d  ·  %s",
-		svc, len(m.sorted), len(m.errors), status)
+	left := fmt.Sprintf("Service: %s  ·  Resources: %s  ·  Errors: %d  ·  %s",
+		svc, count, len(m.errors), m.scanStatus())
 
 	return ui.StatusBar(w, left, m.statusHints())
 }
@@ -1197,7 +1670,7 @@ func (m tuiModel) statusHints() []ui.KeyHint {
 		return []ui.KeyHint{ui.H("?/Esc", "close help")}
 	case m.showErrors:
 		return []ui.KeyHint{ui.H("↑/↓", "scroll"), ui.H("Esc/e", "close")}
-	case m.showFilter:
+	case m.showFilter, m.showSwitcher:
 		return []ui.KeyHint{
 			ui.H("↑/↓", "choose"),
 			ui.H("Enter", "apply"),
@@ -1232,6 +1705,9 @@ func (m tuiModel) statusHints() []ui.KeyHint {
 		hints = append(hints,
 			ui.H("/", "filter"),
 			ui.H("f", "adv filter"),
+			ui.H("s", "sort"),
+			ui.H("y", "copy ARN"),
+			ui.H("C", "csv"),
 		)
 		if m.filterRegion != "" || m.filterState != "" || m.filterText != "" {
 			hints = append(hints, ui.H("r", "reset filters"))
@@ -1240,6 +1716,7 @@ func (m tuiModel) statusHints() []ui.KeyHint {
 			hints = append(hints, ui.H("e", fmt.Sprintf("errors (%d)", len(m.errors))))
 		}
 		return append(hints,
+			ui.H("P", "profile"),
 			ui.H("Tab", "panel"),
 			ui.H("S", "theme"),
 			ui.H("q", "quit"),
@@ -1248,6 +1725,8 @@ func (m tuiModel) statusHints() []ui.KeyHint {
 	case focusDetail:
 		return []ui.KeyHint{
 			ui.H("↑/↓ or [ ]", "scroll"),
+			ui.H("J", "raw json"),
+			ui.H("y", "copy"),
 			ui.H("Esc", "close"),
 			ui.H("Tab", "panel"),
 			ui.H("q", "quit"),
@@ -1260,6 +1739,19 @@ func (m tuiModel) statusHints() []ui.KeyHint {
 // ── Detail renderer ───────────────────────────────────────────────────────────
 
 func (m tuiModel) renderDetail(r model.Resource, width int) string {
+	// Raw mode shows the resource exactly as the CLI's JSON output would —
+	// every field the tool knows, ready to paste into a ticket.
+	if m.detailRaw {
+		data, err := json.MarshalIndent(r, "", "  ")
+		if err != nil {
+			return "JSON error: " + err.Error()
+		}
+		header := detailSectionStyle().Render("RAW JSON") + "\n\n"
+		// Soft-wrap long lines to the panel width; the viewport does not
+		// scroll horizontally.
+		return header + lipgloss.NewStyle().Width(width).Render(string(data))
+	}
+
 	var b strings.Builder
 
 	fieldVal := func(v string, keyWidth, maxW int) string {
@@ -1435,13 +1927,13 @@ func (m tuiModel) errorsOverlay() string {
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
-func waitForChunk(chunks <-chan model.ResultChunk) tea.Cmd {
+func waitForChunk(chunks <-chan model.ResultChunk, gen int) tea.Cmd {
 	return func() tea.Msg {
 		chunk, ok := <-chunks
 		if !ok {
-			return doneMsg{}
+			return doneMsg{gen: gen}
 		}
-		return chunkMsg(chunk)
+		return chunkMsg{gen: gen, chunk: chunk}
 	}
 }
 
