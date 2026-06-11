@@ -12,9 +12,9 @@ import (
 	"github.com/aws/aws-sdk-go-v2/service/cloudwatchlogs"
 	"github.com/aws/aws-sdk-go-v2/service/cloudwatchlogs/types"
 	awsec2 "github.com/aws/aws-sdk-go-v2/service/ec2"
-	"github.com/user/aws_explorer/internal/auth"
-	"github.com/user/aws_explorer/internal/awsutil"
-	"github.com/user/aws_explorer/internal/config"
+	"github.com/ryandam9/aws_explorer/internal/auth"
+	"github.com/ryandam9/aws_explorer/internal/awsutil"
+	"github.com/ryandam9/aws_explorer/internal/config"
 )
 
 // LogGroup is a CloudWatch log group annotated with the region it lives in,

@@ -5,7 +5,7 @@ import (
 
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/service/route53/types"
-	"github.com/user/aws_explorer/internal/services"
+	"github.com/ryandam9/aws_explorer/internal/services"
 )
 
 func TestCollector_Metadata(t *testing.T) {

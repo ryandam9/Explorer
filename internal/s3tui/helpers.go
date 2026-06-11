@@ -5,7 +5,7 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/user/aws_explorer/internal/table"
+	"github.com/ryandam9/aws_explorer/internal/table"
 )
 
 func formatSize(size int64) string {
@@ -61,6 +61,22 @@ func sortTitle(title string, col, active int, asc bool) string {
 		return title + " ↑"
 	}
 	return title + " ↓"
+}
+
+// breadcrumb joins the bucket and prefix segments into a "bucket / seg / seg/"
+// path, truncating from the left when wider than maxW so the trailing
+// components stay visible.
+func breadcrumb(bucket, prefix string, maxW int) string {
+	crumb := bucket
+	if prefix != "" {
+		segs := strings.Split(strings.TrimSuffix(prefix, "/"), "/")
+		segs[len(segs)-1] += "/"
+		crumb += " / " + strings.Join(segs, " / ")
+	}
+	if r := []rune(crumb); maxW > 1 && len(r) > maxW {
+		crumb = "…" + string(r[len(r)-maxW+1:])
+	}
+	return crumb
 }
 
 func displayPrefix(prefix string) string {

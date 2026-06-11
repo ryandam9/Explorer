@@ -5,7 +5,7 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/user/aws_explorer/internal/table"
+	"github.com/ryandam9/aws_explorer/internal/table"
 )
 
 // FieldMeta describes one displayable attribute of a resource type.

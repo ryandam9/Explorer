@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/user/aws_explorer/internal/model"
+	"github.com/ryandam9/aws_explorer/internal/model"
 )
 
 // ConsoleURL generates the AWS console link for a given resource.

@@ -20,15 +20,15 @@ import (
 	"github.com/charmbracelet/x/ansi"
 	zone "github.com/lrstanley/bubblezone"
 
-	"github.com/user/aws_explorer/internal/auth"
-	"github.com/user/aws_explorer/internal/awsutil"
-	"github.com/user/aws_explorer/internal/config"
-	"github.com/user/aws_explorer/internal/csvexport"
-	"github.com/user/aws_explorer/internal/engine"
-	"github.com/user/aws_explorer/internal/model"
-	"github.com/user/aws_explorer/internal/summary"
-	"github.com/user/aws_explorer/internal/table"
-	"github.com/user/aws_explorer/internal/ui"
+	"github.com/ryandam9/aws_explorer/internal/auth"
+	"github.com/ryandam9/aws_explorer/internal/awsutil"
+	"github.com/ryandam9/aws_explorer/internal/config"
+	"github.com/ryandam9/aws_explorer/internal/csvexport"
+	"github.com/ryandam9/aws_explorer/internal/engine"
+	"github.com/ryandam9/aws_explorer/internal/model"
+	"github.com/ryandam9/aws_explorer/internal/summary"
+	"github.com/ryandam9/aws_explorer/internal/table"
+	"github.com/ryandam9/aws_explorer/internal/ui"
 )
 
 // ── Focus ────────────────────────────────────────────────────────────────────
@@ -55,7 +55,10 @@ const (
 
 // ── Zone IDs ─────────────────────────────────────────────────────────────────
 
-const zoneSvc = "svc-"
+const (
+	zoneSvc = "svc-"
+	zoneRow = "row-"
+)
 
 // ── Message types ─────────────────────────────────────────────────────────────
 
@@ -273,7 +276,7 @@ func NewModelWithSeed(ctx context.Context, eng *engine.Engine, configPath string
 	m.settings = ui.NewSettingsModel(0, 0, configPath, cfg)
 
 	m.filterInput = textinput.New()
-	m.filterInput.Placeholder = "Filter resources..."
+	m.filterInput.Placeholder = "Filter resources…"
 	m.filterInput.CharLimit = 128
 	m.filterInput.Width = 32
 	m.filterInput.PromptStyle = lipgloss.NewStyle().Foreground(lipgloss.Color(ui.ColorAccent())).Bold(true)
@@ -287,6 +290,10 @@ func NewModelWithSeed(ctx context.Context, eng *engine.Engine, configPath string
 		table.WithHeight(10),
 		table.WithStyles(ui.TableStyles()),
 	)
+	// Mark every visible row with a mouse zone so clicks can select it.
+	m.table.MarkRow = func(i int, rendered string) string {
+		return zoneM.Mark(fmt.Sprintf("%s%d", zoneRow, i), rendered)
+	}
 
 	// Surface seed resources immediately; typed results stream in and merge.
 	if len(seed) > 0 {
@@ -366,8 +373,9 @@ func (m tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	// While the errors overlay is open, allow scrolling and close on Esc/e/q.
 	if m.showErrors {
-		if key, ok := msg.(tea.KeyMsg); ok {
-			switch key.String() {
+		switch msg := msg.(type) {
+		case tea.KeyMsg:
+			switch msg.String() {
 			case "esc", "e", "q":
 				m.showErrors = false
 				return m, nil
@@ -377,6 +385,14 @@ func (m tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			case "down", "j", "]":
 				m.errorsViewport.LineDown(3)
 				return m, nil
+			}
+		case tea.MouseMsg:
+			// Wheel scrolls the overlay's viewport.
+			switch msg.Button {
+			case tea.MouseButtonWheelUp:
+				m.errorsViewport.LineUp(3)
+			case tea.MouseButtonWheelDown:
+				m.errorsViewport.LineDown(3)
 			}
 		}
 		return m, nil
@@ -800,7 +816,38 @@ func (m tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 
 	case tea.MouseMsg:
+		// Wheel scrolling goes to the focused panel: the detail viewport when
+		// it has focus, otherwise the table (3 rows per tick) or the sidebar.
+		switch msg.Button {
+		case tea.MouseButtonWheelUp, tea.MouseButtonWheelDown:
+			down := msg.Button == tea.MouseButtonWheelDown
+			switch m.focus {
+			case focusDetail:
+				if down {
+					m.detailViewport.LineDown(3)
+				} else {
+					m.detailViewport.LineUp(3)
+				}
+			case focusSidebar:
+				if down && m.activeService < len(m.services)-1 {
+					m.activeService++
+					m.updateTableRows()
+				} else if !down && m.activeService > 0 {
+					m.activeService--
+					m.updateTableRows()
+				}
+			case focusTable:
+				if down {
+					m.table.MoveDown(3)
+				} else {
+					m.table.MoveUp(3)
+				}
+			}
+			return m, tea.Batch(cmds...)
+		}
+
 		// Check sidebar zone clicks.
+		sidebarHit := false
 		for i := range m.services {
 			zID := fmt.Sprintf("%s%d", zoneSvc, i)
 			if m.zones.Get(zID).InBounds(msg) {
@@ -810,7 +857,21 @@ func (m tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				}
 				m.focus = focusTable
 				m.table.Focus()
+				sidebarHit = true
 				break
+			}
+		}
+
+		// Table row clicks select the row; only the rendered rows have zones.
+		if !sidebarHit && msg.Button == tea.MouseButtonLeft {
+			start, end := m.table.VisibleRange()
+			for i := start; i < end; i++ {
+				if m.zones.Get(fmt.Sprintf("%s%d", zoneRow, i)).InBounds(msg) {
+					m.table.SetCursor(i)
+					m.focus = focusTable
+					m.table.Focus()
+					break
+				}
 			}
 		}
 
@@ -1927,7 +1988,7 @@ func (m tuiModel) renderBody() string {
 
 func (m tuiModel) renderSidebar() string {
 	var b strings.Builder
-	b.WriteString(ui.PanelTitleStyle().Render("SERVICES") + "\n\n")
+	b.WriteString(ui.PanelTitleStyle().Render("Services") + "\n\n")
 
 	activeStyle := lipgloss.NewStyle().
 		Foreground(lipgloss.Color(ui.ColorHighlightText())).
@@ -2281,7 +2342,7 @@ func (m tuiModel) renderDetail(r model.Resource, width int) string {
 	if m.showTimeline {
 		b.WriteString("\n" + dSec.Render("CLOUDTRAIL TIMELINE") + "\n\n")
 		if m.timelineLoading {
-			b.WriteString("  Loading events...\n")
+			b.WriteString("  Loading events…\n")
 		} else if m.timelineErr != nil {
 			b.WriteString("  Error: " + m.timelineErr.Error() + "\n")
 		} else if len(m.timelineEvents) == 0 {
@@ -2301,7 +2362,7 @@ func (m tuiModel) renderDetail(r model.Resource, width int) string {
 	if m.showLogs {
 		b.WriteString("\n" + dSec.Render("CLOUDWATCH RECENT ERROR LOGS") + "\n\n")
 		if m.logsLoading {
-			b.WriteString("  Loading logs...\n")
+			b.WriteString("  Loading logs…\n")
 		} else if m.logsErr != nil {
 			b.WriteString("  Error: " + m.logsErr.Error() + "\n")
 		} else if len(m.logsLines) == 0 {
@@ -2321,7 +2382,7 @@ func (m tuiModel) renderDetail(r model.Resource, width int) string {
 		}
 		b.WriteString("\n" + dSec.Render(header) + "\n\n")
 		if m.metricsLoading {
-			b.WriteString("  Loading metric data...\n")
+			b.WriteString("  Loading metric data…\n")
 		} else if m.metricsErr != nil {
 			b.WriteString("  Error: " + m.metricsErr.Error() + "\n")
 		} else if m.metricsData == nil || len(m.metricsData.Values) == 0 {

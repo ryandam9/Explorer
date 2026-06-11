@@ -18,8 +18,8 @@ import (
 	"github.com/charmbracelet/lipgloss"
 	"github.com/dustin/go-humanize"
 
-	"github.com/user/aws_explorer/internal/config"
-	"github.com/user/aws_explorer/internal/ui"
+	"github.com/ryandam9/aws_explorer/internal/config"
+	"github.com/ryandam9/aws_explorer/internal/ui"
 )
 
 type focusArea int
@@ -128,15 +128,15 @@ func NewModel(ctx context.Context, awsCfg *config.AWSConfig, regions []string, a
 	s.Style = lipgloss.NewStyle().Foreground(lipgloss.Color(ui.ColorAccent()))
 
 	gSearch := textinput.New()
-	gSearch.Placeholder = "Filter log groups..."
+	gSearch.Placeholder = "Filter log groups…"
 	gSearch.Width = 30
 
 	sSearch := textinput.New()
-	sSearch.Placeholder = "Filter log streams..."
+	sSearch.Placeholder = "Filter log streams…"
 	sSearch.Width = 30
 
 	eSearch := textinput.New()
-	eSearch.Placeholder = "CloudWatch pattern (e.g. ERROR, panic)..."
+	eSearch.Placeholder = "CloudWatch pattern (e.g. ERROR, panic)…"
 	eSearch.Width = 40
 
 	gSearch.SetValue(groupFilter)
@@ -721,7 +721,7 @@ func (m *model) renderSidebar(width int) string {
 		Foreground(lipgloss.Color(ui.ColorHeading())).
 		Bold(true)
 
-	b.WriteString(headingStyle.Render(" LOG GROUPS") + "\n")
+	b.WriteString(headingStyle.Render(" Log groups") + "\n")
 
 	if m.groupSearchActive {
 		b.WriteString(" " + m.groupSearch.View() + "\n")
@@ -732,7 +732,7 @@ func (m *model) renderSidebar(width int) string {
 	b.WriteString("\n")
 
 	if m.groupsLoading {
-		b.WriteString(fmt.Sprintf("  %s Loading log groups...\n", m.spinner.View()))
+		b.WriteString(fmt.Sprintf("  %s Loading log groups…\n", m.spinner.View()))
 	} else if len(m.filteredGroups) == 0 {
 		b.WriteString("  No log groups found.\n")
 	} else {
@@ -799,9 +799,9 @@ func (m *model) renderStreamsPanel(width int) string {
 		Bold(true)
 
 	if grp, ok := m.selectedGroup(); ok {
-		b.WriteString(headingStyle.Render(" LOG STREAMS: "+aws.ToString(grp.LogGroupName)+" ["+grp.Region+"]") + "\n")
+		b.WriteString(headingStyle.Render(" Log streams: "+aws.ToString(grp.LogGroupName)+" ["+grp.Region+"]") + "\n")
 	} else {
-		b.WriteString(headingStyle.Render(" LOG STREAMS") + "\n")
+		b.WriteString(headingStyle.Render(" Log streams") + "\n")
 	}
 
 	if m.streamSearchActive {
@@ -813,7 +813,7 @@ func (m *model) renderStreamsPanel(width int) string {
 	b.WriteString("\n")
 
 	if m.streamsLoading {
-		b.WriteString(fmt.Sprintf("  %s Loading log streams...\n", m.spinner.View()))
+		b.WriteString(fmt.Sprintf("  %s Loading log streams…\n", m.spinner.View()))
 	} else if len(m.filteredStreams) == 0 {
 		b.WriteString("  No log streams found.\n")
 	} else {
@@ -870,9 +870,9 @@ func (m *model) renderEventsPanel(width int) string {
 		grpName = aws.ToString(grp.LogGroupName)
 		grpRegion = " [" + grp.Region + "]"
 	}
-	title := " EVENTS: " + grpName + grpRegion
+	title := " Events: " + grpName + grpRegion
 	if !m.groupLevelSearch && len(m.filteredStreams) > 0 {
-		title = " STREAM EVENTS: " + aws.ToString(m.filteredStreams[m.selectedStreamIdx].LogStreamName) + grpRegion
+		title = " Stream events: " + aws.ToString(m.filteredStreams[m.selectedStreamIdx].LogStreamName) + grpRegion
 	}
 	if len(title) > width-10 {
 		title = title[:width-13] + "..."
@@ -888,7 +888,7 @@ func (m *model) renderEventsPanel(width int) string {
 	b.WriteString("\n")
 
 	if m.eventsLoading {
-		b.WriteString(fmt.Sprintf("  %s Filtering and loading log events...\n", m.spinner.View()))
+		b.WriteString(fmt.Sprintf("  %s Filtering and loading log events…\n", m.spinner.View()))
 	} else if len(m.events) == 0 {
 		b.WriteString("  No matching log events found in this window.\n")
 	} else {
@@ -945,7 +945,7 @@ func (m *model) renderEventsPanel(width int) string {
 
 func (m *model) renderErrorView() string {
 	var b strings.Builder
-	b.WriteString("\n" + lipgloss.NewStyle().Foreground(lipgloss.Color(ui.ColorError())).Bold(true).Render("  CLOUDWATCH LOGS EXPLORER EXCEPTION") + "\n\n")
+	b.WriteString("\n" + lipgloss.NewStyle().Foreground(lipgloss.Color(ui.ColorError())).Bold(true).Render("  CloudWatch Logs explorer exception") + "\n\n")
 	b.WriteString(fmt.Sprintf("  An error occurred: %v\n\n", m.err))
 	b.WriteString("  Shortcuts:\n")
 	b.WriteString("    Enter, Esc  - Attempt to return or retry\n")
@@ -972,10 +972,10 @@ func (m *model) overlayDetail(bg string) string {
 	headingStyle := lipgloss.NewStyle().Foreground(lipgloss.Color(ui.ColorHeading())).Bold(true)
 	metaStyle := lipgloss.NewStyle().Foreground(lipgloss.Color(ui.ColorMuted()))
 
-	b.WriteString(headingStyle.Render("LOG EVENT DETAILS") + "\n")
+	b.WriteString(headingStyle.Render("Log event details") + "\n")
 	b.WriteString(metaStyle.Render("Timestamp : "+t.Format("2006-01-02 15:04:05.000 MST")) + "\n")
 	b.WriteString(metaStyle.Render("Stream    : "+aws.ToString(ev.LogStreamName)) + "\n")
-	b.WriteString("\n" + headingStyle.Render("MESSAGE:") + "\n\n")
+	b.WriteString("\n" + headingStyle.Render("Message:") + "\n\n")
 
 	rawMsg := aws.ToString(ev.Message)
 	// Try to pretty-print if it's JSON

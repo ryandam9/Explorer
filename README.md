@@ -10,7 +10,7 @@ Discover, monitor, and display AWS resources across accounts and regions via CLI
 - **VPC debugging toolkit** (no AI, deterministic): a findings linter, a connectivity path tracer, plain-English SG/NACL rule explanations, cross-reference ("where used"), merged effective security rules, DNS diagnostics, a public-exposure audit, snapshot diffing, Markdown export, and AWS Reachability Analyzer integration — see [VPC Debugging Toolkit](#vpc-debugging-toolkit)
 - **Config-driven**: YAML configuration for services, regions, filters, output, and per-resource display columns
 - **5 auth methods**: auto (SDK default chain), profile, env vars, static credentials, STS AssumeRole
-- **Output formats**: Table (default), JSON
+- **Output formats**: Table (default), JSON, NDJSON, CSV — with `--no-header` for scripting and colored states on terminals
 - **Filtering**: By region, state, tags, name, and IDs
 - **Concurrent**: Bounded goroutine pool (default 8) for parallel collection across services and regions; collectors stream results page-by-page, so the first resources appear after a single API round-trip instead of after the last page
 - **Resilient**: Best-effort collection — a throttle, timeout, or denied call mid-scan keeps everything already gathered (flagged as partial) instead of dropping the service/region, with configurable retry attempts and adaptive backoff
@@ -26,12 +26,15 @@ Discover, monitor, and display AWS resources across accounts and regions via CLI
 ## Quick Start
 
 ```bash
-# Clone and build
+# Install
+go install github.com/ryandam9/aws_explorer@latest
+
+# …or clone and build
 git clone https://github.com/ryandam9/aws_explorer.git
 cd aws_explorer
-make build          # produces bin/aws_explorer
+make build          # produces bin/aws_explorer with version info embedded
 
-# Run CLI (streams table to stdout)
+# Run CLI (streams table to stdout; works from any directory, no config needed)
 ./bin/aws_explorer
 
 # Run interactive TUI
@@ -45,6 +48,22 @@ make build          # produces bin/aws_explorer
 
 # Run S3 browser TUI
 ./bin/aws_explorer s3 --bucket my-bucket --region us-east-1
+```
+
+### Shell completion
+
+Tab completion for commands, flags and values (output formats, themes, auth
+methods, and the profiles from your `~/.aws/config`) is built in:
+
+```bash
+# bash (add to ~/.bashrc)
+source <(aws_explorer completion bash)
+
+# zsh (add to ~/.zshrc)
+source <(aws_explorer completion zsh)
+
+# fish
+aws_explorer completion fish | source
 ```
 
 ## Build
@@ -73,22 +92,32 @@ make clean
 
 ## CLI Usage
 
-The default command streams discovered resources as a table or JSON to stdout.
+The default command streams discovered resources to stdout as a table, JSON,
+NDJSON or CSV.
 
 ```bash
 ./bin/aws_explorer [flags]
 ```
 
-### Flags
+While the scan runs, a live progress meter (`⠿ scanning 12/56 tasks · 340
+resources`) is shown on stderr — only when stderr is a terminal, so piping
+stdout stays clean. Collection errors are summarized after the run,
+deduplicated across regions. Resource states are colored when stdout is a
+terminal (disable with [`NO_COLOR`](https://no-color.org/) or by piping).
+
+### Global flags (work on every command)
 
 | Flag | Default | Description |
 |------|---------|-------------|
-| `--config` | `config.yaml` | Path to config file |
+| `--config` | auto-discovered | Path to config file (default search: `./config.yaml`, then the user config dir, then built-in defaults) |
 | `--profile` | `default` | AWS named profile |
 | `--auth-method` | `auto` | Auth method: `auto`, `profile`, `env`, `static`, `sts` |
-| `--role-arn` | — | IAM role ARN to assume (for `sts` auth) |
-| `--output` | `table` | Output format: `table` or `json` |
+| `--role-arn` | — | IAM role ARN to assume (sets auth method to `sts`) |
+| `--region` / `-r` | — | Scan only this region (overrides `aws.regions`, `--all-regions` and region filters) |
+| `--output` / `-o` | `table` | Output format: `table`, `json`, `ndjson`, `csv` |
+| `--no-header` | `false` | Omit the header row in `table`/`csv` output (for scripting) |
 | `--all-regions` | `false` | Scan all available AWS regions |
+| `--version` | — | Print version, commit and build date |
 
 ### Examples
 
@@ -96,20 +125,22 @@ The default command streams discovered resources as a table or JSON to stdout.
 # Use a named AWS profile
 ./bin/aws_explorer --profile prod
 
-# Output JSON
-./bin/aws_explorer --output json
+# Pin to one region
+./bin/aws_explorer -r eu-west-1
+
+# Machine-readable output
+./bin/aws_explorer -o json | jq '.[].id'
+./bin/aws_explorer -o ndjson | head
+./bin/aws_explorer -o csv --no-header > resources.csv
 
 # Scan all regions
 ./bin/aws_explorer --all-regions
 
 # Assume an IAM role
-./bin/aws_explorer --auth-method sts --role-arn arn:aws:iam::123456789012:role/MyRole
+./bin/aws_explorer --role-arn arn:aws:iam::123456789012:role/MyRole
 
 # Custom config file
 ./bin/aws_explorer --config /path/to/config.yaml
-
-# Combine flags
-./bin/aws_explorer --profile dev --output json --all-regions
 ```
 
 ## TUI Usage
@@ -120,7 +151,8 @@ Interactive terminal UI with sidebar navigation, resource table, and detail pane
 ./bin/aws_explorer tui [flags]
 ```
 
-Accepts the same `--config`, `--profile`, `--auth-method`, `--role-arn`, and `--all-regions` flags as the CLI command.
+Accepts the same global flags as the CLI command (`--config`, `--profile`,
+`--auth-method`, `--role-arn`, `--region`, `--all-regions`).
 
 ### TUI Keyboard Shortcuts
 
@@ -194,14 +226,14 @@ Each row carries five columns:
 ./bin/aws_explorer summary [flags]
 ```
 
-Accepts the same `--config`, `--profile`, `--auth-method`, `--role-arn`, and
-`--all-regions` flags as the CLI command.
+Accepts the same global flags as the CLI command (`--config`, `--profile`,
+`--auth-method`, `--role-arn`, `--region`, `--all-regions`).
 
 ### Summary Flags
 
 | Flag | Default | Description |
 |------|---------|-------------|
-| `--output` / `-o` | `table` | Output format: `table`, `json`, or `csv` |
+| `--output` / `-o` | `table` | Output format: `table`, `json`, `ndjson`, or `csv` |
 | `--tui` | `false` | Explore the same inventory interactively instead of printing |
 | `--typed-only` | `false` | Skip the all-services Tagging API sweep; use only the built-in typed collectors |
 
@@ -240,14 +272,12 @@ If `--region` is omitted, all regions are scanned for VPCs.
 
 ### VPC Flags
 
+The global `--profile`, `--auth-method`, `--role-arn`, `--region` and
+`--all-regions` flags apply. With no region flags, all regions are scanned.
+
 | Flag | Default | Description |
 |------|---------|-------------|
-| `--profile` | (global) | AWS named profile (overrides global `--profile`) |
-| `--auth-method` | (global) | Auth method: `auto`, `profile`, `env`, `static`, `sts` |
-| `--role-arn` | — | IAM role ARN to assume via STS |
-| `--region` | — | AWS region (defaults to all regions if omitted) |
 | `--theme` | `spotted-pardalote` | Color theme |
-| `--all-regions` | `false` | Scan all AWS regions |
 
 ### Layout
 
@@ -556,11 +586,13 @@ A dedicated S3 browser with bucket listing, object navigation, metadata viewing,
 
 ### S3 Flags
 
+The global `--profile`, `--auth-method`, `--role-arn` and `--region` flags
+apply.
+
 | Flag | Default | Description |
 |------|---------|-------------|
 | `--bucket` | — | Bucket name to open directly |
 | `--prefix` | — | Key prefix to start browsing from |
-| `--region` | — | AWS region of the bucket |
 | `--theme` | `spotted-pardalote` | UI theme name |
 | `--allow-delete` | `false` | Enable object deletion |
 | `--endpoint-url` | — | Custom endpoint (LocalStack, MinIO, etc.) |
@@ -587,6 +619,35 @@ A dedicated S3 browser with bucket listing, object navigation, metadata viewing,
 ./bin/aws_explorer s3 --endpoint-url http://localhost:9000
 ```
 
+## CloudWatch Logs TUI Usage
+
+An interactive explorer for CloudWatch log groups, streams and events, with
+filtering, search and live tailing.
+
+```bash
+./bin/aws_explorer cw [flags]
+```
+
+The global `--profile`, `--auth-method`, `--role-arn`, `--region` and
+`--all-regions` flags apply: `--region` pins a single region, `--all-regions`
+sweeps every enabled region and adds a Region column to the group list, and
+otherwise the config's `aws.regions` list is used.
+
+| Flag | Default | Description |
+|------|---------|-------------|
+| `--group` / `-g` | — | Initial log group filter/pattern |
+| `--stream` / `-s` | — | Initial log stream filter |
+| `--filter` / `-f` | — | Initial query pattern for log events |
+| `--theme` | `spotted-pardalote` | UI theme name |
+
+```bash
+# Browse log groups in one region
+./bin/aws_explorer cw --region us-east-1
+
+# Open a group and search for errors
+./bin/aws_explorer cw -g /aws/lambda/my-fn -f ERROR
+```
+
 ## Makefile Targets
 
 ```bash
@@ -605,7 +666,32 @@ make help            # Show available targets
 
 ## Configuration
 
-All settings live in `config.yaml`. CLI flags override config file values at runtime.
+Configuration is **optional** — the binary embeds the default config and runs
+from any directory with zero setup. When a `config.yaml` exists it is
+discovered in this order:
+
+1. The `--config` flag
+2. `./config.yaml` in the current directory
+3. The user config directory (`~/.config/aws_explorer/config.yaml` on Linux,
+   `~/Library/Application Support/aws_explorer/config.yaml` on macOS)
+4. The built-in defaults embedded in the binary
+
+CLI flags override config file values at runtime.
+
+```bash
+# Scaffold a starter config in the current directory
+aws_explorer config init
+
+# Scaffold the per-user config used from any directory
+aws_explorer config init --path ~/.config/aws_explorer/config.yaml
+
+# Show which config file is active
+aws_explorer config path
+```
+
+Theme edits saved from the in-app settings panel (`Ctrl+S`) are written to the
+active config file; when running on built-in defaults the file is created in
+the user config directory on first save.
 
 ### Full Configuration Reference
 

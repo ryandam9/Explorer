@@ -13,7 +13,7 @@ import (
 	"github.com/aws/aws-sdk-go-v2/credentials/stscreds"
 	"github.com/aws/aws-sdk-go-v2/service/sts"
 
-	"github.com/user/aws_explorer/internal/config"
+	"github.com/ryandam9/aws_explorer/internal/config"
 )
 
 // BuildAWSConfig creates an aws.Config for the specified region using the

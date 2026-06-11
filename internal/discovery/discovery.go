@@ -19,9 +19,9 @@ import (
 	rgttypes "github.com/aws/aws-sdk-go-v2/service/resourcegroupstaggingapi/types"
 	"golang.org/x/sync/errgroup"
 
-	"github.com/user/aws_explorer/internal/awserr"
-	"github.com/user/aws_explorer/internal/awsutil"
-	"github.com/user/aws_explorer/internal/model"
+	"github.com/ryandam9/aws_explorer/internal/awserr"
+	"github.com/ryandam9/aws_explorer/internal/awsutil"
+	"github.com/ryandam9/aws_explorer/internal/model"
 )
 
 // Discover enumerates taggable resources across all services in each of the

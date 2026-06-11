@@ -13,7 +13,7 @@ import (
 	"strings"
 	"text/tabwriter"
 
-	"github.com/user/aws_explorer/internal/model"
+	"github.com/ryandam9/aws_explorer/internal/model"
 )
 
 // Row is one line of the summary inventory.
@@ -144,22 +144,27 @@ func dash(s string) string {
 	return s
 }
 
-// Render writes the rows to w in the requested format (table, json, csv).
-// Unknown formats fall back to table.
-func Render(w io.Writer, rows []Row, format string) error {
+// Render writes the rows to w in the requested format (table, json, ndjson,
+// csv). Unknown formats fall back to table. noHeader omits the header row in
+// table and csv output.
+func Render(w io.Writer, rows []Row, format string, noHeader bool) error {
 	switch strings.ToLower(format) {
 	case "json":
 		return renderJSON(w, rows)
+	case "ndjson":
+		return renderNDJSON(w, rows)
 	case "csv":
-		return renderCSV(w, rows)
+		return renderCSV(w, rows, noHeader)
 	default:
-		return renderTable(w, rows)
+		return renderTable(w, rows, noHeader)
 	}
 }
 
-func renderTable(w io.Writer, rows []Row) error {
+func renderTable(w io.Writer, rows []Row, noHeader bool) error {
 	tw := tabwriter.NewWriter(w, 0, 0, 3, ' ', 0)
-	fmt.Fprintln(tw, "SNO\tNAME\tTYPE\tARN\tREGION/AZ")
+	if !noHeader {
+		fmt.Fprintln(tw, "SNO\tNAME\tTYPE\tARN\tREGION/AZ")
+	}
 	for _, r := range rows {
 		fmt.Fprintf(tw, "%d\t%s\t%s\t%s\t%s\n", r.SNO, r.Name, r.Type, r.ARN, r.RegionAZ)
 	}
@@ -172,10 +177,22 @@ func renderJSON(w io.Writer, rows []Row) error {
 	return enc.Encode(rows)
 }
 
-func renderCSV(w io.Writer, rows []Row) error {
+func renderNDJSON(w io.Writer, rows []Row) error {
+	enc := json.NewEncoder(w)
+	for _, r := range rows {
+		if err := enc.Encode(r); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func renderCSV(w io.Writer, rows []Row, noHeader bool) error {
 	cw := csv.NewWriter(w)
-	if err := cw.Write([]string{"SNO", "Name", "Type", "ARN", "Region/AZ"}); err != nil {
-		return err
+	if !noHeader {
+		if err := cw.Write([]string{"SNO", "Name", "Type", "ARN", "Region/AZ"}); err != nil {
+			return err
+		}
 	}
 	for _, r := range rows {
 		if err := cw.Write([]string{fmt.Sprintf("%d", r.SNO), r.Name, r.Type, r.ARN, r.RegionAZ}); err != nil {

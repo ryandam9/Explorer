@@ -8,9 +8,9 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/x/ansi"
 
-	"github.com/user/aws_explorer/internal/config"
-	"github.com/user/aws_explorer/internal/model"
-	"github.com/user/aws_explorer/internal/ui"
+	"github.com/ryandam9/aws_explorer/internal/config"
+	"github.com/ryandam9/aws_explorer/internal/model"
+	"github.com/ryandam9/aws_explorer/internal/ui"
 )
 
 // newTestModel builds a model, sizes it, and feeds it a chunk of fake
@@ -50,7 +50,7 @@ func TestViewShowsResourcesAndContextHints(t *testing.T) {
 	m := newTestModel(t, 140, 40)
 	plain := ansi.Strip(m.View())
 
-	for _, want := range []string{"i-abc123", "web-1", "SERVICES", "ec2", "s3"} {
+	for _, want := range []string{"i-abc123", "web-1", "Services", "ec2", "s3"} {
 		if !strings.Contains(plain, want) {
 			t.Errorf("view missing %q", want)
 		}

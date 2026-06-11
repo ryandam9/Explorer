@@ -5,8 +5,8 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/user/aws_explorer/internal/display"
-	"github.com/user/aws_explorer/internal/table"
+	"github.com/ryandam9/aws_explorer/internal/display"
+	"github.com/ryandam9/aws_explorer/internal/table"
 )
 
 // ---------------------------------------------------------------------------
@@ -113,9 +113,9 @@ type sidebarCategory struct {
 }
 
 var sidebarCategories = []sidebarCategory{
-	{"NETWORK", []resourceType{rtSubnets, rtSecurityGroups, rtNetworkInterfaces, rtRouteTables, rtInternetGateways, rtNatGateways, rtEndpoints, rtNetworkACLs, rtPeering, rtFlowLogs}},
-	{"COMPUTE", []resourceType{rtEC2Instances, rtLambda}},
-	{"SERVICES", []resourceType{rtRDS, rtLoadBalancers}},
+	{"Network", []resourceType{rtSubnets, rtSecurityGroups, rtNetworkInterfaces, rtRouteTables, rtInternetGateways, rtNatGateways, rtEndpoints, rtNetworkACLs, rtPeering, rtFlowLogs}},
+	{"Compute", []resourceType{rtEC2Instances, rtLambda}},
+	{"Services", []resourceType{rtRDS, rtLoadBalancers}},
 }
 
 type sidebarItem struct {

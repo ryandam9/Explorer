@@ -2,7 +2,14 @@ BINARY  := bin/aws_explorer
 GO      := go
 PKG     := ./...
 
-.PHONY: all fmt vet test build clean run run-all-regions tidy lint help
+VERSION := $(shell git describe --tags --always --dirty 2>/dev/null || echo dev)
+COMMIT  := $(shell git rev-parse --short HEAD 2>/dev/null || echo none)
+DATE    := $(shell date -u +%Y-%m-%dT%H:%M:%SZ)
+LDFLAGS := -X github.com/ryandam9/aws_explorer/cmd.version=$(VERSION) \
+           -X github.com/ryandam9/aws_explorer/cmd.commit=$(COMMIT) \
+           -X github.com/ryandam9/aws_explorer/cmd.date=$(DATE)
+
+.PHONY: all fmt vet test build clean run run-all-regions tidy lint man help
 
 all: fmt vet test build
 
@@ -16,10 +23,14 @@ test:
 	$(GO) test $(PKG) -v -count=1
 
 build:
-	$(GO) build -o $(BINARY) main.go
+	$(GO) build -ldflags "$(LDFLAGS)" -o $(BINARY) main.go
 
 clean:
 	rm -f $(BINARY)
+	rm -rf man
+
+man: build
+	./$(BINARY) docs --dir man
 
 run: build
 	./$(BINARY)
@@ -43,7 +54,8 @@ help:
 	@echo "  vet              - Run go vet"
 	@echo "  test             - Run tests"
 	@echo "  build            - Build binary"
-	@echo "  clean            - Remove binary"
+	@echo "  clean            - Remove binary and generated man pages"
+	@echo "  man              - Generate man pages into ./man"
 	@echo "  run              - Build and run CLI mode"
 	@echo "  run-all-regions  - Build and run with --all-regions"
 	@echo "  tidy             - Tidy go modules"

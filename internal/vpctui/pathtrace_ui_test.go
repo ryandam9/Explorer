@@ -53,7 +53,7 @@ func TestViewTraceResultOverlayLoading(t *testing.T) {
 	m := &Model{width: 100, height: 30, traceLoading: true}
 	m.traceViewport = viewport.New(80, 20)
 	out := ansi.Strip(m.viewTraceResultOverlay("bg"))
-	if !strings.Contains(out, "Connectivity Trace") {
+	if !strings.Contains(out, "Connectivity trace") {
 		t.Errorf("overlay should show its title while loading:\n%s", out)
 	}
 }

@@ -4,8 +4,8 @@ import (
 	"context"
 	"testing"
 
-	"github.com/user/aws_explorer/internal/model"
-	"github.com/user/aws_explorer/internal/services"
+	"github.com/ryandam9/aws_explorer/internal/model"
+	"github.com/ryandam9/aws_explorer/internal/services"
 )
 
 // stubCollector is a minimal Collector for testing.

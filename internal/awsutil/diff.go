@@ -3,7 +3,7 @@ package awsutil
 import (
 	"fmt"
 
-	"github.com/user/aws_explorer/internal/model"
+	"github.com/ryandam9/aws_explorer/internal/model"
 )
 
 // ModifiedResourceDiff holds facts of a changed resource.

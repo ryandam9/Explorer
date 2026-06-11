@@ -11,8 +11,8 @@ import (
 	"github.com/aws/aws-sdk-go-v2/service/eks/types"
 	"golang.org/x/sync/errgroup"
 
-	"github.com/user/aws_explorer/internal/model"
-	"github.com/user/aws_explorer/internal/services"
+	"github.com/ryandam9/aws_explorer/internal/model"
+	"github.com/ryandam9/aws_explorer/internal/services"
 )
 
 // describeConcurrency bounds parallel DescribeCluster calls so accounts with

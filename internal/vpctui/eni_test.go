@@ -3,7 +3,7 @@ package vpctui
 import (
 	"testing"
 
-	"github.com/user/aws_explorer/internal/display"
+	"github.com/ryandam9/aws_explorer/internal/display"
 )
 
 func TestENIToMap(t *testing.T) {
@@ -72,7 +72,7 @@ func TestNetworkInterfacesResourceTypeWired(t *testing.T) {
 		t.Errorf("expected ENI ID as first data column, got %+v", cols)
 	}
 
-	// The sidebar must expose the new resource under NETWORK.
+	// The sidebar must expose the new resource under Network.
 	found := false
 	for _, item := range buildSidebarItems() {
 		if !item.isHeader && item.rt == rtNetworkInterfaces {
