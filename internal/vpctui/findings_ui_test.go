@@ -47,7 +47,7 @@ func TestViewFindingsOverlayCounts(t *testing.T) {
 	m.findingsViewport.SetContent(m.renderFindings())
 
 	out := ansi.Strip(m.viewFindingsOverlay("bg"))
-	if !strings.Contains(out, "VPC Findings — 1 critical, 1 warning, 1 info") {
+	if !strings.Contains(out, "VPC findings — 1 critical, 1 warning, 1 info") {
 		t.Errorf("overlay title should summarize counts, got:\n%s", out)
 	}
 	if !strings.Contains(out, "Esc/F close") {

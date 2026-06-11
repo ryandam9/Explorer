@@ -273,7 +273,7 @@ func NewModelWithSeed(ctx context.Context, eng *engine.Engine, configPath string
 	m.settings = ui.NewSettingsModel(0, 0, configPath, cfg)
 
 	m.filterInput = textinput.New()
-	m.filterInput.Placeholder = "Filter resources..."
+	m.filterInput.Placeholder = "Filter resources…"
 	m.filterInput.CharLimit = 128
 	m.filterInput.Width = 32
 	m.filterInput.PromptStyle = lipgloss.NewStyle().Foreground(lipgloss.Color(ui.ColorAccent())).Bold(true)
@@ -366,8 +366,9 @@ func (m tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	// While the errors overlay is open, allow scrolling and close on Esc/e/q.
 	if m.showErrors {
-		if key, ok := msg.(tea.KeyMsg); ok {
-			switch key.String() {
+		switch msg := msg.(type) {
+		case tea.KeyMsg:
+			switch msg.String() {
 			case "esc", "e", "q":
 				m.showErrors = false
 				return m, nil
@@ -377,6 +378,14 @@ func (m tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			case "down", "j", "]":
 				m.errorsViewport.LineDown(3)
 				return m, nil
+			}
+		case tea.MouseMsg:
+			// Wheel scrolls the overlay's viewport.
+			switch msg.Button {
+			case tea.MouseButtonWheelUp:
+				m.errorsViewport.LineUp(3)
+			case tea.MouseButtonWheelDown:
+				m.errorsViewport.LineDown(3)
 			}
 		}
 		return m, nil
@@ -800,6 +809,36 @@ func (m tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 
 	case tea.MouseMsg:
+		// Wheel scrolling goes to the focused panel: the detail viewport when
+		// it has focus, otherwise the table (3 rows per tick) or the sidebar.
+		switch msg.Button {
+		case tea.MouseButtonWheelUp, tea.MouseButtonWheelDown:
+			down := msg.Button == tea.MouseButtonWheelDown
+			switch m.focus {
+			case focusDetail:
+				if down {
+					m.detailViewport.LineDown(3)
+				} else {
+					m.detailViewport.LineUp(3)
+				}
+			case focusSidebar:
+				if down && m.activeService < len(m.services)-1 {
+					m.activeService++
+					m.updateTableRows()
+				} else if !down && m.activeService > 0 {
+					m.activeService--
+					m.updateTableRows()
+				}
+			case focusTable:
+				if down {
+					m.table.MoveDown(3)
+				} else {
+					m.table.MoveUp(3)
+				}
+			}
+			return m, tea.Batch(cmds...)
+		}
+
 		// Check sidebar zone clicks.
 		for i := range m.services {
 			zID := fmt.Sprintf("%s%d", zoneSvc, i)
@@ -1927,7 +1966,7 @@ func (m tuiModel) renderBody() string {
 
 func (m tuiModel) renderSidebar() string {
 	var b strings.Builder
-	b.WriteString(ui.PanelTitleStyle().Render("SERVICES") + "\n\n")
+	b.WriteString(ui.PanelTitleStyle().Render("Services") + "\n\n")
 
 	activeStyle := lipgloss.NewStyle().
 		Foreground(lipgloss.Color(ui.ColorHighlightText())).
@@ -2281,7 +2320,7 @@ func (m tuiModel) renderDetail(r model.Resource, width int) string {
 	if m.showTimeline {
 		b.WriteString("\n" + dSec.Render("CLOUDTRAIL TIMELINE") + "\n\n")
 		if m.timelineLoading {
-			b.WriteString("  Loading events...\n")
+			b.WriteString("  Loading events…\n")
 		} else if m.timelineErr != nil {
 			b.WriteString("  Error: " + m.timelineErr.Error() + "\n")
 		} else if len(m.timelineEvents) == 0 {
@@ -2301,7 +2340,7 @@ func (m tuiModel) renderDetail(r model.Resource, width int) string {
 	if m.showLogs {
 		b.WriteString("\n" + dSec.Render("CLOUDWATCH RECENT ERROR LOGS") + "\n\n")
 		if m.logsLoading {
-			b.WriteString("  Loading logs...\n")
+			b.WriteString("  Loading logs…\n")
 		} else if m.logsErr != nil {
 			b.WriteString("  Error: " + m.logsErr.Error() + "\n")
 		} else if len(m.logsLines) == 0 {
@@ -2321,7 +2360,7 @@ func (m tuiModel) renderDetail(r model.Resource, width int) string {
 		}
 		b.WriteString("\n" + dSec.Render(header) + "\n\n")
 		if m.metricsLoading {
-			b.WriteString("  Loading metric data...\n")
+			b.WriteString("  Loading metric data…\n")
 		} else if m.metricsErr != nil {
 			b.WriteString("  Error: " + m.metricsErr.Error() + "\n")
 		} else if m.metricsData == nil || len(m.metricsData.Values) == 0 {

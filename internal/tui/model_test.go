@@ -50,7 +50,7 @@ func TestViewShowsResourcesAndContextHints(t *testing.T) {
 	m := newTestModel(t, 140, 40)
 	plain := ansi.Strip(m.View())
 
-	for _, want := range []string{"i-abc123", "web-1", "SERVICES", "ec2", "s3"} {
+	for _, want := range []string{"i-abc123", "web-1", "Services", "ec2", "s3"} {
 		if !strings.Contains(plain, want) {
 			t.Errorf("view missing %q", want)
 		}

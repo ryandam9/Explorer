@@ -331,7 +331,7 @@ func NewModel(ctx context.Context, awsCfg *config.AWSConfig, region, bucket, pre
 	m.prefixInput.Cursor.Style = lipgloss.NewStyle().Foreground(lipgloss.Color(ui.ColorAccent()))
 
 	m.bucketSearch = textinput.New()
-	m.bucketSearch.Placeholder = "Filter buckets..."
+	m.bucketSearch.Placeholder = "Filter buckets…"
 	m.bucketSearch.CharLimit = 128
 	m.bucketSearch.Width = 40
 	m.bucketSearch.PromptStyle = lipgloss.NewStyle().Foreground(lipgloss.Color(ui.ColorAccent())).Bold(true)
@@ -603,10 +603,10 @@ func (m *Model) fetchBucketRegions() tea.Cmd {
 	sem := make(chan struct{}, 20)
 
 	// Apply any already-cached regions immediately so a reload doesn't
-	// leave the region column stuck at "..." for buckets we've seen before.
+	// leave the region column stuck at "…" for buckets we've seen before.
 	cacheApplied := false
 	for i, row := range rows {
-		if row[2] != "..." {
+		if row[2] != "…" {
 			continue
 		}
 		if region, ok := m.bucketRegionCache[row[1]]; ok {
@@ -624,7 +624,7 @@ func (m *Model) fetchBucketRegions() tea.Cmd {
 	cmds := make([]tea.Cmd, 0, len(rows))
 	for i, row := range rows {
 		name := row[1]
-		if row[2] != "..." {
+		if row[2] != "…" {
 			continue
 		}
 		idx := i
@@ -1079,7 +1079,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					m.prefix = ""
 					m.prefixInput.SetValue("")
 					// Region may still be loading; fall back to the cache.
-					if m.region == "..." {
+					if m.region == "…" {
 						if cached, ok := m.bucketRegionCache[m.bucket]; ok {
 							m.region = cached
 						}
@@ -1344,7 +1344,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					m.prefix = ""
 					m.prefixInput.SetValue("")
 					// Region may still be loading; fall back to the cache.
-					if m.region == "..." {
+					if m.region == "…" {
 						if cached, ok := m.bucketRegionCache[m.bucket]; ok {
 							m.region = cached
 						}
@@ -1389,7 +1389,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.scanning = true
 		m.scanTotal = len(msg.regions)
 		m.scanDone = 0
-		m.statusMsg = fmt.Sprintf("Scanning %d regions...", m.scanTotal)
+		m.statusMsg = fmt.Sprintf("Scanning %d regions…", m.scanTotal)
 		awsCfg := m.awsCfg
 		endpointURL := m.endpointURL
 		ctx := m.client.ctx
@@ -1417,7 +1417,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				if b.CreationDate != nil {
 					dateStr = b.CreationDate.Format("2006-01-02 15:04:05")
 				}
-				m.allBucketRows = append(m.allBucketRows, table.Row{"", name, "...", dateStr})
+				m.allBucketRows = append(m.allBucketRows, table.Row{"", name, "…", dateStr})
 			}
 			m.bucketTable.SetRows(seqRows(m.allBucketRows))
 			if firstBucket && m.bucket == "" && len(m.allBucketRows) > 0 {
@@ -1440,7 +1440,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				cmds = append(cmds, m.fetchBucketRegions())
 			}
 		} else {
-			m.statusMsg = fmt.Sprintf("Scanning regions... %d / %d  (%d bucket(s) found so far)", m.scanDone, m.scanTotal, len(m.allBucketRows))
+			m.statusMsg = fmt.Sprintf("Scanning regions… %d / %d  (%d bucket(s) found so far)", m.scanDone, m.scanTotal, len(m.allBucketRows))
 		}
 
 	case bucketsLoadedMsg:
@@ -1642,7 +1642,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 func (m *Model) View() string {
 	if m.width == 0 {
-		return "Initializing..."
+		return "Initializing…"
 	}
 
 	// Bucket detail full-screen view
@@ -1685,10 +1685,10 @@ func (m *Model) View() string {
 
 		content = lipgloss.Place(m.width-4, m.height-10, lipgloss.Center, lipgloss.Center, errBox)
 	} else if m.loading {
-		message := "Discovering AWS regions..."
+		message := "Discovering AWS regions…"
 		detail := "Fetching the list of available regions before scanning for buckets."
 		if m.state == stateObjectList {
-			message = "Loading S3 objects..."
+			message = "Loading objects…"
 			detail = fmt.Sprintf("Bucket: %s   Prefix: %s", m.bucket, displayPrefix(m.prefix))
 		}
 		content = lipgloss.Place(m.width-4, m.height-10, lipgloss.Center, lipgloss.Center, m.loadingBox(message, detail))
@@ -1899,6 +1899,15 @@ func tablePanel(t *table.Model, focused bool) string {
 
 func (m *Model) bucketListView() string {
 	tableSection := tablePanel(&m.bucketTable, m.focus == focusBuckets)
+	if len(m.bucketTable.Rows()) == 0 {
+		// Region scan still in flight (or no buckets at all): show a spinner
+		// or an empty-state line instead of a bare table grid.
+		body := ui.MutedStyle().Render("No buckets found")
+		if m.loading || m.scanning {
+			body = m.loadingLine("Loading buckets…")
+		}
+		tableSection = ui.TablePanelStyle(m.focus == focusBuckets).Render(body)
+	}
 
 	const detailsHeight = 10
 	detailsWidth := max(20, m.width-4)
@@ -1912,7 +1921,7 @@ func (m *Model) bucketListView() string {
 		date := row[3]
 		title = fmt.Sprintf("BUCKET DETAILS: %s  [d] Full detail view", name)
 
-		metaText = m.loadingLine("Loading bucket details...")
+		metaText = m.loadingLine("Loading bucket details…")
 		if !m.detailsLoading && m.selectedBucketDetails != nil {
 			tagStr := ""
 			if len(m.selectedBucketDetails.Tags) > 0 {
@@ -1971,8 +1980,11 @@ func (m *Model) objectListView() string {
 	headerRight := ui.MutedStyle().Render(
 		fmt.Sprintf("Objects: %d   Size: %s", m.objCount, sizeStr))
 
+	// Breadcrumb of the current location: bucket plus prefix components,
+	// left-truncated so the trailing components stay visible.
+	crumbW := max(16, m.tableViewWidth()-lipgloss.Width(headerRight)-7)
 	bucketHeader := lipgloss.JoinHorizontal(lipgloss.Top,
-		ui.BadgeStyle().Render(fmt.Sprintf("Bucket: %s", m.bucket)),
+		ui.BadgeStyle().Render(breadcrumb(m.bucket, m.prefix, crumbW)),
 		"   ",
 		headerRight,
 	)
@@ -1983,6 +1995,20 @@ func (m *Model) objectListView() string {
 	)
 
 	tableSection := tablePanel(&m.objectTable, m.focus == focusObjects)
+	if len(m.objectMaps) == 0 {
+		// Initial fetch in flight or a genuinely empty listing: show a spinner
+		// or an empty-state line instead of a bare table grid.
+		body := ui.MutedStyle().Render("No objects under this prefix")
+		if m.loading {
+			body = m.loadingLine("Loading objects…")
+		}
+		tableSection = ui.TablePanelStyle(m.focus == focusObjects).Render(body)
+	} else if m.objectsNextToken != nil {
+		tableSection = lipgloss.JoinVertical(lipgloss.Left,
+			tableSection,
+			ui.MutedStyle().Render("More objects available · press L"),
+		)
+	}
 
 	// Details Panel — always render two fixed-size boxes so nothing below shifts.
 	const detailsHeight = 10
@@ -2008,7 +2034,7 @@ func (m *Model) objectListView() string {
 			metaText = "Status: N/A"
 		} else {
 			if m.detailsLoading || m.selectedDetails == nil {
-				metaText = m.loadingLine("Loading object metadata...")
+				metaText = m.loadingLine("Loading object metadata…")
 			} else {
 				// Build tags string
 				tagStr := ""
@@ -2051,7 +2077,7 @@ func (m *Model) objectListView() string {
 				if kmsKey == "" {
 					kmsKey = "—"
 				} else if len(kmsKey) > 20 {
-					kmsKey = kmsKey[:20] + "..."
+					kmsKey = kmsKey[:20] + "…"
 				}
 				sc := m.selectedDetails.StorageClass
 				if sc == "" {
@@ -2150,7 +2176,7 @@ func (m *Model) bucketDetailView() string {
 
 	var body string
 	if m.detailsLoading || m.selectedBucketDetails == nil {
-		body = m.loadingLine("Loading bucket details...")
+		body = m.loadingLine("Loading bucket details…")
 	} else {
 		d := m.selectedBucketDetails
 		orDash := func(s string) string {
@@ -2172,7 +2198,7 @@ func (m *Model) bucketDetailView() string {
 		case 1: // Access & Security
 			policyTrunc := d.Policy
 			if len(policyTrunc) > 80 {
-				policyTrunc = policyTrunc[:80] + "..."
+				policyTrunc = policyTrunc[:80] + "…"
 			}
 			body = lipgloss.JoinVertical(lipgloss.Left,
 				ui.BoldStyle().Render("Public Access Block: ")+orDash(d.PublicAccessBlock),
@@ -2355,7 +2381,7 @@ func (m *Model) previewView() string {
 	if m.previewErr != nil {
 		body = "Preview failed: " + summarizeS3Error(m.previewErr)
 	} else if m.previewLoading {
-		body = m.loadingLine("Loading preview...")
+		body = m.loadingLine("Loading preview…")
 	} else if m.previewContent == "" {
 		body = "Object is empty."
 	} else {

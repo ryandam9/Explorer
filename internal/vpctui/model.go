@@ -327,7 +327,7 @@ func NewModel(
 	m.initResourceTable(m.activeResource)
 
 	m.vpcSearch = textinput.New()
-	m.vpcSearch.Placeholder = "Filter VPCs..."
+	m.vpcSearch.Placeholder = "Filter VPCs…"
 	m.vpcSearch.CharLimit = 128
 	m.vpcSearch.Width = 40
 	m.vpcSearch.PromptStyle = lipgloss.NewStyle().Foreground(lipgloss.Color(ui.ColorAccent())).Bold(true)
@@ -1672,7 +1672,7 @@ func (m *Model) View() string {
 		if m.width > 0 {
 			helpW = min(m.width-4, 70)
 		}
-		return lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center, ui.HelpView("VPC Explorer — Help", m.helpText(), helpW))
+		return lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center, ui.HelpView("VPC Explorer — help", m.helpText(), helpW))
 	}
 
 	if m.showDetail {
@@ -1731,6 +1731,26 @@ func (m *Model) viewVPCListState() string {
 	}
 
 	tableView := m.vpcTable.View()
+	// Before the first results arrive the table is empty; show a spinner (or a
+	// clear empty-state once the scan finished) instead of a blank pane, padded
+	// to the table's height so the layout doesn't jump when rows land.
+	if len(m.allVPCs) == 0 {
+		var body string
+		switch {
+		case m.loading && m.scanning:
+			body = m.spinner.View() + "  Scanning regions…"
+		case m.loading:
+			body = m.spinner.View() + "  Loading VPCs…"
+		default:
+			where := m.region
+			if m.allRegions || where == "" {
+				where = "any scanned region"
+			}
+			body = lipgloss.NewStyle().Foreground(lipgloss.Color(ui.ColorMuted())).
+				Render("No VPCs found in " + where + ".")
+		}
+		tableView = lipgloss.NewStyle().Height(m.vpcTable.Height()).Render(body)
+	}
 
 	var searchBar string
 	if m.inVPCSearch {
@@ -1791,7 +1811,7 @@ func (m *Model) viewVPCPanel(height int) string {
 			label = vpc.Name
 		}
 		if ansi.StringWidth(label) > vpcPanelInner-2 {
-			label = ansi.Truncate(label, vpcPanelInner-2, "...")
+			label = ansi.Truncate(label, vpcPanelInner-2, "…")
 		}
 		style := idleStyle
 		if m.selectedVPC != nil && vpc.ID == m.selectedVPC.ID {
@@ -1841,7 +1861,7 @@ func (m *Model) viewCategoryPanel(height int) string {
 		} else {
 			label := item.label
 			if ansi.StringWidth(label) > catPanelInner-2 {
-				label = ansi.Truncate(label, catPanelInner-2, "...")
+				label = ansi.Truncate(label, catPanelInner-2, "…")
 			}
 			var style lipgloss.Style
 			if i == m.activeSidebarIdx {
@@ -1891,7 +1911,7 @@ func (m *Model) viewResourcePanel(height int) string {
 	var body string
 	switch {
 	case m.resourceLoading:
-		body = m.spinner.View() + "  Loading " + rtLabel(m.activeResource) + "..."
+		body = m.spinner.View() + "  Loading " + rtLabel(m.activeResource) + "…"
 	case m.resourceErr != nil:
 		body = lipgloss.NewStyle().Foreground(lipgloss.Color(ui.ColorError())).
 			Render("Error: " + m.resourceErr.Error())
@@ -1971,10 +1991,10 @@ func (m *Model) viewDetailOverlay(bg string) string {
 }
 
 func (m *Model) viewFindingsOverlay(bg string) string {
-	titleText := "VPC Findings"
+	titleText := "VPC findings"
 	if !m.findingsLoading {
 		crit, warn, info := countBySeverity(m.findings)
-		titleText = fmt.Sprintf("VPC Findings — %d critical, %d warning, %d info", crit, warn, info)
+		titleText = fmt.Sprintf("VPC findings — %d critical, %d warning, %d info", crit, warn, info)
 	}
 	body := m.overlayBody(m.findingsLoading, "Analyzing VPC…", m.findingsErr, &m.findingsViewport)
 	return m.overlayFrame(titleText, body, "↑/↓ scroll  •  Esc/F close")
@@ -2042,7 +2062,7 @@ func (m *Model) viewTraceInputOverlay(bg string) string {
 
 func (m *Model) viewTraceResultOverlay(bg string) string {
 	body := m.overlayBody(m.traceLoading, "Tracing path…", m.traceErr, &m.traceViewport)
-	return m.overlayFrame("Connectivity Trace", body, "↑/↓ scroll  •  Esc/t close")
+	return m.overlayFrame("Connectivity trace", body, "↑/↓ scroll  •  Esc/t close")
 }
 
 // renderTraceResult builds the scrollable body of the trace result overlay: a
@@ -2364,7 +2384,7 @@ func (m *Model) viewScanStatus() string {
 		return s
 	}
 	if m.loading {
-		return m.spinner.View() + "  Loading…"
+		return m.spinner.View() + "  Loading VPCs…"
 	}
 	count := len(m.allVPCs)
 	noun := "VPCs"
@@ -2481,13 +2501,13 @@ func colScrollHints(t *table.Model) []ui.KeyHint {
 
 func (m *Model) helpText() string {
 	lines := []string{
-		lipgloss.NewStyle().Foreground(lipgloss.Color(ui.ColorMuted())).Render("VPC List"),
+		lipgloss.NewStyle().Foreground(lipgloss.Color(ui.ColorMuted())).Render("VPC list"),
 		"  Enter    Open resource browser for selected VPC",
 		"  /        Filter VPCs by name/ID",
 		"  < >      Scroll table columns left/right (when wider than screen)",
 		"  r        Refresh VPC list",
 		"",
-		lipgloss.NewStyle().Foreground(lipgloss.Color(ui.ColorMuted())).Render("Resource Browser"),
+		lipgloss.NewStyle().Foreground(lipgloss.Color(ui.ColorMuted())).Render("Resource browser"),
 		"  ↑ ↓      Navigate category sidebar or resource table",
 		"  < >      Scroll table columns left/right (when wider than panel)",
 		"  Tab      Switch focus between sidebar and resource table",
@@ -2507,7 +2527,7 @@ func (m *Model) helpText() string {
 		"  r        Refresh current resource list",
 		"  Esc      Go back to VPC list",
 		"",
-		lipgloss.NewStyle().Foreground(lipgloss.Color(ui.ColorMuted())).Render("Detail Overlay"),
+		lipgloss.NewStyle().Foreground(lipgloss.Color(ui.ColorMuted())).Render("Detail overlay"),
 		"  ↑ ↓      Scroll",
 		"  Esc      Close",
 		"",

@@ -349,7 +349,7 @@ func (c *S3Client) GetObjectDetails(bucket, key string) (*ObjectDetails, error) 
 				} else if g.Grantee.ID != nil {
 					id := *g.Grantee.ID
 					if len(id) > 12 {
-						id = id[:12] + "..."
+						id = id[:12] + "…"
 					}
 					grantee = id
 				}
