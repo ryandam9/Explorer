@@ -33,7 +33,7 @@ func (c *Collector) Collect(ctx context.Context, input services.CollectInput) ([
 	for clusterPaginator.HasMorePages() {
 		page, err := clusterPaginator.NextPage(ctx)
 		if err != nil {
-			return nil, fmt.Errorf("failed to list ECS clusters: %w", err)
+			return resources, fmt.Errorf("failed to list ECS clusters: %w", err)
 		}
 
 		if len(page.ClusterArns) == 0 {
@@ -44,7 +44,7 @@ func (c *Collector) Collect(ctx context.Context, input services.CollectInput) ([
 			Clusters: page.ClusterArns,
 		})
 		if err != nil {
-			return nil, fmt.Errorf("failed to describe ECS clusters: %w", err)
+			return resources, fmt.Errorf("failed to describe ECS clusters: %w", err)
 		}
 
 		for _, cluster := range desc.Clusters {

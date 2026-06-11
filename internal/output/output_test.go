@@ -107,3 +107,42 @@ func TestPrintErrors_LongMessageWraps(t *testing.T) {
 		t.Errorf("expected privilege box:\n%s", out)
 	}
 }
+
+func TestPrintErrors_PartialMarkerOnOtherErrors(t *testing.T) {
+	var buf bytes.Buffer
+	errs := []model.ExploreError{
+		{Service: "rds", Region: "eu-west-1", Code: "ThrottlingException", Message: "rate exceeded", Partial: true},
+	}
+	printErrors(&buf, errs)
+	out := buf.String()
+
+	if !strings.Contains(out, "partial results kept") {
+		t.Errorf("expected partial marker for partial error:\n%s", out)
+	}
+}
+
+func TestPrintErrors_PartialMarkerOnAccessDenied(t *testing.T) {
+	var buf bytes.Buffer
+	errs := []model.ExploreError{
+		{Service: "iam", Region: "global", Code: "AccessDenied", Message: "denied on page 2.", Partial: true},
+	}
+	printErrors(&buf, errs)
+	out := buf.String()
+
+	if !strings.Contains(out, "kept") {
+		t.Errorf("expected kept-resources note for partial auth error:\n%s", out)
+	}
+}
+
+func TestPrintErrors_NoPartialMarkerByDefault(t *testing.T) {
+	var buf bytes.Buffer
+	errs := []model.ExploreError{
+		{Service: "rds", Region: "eu-west-1", Code: "InternalError", Message: "server error"},
+	}
+	printErrors(&buf, errs)
+	out := buf.String()
+
+	if strings.Contains(out, "partial") {
+		t.Errorf("unexpected partial marker for non-partial error:\n%s", out)
+	}
+}

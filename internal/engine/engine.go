@@ -253,30 +253,37 @@ func (e *Engine) StreamRun(ctx context.Context, chunks chan<- model.ResultChunk)
 				}
 
 				res, err := s.Collect(collectCtx, input)
+				filteredRes := filterResources(res, input.Filters)
 				if err != nil {
+					// Collectors are best-effort: res may hold resources
+					// gathered before the failure. Keep them and flag the
+					// error as partial so consumers can say so.
+					partial := len(filteredRes) > 0
 					code := "CollectionError"
 					msg := err.Error()
 					if awserr.IsAuthError(err) {
 						code = "AccessDenied"
 						msg = awserr.FriendlyMessage(err, s.Name())
-						slog.Warn("Access denied, skipping region",
-							"service", s.Name(), "region", r)
+						slog.Warn("Access denied",
+							"service", s.Name(), "region", r, "keptResources", len(filteredRes))
 					} else {
-						slog.Warn("Collection error, skipping region",
-							"service", s.Name(), "region", r, "error", err.Error())
+						slog.Warn("Collection error",
+							"service", s.Name(), "region", r, "keptResources", len(filteredRes),
+							"error", err.Error())
 					}
 					chunks <- model.ResultChunk{
+						Resources: filteredRes,
 						Errors: []model.ExploreError{{
 							Service: s.Name(),
 							Region:  r,
 							Code:    code,
 							Message: msg,
+							Partial: partial,
 						}},
 					}
 					return nil
 				}
 
-				filteredRes := filterResources(res, input.Filters)
 				if len(filteredRes) > 0 {
 					chunks <- model.ResultChunk{Resources: filteredRes}
 				}

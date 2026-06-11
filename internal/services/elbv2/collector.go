@@ -33,7 +33,7 @@ func (c *Collector) Collect(ctx context.Context, input services.CollectInput) ([
 	for paginator.HasMorePages() {
 		page, err := paginator.NextPage(ctx)
 		if err != nil {
-			return nil, fmt.Errorf("failed to describe load balancers: %w", err)
+			return resources, fmt.Errorf("failed to describe load balancers: %w", err)
 		}
 
 		for _, lb := range page.LoadBalancers {

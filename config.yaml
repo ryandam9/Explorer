@@ -23,6 +23,13 @@ aws:
         accesskeyid: ""
         secretaccesskey: ""
         sessiontoken: ""
+    # Retry tuning for every AWS API call. Raise maxattempts and switch to the
+    # "adaptive" mode if large scans hit throttling (RequestLimitExceeded).
+    retry:
+        # Total attempts per API call (1 = no retries). 0 uses the SDK default (3).
+        maxattempts: 0
+        # "standard" (default) or "adaptive" (adds client-side rate limiting).
+        mode: ""
 services:
     cloudwatch:
         enabled: true

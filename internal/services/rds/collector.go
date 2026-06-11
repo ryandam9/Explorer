@@ -36,7 +36,7 @@ func (c *Collector) Collect(ctx context.Context, input services.CollectInput) ([
 	for paginator.HasMorePages() {
 		page, err := paginator.NextPage(ctx)
 		if err != nil {
-			return nil, fmt.Errorf("failed to describe RDS instances: %w", err)
+			return resources, fmt.Errorf("failed to describe RDS instances: %w", err)
 		}
 
 		for _, instance := range page.DBInstances {

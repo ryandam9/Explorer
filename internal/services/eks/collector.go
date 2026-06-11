@@ -2,7 +2,9 @@ package eks
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"sync"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/service/eks"
@@ -35,36 +37,49 @@ func (c *Collector) Collect(ctx context.Context, input services.CollectInput) ([
 	client := eks.NewFromConfig(input.AWSConfig)
 
 	var clusterNames []string
+	var errs []error
 	paginator := eks.NewListClustersPaginator(client, &eks.ListClustersInput{})
 	for paginator.HasMorePages() {
 		page, err := paginator.NextPage(ctx)
 		if err != nil {
-			return nil, fmt.Errorf("failed to list EKS clusters: %w", err)
+			// Keep the clusters listed so far and still describe them below.
+			errs = append(errs, fmt.Errorf("failed to list EKS clusters: %w", err))
+			break
 		}
 		clusterNames = append(clusterNames, page.Clusters...)
 	}
 
-	// Describe clusters concurrently; indexed writes keep list order.
-	resources := make([]model.Resource, len(clusterNames))
-	g, gctx := errgroup.WithContext(ctx)
+	// Describe clusters concurrently; indexed writes keep list order. A failed
+	// describe drops only that cluster, not the whole region.
+	described := make([]*model.Resource, len(clusterNames))
+	var mu sync.Mutex
+	var g errgroup.Group
 	g.SetLimit(describeConcurrency)
 	for i, clusterName := range clusterNames {
 		g.Go(func() error {
-			desc, err := client.DescribeCluster(gctx, &eks.DescribeClusterInput{
+			desc, err := client.DescribeCluster(ctx, &eks.DescribeClusterInput{
 				Name: aws.String(clusterName),
 			})
 			if err != nil {
-				return fmt.Errorf("failed to describe EKS cluster %s: %w", clusterName, err)
+				mu.Lock()
+				errs = append(errs, fmt.Errorf("failed to describe EKS cluster %s: %w", clusterName, err))
+				mu.Unlock()
+				return nil
 			}
-			resources[i] = c.mapCluster(input.Region, desc.Cluster, input.DetailLevel)
+			res := c.mapCluster(input.Region, desc.Cluster, input.DetailLevel)
+			described[i] = &res
 			return nil
 		})
 	}
-	if err := g.Wait(); err != nil {
-		return nil, err
-	}
+	_ = g.Wait()
 
-	return resources, nil
+	resources := make([]model.Resource, 0, len(described))
+	for _, r := range described {
+		if r != nil {
+			resources = append(resources, *r)
+		}
+	}
+	return resources, errors.Join(errs...)
 }
 
 func (c *Collector) mapCluster(region string, cluster *types.Cluster, detail services.DetailLevel) model.Resource {

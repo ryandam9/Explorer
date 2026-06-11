@@ -2,7 +2,9 @@ package dynamodb
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"sync"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/service/dynamodb"
@@ -35,36 +37,49 @@ func (c *Collector) Collect(ctx context.Context, input services.CollectInput) ([
 	client := dynamodb.NewFromConfig(input.AWSConfig)
 
 	var tableNames []string
+	var errs []error
 	paginator := dynamodb.NewListTablesPaginator(client, &dynamodb.ListTablesInput{})
 	for paginator.HasMorePages() {
 		page, err := paginator.NextPage(ctx)
 		if err != nil {
-			return nil, fmt.Errorf("failed to list DynamoDB tables: %w", err)
+			// Keep the tables listed so far and still describe them below.
+			errs = append(errs, fmt.Errorf("failed to list DynamoDB tables: %w", err))
+			break
 		}
 		tableNames = append(tableNames, page.TableNames...)
 	}
 
-	// Describe tables concurrently; indexed writes keep list order.
-	resources := make([]model.Resource, len(tableNames))
-	g, gctx := errgroup.WithContext(ctx)
+	// Describe tables concurrently; indexed writes keep list order. A failed
+	// describe drops only that table, not the whole region.
+	described := make([]*model.Resource, len(tableNames))
+	var mu sync.Mutex
+	var g errgroup.Group
 	g.SetLimit(describeConcurrency)
 	for i, tableName := range tableNames {
 		g.Go(func() error {
-			desc, err := client.DescribeTable(gctx, &dynamodb.DescribeTableInput{
+			desc, err := client.DescribeTable(ctx, &dynamodb.DescribeTableInput{
 				TableName: aws.String(tableName),
 			})
 			if err != nil {
-				return fmt.Errorf("failed to describe table %s: %w", tableName, err)
+				mu.Lock()
+				errs = append(errs, fmt.Errorf("failed to describe table %s: %w", tableName, err))
+				mu.Unlock()
+				return nil
 			}
-			resources[i] = c.mapTable(input.Region, desc.Table, input.DetailLevel)
+			res := c.mapTable(input.Region, desc.Table, input.DetailLevel)
+			described[i] = &res
 			return nil
 		})
 	}
-	if err := g.Wait(); err != nil {
-		return nil, err
-	}
+	_ = g.Wait()
 
-	return resources, nil
+	resources := make([]model.Resource, 0, len(described))
+	for _, r := range described {
+		if r != nil {
+			resources = append(resources, *r)
+		}
+	}
+	return resources, errors.Join(errs...)
 }
 
 func (c *Collector) mapTable(region string, table *types.TableDescription, detail services.DetailLevel) model.Resource {

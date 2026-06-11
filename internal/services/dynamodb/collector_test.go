@@ -1,11 +1,15 @@
 package dynamodb
 
 import (
+	"context"
+	"io"
+	"net/http"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
+	"github.com/aws/aws-sdk-go-v2/credentials"
 	"github.com/aws/aws-sdk-go-v2/service/dynamodb/types"
 	"github.com/user/aws_explorer/internal/services"
 )
@@ -152,5 +156,56 @@ func TestMapTable_NilCreationDateTime(t *testing.T) {
 
 	if res.CreatedAt != nil {
 		t.Errorf("expected nil CreatedAt, got %v", res.CreatedAt)
+	}
+}
+
+// describeStubClient answers ListTables with two tables, then succeeds the
+// DescribeTable for "good" and fails it for "bad".
+type describeStubClient struct{}
+
+func (s *describeStubClient) Do(req *http.Request) (*http.Response, error) {
+	payload, _ := io.ReadAll(req.Body)
+	respond := func(status int, body string) (*http.Response, error) {
+		return &http.Response{
+			StatusCode: status,
+			Header:     http.Header{"Content-Type": []string{"application/x-amz-json-1.0"}},
+			Body:       io.NopCloser(strings.NewReader(body)),
+		}, nil
+	}
+	switch {
+	case strings.Contains(req.Header.Get("X-Amz-Target"), "ListTables"):
+		return respond(200, `{"TableNames":["good","bad"]}`)
+	case strings.Contains(string(payload), `"good"`):
+		return respond(200, `{"Table":{"TableName":"good","TableId":"id-1","TableStatus":"ACTIVE"}}`)
+	default:
+		return respond(400, `{"__type":"com.amazon.coral.validate#ValidationException","message":"simulated describe failure"}`)
+	}
+}
+
+func TestCollect_FailedDescribeDropsOnlyThatTable(t *testing.T) {
+	c := NewCollector()
+	input := services.CollectInput{
+		AWSConfig: aws.Config{
+			Region:           "us-east-1",
+			Credentials:      credentials.NewStaticCredentialsProvider("AKID", "SECRET", ""),
+			HTTPClient:       &describeStubClient{},
+			RetryMaxAttempts: 1,
+		},
+		Region: "us-east-1",
+	}
+
+	resources, err := c.Collect(context.Background(), input)
+
+	if err == nil {
+		t.Fatal("expected the failed DescribeTable to be reported")
+	}
+	if !strings.Contains(err.Error(), "bad") {
+		t.Errorf("error should name the failed table, got: %v", err)
+	}
+	if len(resources) != 1 {
+		t.Fatalf("expected the successfully described table to be kept, got %d", len(resources))
+	}
+	if resources[0].Name != "good" {
+		t.Errorf("Name = %q, want good", resources[0].Name)
 	}
 }

@@ -129,8 +129,12 @@ func printErrors(w io.Writer, errs []model.ExploreError) {
 		fmt.Fprintln(w, "  +--------------------------------------------------------------+")
 		for _, e := range authErrs {
 			fmt.Fprintf(w, "  | Service : %-50s |\n", e.Service+" ("+e.Region+")")
+			msg := e.Message
+			if e.Partial {
+				msg += " Resources collected before the failure were kept."
+			}
 			// Word-wrap the message at 50 chars so it fits the box
-			words := strings.Fields(e.Message)
+			words := strings.Fields(msg)
 			line := ""
 			for _, word := range words {
 				if len(line)+1+len(word) > 50 {
@@ -155,7 +159,11 @@ func printErrors(w io.Writer, errs []model.ExploreError) {
 	if len(otherErrs) > 0 {
 		fmt.Fprintln(w, "Errors encountered during collection:")
 		for _, e := range otherErrs {
-			fmt.Fprintf(w, "  [%s|%s] %s: %s\n", e.Service, e.Region, e.Code, e.Message)
+			code := e.Code
+			if e.Partial {
+				code += ", partial results kept"
+			}
+			fmt.Fprintf(w, "  [%s|%s] %s: %s\n", e.Service, e.Region, code, e.Message)
 		}
 		fmt.Fprintln(w, "")
 	}
