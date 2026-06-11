@@ -135,13 +135,24 @@ what you see in the bar is always what works right now.
 | `Tab` / `Shift+Tab` | Switch focus between sidebar, table and detail panel |
 | `<` / `>` (or `,` / `.`) | Scroll table columns when the table is wider than the panel |
 | `Enter` | Select service / open the detail panel for the selected resource |
-| `/` | Quick text filter (matches any column) |
+| `/` | Quick text filter (matches any column; shows a live `matched/total` count) |
 | `f` | Advanced filter (region / state) |
 | `r` | Reset all filters |
+| `s` / `R` | Sort by the next column / reverse the sort direction (`↑`/`↓` shown in the header) |
+| `y` / `Y` | Copy the selected resource's ARN / ID to the clipboard |
+| `J` | Toggle a raw-JSON view in the detail panel (`y` then copies the JSON) |
+| `C` | Export the current (filtered, sorted) view to CSV under `~/.aws_explorer/exports/` |
+| `P` | Switch AWS profile and/or region scope, then rescan — no restart needed |
+| `e` | Open the scan-errors overlay (services with errors also carry a `⚠n` badge in the sidebar) |
 | `S` | Settings panel (themes & colors) |
 | `?` | Help overlay |
 | `Esc` | Close detail panel / overlay |
 | `q` / `Ctrl+C` | Quit |
+
+While a scan is running, the header shows real progress (`scanning 23/60` with
+the last pending `service@region` tasks named) instead of a generic spinner,
+and collection errors are surfaced inline: a red `⚠ n errors` badge in the
+header plus per-service warning badges in the sidebar.
 
 ## Summary Usage
 
@@ -277,7 +288,9 @@ type in `config.yaml` — see [Customizing displayed columns](#customizing-displ
 | `Tab` | Switch focus between the category sidebar and the resource table |
 | `<` / `>` (or `,` / `.`) | Scroll table columns left/right when a table is wider than the panel |
 | `/` | Filter the VPC list by name or ID (VPC list only) |
-| `c` | Copy the selected resource's ID to the clipboard |
+| `s` / `R` | Sort the resource table by the next column / reverse the direction |
+| `c` / `y` | Copy the selected resource's ID to the clipboard |
+| `C` | Export the current resource table to CSV under `~/.aws_explorer/exports/` |
 | `r` | Refresh the VPC list or the current resource list |
 | `Esc` | Go back one level (overlay → table → sidebar → VPC list) |
 | `S` | Open the settings panel (themes & colors) |

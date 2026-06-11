@@ -283,14 +283,49 @@ func TestStreamRun_StreamsOneChunkPerEmittedPage(t *testing.T) {
 		got = append(got, c)
 	}
 
-	if len(got) != 2 {
-		t.Fatalf("expected one chunk per emitted page, got %d: %+v", len(got), got)
+	// Two page chunks plus the final per-task chunk carrying the Progress
+	// marker (sent even when no residual resources remain).
+	if len(got) != 3 {
+		t.Fatalf("expected 2 page chunks + 1 progress chunk, got %d: %+v", len(got), got)
 	}
 	if len(got[0].Resources) != 2 || got[0].Resources[0].ID != "p1a" {
 		t.Errorf("unexpected first page: %+v", got[0].Resources)
 	}
 	if len(got[1].Resources) != 1 || got[1].Resources[0].ID != "p2a" {
 		t.Errorf("unexpected second page: %+v", got[1].Resources)
+	}
+	last := got[2]
+	if len(last.Resources) != 0 || last.Progress == nil {
+		t.Fatalf("expected a final resources-free progress chunk, got %+v", last)
+	}
+	if last.Progress.Service != "fake" || last.Progress.Region != "global" {
+		t.Errorf("unexpected progress origin: %+v", last.Progress)
+	}
+}
+
+func TestStreamRun_ProgressEmittedForEveryTask(t *testing.T) {
+	// A collector that returns nothing must still produce a progress marker,
+	// or the TUI's done/total counter would never reach the total.
+	eng := newFakeEngine(&fakeCollector{name: "fake"})
+
+	chunks := make(chan model.ResultChunk, 16)
+	go eng.StreamRun(context.Background(), chunks)
+	progress := 0
+	for c := range chunks {
+		if c.Progress != nil {
+			progress++
+		}
+	}
+	if progress != 1 {
+		t.Fatalf("expected exactly 1 progress marker, got %d", progress)
+	}
+}
+
+func TestPlannedTaskKeys(t *testing.T) {
+	eng := newFakeEngine(&fakeCollector{name: "fake"}) // global collector
+	keys := eng.PlannedTaskKeys()
+	if len(keys) != 1 || keys[0] != "fake@global" {
+		t.Fatalf("PlannedTaskKeys = %v, want [fake@global]", keys)
 	}
 }
 

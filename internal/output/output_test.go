@@ -146,3 +146,41 @@ func TestPrintErrors_NoPartialMarkerByDefault(t *testing.T) {
 		t.Errorf("unexpected partial marker for non-partial error:\n%s", out)
 	}
 }
+
+func TestStreamTableAlignmentStableAcrossChunks(t *testing.T) {
+	chunks := make(chan model.ResultChunk, 4)
+	chunks <- model.ResultChunk{Resources: []model.Resource{
+		{Service: "ec2", Type: "instance", Region: "us-east-1", ID: "i-1", Name: "a", State: "running"},
+	}}
+	// Second chunk arrives "later" with much longer values; earlier rows must
+	// not depend on it for their column widths (fixed-width format).
+	chunks <- model.ResultChunk{Resources: []model.Resource{
+		{Service: "secretsmanager", Type: "secret", Region: "ap-southeast-2", ID: "arn:aws:secretsmanager:ap-southeast-2:123456789012:secret:x", Name: "long-name", State: ""},
+	}}
+	close(chunks)
+
+	var buf bytes.Buffer
+	streamTable(&buf, chunks)
+
+	lines := strings.Split(strings.TrimRight(buf.String(), "\n"), "\n")
+	if len(lines) != 3 {
+		t.Fatalf("expected header + 2 rows, got %d lines:\n%s", len(lines), buf.String())
+	}
+	// The TYPE column must start at the same offset on the header and every
+	// row whose SERVICE fits the floor.
+	headerTypeIdx := strings.Index(lines[0], "TYPE")
+	row1TypeIdx := strings.Index(lines[1], "instance")
+	if headerTypeIdx == -1 || headerTypeIdx != row1TypeIdx {
+		t.Errorf("TYPE column drifted: header at %d, first row at %d\n%s", headerTypeIdx, row1TypeIdx, buf.String())
+	}
+}
+
+func TestStreamTableEmpty(t *testing.T) {
+	chunks := make(chan model.ResultChunk)
+	close(chunks)
+	var buf bytes.Buffer
+	streamTable(&buf, chunks)
+	if !strings.Contains(buf.String(), "No resources found.") {
+		t.Errorf("expected empty notice, got %q", buf.String())
+	}
+}

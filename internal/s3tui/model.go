@@ -19,6 +19,7 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/user/aws_explorer/internal/config"
+	"github.com/user/aws_explorer/internal/csvexport"
 	"github.com/user/aws_explorer/internal/display"
 	"github.com/user/aws_explorer/internal/table"
 	"github.com/user/aws_explorer/internal/ui"
@@ -95,6 +96,10 @@ type objectsLoadedMsg struct {
 	maps  []map[string]string
 	count int
 	size  int64
+	// nextToken is non-nil when the bucket has more keys than the page
+	// window fetched; appended marks a "load more" continuation batch.
+	nextToken *string
+	appended  bool
 }
 
 type objectDetailsMsg struct {
@@ -180,14 +185,17 @@ type Model struct {
 	lastSelectedKey       string
 	selectedDetails       *ObjectDetails
 	selectedBucketDetails *BucketDetails
-	detailsLoading        bool
-	showHelp              bool
-	showPreview           bool
-	previewKey            string
-	previewContent        string
-	previewLoading        bool
-	previewErr            error
-	bucketRegionCache     map[string]string
+	// objectsNextToken is set when the current listing was cut off by the
+	// page window; "L" continues from it.
+	objectsNextToken  *string
+	detailsLoading    bool
+	showHelp          bool
+	showPreview       bool
+	previewKey        string
+	previewContent    string
+	previewLoading    bool
+	previewErr        error
+	bucketRegionCache map[string]string
 	// bucketDetailsCache holds fetched bucket details for the session: each
 	// fetch costs ~19 API calls and is triggered by every selection change in
 	// the bucket list, so revisiting a bucket must not refetch. The refresh
@@ -633,71 +641,134 @@ func (m *Model) fetchBucketRegions() tea.Cmd {
 
 func (m *Model) loadObjects() tea.Cmd {
 	m.loading = true
+	m.objectsNextToken = nil
 	flat := m.flatMode
 	prefix := m.prefix
 	bucket := m.bucket
+	client := m.client
 	return func() tea.Msg {
-		var res *ListObjectsResult
-		var err error
-		if flat {
-			res, err = m.client.ListObjectsFlat(bucket, prefix)
-		} else {
-			res, err = m.client.ListObjects(bucket, prefix)
-		}
-		if err != nil {
-			return errMsg{fmt.Errorf("access denied or region mismatch for bucket '%s': %w", bucket, err)}
-		}
+		return fetchObjectWindow(client, bucket, prefix, flat, nil, false)
+	}
+}
 
-		var maps []map[string]string
-		var count int
-		var totalSize int64
+// loadMoreObjects continues a truncated listing from the saved token and
+// appends the next window to the current view.
+func (m *Model) loadMoreObjects() tea.Cmd {
+	if m.objectsNextToken == nil {
+		return nil
+	}
+	m.loading = true
+	token := m.objectsNextToken
+	flat := m.flatMode
+	prefix := m.prefix
+	bucket := m.bucket
+	client := m.client
+	return func() tea.Msg {
+		return fetchObjectWindow(client, bucket, prefix, flat, token, true)
+	}
+}
 
-		if prefix != "" && !flat {
-			maps = append(maps, map[string]string{"name": "..", "type": "DIR", "size": "-", "last_modified": "-", "storage_class": "DIR", "etag": "-"})
-		}
+// fetchObjectWindow lists one page window and converts it to row maps.
+func fetchObjectWindow(client *S3Client, bucket, prefix string, flat bool, token *string, appended bool) tea.Msg {
+	var res *ListObjectsResult
+	var err error
+	if flat {
+		res, err = client.ListObjectsFlat(bucket, prefix, token)
+	} else {
+		res, err = client.ListObjects(bucket, prefix, token)
+	}
+	if err != nil {
+		return errMsg{fmt.Errorf("access denied or region mismatch for bucket '%s': %w", bucket, err)}
+	}
+	// The ".." up-dir entry belongs only to the first window of a
+	// hierarchical listing; continuation batches are appended after it.
+	includeUp := prefix != "" && !flat && !appended
+	maps, count, size := buildObjectMaps(res, prefix, flat, includeUp)
+	return objectsLoadedMsg{maps: maps, count: count, size: size, nextToken: res.NextToken, appended: appended}
+}
 
-		if !flat {
-			for _, p := range res.Prefixes {
-				name := aws.ToString(p.Prefix)
-				if prefix != "" && strings.HasPrefix(name, prefix) {
-					name = strings.TrimPrefix(name, prefix)
-				}
-				maps = append(maps, map[string]string{"name": name, "type": "DIR", "size": "-", "last_modified": "-", "storage_class": "DIR", "etag": "-"})
-			}
-		}
+// buildObjectMaps converts a listing window into the row maps the object
+// table renders, returning the file count and cumulative size alongside.
+func buildObjectMaps(res *ListObjectsResult, prefix string, flat, includeUp bool) ([]map[string]string, int, int64) {
+	var maps []map[string]string
+	var count int
+	var totalSize int64
 
-		for _, o := range res.Objects {
-			name := aws.ToString(o.Key)
+	if includeUp {
+		maps = append(maps, map[string]string{"name": "..", "type": "DIR", "size": "-", "last_modified": "-", "storage_class": "DIR", "etag": "-"})
+	}
+
+	if !flat {
+		for _, p := range res.Prefixes {
+			name := aws.ToString(p.Prefix)
 			if prefix != "" && strings.HasPrefix(name, prefix) {
 				name = strings.TrimPrefix(name, prefix)
 			}
-			if name == "" {
-				continue
-			}
-			count++
-			sizeBytes := aws.ToInt64(o.Size)
-			totalSize += sizeBytes
-			date := ""
-			if o.LastModified != nil {
-				date = o.LastModified.Format("2006-01-02 15:04:05")
-			}
-			class := string(o.StorageClass)
-			if class == "" {
-				class = "STANDARD"
-			}
-			etag := strings.Trim(aws.ToString(o.ETag), "\"")
-			maps = append(maps, map[string]string{
-				"name":          name,
-				"type":          "FILE",
-				"size":          formatSize(sizeBytes),
-				"last_modified": date,
-				"storage_class": class,
-				"etag":          etag,
-			})
+			maps = append(maps, map[string]string{"name": name, "type": "DIR", "size": "-", "last_modified": "-", "storage_class": "DIR", "etag": "-"})
 		}
-
-		return objectsLoadedMsg{maps: maps, count: count, size: totalSize}
 	}
+
+	for _, o := range res.Objects {
+		name := aws.ToString(o.Key)
+		if prefix != "" && strings.HasPrefix(name, prefix) {
+			name = strings.TrimPrefix(name, prefix)
+		}
+		if name == "" {
+			continue
+		}
+		count++
+		sizeBytes := aws.ToInt64(o.Size)
+		totalSize += sizeBytes
+		date := ""
+		if o.LastModified != nil {
+			date = o.LastModified.Format("2006-01-02 15:04:05")
+		}
+		class := string(o.StorageClass)
+		if class == "" {
+			class = "STANDARD"
+		}
+		etag := strings.Trim(aws.ToString(o.ETag), "\"")
+		maps = append(maps, map[string]string{
+			"name":          name,
+			"type":          "FILE",
+			"size":          formatSize(sizeBytes),
+			"last_modified": date,
+			"storage_class": class,
+			"etag":          etag,
+		})
+	}
+
+	return maps, count, totalSize
+}
+
+// exportObjectsCSV writes the current object listing (current sort order,
+// full values) to a timestamped CSV and returns its path.
+func (m *Model) exportObjectsCSV() (string, error) {
+	fields := m.objectColFields()
+	header := make([]string, 0, len(fields))
+	for _, f := range fields {
+		header = append(header, f.Title)
+	}
+	rows := make([][]string, 0, len(m.objectMaps))
+	for _, r := range m.objectMaps {
+		if r["name"] == ".." {
+			continue
+		}
+		row := make([]string, 0, len(fields))
+		for _, f := range fields {
+			row = append(row, r[f.Key])
+		}
+		rows = append(rows, row)
+	}
+	dir, err := csvexport.DefaultDir()
+	if err != nil {
+		return "", err
+	}
+	name := "s3-" + m.bucket
+	if m.prefix != "" {
+		name += "-" + strings.TrimSuffix(m.prefix, "/")
+	}
+	return csvexport.Write(dir, name, header, rows)
 }
 
 // buildObjectRows converts objectMaps to display rows using current column config.
@@ -1195,6 +1266,21 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				cmds = append(cmds, m.loadObjects())
 			}
 
+		case "L":
+			// Continue a listing the page window cut off.
+			if m.state == stateObjectList && m.objectsNextToken != nil && !m.loading {
+				cmds = append(cmds, m.loadMoreObjects(), m.startSpinner())
+			}
+
+		case "C":
+			if m.state == stateObjectList && len(m.objectMaps) > 0 {
+				if path, err := m.exportObjectsCSV(); err != nil {
+					m.statusMsg = "CSV export failed: " + err.Error()
+				} else {
+					m.statusMsg = "Exported " + path
+				}
+			}
+
 		case "p":
 			if m.state == stateObjectList && m.focus == focusObjects {
 				if key, ok := m.selectedObjectKey(); ok {
@@ -1388,6 +1474,17 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case objectsLoadedMsg:
 		m.loading = false
 		m.err = nil
+		m.objectsNextToken = msg.nextToken
+		if msg.appended {
+			// "Load more": extend the current view, keep the selection.
+			m.objCount += msg.count
+			m.totalSize += msg.size
+			m.objectMaps = append(m.objectMaps, msg.maps...)
+			m.sortObjects(m.objectMaps)
+			m.updateObjectColumns()
+			m.objectTable.SetRows(m.buildObjectRows())
+			break
+		}
 		m.objCount = msg.count
 		m.totalSize = msg.size
 		m.objectMaps = msg.maps
@@ -1680,7 +1777,13 @@ func (m *Model) renderStatusBar() string {
 		} else if m.statusMsg != "" {
 			left = m.statusMsg
 		} else {
-			left = fmt.Sprintf("Bucket: %s  |  Objects: %d  |  Size: %s", m.bucket, m.objCount, formatSize(m.totalSize))
+			objects := fmt.Sprintf("%d", m.objCount)
+			if m.objectsNextToken != nil {
+				// Be honest about the page window: the bucket has more keys
+				// than are on screen.
+				objects += "+ (truncated — L loads more)"
+			}
+			left = fmt.Sprintf("Bucket: %s  |  Objects: %s  |  Size: %s", m.bucket, objects, formatSize(m.totalSize))
 			if m.prefix != "" {
 				left += fmt.Sprintf("  |  Prefix: %s", m.prefix)
 			}
@@ -1752,10 +1855,14 @@ func (m *Model) statusHints() []ui.KeyHint {
 		if m.allowDelete {
 			hints = append(hints, ui.H("x", "delete"))
 		}
+		if m.objectsNextToken != nil {
+			hints = append(hints, ui.H("L", "load more"))
+		}
 		hints = append(hints,
 			ui.H("y", "copy URI"),
 			ui.H("g", "presign"),
 			ui.H("s", "sort"),
+			ui.H("C", "csv"),
 			ui.H("f", "flat"),
 			ui.H("r", "refresh"),
 			ui.H("Esc", "back"),
@@ -2220,6 +2327,8 @@ func (m *Model) helpView() string {
 			"  v                  Toggle versions indicator",
 			"  s                  Cycle sort column",
 			"  R                  Reverse sort direction",
+			"  L                  Load more objects (when the listing is truncated)",
+			"  C                  Export current listing to CSV (~/.aws_explorer/exports)",
 			"  r                  Refresh object list"+deleteSection,
 		)
 	}

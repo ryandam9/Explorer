@@ -10,6 +10,16 @@ type ExploreResult struct {
 type ResultChunk struct {
 	Resources []Resource
 	Errors    []ExploreError
+	// Progress, when non-nil, reports that one collection task (a service ×
+	// region pair) finished — successfully or not, with or without resources —
+	// so consumers can show real scan progress instead of a spinner.
+	Progress *TaskProgress
+}
+
+// TaskProgress identifies a finished collection task.
+type TaskProgress struct {
+	Service string
+	Region  string
 }
 
 // ExploreError represents an error that occurred during exploration.

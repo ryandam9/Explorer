@@ -3,6 +3,7 @@ package vpctui
 import (
 	"context"
 	"fmt"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -177,6 +178,11 @@ type Model struct {
 	resourceLoading bool
 	resourceErr     error
 
+	// Resource table column sorting: s cycles, R flips direction.
+	// sortCol -1 keeps API order; otherwise it indexes colFields.
+	sortCol int
+	sortAsc bool
+
 	// Detail overlay
 	showDetail     bool
 	detailViewport viewport.Model
@@ -309,6 +315,8 @@ func NewModel(
 		sidebarItems:     items,
 		activeSidebarIdx: firstIdx,
 		activeResource:   items[firstIdx].rt,
+		sortCol:          -1,
+		sortAsc:          true,
 		state:            stateVPCList,
 		focus:            focusVPCList,
 	}
@@ -388,12 +396,37 @@ func (m *Model) initResourceTable(rt resourceType) {
 	m.applyTableStyle(&m.resourceTable)
 }
 
-// rebuildResourceTable refreshes columns and rows for m.activeResource from cached maps.
+// rebuildResourceTable refreshes columns and rows for m.activeResource from
+// cached maps, applying the active column sort. The cached slice itself is
+// sorted (stably, in place) so the cursor index always maps to the same
+// entry the row shows — detail, copy, and xref all rely on that.
 func (m *Model) rebuildResourceTable() {
 	rt := m.activeResource
 	maps := m.resourceMaps[rt]
 	colFields := m.colFields(rt)
-	m.resourceTable.SetColumns(display.Columns(colFields))
+
+	if m.sortCol >= 0 && m.sortCol < len(colFields) {
+		key, asc := colFields[m.sortCol].Key, m.sortAsc
+		sort.SliceStable(maps, func(i, j int) bool {
+			a := strings.ToLower(maps[i][key])
+			b := strings.ToLower(maps[j][key])
+			if asc {
+				return a < b
+			}
+			return a > b
+		})
+	}
+
+	cols := display.Columns(colFields)
+	if m.sortCol >= 0 && m.sortCol+1 < len(cols) {
+		arrow := " ↑"
+		if !m.sortAsc {
+			arrow = " ↓"
+		}
+		cols[m.sortCol+1].Title += arrow // +1: leading "#" column
+	}
+	m.resourceTable.SetColumns(cols)
+
 	rows := make([]table.Row, len(maps))
 	for i, r := range maps {
 		rows[i] = display.Row(colFields, r)
@@ -817,6 +850,8 @@ func (m *Model) enterVPC(vpc VPCInfo) tea.Cmd {
 	}
 	m.resourceMaps = make(map[resourceType][]map[string]string)
 	m.resourceErr = nil
+	m.sortCol = -1
+	m.sortAsc = true
 	// Entering a VPC starts a fresh look at it: any snapshot cached from an
 	// earlier visit is stale by intent.
 	m.snapCache.invalidate(vpc.ID)
@@ -1355,6 +1390,10 @@ func (m *Model) handleCategoryKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		m.activeResource = item.rt
+		// Each resource type has its own columns; a sort chosen for one
+		// would point at an unrelated column in the next.
+		m.sortCol = -1
+		m.sortAsc = true
 		m.initResourceTable(m.activeResource)
 		m.updateTableSizes()
 		if _, cached := m.resourceMaps[m.activeResource]; cached {
@@ -1387,7 +1426,29 @@ func (m *Model) handleResourceTableKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, nil
 	case "r":
 		return m, m.refreshResources()
-	case "c":
+	case "s":
+		// Cycle: API order → first column → … → last column → API order.
+		fields := m.colFields(m.activeResource)
+		m.sortCol++
+		if m.sortCol >= len(fields) {
+			m.sortCol = -1
+		}
+		m.rebuildResourceTable()
+		return m, nil
+	case "R":
+		if m.sortCol >= 0 {
+			m.sortAsc = !m.sortAsc
+			m.rebuildResourceTable()
+		}
+		return m, nil
+	case "C":
+		if path, err := m.exportResourceCSV(); err != nil {
+			m.statusMsg = "CSV export failed: " + err.Error()
+		} else if path != "" {
+			m.statusMsg = "Exported " + path
+		}
+		return m, nil
+	case "c", "y":
 		row := m.resourceTable.SelectedRow()
 		if len(row) >= 2 {
 			_ = clipboard.WriteAll(row[1])
@@ -2384,7 +2445,9 @@ func (m *Model) statusHints() []ui.KeyHint {
 			}
 			hints = append(hints, colScrollHints(&m.resourceTable)...)
 			hints = append(hints,
+				ui.H("s", "sort"),
 				ui.H("c", "copy ID"),
+				ui.H("C", "csv"),
 				ui.H("x", "where used"),
 			)
 			// Trace and effective-rules only operate on network interfaces, so
@@ -2426,7 +2489,9 @@ func (m *Model) helpText() string {
 		"  < >      Scroll table columns left/right (when wider than panel)",
 		"  Tab      Switch focus between sidebar and resource table",
 		"  Enter    Load resource type (sidebar) / open detail (table)",
-		"  c        Copy resource ID to clipboard",
+		"  s / R    Sort by next column / reverse sort order",
+		"  c, y     Copy resource ID to clipboard",
+		"  C        Export current table to CSV (~/.aws_explorer/exports)",
 		"  F        Run the VPC findings linter (security/routing/capacity issues)",
 		"  P        Public exposure: what is reachable from the internet",
 		"  A        AWS Reachability Analyzer: list analyses; n creates one (paid)",

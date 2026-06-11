@@ -38,17 +38,23 @@ func PrintResult(result model.ExploreResult, format string) {
 func StreamOutput(chunks <-chan model.ResultChunk, format string) {
 	switch strings.ToLower(format) {
 	case "json":
-		streamJSON(chunks)
+		streamJSON(os.Stdout, chunks)
 	case "table":
 		fallthrough
 	default:
-		streamTable(chunks)
+		streamTable(os.Stdout, chunks)
 	}
 }
 
-func streamTable(chunks <-chan model.ResultChunk) {
-	w := tabwriter.NewWriter(os.Stdout, 0, 0, 3, ' ', 0)
-	fmt.Fprintln(w, "SERVICE\tTYPE\tREGION\tID\tNAME\tSTATE")
+// streamRowFmt fixes each column's width up front so alignment is identical
+// across every streamed chunk. A tabwriter cannot provide this: it computes
+// widths per flush, and flushing per chunk (required for streaming) makes
+// columns drift between chunks. Values longer than their floor extend only
+// their own row.
+const streamRowFmt = "%-14s  %-14s  %-15s  %-44s  %-30s  %s\n"
+
+func streamTable(w io.Writer, chunks <-chan model.ResultChunk) {
+	fmt.Fprintf(w, streamRowFmt, "SERVICE", "TYPE", "REGION", "ID", "NAME", "STATE")
 
 	anyOutput := false
 	for chunk := range chunks {
@@ -57,20 +63,19 @@ func streamTable(chunks <-chan model.ResultChunk) {
 		}
 
 		for _, r := range chunk.Resources {
-			fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\t%s\n",
+			fmt.Fprintf(w, streamRowFmt,
 				r.Service, r.Type, r.Region, r.ID, r.Name, r.State)
 			anyOutput = true
 		}
-		w.Flush()
 	}
 
 	if !anyOutput {
-		fmt.Println("No resources found.")
+		fmt.Fprintln(w, "No resources found.")
 	}
 }
 
-func streamJSON(chunks <-chan model.ResultChunk) {
-	bw := bufio.NewWriter(os.Stdout)
+func streamJSON(out io.Writer, chunks <-chan model.ResultChunk) {
+	bw := bufio.NewWriter(out)
 	defer bw.Flush()
 
 	first := true
