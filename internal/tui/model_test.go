@@ -22,7 +22,7 @@ func newTestModel(t *testing.T, width, height int) tuiModel {
 	resources := []model.Resource{
 		{Service: "s3", Type: "bucket", Region: "us-east-1", ID: "bkt-1", Name: "logs", State: "active"},
 		{Service: "ec2", Type: "instance", Region: "us-east-1", ID: "i-abc123", Name: "web-1", State: "running"},
-		{Service: "ec2", Type: "instance", Region: "eu-west-1", ID: "i-def456", Name: "web-2", State: "stopped"},
+		{Service: "ec2", Type: "instance", Region: "eu-west-1", ID: "i-def456", Name: "web-2", State: "running"},
 	}
 
 	m = update(m, tea.WindowSizeMsg{Width: width, Height: height})

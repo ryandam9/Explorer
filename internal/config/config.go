@@ -4,11 +4,19 @@ package config
 type Config struct {
 	App      AppConfig                `mapstructure:"app"`
 	AWS      AWSConfig                `mapstructure:"aws"`
+	Accounts []AccountConfig          `mapstructure:"accounts"`
 	Services map[string]ServiceConfig `mapstructure:"services"`
 	Filters  FilterConfig             `mapstructure:"filters"`
 	Output   OutputConfig             `mapstructure:"output"`
 	UI       UIConfig                 `mapstructure:"ui"`
 	Display  DisplayConfig            `mapstructure:"display"`
+}
+
+// AccountConfig represents configuration for a specific AWS account sweep.
+type AccountConfig struct {
+	Name    string `mapstructure:"name"`
+	Profile string `mapstructure:"profile"`
+	RoleARN string `mapstructure:"roleArn"`
 }
 
 // DisplayConfig controls which attributes are shown for each resource type.

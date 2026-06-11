@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"os"
 	"sort"
 	"strings"
 	"time"
@@ -199,6 +200,30 @@ type tuiModel struct {
 	// Config (path + loaded struct) needed to (re)build the settings panel.
 	configPath string
 	cfg        *config.Config
+
+	// Cloud Support & Debugging (Feature 1, 3, 7, 8)
+	showTimeline    bool
+	timelineLoading bool
+	timelineEvents  []awsutil.CloudTrailEvent
+	timelineErr     error
+
+	showLogs    bool
+	logsLoading bool
+	logsLines   []string
+	logsErr     error
+
+	showMetrics    bool
+	metricsLoading bool
+	metricsData    *awsutil.SparklineMetric
+	metricsErr     error
+
+	watchMode    bool
+	watchTimerID int
+	prevStates   map[string]string
+	changedRows  map[string]time.Time
+
+	showXref      bool
+	xrefResources []model.Resource
 }
 
 // ── Constructor ───────────────────────────────────────────────────────────────
@@ -441,6 +466,10 @@ func (m tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.detail = nil
 				m.focus = focusTable
 				m.table.Focus()
+				m.showTimeline = false
+				m.showLogs = false
+				m.showMetrics = false
+				m.showXref = false
 				m.syncTableLayout()
 			}
 			return m, tea.Batch(cmds...)
@@ -464,6 +493,10 @@ func (m tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					m.showDetail = true
 					m.focus = focusDetail
 					m.table.Blur()
+					m.showTimeline = false
+					m.showLogs = false
+					m.showMetrics = false
+					m.showXref = false
 					m.syncTableLayout()
 					m.syncDetailViewport()
 				}
@@ -542,7 +575,7 @@ func (m tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				if m.sortCol == 0 { // skip the row-number column
 					m.sortCol = 1
 				}
-				if m.sortCol > 6 {
+				if m.sortCol >= len(m.columns()) {
 					m.sortCol = -1
 				}
 				m.invalidateRows()
@@ -628,6 +661,132 @@ func (m tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.openErrorsOverlay()
 			}
 			return m, tea.Batch(cmds...)
+
+		case "w":
+			m.saveSnapshot()
+			cmds = append(cmds, toastCmd(4*time.Second))
+			return m, tea.Batch(cmds...)
+
+		case "W":
+			m.watchMode = !m.watchMode
+			if m.watchMode {
+				m.watchTimerID++
+				m.setToast("Watch mode enabled (5s auto-refresh)")
+				m.prevStates = make(map[string]string)
+				for _, r := range m.sorted {
+					key := r.ARN
+					if key == "" {
+						key = r.ID
+					}
+					m.prevStates[key] = r.State
+				}
+				cmds = append(cmds, m.watchTick(5*time.Second, m.watchTimerID))
+			} else {
+				m.setToast("Watch mode disabled")
+			}
+			cmds = append(cmds, toastCmd(3*time.Second))
+			return m, tea.Batch(cmds...)
+
+		case "t":
+			if res, ok := m.selectedResource(); ok {
+				m.showTimeline = !m.showTimeline
+				if m.showTimeline {
+					m.showLogs = false
+					m.showMetrics = false
+					m.showXref = false
+					m.timelineLoading = true
+					m.timelineErr = nil
+					m.timelineEvents = nil
+					cmds = append(cmds, m.fetchTimelineCmd(res.Region, res.ID))
+				}
+				m.syncDetailViewport()
+			}
+			return m, tea.Batch(cmds...)
+
+		case "l":
+			if res, ok := m.selectedResource(); ok {
+				m.showLogs = !m.showLogs
+				if m.showLogs {
+					m.showTimeline = false
+					m.showMetrics = false
+					m.showXref = false
+					logGroup := logGroupFor(res)
+					if logGroup == "" {
+						m.logsErr = fmt.Errorf("No standard log group found for service %s", res.Service)
+						m.logsLoading = false
+						m.logsLines = nil
+					} else {
+						m.logsLoading = true
+						m.logsErr = nil
+						m.logsLines = nil
+						cmds = append(cmds, m.fetchLogsCmd(res.Region, logGroup, res.ID))
+					}
+				}
+				m.syncDetailViewport()
+			}
+			return m, tea.Batch(cmds...)
+
+		case "g":
+			if res, ok := m.selectedResource(); ok {
+				m.showMetrics = !m.showMetrics
+				if m.showMetrics {
+					m.showTimeline = false
+					m.showLogs = false
+					m.showXref = false
+					m.metricsLoading = true
+					m.metricsErr = nil
+					m.metricsData = nil
+					ns, name, dims := metricParamsFor(res)
+					cmds = append(cmds, m.fetchMetricsCmd(res.Region, ns, name, dims, res.ID))
+				}
+				m.syncDetailViewport()
+			}
+			return m, tea.Batch(cmds...)
+
+		case "x":
+			if res, ok := m.selectedResource(); ok {
+				m.showXref = !m.showXref
+				if m.showXref {
+					m.showTimeline = false
+					m.showLogs = false
+					m.showMetrics = false
+					m.xrefResources = m.findReferences(res.ID)
+				}
+				m.syncDetailViewport()
+			}
+			return m, tea.Batch(cmds...)
+
+		case "o":
+			res, ok := m.selectedResource()
+			if m.showDetail && m.detail != nil {
+				res, ok = *m.detail, true
+			}
+			if ok {
+				url := awsutil.ConsoleURL(res)
+				if err := clipboard.WriteAll(url); err != nil {
+					m.setToast("Copy URL failed: " + err.Error())
+				} else {
+					m.setToast("Copied AWS Console URL")
+				}
+				cmds = append(cmds, toastCmd(3*time.Second))
+			}
+			return m, tea.Batch(cmds...)
+
+		case "k":
+			res, ok := m.selectedResource()
+			if m.showDetail && m.detail != nil {
+				res, ok = *m.detail, true
+			}
+			if ok {
+				cmdStr := awsutil.AWSCLICommand(res)
+				if err := clipboard.WriteAll(cmdStr); err != nil {
+					m.setToast("Copy command failed: " + err.Error())
+				} else {
+					m.setToast("Copied AWS CLI command")
+				}
+				cmds = append(cmds, toastCmd(3*time.Second))
+			}
+			return m, tea.Batch(cmds...)
 		}
 
 	case tea.MouseMsg:
@@ -706,6 +865,47 @@ func (m tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		var cmd tea.Cmd
 		m.spinner, cmd = m.spinner.Update(msg)
 		cmds = append(cmds, cmd)
+
+	case timelineMsg:
+		if m.showDetail && m.detail != nil && m.detail.ID == msg.resourceID {
+			m.timelineLoading = false
+			m.timelineEvents = msg.events
+			m.timelineErr = msg.err
+			m.syncDetailViewport()
+		}
+		return m, tea.Batch(cmds...)
+
+	case logsMsg:
+		if m.showDetail && m.detail != nil && m.detail.ID == msg.resourceID {
+			m.logsLoading = false
+			m.logsLines = msg.lines
+			m.logsErr = msg.err
+			m.syncDetailViewport()
+		}
+		return m, tea.Batch(cmds...)
+
+	case metricsMsg:
+		if m.showDetail && m.detail != nil && m.detail.ID == msg.resourceID {
+			m.metricsLoading = false
+			m.metricsData = msg.data
+			m.metricsErr = msg.err
+			m.syncDetailViewport()
+		}
+		return m, tea.Batch(cmds...)
+
+	case watchTickMsg:
+		if m.watchMode && msg.timerID == m.watchTimerID {
+			m.prevStates = make(map[string]string)
+			for _, r := range m.sorted {
+				key := r.ARN
+				if key == "" {
+					key = r.ID
+				}
+				m.prevStates[key] = r.State
+			}
+			cmds = append(cmds, m.watchRefreshCmd(), m.watchTick(5*time.Second, m.watchTimerID))
+		}
+		return m, tea.Batch(cmds...)
 	}
 
 	// Forward remaining events (navigation keys) to the table when it has focus.
@@ -884,32 +1084,57 @@ func (m *tuiModel) mergeResources(batch []model.Resource) {
 			}
 		}
 	}
+
+	if len(m.prevStates) > 0 {
+		if m.changedRows == nil {
+			m.changedRows = make(map[string]time.Time)
+		}
+		for _, r := range m.sorted {
+			key := r.ARN
+			if key == "" {
+				key = r.ID
+			}
+			if oldState, ok := m.prevStates[key]; ok {
+				if oldState != r.State {
+					m.changedRows[key] = time.Now().Add(10 * time.Second)
+				}
+			}
+		}
+	}
 }
 
 // onResultsChanged re-derives the service list after new chunks were merged,
 // then invalidates the cached rows. Filter changes alone only need
 // invalidateRows, which reuses the sorted slice.
 func (m *tuiModel) onResultsChanged() {
-	names := make([]string, 0, len(m.svcSet)+1)
+	// Unfiltered per-service totals for the "14/3201" filter indicator.
+	totals := make(map[string]int, len(m.svcSet)+2)
+	triageCount := 0
+	for _, r := range m.sorted {
+		totals[r.Service]++
+		if isUnhealthy(r) {
+			triageCount++
+		}
+	}
+	totals["All"] = len(m.sorted)
+	totals["Triage"] = triageCount
+	m.svcTotals = totals
+
+	names := make([]string, 0, len(m.svcSet)+2)
+	if triageCount > 0 {
+		names = append(names, "Triage")
+	}
 	names = append(names, "All")
 	for svc := range m.svcSet {
 		names = append(names, svc)
 	}
-	sort.Strings(names[1:])
+	sort.Strings(names[len(names)-len(m.svcSet):])
 	m.services = names
 
 	// Clamp active service index.
 	if m.activeService >= len(m.services) {
 		m.activeService = 0
 	}
-
-	// Unfiltered per-service totals for the "14/3201" filter indicator.
-	totals := make(map[string]int, len(m.svcSet)+1)
-	for _, r := range m.sorted {
-		totals[r.Service]++
-	}
-	totals["All"] = len(m.sorted)
-	m.svcTotals = totals
 
 	m.invalidateRows()
 }
@@ -922,20 +1147,73 @@ func (m *tuiModel) invalidateRows() {
 	m.allRes = make(map[string][]model.Resource)
 }
 
+// isUnhealthy returns true if a resource is in an unhealthy/bad state.
+func isUnhealthy(r model.Resource) bool {
+	state := strings.ToLower(r.State)
+	// CloudWatch Alarms
+	if r.Service == "cloudwatch" && state == "alarm" {
+		return true
+	}
+	// EC2 instances
+	if r.Service == "ec2" {
+		if state == "stopped" || state == "impaired" || state == "unhealthy" || strings.Contains(state, "fail") {
+			return true
+		}
+	}
+	// RDS DB Instances
+	if r.Service == "rds" {
+		if state == "stopped" || strings.Contains(state, "full") || state == "unhealthy" || state == "failed" {
+			return true
+		}
+	}
+	// ELB / Target Groups
+	if r.Service == "elbv2" {
+		if strings.Contains(state, "unhealthy") || state == "failed" {
+			return true
+		}
+	}
+	// EKS
+	if r.Service == "eks" {
+		if strings.Contains(state, "degraded") || state == "failed" || state == "unhealthy" {
+			return true
+		}
+	}
+	// Lambda
+	if r.Service == "lambda" {
+		if strings.Contains(state, "throttle") || state == "failed" || state == "unhealthy" {
+			return true
+		}
+	}
+	// General catch-all for any resource in explicit alarm/unhealthy/failed state
+	if state == "alarm" || state == "unhealthy" || state == "failed" || state == "degraded" {
+		return true
+	}
+	return false
+}
+
 // sortField returns the cell a table sort column maps to.
-func sortField(r model.Resource, col int) string {
-	switch col {
-	case 1:
+func (m tuiModel) sortField(r model.Resource, col int) string {
+	cols := m.columns()
+	if col < 0 || col >= len(cols) {
+		return ""
+	}
+	title := cols[col].Title
+	title = strings.TrimSuffix(title, " ↑")
+	title = strings.TrimSuffix(title, " ↓")
+	switch title {
+	case "Account":
+		return r.AccountID
+	case "Service":
 		return r.Service
-	case 2:
+	case "Type":
 		return r.Type
-	case 3:
+	case "Region":
 		return r.Region
-	case 4:
+	case "ID":
 		return r.ID
-	case 5:
+	case "Name":
 		return r.Name
-	case 6:
+	case "State":
 		return r.State
 	}
 	return ""
@@ -952,7 +1230,11 @@ func (m *tuiModel) rowsFor(svc string) []table.Row {
 	query := strings.ToLower(m.filterText)
 	var res []model.Resource
 	for i, r := range m.sorted {
-		if svc != "All" && r.Service != svc {
+		if svc == "Triage" {
+			if !isUnhealthy(r) {
+				continue
+			}
+		} else if svc != "All" && r.Service != svc {
 			continue
 		}
 		if m.filterRegion != "" && r.Region != m.filterRegion {
@@ -973,8 +1255,8 @@ func (m *tuiModel) rowsFor(svc string) []table.Row {
 	if m.sortCol > 0 {
 		col, asc := m.sortCol, m.sortAsc
 		sort.SliceStable(res, func(i, j int) bool {
-			a := strings.ToLower(sortField(res[i], col))
-			b := strings.ToLower(sortField(res[j], col))
+			a := strings.ToLower(m.sortField(res[i], col))
+			b := strings.ToLower(m.sortField(res[j], col))
 			if asc {
 				return a < b
 			}
@@ -984,10 +1266,30 @@ func (m *tuiModel) rowsFor(svc string) []table.Row {
 
 	rows := []table.Row{}
 	for _, r := range res {
-		rows = append(rows, table.Row{
-			fmt.Sprintf("%d", len(rows)+1),
-			r.Service, r.Type, r.Region, r.ID, r.Name, r.State,
-		})
+		row := table.Row{fmt.Sprintf("%d", len(rows)+1)}
+		if len(m.cfg.Accounts) > 0 {
+			row = append(row, r.AccountID)
+		}
+		
+		key := r.ARN
+		if key == "" {
+			key = r.ID
+		}
+		
+		stateStr := r.State
+		if m.changedRows != nil {
+			if exp, ok := m.changedRows[key]; ok && time.Now().Before(exp) {
+				// Colorize state transition
+				stateStr = lipgloss.NewStyle().
+					Foreground(lipgloss.Color(ui.ColorHighlightText())).
+					Background(lipgloss.Color(ui.ColorSuccess())).
+					Bold(true).
+					Render(r.State)
+			}
+		}
+		
+		row = append(row, r.Service, r.Type, r.Region, r.ID, r.Name, stateStr)
+		rows = append(rows, row)
 	}
 	m.allRows[svc] = rows
 	m.allRes[svc] = res
@@ -1022,10 +1324,17 @@ func (m *tuiModel) updateTableRows() {
 // flex to fill leftover space; when the panel is too narrow for everything,
 // the table scrolls horizontally instead of truncating columns away.
 func (m tuiModel) columns() []table.Column {
-	// Fixed widths: #(4) Service(10) Type(12) Region(13) State(10) = 49,
-	// plus each column's cell padding (2 × 7 columns).
-	const fixed = 4 + 10 + 12 + 13 + 10
-	const padding = 2 * 7
+	// Fixed widths: #(4) Account(12 - optional) Service(10) Type(12) Region(13) State(10)
+	var fixed int
+	var numCols int
+	if len(m.cfg.Accounts) > 0 {
+		fixed = 4 + 12 + 10 + 12 + 13 + 10
+		numCols = 8
+	} else {
+		fixed = 4 + 10 + 12 + 13 + 10
+		numCols = 7
+	}
+	padding := 2 * numCols
 	rem := m.tableInnerWidth() - tablePanelHPad - fixed - padding
 	idW := rem * 2 / 5
 	nameW := rem - idW
@@ -1036,15 +1345,20 @@ func (m tuiModel) columns() []table.Column {
 		nameW = 10
 	}
 
-	cols := []table.Column{
-		{Title: "#", Width: 4},
+	var cols []table.Column
+	cols = append(cols, table.Column{Title: "#", Width: 4})
+	if len(m.cfg.Accounts) > 0 {
+		cols = append(cols, table.Column{Title: "Account", Width: 12})
+	}
+	cols = append(cols, []table.Column{
 		{Title: "Service", Width: 10},
 		{Title: "Type", Width: 12},
 		{Title: "Region", Width: 13},
 		{Title: "ID", Width: idW},
 		{Title: "Name", Width: nameW},
 		{Title: "State", Width: 10},
-	}
+	}...)
+
 	if m.sortCol > 0 && m.sortCol < len(cols) {
 		arrow := " ↑"
 		if !m.sortAsc {
@@ -1273,6 +1587,19 @@ func (m *tuiModel) restartScan() tea.Cmd {
 	return tea.Batch(waitForChunk(m.chunks, m.scanGen), m.spinner.Tick)
 }
 
+func (m *tuiModel) watchRefreshCmd() tea.Cmd {
+	if m.scanCancel != nil {
+		m.scanCancel()
+	}
+	m.scanCtx, m.scanCancel = context.WithCancel(m.ctx)
+	m.scanGen++
+	m.loading = true
+	m.done = false
+	m.chunks = make(chan model.ResultChunk, 64)
+	go m.engine.StreamRun(m.scanCtx, m.chunks)
+	return waitForChunk(m.chunks, m.scanGen)
+}
+
 // ── CSV export ────────────────────────────────────────────────────────────────
 
 // inventoryCSV builds the header and rows for exporting resources — full,
@@ -1348,7 +1675,7 @@ func (m tuiModel) helpView() string {
 		"  Enter              Select service / open detail",
 		"  Esc                Close detail or overlay",
 		"",
-		"Resources",
+		"Resources & Audit",
 		"  /                  Quick text filter (shows match count)",
 		"  f                  Advanced filter (region / state)",
 		"  r                  Reset all filters",
@@ -1356,6 +1683,16 @@ func (m tuiModel) helpView() string {
 		"  y / Y              Copy ARN / ID of the selected resource",
 		"  J                  Toggle raw JSON in the detail panel (y copies it)",
 		"  C                  Export current view to CSV (~/.aws_explorer/exports)",
+		"  w                  Save full scan snapshot JSON",
+		"  W                  Toggle live watch mode (5s auto-refresh)",
+		"",
+		"Support Debugging (while in detail panel)",
+		"  t                  Toggle CloudTrail resource mutation timeline",
+		"  l                  Toggle CloudWatch recent ERROR logs",
+		"  g                  Toggle CloudWatch key metric sparkline (1hr)",
+		"  x                  Toggle cross-resource relationship xrefs",
+		"  o                  Copy AWS Console URL",
+		"  k                  Copy AWS CLI reproduction command",
 		"",
 		"Utility",
 		"  P                  Switch AWS profile / region and rescan",
@@ -1708,6 +2045,8 @@ func (m tuiModel) statusHints() []ui.KeyHint {
 			ui.H("s", "sort"),
 			ui.H("y", "copy ARN"),
 			ui.H("C", "csv"),
+			ui.H("w", "snapshot"),
+			ui.H("W", "watch"),
 		)
 		if m.filterRegion != "" || m.filterState != "" || m.filterText != "" {
 			hints = append(hints, ui.H("r", "reset filters"))
@@ -1724,10 +2063,12 @@ func (m tuiModel) statusHints() []ui.KeyHint {
 		)
 	case focusDetail:
 		return []ui.KeyHint{
+			ui.H("Esc", "close"),
 			ui.H("↑/↓ or [ ]", "scroll"),
 			ui.H("J", "raw json"),
 			ui.H("y", "copy"),
-			ui.H("Esc", "close"),
+			ui.H("t/l/g/x", "debug info"),
+			ui.H("o/k", "copy console/cli"),
 			ui.H("Tab", "panel"),
 			ui.H("q", "quit"),
 			ui.H("?", "help"),
@@ -1772,74 +2113,172 @@ func (m tuiModel) renderDetail(r model.Resource, width int) string {
 	dKey := detailKeyStyle()
 	dSec := detailSectionStyle()
 
-	b.WriteString(dSec.Render("RESOURCE") + "\n\n")
+	if strings.ToLower(r.Service) == "diff" {
+		b.WriteString(dSec.Render("DIFF FACT") + "\n\n")
+		b.WriteString(dKey.Render(fmt.Sprintf("%-12s", "Diff Kind")) + " " + r.State + "\n")
+		b.WriteString(dKey.Render(fmt.Sprintf("%-12s", "Resource ID")) + " " + r.ID + "\n")
+		if r.Name != "" {
+			b.WriteString(dKey.Render(fmt.Sprintf("%-12s", "Name")) + " " + r.Name + "\n")
+		}
+		b.WriteString(dKey.Render(fmt.Sprintf("%-12s", "Region")) + " " + r.Region + "\n")
+		b.WriteString(dKey.Render(fmt.Sprintf("%-12s", "Type")) + " " + r.Type + "\n")
 
-	fields := []struct{ k, v string }{
-		{"Service", r.Service},
-		{"Type", r.Type},
-		{"Region", r.Region},
-		{"AZ", r.AZ},
-		{"Account", r.AccountID},
-		{"ID", r.ID},
-		{"Name", r.Name},
-		{"State", r.State},
-	}
-	for _, f := range fields {
-		if f.v != "" {
-			b.WriteString(dKey.Render(fmt.Sprintf("%-9s", f.k)) + " " +
-				fieldVal(f.v, keyW, valW) + "\n")
+		if kind, ok := r.Details["diffKind"].(string); ok {
+			switch kind {
+			case "MODIFIED":
+				if changes, ok := r.Details["changes"].([]string); ok && len(changes) > 0 {
+					b.WriteString("\n" + dSec.Render("CHANGES DETECTED") + "\n\n")
+					for _, c := range changes {
+						b.WriteString(lipgloss.NewStyle().Foreground(lipgloss.Color(ui.ColorWarning())).Render("  ~ "+c) + "\n")
+					}
+				}
+			case "ADDED":
+				b.WriteString("\n" + dSec.Render("RESOURCE ADDED") + "\n")
+				b.WriteString("  This resource exists in the new scan, but was not found in the old scan.\n")
+			case "REMOVED":
+				b.WriteString("\n" + dSec.Render("RESOURCE REMOVED") + "\n")
+				b.WriteString("  This resource was found in the old scan, but is no longer present in the new scan.\n")
+			}
+		}
+	} else {
+		b.WriteString(dSec.Render("RESOURCE") + "\n\n")
+
+		fields := []struct{ k, v string }{
+			{"Service", r.Service},
+			{"Type", r.Type},
+			{"Region", r.Region},
+			{"AZ", r.AZ},
+			{"Account", r.AccountID},
+			{"ID", r.ID},
+			{"Name", r.Name},
+			{"State", r.State},
+		}
+		for _, f := range fields {
+			if f.v != "" {
+				b.WriteString(dKey.Render(fmt.Sprintf("%-9s", f.k)) + " " +
+					fieldVal(f.v, keyW, valW) + "\n")
+			}
+		}
+
+		if r.ARN != "" {
+			arnW := width - 2
+			if arnW < 10 {
+				arnW = 10
+			}
+			b.WriteString(dKey.Render("ARN") + "\n")
+			for _, chunk := range chunkString(r.ARN, arnW) {
+				b.WriteString("  " + chunk + "\n")
+			}
+		}
+
+		if r.CreatedAt != nil {
+			b.WriteString(dKey.Render("Created") + "  " +
+				r.CreatedAt.Format("2006-01-02 15:04:05") + "\n")
+		}
+
+		if len(r.Summary) > 0 {
+			b.WriteString("\n" + dSec.Render("SUMMARY") + "\n\n")
+			keys := make([]string, 0, len(r.Summary))
+			for k := range r.Summary {
+				keys = append(keys, k)
+			}
+			sort.Strings(keys)
+			const sumKeyW = 20
+			sumValW := width - sumKeyW - 1
+			if sumValW < 10 {
+				sumValW = 10
+			}
+			for _, k := range keys {
+				b.WriteString(dKey.Render(fmt.Sprintf("%-20s", k)) + " " +
+					fieldVal(r.Summary[k], sumKeyW, sumValW) + "\n")
+			}
+		}
+
+		if len(r.Tags) > 0 {
+			b.WriteString("\n" + dSec.Render("TAGS") + "\n\n")
+			keys := make([]string, 0, len(r.Tags))
+			for k := range r.Tags {
+				keys = append(keys, k)
+			}
+			sort.Strings(keys)
+			const tagKeyW = 20
+			tagValW := width - tagKeyW - 1
+			if tagValW < 10 {
+				tagValW = 10
+			}
+			for _, k := range keys {
+				b.WriteString(dKey.Render(fmt.Sprintf("%-20s", k)) + " " +
+					fieldVal(r.Tags[k], tagKeyW, tagValW) + "\n")
+			}
 		}
 	}
 
-	if r.ARN != "" {
-		arnW := width - 2
-		if arnW < 10 {
-			arnW = 10
-		}
-		b.WriteString(dKey.Render("ARN") + "\n")
-		for _, chunk := range chunkString(r.ARN, arnW) {
-			b.WriteString("  " + chunk + "\n")
+	// ── Cloud Support Toggleable Panes (Appended sections) ──
+
+	if m.showTimeline {
+		b.WriteString("\n" + dSec.Render("CLOUDTRAIL TIMELINE") + "\n\n")
+		if m.timelineLoading {
+			b.WriteString("  Loading events...\n")
+		} else if m.timelineErr != nil {
+			b.WriteString("  Error: " + m.timelineErr.Error() + "\n")
+		} else if len(m.timelineEvents) == 0 {
+			b.WriteString("  No recent CloudTrail mutations found.\n")
+		} else {
+			for _, ev := range m.timelineEvents {
+				timeStr := ev.Time.Format("2006-01-02 15:04:05")
+				b.WriteString(fmt.Sprintf("  %s · %s\n",
+					lipgloss.NewStyle().Foreground(lipgloss.Color(ui.ColorMuted())).Render(timeStr),
+					lipgloss.NewStyle().Foreground(lipgloss.Color(ui.ColorAccent())).Bold(true).Render(ev.EventName)))
+				b.WriteString(fmt.Sprintf("    %s %s · %s\n\n",
+					dKey.Render("by"), ev.Principal, ev.SourceIP))
+			}
 		}
 	}
 
-	if r.CreatedAt != nil {
-		b.WriteString(dKey.Render("Created") + "  " +
-			r.CreatedAt.Format("2006-01-02 15:04:05") + "\n")
-	}
-
-	if len(r.Summary) > 0 {
-		b.WriteString("\n" + dSec.Render("SUMMARY") + "\n\n")
-		keys := make([]string, 0, len(r.Summary))
-		for k := range r.Summary {
-			keys = append(keys, k)
-		}
-		sort.Strings(keys)
-		const sumKeyW = 20
-		sumValW := width - sumKeyW - 1
-		if sumValW < 10 {
-			sumValW = 10
-		}
-		for _, k := range keys {
-			b.WriteString(dKey.Render(fmt.Sprintf("%-20s", k)) + " " +
-				fieldVal(r.Summary[k], sumKeyW, sumValW) + "\n")
+	if m.showLogs {
+		b.WriteString("\n" + dSec.Render("CLOUDWATCH RECENT ERROR LOGS") + "\n\n")
+		if m.logsLoading {
+			b.WriteString("  Loading logs...\n")
+		} else if m.logsErr != nil {
+			b.WriteString("  Error: " + m.logsErr.Error() + "\n")
+		} else if len(m.logsLines) == 0 {
+			b.WriteString("  No recent error logs found.\n")
+		} else {
+			for _, line := range m.logsLines {
+				b.WriteString("  " + lipgloss.NewStyle().Foreground(lipgloss.Color(ui.ColorError())).Render(line) + "\n")
+			}
 		}
 	}
 
-	if len(r.Tags) > 0 {
-		b.WriteString("\n" + dSec.Render("TAGS") + "\n\n")
-		keys := make([]string, 0, len(r.Tags))
-		for k := range r.Tags {
-			keys = append(keys, k)
+	if m.showMetrics {
+		ns, name, _ := metricParamsFor(r)
+		b.WriteString("\n" + dSec.Render(fmt.Sprintf("METRICS: %s (%s)", name, ns)) + "\n\n")
+		if m.metricsLoading {
+			b.WriteString("  Loading metric data...\n")
+		} else if m.metricsErr != nil {
+			b.WriteString("  Error: " + m.metricsErr.Error() + "\n")
+		} else if m.metricsData == nil || len(m.metricsData.Values) == 0 {
+			b.WriteString("  No metric data available for the last hour.\n")
+		} else {
+			spark := awsutil.GenerateSparkline(m.metricsData.Values)
+			minV := getMin(m.metricsData.Values)
+			maxV := getMax(m.metricsData.Values)
+			b.WriteString(fmt.Sprintf("  Sparkline: %s\n", lipgloss.NewStyle().Foreground(lipgloss.Color(ui.ColorAccent())).Render(spark)))
+			b.WriteString(fmt.Sprintf("  Range: Min %.2f · Max %.2f · Unit %s\n", minV, maxV, m.metricsData.Unit))
 		}
-		sort.Strings(keys)
-		const tagKeyW = 20
-		tagValW := width - tagKeyW - 1
-		if tagValW < 10 {
-			tagValW = 10
-		}
-		for _, k := range keys {
-			b.WriteString(dKey.Render(fmt.Sprintf("%-20s", k)) + " " +
-				fieldVal(r.Tags[k], tagKeyW, tagValW) + "\n")
+	}
+
+	if m.showXref {
+		b.WriteString("\n" + dSec.Render("CROSS-RESOURCE REFERENCES") + "\n\n")
+		if len(m.xrefResources) == 0 {
+			b.WriteString("  No references found in other resources.\n")
+		} else {
+			for _, xr := range m.xrefResources {
+				b.WriteString(fmt.Sprintf("  - %s %s [%s]\n",
+					lipgloss.NewStyle().Foreground(lipgloss.Color(ui.ColorAccent())).Render(xr.Service),
+					xr.ID,
+					xr.Type))
+			}
 		}
 	}
 
@@ -1950,4 +2389,182 @@ func chunkString(s string, n int) []string {
 		out = append(out, s)
 	}
 	return out
+}
+
+// ── Cloud Support & Debugging Helpers ──────────────────────────────────────────
+
+type timelineMsg struct {
+	resourceID string
+	events     []awsutil.CloudTrailEvent
+	err        error
+}
+
+type logsMsg struct {
+	resourceID string
+	lines      []string
+	err        error
+}
+
+type metricsMsg struct {
+	resourceID string
+	data       *awsutil.SparklineMetric
+	err        error
+}
+
+type watchTickMsg struct {
+	timerID int
+}
+
+func logGroupFor(r model.Resource) string {
+	switch strings.ToLower(r.Service) {
+	case "lambda":
+		return "/aws/lambda/" + r.Name
+	case "ecs":
+		return "/aws/ecs/" + r.Name
+	case "rds":
+		return "/aws/rds/instance/" + r.ID + "/error"
+	}
+	return ""
+}
+
+func metricParamsFor(r model.Resource) (namespace, metricName string, dimensions map[string]string) {
+	dimensions = make(map[string]string)
+	switch strings.ToLower(r.Service) {
+	case "ec2":
+		namespace = "AWS/EC2"
+		metricName = "CPUUtilization"
+		dimensions["InstanceId"] = r.ID
+	case "rds":
+		namespace = "AWS/RDS"
+		metricName = "CPUUtilization"
+		dimensions["DBInstanceIdentifier"] = r.ID
+	case "lambda":
+		namespace = "AWS/Lambda"
+		metricName = "Errors"
+		dimensions["FunctionName"] = r.Name
+	case "elbv2":
+		namespace = "AWS/ApplicationELB"
+		metricName = "UnHealthyHostCount"
+		dimensions["TargetGroup"] = r.ID
+	default:
+		namespace = "AWS/EC2"
+		metricName = "CPUUtilization"
+		dimensions["InstanceId"] = r.ID
+	}
+	return
+}
+
+func getMin(vals []float64) float64 {
+	if len(vals) == 0 {
+		return 0
+	}
+	m := vals[0]
+	for _, v := range vals {
+		if v < m {
+			m = v
+		}
+	}
+	return m
+}
+
+func getMax(vals []float64) float64 {
+	if len(vals) == 0 {
+		return 0
+	}
+	m := vals[0]
+	for _, v := range vals {
+		if v > m {
+			m = v
+		}
+	}
+	return m
+}
+
+func (m *tuiModel) saveSnapshot() {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		m.setToast("Failed to find home dir: " + err.Error())
+		return
+	}
+	dir := home + "/.aws_explorer/snapshots"
+	if err := os.MkdirAll(dir, 0755); err != nil {
+		m.setToast("Failed to create snapshot dir: " + err.Error())
+		return
+	}
+	profile := m.cfg.AWS.Profile
+	if profile == "" {
+		profile = "default"
+	}
+	timestamp := time.Now().Format("20060102-150405")
+	filename := fmt.Sprintf("%s/snapshot-%s-%s.json", dir, profile, timestamp)
+
+	data, err := json.MarshalIndent(m.sorted, "", "  ")
+	if err != nil {
+		m.setToast("Failed to marshal inventory: " + err.Error())
+		return
+	}
+
+	if err := os.WriteFile(filename, data, 0644); err != nil {
+		m.setToast("Failed to write snapshot: " + err.Error())
+		return
+	}
+
+	m.setToast("Saved snapshot to " + filename)
+}
+
+func (m *tuiModel) findReferences(resourceID string) []model.Resource {
+	if resourceID == "" {
+		return nil
+	}
+	var refs []model.Resource
+	for _, r := range m.sorted {
+		if r.ID == resourceID {
+			continue // skip self
+		}
+		matched := false
+		for _, v := range r.Summary {
+			if strings.Contains(v, resourceID) {
+				matched = true
+				break
+			}
+		}
+		if !matched {
+			if data, err := json.Marshal(r.Details); err == nil {
+				if strings.Contains(string(data), resourceID) {
+					matched = true
+				}
+			}
+		}
+		if matched {
+			refs = append(refs, r)
+		}
+	}
+	return refs
+}
+
+func (m tuiModel) fetchTimelineCmd(region, resourceID string) tea.Cmd {
+	return func() tea.Msg {
+		events, err := awsutil.FetchCloudTrailEvents(m.ctx, m.engine.AWSConfig, region, resourceID)
+		return timelineMsg{resourceID: resourceID, events: events, err: err}
+	}
+}
+
+func (m tuiModel) fetchLogsCmd(region, logGroupName, resourceID string) tea.Cmd {
+	return func() tea.Msg {
+		lines, err := awsutil.FetchRecentLogs(m.ctx, m.engine.AWSConfig, region, logGroupName, "ERROR")
+		return logsMsg{resourceID: resourceID, lines: lines, err: err}
+	}
+}
+
+func (m tuiModel) fetchMetricsCmd(region, namespace, metricName string, dimensions map[string]string, resourceID string) tea.Cmd {
+	return func() tea.Msg {
+		data, err := awsutil.FetchMetricData(m.ctx, m.engine.AWSConfig, region, namespace, metricName, dimensions)
+		return metricsMsg{resourceID: resourceID, data: data, err: err}
+	}
+}
+
+func (m tuiModel) watchTick(d time.Duration, id int) tea.Cmd {
+	return tea.Tick(d, func(t time.Time) tea.Msg {
+		return watchTickMsg{timerID: id}
+	})
 }

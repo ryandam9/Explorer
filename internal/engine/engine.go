@@ -177,17 +177,40 @@ func (e *Engine) Run(ctx context.Context) (model.ExploreResult, error) {
 func (e *Engine) PlannedTaskKeys() []string {
 	regions := e.EffectiveRegions()
 	var keys []string
-	for _, srv := range e.registry.GetAll() {
-		srvCfg, ok := e.Config.Services[srv.Name()]
-		if !ok || !srvCfg.Enabled {
-			continue
+	accounts := e.Config.Accounts
+	if len(accounts) == 0 {
+		for _, srv := range e.registry.GetAll() {
+			srvCfg, ok := e.Config.Services[srv.Name()]
+			if !ok || !srvCfg.Enabled {
+				continue
+			}
+			serviceRegions := regions
+			if srv.IsGlobal() {
+				serviceRegions = []string{"global"}
+			}
+			for _, region := range serviceRegions {
+				keys = append(keys, srv.Name()+"@"+region)
+			}
 		}
-		serviceRegions := regions
-		if srv.IsGlobal() {
-			serviceRegions = []string{"global"}
+		return keys
+	}
+	for _, acc := range accounts {
+		name := acc.Name
+		if name == "" {
+			name = "default"
 		}
-		for _, region := range serviceRegions {
-			keys = append(keys, srv.Name()+"@"+region)
+		for _, srv := range e.registry.GetAll() {
+			srvCfg, ok := e.Config.Services[srv.Name()]
+			if !ok || !srvCfg.Enabled {
+				continue
+			}
+			serviceRegions := regions
+			if srv.IsGlobal() {
+				serviceRegions = []string{"global"}
+			}
+			for _, region := range serviceRegions {
+				keys = append(keys, name+"/"+srv.Name()+"@"+region)
+			}
 		}
 	}
 	return keys
@@ -218,6 +241,12 @@ func (e *Engine) EffectiveRegions() []string {
 	return regions
 }
 
+type accountSweep struct {
+	Name      string
+	AWSConfig aws.Config
+	AccountID string
+}
+
 // StreamRun emits results to the channel as they arrive, then closes it.
 func (e *Engine) StreamRun(ctx context.Context, chunks chan<- model.ResultChunk) {
 	defer close(chunks)
@@ -231,123 +260,188 @@ func (e *Engine) StreamRun(ctx context.Context, chunks chan<- model.ResultChunk)
 
 	regions := e.EffectiveRegions()
 
-	for _, srv := range e.registry.GetAll() {
-		srvCfg, ok := e.Config.Services[srv.Name()]
-		if !ok || !srvCfg.Enabled {
-			continue
-		}
-
-		serviceRegions := regions
-		if srv.IsGlobal() {
-			serviceRegions = []string{"global"}
-		}
-
-		for _, region := range serviceRegions {
-			s := srv
-			r := region
-
-			g.Go(func() error {
-				slog.Debug("Starting collector", "service", s.Name(), "region", r)
-
-				// app.timeoutSeconds bounds each collector run.
-				collectCtx := gCtx
-				if e.Config.App.TimeoutSeconds > 0 {
-					var cancel context.CancelFunc
-					collectCtx, cancel = context.WithTimeout(gCtx, time.Duration(e.Config.App.TimeoutSeconds)*time.Second)
-					defer cancel()
-				}
-
-				regionalConfig := e.AWSConfig
-				if r != "global" {
-					regionalConfig.Region = r
-				}
-
-				// send delivers a chunk unless the whole run is being torn
-				// down (consumer gone), in which case it drops the chunk
-				// instead of blocking the worker forever.
-				send := func(chunk model.ResultChunk) {
-					select {
-					case chunks <- chunk:
-					case <-gCtx.Done():
-					}
-				}
-
-				input := services.CollectInput{
-					Config:    e.Config,
-					AWSConfig: regionalConfig,
-					Region:    r,
-					AccountID: e.AccountID,
-					Filters: model.Filter{
-						Regions: e.Config.Filters.Regions,
-						States:  e.Config.Filters.States,
-						Tags:    e.Config.Filters.Tags,
+	var sweeps []accountSweep
+	if len(e.Config.Accounts) == 0 {
+		sweeps = append(sweeps, accountSweep{
+			Name:      e.Config.AWS.Profile,
+			AWSConfig: e.AWSConfig,
+			AccountID: e.AccountID,
+		})
+	} else {
+		for _, acc := range e.Config.Accounts {
+			accCfg := e.AWSConfig.Copy()
+			var err error
+			if acc.Profile != "" {
+				accCfg, err = auth.BuildAWSConfig(ctx, &config.AWSConfig{
+					Profile:    acc.Profile,
+					AuthMethod: "profile",
+				}, "us-east-1")
+			}
+			if err != nil {
+				slog.Error("Failed to build AWS config for account", "name", acc.Name, "error", err)
+				continue
+			}
+			if acc.RoleARN != "" {
+				stsCfg := config.AWSConfig{
+					AuthMethod: "sts",
+					STS: config.STSConfig{
+						RoleARN:     acc.RoleARN,
+						SessionName: "aws-explorer-sweep",
 					},
-					DetailLevel: services.DetailLevelSummary,
 				}
-
-				// Stream page-sized batches as the collector gathers them so
-				// results surface after the first page round-trip, not after
-				// the last. emitted counts streamed resources (post-filter)
-				// so the error path below can still flag partial results;
-				// collectors call Emit from this goroutine, so no locking.
-				emitted := 0
-				input.Emit = func(batch []model.Resource) {
-					filtered := filterResources(batch, input.Filters)
-					emitted += len(filtered)
-					if len(filtered) > 0 {
-						send(model.ResultChunk{Resources: filtered})
-					}
-				}
-
-				res, err := s.Collect(collectCtx, input)
-				filteredRes := filterResources(res, input.Filters)
+				accCfg, err = auth.BuildAWSConfig(ctx, &stsCfg, "us-east-1")
 				if err != nil {
-					// Collectors are best-effort: res may hold resources
-					// gathered before the failure (and more may have been
-					// streamed already). Keep them and flag the error as
-					// partial so consumers can say so.
-					partial := len(filteredRes) > 0 || emitted > 0
-					code := "CollectionError"
-					msg := err.Error()
-					switch {
-					case awserr.IsAuthError(err):
-						code = "AccessDenied"
-						msg = awserr.FriendlyMessage(err, s.Name())
-						slog.Warn("Access denied",
-							"service", s.Name(), "region", r, "keptResources", len(filteredRes)+emitted)
-					case errors.Is(err, context.DeadlineExceeded):
-						code = "Timeout"
-						msg = fmt.Sprintf("collection timed out after %ds (app.timeoutSeconds); results are incomplete",
-							e.Config.App.TimeoutSeconds)
-						slog.Warn("Collection timed out",
-							"service", s.Name(), "region", r, "keptResources", len(filteredRes)+emitted)
-					default:
-						slog.Warn("Collection error",
-							"service", s.Name(), "region", r, "keptResources", len(filteredRes)+emitted,
-							"error", err.Error())
+					slog.Error("Failed to assume role for account", "name", acc.Name, "error", err)
+					continue
+				}
+			}
+			accID := resolveAccountID(ctx, accCfg)
+			sweeps = append(sweeps, accountSweep{
+				Name:      acc.Name,
+				AWSConfig: accCfg,
+				AccountID: accID,
+			})
+		}
+	}
+
+	for _, sweep := range sweeps {
+		for _, srv := range e.registry.GetAll() {
+			srvCfg, ok := e.Config.Services[srv.Name()]
+			if !ok || !srvCfg.Enabled {
+				continue
+			}
+
+			serviceRegions := regions
+			if srv.IsGlobal() {
+				serviceRegions = []string{"global"}
+			}
+
+			for _, region := range serviceRegions {
+				s := srv
+				r := region
+				sw := sweep
+
+				g.Go(func() error {
+					slog.Debug("Starting collector", "service", s.Name(), "region", r, "account", sw.Name)
+
+					// app.timeoutSeconds bounds each collector run.
+					collectCtx := gCtx
+					if e.Config.App.TimeoutSeconds > 0 {
+						var cancel context.CancelFunc
+						collectCtx, cancel = context.WithTimeout(gCtx, time.Duration(e.Config.App.TimeoutSeconds)*time.Second)
+						defer cancel()
+					}
+
+					regionalConfig := sw.AWSConfig
+					if r != "global" {
+						regionalConfig.Region = r
+					}
+
+					// send delivers a chunk unless the whole run is being torn
+					// down (consumer gone), in which case it drops the chunk
+					// instead of blocking the worker forever.
+					send := func(chunk model.ResultChunk) {
+						select {
+						case chunks <- chunk:
+						case <-gCtx.Done():
+						}
+					}
+
+					input := services.CollectInput{
+						Config:    e.Config,
+						AWSConfig: regionalConfig,
+						Region:    r,
+						AccountID: sw.AccountID,
+						Filters: model.Filter{
+							Regions: e.Config.Filters.Regions,
+							States:  e.Config.Filters.States,
+							Tags:    e.Config.Filters.Tags,
+						},
+						DetailLevel: services.DetailLevelSummary,
+					}
+
+					// Stream page-sized batches as the collector gathers them so
+					// results surface after the first page round-trip, not after
+					// the last. emitted counts streamed resources (post-filter)
+					// so the error path below can still flag partial results;
+					// collectors call Emit from this goroutine, so no locking.
+					emitted := 0
+					input.Emit = func(batch []model.Resource) {
+						for i := range batch {
+							if batch[i].AccountID == "" {
+								batch[i].AccountID = sw.Name
+							}
+						}
+						filtered := filterResources(batch, input.Filters)
+						emitted += len(filtered)
+						if len(filtered) > 0 {
+							send(model.ResultChunk{Resources: filtered})
+						}
+					}
+
+					res, err := s.Collect(collectCtx, input)
+					for i := range res {
+						if res[i].AccountID == "" {
+							res[i].AccountID = sw.Name
+						}
+					}
+					filteredRes := filterResources(res, input.Filters)
+					if err != nil {
+						// Collectors are best-effort: res may hold resources
+						// gathered before the failure (and more may have been
+						// streamed already). Keep them and flag the error as
+						// partial so consumers can say so.
+						partial := len(filteredRes) > 0 || emitted > 0
+						code := "CollectionError"
+						msg := err.Error()
+						switch {
+						case awserr.IsAuthError(err):
+							code = "AccessDenied"
+							msg = awserr.FriendlyMessage(err, s.Name())
+							slog.Warn("Access denied",
+								"service", s.Name(), "region", r, "keptResources", len(filteredRes)+emitted)
+						case errors.Is(err, context.DeadlineExceeded):
+							code = "Timeout"
+							msg = fmt.Sprintf("collection timed out after %ds (app.timeoutSeconds); results are incomplete",
+								e.Config.App.TimeoutSeconds)
+							slog.Warn("Collection timed out",
+								"service", s.Name(), "region", r, "keptResources", len(filteredRes)+emitted)
+						default:
+							slog.Warn("Collection error",
+								"service", s.Name(), "region", r, "keptResources", len(filteredRes)+emitted,
+								"error", err.Error())
+						}
+						progressSvc := s.Name()
+						if len(e.Config.Accounts) > 0 {
+							progressSvc = sw.Name + "/" + s.Name()
+						}
+						send(model.ResultChunk{
+							Resources: filteredRes,
+							Errors: []model.ExploreError{{
+								Service: s.Name(),
+								Region:  r,
+								Code:    code,
+								Message: msg,
+								Partial: partial,
+							}},
+							Progress: &model.TaskProgress{Service: progressSvc, Region: r},
+						})
+						return nil
+					}
+
+					// Always send the final chunk — even with zero resources —
+					// so the Progress marker reaches consumers for every task.
+					progressSvc := s.Name()
+					if len(e.Config.Accounts) > 0 {
+						progressSvc = sw.Name + "/" + s.Name()
 					}
 					send(model.ResultChunk{
 						Resources: filteredRes,
-						Errors: []model.ExploreError{{
-							Service: s.Name(),
-							Region:  r,
-							Code:    code,
-							Message: msg,
-							Partial: partial,
-						}},
-						Progress: &model.TaskProgress{Service: s.Name(), Region: r},
+						Progress:  &model.TaskProgress{Service: progressSvc, Region: r},
 					})
 					return nil
-				}
-
-				// Always send the final chunk — even with zero resources —
-				// so the Progress marker reaches consumers for every task.
-				send(model.ResultChunk{
-					Resources: filteredRes,
-					Progress:  &model.TaskProgress{Service: s.Name(), Region: r},
 				})
-				return nil
-			})
+			}
 		}
 	}
 
