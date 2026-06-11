@@ -207,11 +207,21 @@ func (c *CWLogsClient) ListLogStreams(ctx context.Context, region, logGroupName 
 // pages oldest-first, so it scans a 24-hour lookback window to the end and
 // keeps the last `limit` events.
 func (c *CWLogsClient) GetLogEvents(ctx context.Context, region, logGroupName, logStreamName, filterPattern string, limit int32) ([]types.FilteredLogEvent, error) {
+	start := time.Now().Add(-24 * time.Hour).UnixMilli()
+	return c.GetLogEventsSince(ctx, region, logGroupName, logStreamName, filterPattern, start, limit)
+}
+
+// GetLogEventsSince pages FilterLogEvents forward from startMillis (inclusive),
+// keeping at most `limit` of the most recent events. The full log viewer uses
+// it for the initial backfill and to stream events newer than the last one
+// seen; StartTime being inclusive means the caller must de-duplicate by event
+// ID across calls.
+func (c *CWLogsClient) GetLogEventsSince(ctx context.Context, region, logGroupName, logStreamName, filterPattern string, startMillis int64, limit int32) ([]types.FilteredLogEvent, error) {
 	const maxPages = 20
 
 	input := &cloudwatchlogs.FilterLogEventsInput{
 		LogGroupName: aws.String(logGroupName),
-		StartTime:    aws.Int64(time.Now().Add(-24 * time.Hour).UnixMilli()),
+		StartTime:    aws.Int64(startMillis),
 	}
 	if logStreamName != "" {
 		input.LogStreamNames = []string{logStreamName}

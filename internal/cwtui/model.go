@@ -2,7 +2,6 @@ package cwtui
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -50,9 +49,8 @@ type model struct {
 	height int
 
 	// Navigation & State
-	focus      focusArea
-	view       activeView
-	showDetail bool
+	focus focusArea
+	view  activeView
 
 	// Log Groups Panel
 	groups            []LogGroup
@@ -78,9 +76,8 @@ type model struct {
 	eventsLoading     bool
 	groupLevelSearch  bool // If true, queries entire group instead of specific stream
 
-	// Expand Event Modal
-	selectedEvent        *types.FilteredLogEvent
-	expandedScrollOffset int
+	// Full log viewer (opened with Enter on an event)
+	viewer logViewer
 
 	// Watch Mode (Live tailing)
 	watchMode bool
@@ -139,6 +136,10 @@ func NewModel(ctx context.Context, awsCfg *config.AWSConfig, regions []string, a
 	eSearch.Placeholder = "CloudWatch pattern (e.g. ERROR, panic)…"
 	eSearch.Width = 40
 
+	vSearch := textinput.New()
+	vSearch.Placeholder = "Find in log…"
+	vSearch.Width = 40
+
 	gSearch.SetValue(groupFilter)
 	sSearch.SetValue(streamFilter)
 	eSearch.SetValue(eventPattern)
@@ -156,6 +157,7 @@ func NewModel(ctx context.Context, awsCfg *config.AWSConfig, regions []string, a
 		groupSearch:  gSearch,
 		streamSearch: sSearch,
 		eventSearch:  eSearch,
+		viewer:       logViewer{search: vSearch},
 	}
 
 	return m, nil
@@ -176,6 +178,9 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.WindowSizeMsg:
 		m.width = msg.Width
 		m.height = msg.Height
+		if m.viewer.active {
+			m.viewer.rebuild(m.viewerWrapWidth())
+		}
 
 	case spinner.TickMsg:
 		var cmd tea.Cmd
@@ -230,6 +235,15 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 		}
 
+	case viewerEventsMsg:
+		m.handleViewerEvents(msg, &cmds)
+
+	case viewerTickMsg:
+		// Stream new events while the viewer stays open on the same target.
+		if m.viewer.active && msg.key == m.viewer.key {
+			cmds = append(cmds, m.loadViewerEventsCmd(false), m.viewerTickCmd())
+		}
+
 	case tea.KeyMsg:
 		// Error screen: Enter/Esc clears the error and retries, q quits.
 		if m.err != nil {
@@ -243,6 +257,12 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					cmds = append(cmds, m.loadGroupsCmd(""))
 				}
 			}
+			return m, tea.Batch(cmds...)
+		}
+
+		// Full log viewer captures all keys while open
+		if m.viewer.active {
+			m.handleViewerKeys(msg, &cmds)
 			return m, tea.Batch(cmds...)
 		}
 
@@ -298,27 +318,6 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				var cmd tea.Cmd
 				m.eventSearch, cmd = m.eventSearch.Update(msg)
 				cmds = append(cmds, cmd)
-			}
-			return m, tea.Batch(cmds...)
-		}
-
-		// Detail overlay keys
-		if m.showDetail {
-			switch msg.String() {
-			case "esc", "q", "enter":
-				m.showDetail = false
-			case "up", "k":
-				if m.expandedScrollOffset > 0 {
-					m.expandedScrollOffset--
-				}
-			case "down", "j":
-				m.expandedScrollOffset++
-			case "y":
-				if m.selectedEvent != nil {
-					_ = clipboard.WriteAll(aws.ToString(m.selectedEvent.Message))
-					m.setToast("Copied event message to clipboard")
-					cmds = append(cmds, toastCmd(3*time.Second))
-				}
 			}
 			return m, tea.Batch(cmds...)
 		}
@@ -481,9 +480,7 @@ func (m *model) handleSelection(cmds *[]tea.Cmd) {
 		if len(m.events) == 0 {
 			return
 		}
-		m.selectedEvent = &m.events[m.selectedEventIdx]
-		m.showDetail = true
-		m.expandedScrollOffset = 0
+		m.openViewer(cmds)
 	}
 }
 
@@ -514,20 +511,6 @@ func (m *model) handleCopy(cmds *[]tea.Cmd) {
 }
 
 func (m *model) handleExport(cmds *[]tea.Cmd) {
-	if len(m.events) == 0 {
-		m.setToast("No events to export")
-		*cmds = append(*cmds, toastCmd(3*time.Second))
-		return
-	}
-	home, err := os.UserHomeDir()
-	if err != nil {
-		m.setToast("Failed to find home: " + err.Error())
-		*cmds = append(*cmds, toastCmd(3*time.Second))
-		return
-	}
-	dir := filepath.Join(home, ".aws_explorer", "logs")
-	_ = os.MkdirAll(dir, 0755)
-
 	grpName := "unknown-group"
 	if grp, ok := m.selectedGroup(); ok {
 		grpName = sanitizeFilename(grp.Region + "-" + aws.ToString(grp.LogGroupName))
@@ -536,22 +519,46 @@ func (m *model) handleExport(cmds *[]tea.Cmd) {
 	if !m.groupLevelSearch && len(m.filteredStreams) > 0 {
 		streamName = sanitizeFilename(aws.ToString(m.filteredStreams[m.selectedStreamIdx].LogStreamName))
 	}
-	filename := fmt.Sprintf("cw-logs-%s-%s-%s.log", grpName, streamName, time.Now().Format("20060102-150405"))
-	path := filepath.Join(dir, filename)
 
-	var sb strings.Builder
-	for _, ev := range m.events {
-		t := time.Unix(0, aws.ToInt64(ev.Timestamp)*int64(time.Millisecond))
-		sb.WriteString(fmt.Sprintf("[%s] %s\n", t.Format("2006-01-02 15:04:05.000"), aws.ToString(ev.Message)))
-	}
-
-	err = os.WriteFile(path, []byte(sb.String()), 0644)
+	path, err := exportEvents(m.events, grpName, streamName)
 	if err != nil {
 		m.setToast("Export failed: " + err.Error())
 	} else {
 		m.setToast("Exported logs to " + path)
 	}
 	*cmds = append(*cmds, toastCmd(4*time.Second))
+}
+
+// formatEvents renders events as timestamped plain-text lines, the shared
+// format for clipboard copies and file exports.
+func formatEvents(events []types.FilteredLogEvent) string {
+	var sb strings.Builder
+	for _, ev := range events {
+		t := time.Unix(0, aws.ToInt64(ev.Timestamp)*int64(time.Millisecond))
+		sb.WriteString(fmt.Sprintf("[%s] %s\n", t.Format("2006-01-02 15:04:05.000"), aws.ToString(ev.Message)))
+	}
+	return sb.String()
+}
+
+// exportEvents writes events to ~/.aws_explorer/logs and returns the path.
+func exportEvents(events []types.FilteredLogEvent, grpLabel, streamLabel string) (string, error) {
+	if len(events) == 0 {
+		return "", fmt.Errorf("no events to export")
+	}
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return "", fmt.Errorf("failed to find home: %w", err)
+	}
+	dir := filepath.Join(home, ".aws_explorer", "logs")
+	if err := os.MkdirAll(dir, 0755); err != nil {
+		return "", err
+	}
+	filename := fmt.Sprintf("cw-logs-%s-%s-%s.log", grpLabel, streamLabel, time.Now().Format("20060102-150405"))
+	path := filepath.Join(dir, filename)
+	if err := os.WriteFile(path, []byte(formatEvents(events)), 0644); err != nil {
+		return "", err
+	}
+	return path, nil
 }
 
 func (m *model) filterGroups() {
@@ -650,6 +657,10 @@ func (m *model) View() string {
 		return m.renderErrorView()
 	}
 
+	if m.viewer.active {
+		return m.applyToast(m.renderViewer())
+	}
+
 	var sb strings.Builder
 
 	// Main Layout: Sidebar & Content Panel
@@ -690,27 +701,26 @@ func (m *model) View() string {
 
 	sb.WriteString(ui.StatusBar(m.width, statusText, m.getHelpHints()))
 
-	// Modals/Overlays
-	rendered := sb.String()
-	if m.showDetail {
-		rendered = m.overlayDetail(rendered)
-	}
+	return m.applyToast(sb.String())
+}
 
-	if m.toast != "" && time.Now().Before(m.toastExp) {
-		toastRendered := lipgloss.NewStyle().
-			Background(lipgloss.Color(ui.ColorSuccess())).
-			Foreground(lipgloss.Color(ui.ColorHighlightText())).
-			Padding(0, 2).
-			Bold(true).
-			Render("✓ " + m.toast)
-		lines := strings.Split(rendered, "\n")
-		if len(lines) >= 2 {
-			tl := lipgloss.PlaceHorizontal(m.width, lipgloss.Right, toastRendered)
-			lines[1] = tl
-			rendered = strings.Join(lines, "\n")
-		}
+// applyToast paints the active toast notification over the rendered view.
+func (m *model) applyToast(rendered string) string {
+	if m.toast == "" || !time.Now().Before(m.toastExp) {
+		return rendered
 	}
-
+	toastRendered := lipgloss.NewStyle().
+		Background(lipgloss.Color(ui.ColorSuccess())).
+		Foreground(lipgloss.Color(ui.ColorHighlightText())).
+		Padding(0, 2).
+		Bold(true).
+		Render("✓ " + m.toast)
+	lines := strings.Split(rendered, "\n")
+	if len(lines) >= 2 {
+		tl := lipgloss.PlaceHorizontal(m.width, lipgloss.Right, toastRendered)
+		lines[1] = tl
+		rendered = strings.Join(lines, "\n")
+	}
 	return rendered
 }
 
@@ -960,65 +970,6 @@ func (m *model) renderErrorView() string {
 	return borderStyle.Render(b.String())
 }
 
-func (m *model) overlayDetail(bg string) string {
-	if m.selectedEvent == nil {
-		return bg
-	}
-
-	var b strings.Builder
-	ev := m.selectedEvent
-	t := time.Unix(0, aws.ToInt64(ev.Timestamp)*int64(time.Millisecond))
-
-	headingStyle := lipgloss.NewStyle().Foreground(lipgloss.Color(ui.ColorHeading())).Bold(true)
-	metaStyle := lipgloss.NewStyle().Foreground(lipgloss.Color(ui.ColorMuted()))
-
-	b.WriteString(headingStyle.Render("Log event details") + "\n")
-	b.WriteString(metaStyle.Render("Timestamp : "+t.Format("2006-01-02 15:04:05.000 MST")) + "\n")
-	b.WriteString(metaStyle.Render("Stream    : "+aws.ToString(ev.LogStreamName)) + "\n")
-	b.WriteString("\n" + headingStyle.Render("Message:") + "\n\n")
-
-	rawMsg := aws.ToString(ev.Message)
-	// Try to pretty-print if it's JSON
-	var parsed interface{}
-	if err := json.Unmarshal([]byte(rawMsg), &parsed); err == nil {
-		if indented, err := json.MarshalIndent(parsed, "", "  "); err == nil {
-			rawMsg = string(indented)
-		}
-	}
-
-	b.WriteString(rawMsg + "\n")
-
-	modalW := m.width - 10
-	modalH := m.height - 6
-	if modalW < 40 {
-		modalW = 40
-	}
-	if modalH < 10 {
-		modalH = 10
-	}
-
-	// Support simple vertical scroll for massive stacktraces/JSON structures
-	lines := strings.Split(b.String(), "\n")
-	var scrollable []string
-	if m.expandedScrollOffset >= len(lines) {
-		m.expandedScrollOffset = max(0, len(lines)-1)
-	}
-	for i := m.expandedScrollOffset; i < len(lines) && len(scrollable) < modalH-4; i++ {
-		scrollable = append(scrollable, lines[i])
-	}
-
-	renderedModal := lipgloss.NewStyle().
-		Border(lipgloss.RoundedBorder()).
-		BorderForeground(lipgloss.Color(ui.ColorBorderFocus())).
-		Background(lipgloss.Color(ui.ColorBackground())).
-		Padding(1, 2).
-		Width(modalW).
-		Height(modalH).
-		Render(strings.Join(scrollable, "\n"))
-
-	return lipgloss.Place(m.width, m.height-4, lipgloss.Center, lipgloss.Center, renderedModal)
-}
-
 func (m *model) getBorderColor(area focusArea) string {
 	if m.focus == area {
 		return ui.ColorBorderFocus()
@@ -1029,11 +980,23 @@ func (m *model) getBorderColor(area focusArea) string {
 func (m *model) getHelpHints() []ui.KeyHint {
 	var hints []ui.KeyHint
 
-	if m.showDetail {
+	if m.viewer.active {
+		if m.viewer.searchActive {
+			return []ui.KeyHint{
+				ui.H("Enter", "jump to match"),
+				ui.H("Esc", "cancel"),
+			}
+		}
 		return []ui.KeyHint{
 			ui.H("↑/↓", "scroll"),
-			ui.H("y", "copy"),
-			ui.H("Esc/Enter", "close"),
+			ui.H("PgUp/PgDn", "page"),
+			ui.H("/", "find"),
+			ui.H("n/N", "next/prev"),
+			ui.H("G", "tail"),
+			ui.H("f", "follow"),
+			ui.H("y", "copy all"),
+			ui.H("s", "export"),
+			ui.H("Esc", "close"),
 		}
 	}
 
@@ -1055,7 +1018,7 @@ func (m *model) getHelpHints() []ui.KeyHint {
 	case focusEvents:
 		hints = append(hints,
 			ui.H("↑/↓", "events"),
-			ui.H("Enter", "expand"),
+			ui.H("Enter", "full log"),
 			ui.H("/", "pattern"),
 			ui.H("W", "tail watch"),
 			ui.H("y", "copy"),

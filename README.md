@@ -648,6 +648,24 @@ otherwise the config's `aws.regions` list is used.
 ./bin/aws_explorer cw -g /aws/lambda/my-fn -f ERROR
 ```
 
+### Full log viewer
+
+Pressing `Enter` on a log event opens the **full log viewer**: a full-screen
+page with the entire log (24-hour lookback, most recent 2000 events) for the
+selected stream — or the whole group in group-level search — that streams new
+events live as they arrive.
+
+| Key | Action |
+|-----|--------|
+| `↑`/`↓`, `PgUp`/`PgDn`, `Ctrl+U`/`Ctrl+D` | Scroll (scrolling up pauses tailing) |
+| `g` / `G` | Jump to top / jump to bottom and resume tailing |
+| `f` | Toggle follow (auto-scroll as new events stream in) |
+| `/` | Search within the log (case-insensitive, matches highlighted) |
+| `n` / `N` | Jump to next / previous match |
+| `y` | Copy the entire log to the clipboard |
+| `s` | Export the log to `~/.aws_explorer/logs/` |
+| `Esc` / `q` | Close the viewer |
+
 ## Makefile Targets
 
 ```bash
