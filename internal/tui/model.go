@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/atotto/clipboard"
+	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/charmbracelet/bubbles/spinner"
 	"github.com/charmbracelet/bubbles/textinput"
 	"github.com/charmbracelet/bubbles/viewport"
@@ -221,6 +222,7 @@ type tuiModel struct {
 	watchTimerID int
 	prevStates   map[string]string
 	changedRows  map[string]time.Time
+	watchSeen    map[string]bool // keys seen during the in-flight watch refresh
 
 	showXref      bool
 	xrefResources []model.Resource
@@ -295,6 +297,11 @@ func NewModelWithSeed(ctx context.Context, eng *engine.Engine, configPath string
 }
 
 func (m tuiModel) Init() tea.Cmd {
+	if m.engine == nil {
+		// Offline snapshot view: no scan to run, the seed is the inventory.
+		close(m.chunks)
+		return tea.Batch(waitForChunk(m.chunks, m.scanGen), m.spinner.Tick)
+	}
 	go m.engine.StreamRun(m.scanCtx, m.chunks)
 	return tea.Batch(waitForChunk(m.chunks, m.scanGen), m.spinner.Tick)
 }
@@ -668,18 +675,16 @@ func (m tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, tea.Batch(cmds...)
 
 		case "W":
+			if m.engine == nil {
+				m.setToast("Watch mode unavailable in offline snapshot view")
+				cmds = append(cmds, toastCmd(3*time.Second))
+				return m, tea.Batch(cmds...)
+			}
 			m.watchMode = !m.watchMode
 			if m.watchMode {
 				m.watchTimerID++
 				m.setToast("Watch mode enabled (5s auto-refresh)")
-				m.prevStates = make(map[string]string)
-				for _, r := range m.sorted {
-					key := r.ARN
-					if key == "" {
-						key = r.ID
-					}
-					m.prevStates[key] = r.State
-				}
+				m.snapshotStates()
 				cmds = append(cmds, m.watchTick(5*time.Second, m.watchTimerID))
 			} else {
 				m.setToast("Watch mode disabled")
@@ -687,8 +692,12 @@ func (m tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			cmds = append(cmds, toastCmd(3*time.Second))
 			return m, tea.Batch(cmds...)
 
+		// The debug panes and copy helpers below only apply while the detail
+		// panel is open; in table focus the same keys belong to the table
+		// (k = up, g = top, …) and fall through to it.
 		case "t":
-			if res, ok := m.selectedResource(); ok {
+			if m.focus == focusDetail && m.detail != nil {
+				res := *m.detail
 				m.showTimeline = !m.showTimeline
 				if m.showTimeline {
 					m.showLogs = false
@@ -697,14 +706,15 @@ func (m tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					m.timelineLoading = true
 					m.timelineErr = nil
 					m.timelineEvents = nil
-					cmds = append(cmds, m.fetchTimelineCmd(res.Region, res.ID))
+					cmds = append(cmds, m.fetchTimelineCmd(res))
 				}
 				m.syncDetailViewport()
+				return m, tea.Batch(cmds...)
 			}
-			return m, tea.Batch(cmds...)
 
 		case "l":
-			if res, ok := m.selectedResource(); ok {
+			if m.focus == focusDetail && m.detail != nil {
+				res := *m.detail
 				m.showLogs = !m.showLogs
 				if m.showLogs {
 					m.showTimeline = false
@@ -712,39 +722,47 @@ func (m tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					m.showXref = false
 					logGroup := logGroupFor(res)
 					if logGroup == "" {
-						m.logsErr = fmt.Errorf("No standard log group found for service %s", res.Service)
+						m.logsErr = fmt.Errorf("no standard log group known for service %s", res.Service)
 						m.logsLoading = false
 						m.logsLines = nil
 					} else {
 						m.logsLoading = true
 						m.logsErr = nil
 						m.logsLines = nil
-						cmds = append(cmds, m.fetchLogsCmd(res.Region, logGroup, res.ID))
+						cmds = append(cmds, m.fetchLogsCmd(res, logGroup))
 					}
 				}
 				m.syncDetailViewport()
+				return m, tea.Batch(cmds...)
 			}
-			return m, tea.Batch(cmds...)
 
 		case "g":
-			if res, ok := m.selectedResource(); ok {
+			if m.focus == focusDetail && m.detail != nil {
+				res := *m.detail
 				m.showMetrics = !m.showMetrics
 				if m.showMetrics {
 					m.showTimeline = false
 					m.showLogs = false
 					m.showXref = false
-					m.metricsLoading = true
-					m.metricsErr = nil
-					m.metricsData = nil
-					ns, name, dims := metricParamsFor(res)
-					cmds = append(cmds, m.fetchMetricsCmd(res.Region, ns, name, dims, res.ID))
+					ns, name, dims, ok := metricParamsFor(res)
+					if !ok {
+						m.metricsErr = fmt.Errorf("no metric mapping for service %s", res.Service)
+						m.metricsLoading = false
+						m.metricsData = nil
+					} else {
+						m.metricsLoading = true
+						m.metricsErr = nil
+						m.metricsData = nil
+						cmds = append(cmds, m.fetchMetricsCmd(res, ns, name, dims))
+					}
 				}
 				m.syncDetailViewport()
+				return m, tea.Batch(cmds...)
 			}
-			return m, tea.Batch(cmds...)
 
 		case "x":
-			if res, ok := m.selectedResource(); ok {
+			if m.focus == focusDetail && m.detail != nil {
+				res := *m.detail
 				m.showXref = !m.showXref
 				if m.showXref {
 					m.showTimeline = false
@@ -753,40 +771,32 @@ func (m tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					m.xrefResources = m.findReferences(res.ID)
 				}
 				m.syncDetailViewport()
+				return m, tea.Batch(cmds...)
 			}
-			return m, tea.Batch(cmds...)
 
 		case "o":
-			res, ok := m.selectedResource()
-			if m.showDetail && m.detail != nil {
-				res, ok = *m.detail, true
-			}
-			if ok {
-				url := awsutil.ConsoleURL(res)
+			if m.focus == focusDetail && m.detail != nil {
+				url := awsutil.ConsoleURL(*m.detail)
 				if err := clipboard.WriteAll(url); err != nil {
 					m.setToast("Copy URL failed: " + err.Error())
 				} else {
 					m.setToast("Copied AWS Console URL")
 				}
 				cmds = append(cmds, toastCmd(3*time.Second))
+				return m, tea.Batch(cmds...)
 			}
-			return m, tea.Batch(cmds...)
 
 		case "k":
-			res, ok := m.selectedResource()
-			if m.showDetail && m.detail != nil {
-				res, ok = *m.detail, true
-			}
-			if ok {
-				cmdStr := awsutil.AWSCLICommand(res)
+			if m.focus == focusDetail && m.detail != nil {
+				cmdStr := awsutil.AWSCLICommand(*m.detail)
 				if err := clipboard.WriteAll(cmdStr); err != nil {
 					m.setToast("Copy command failed: " + err.Error())
 				} else {
 					m.setToast("Copied AWS CLI command")
 				}
 				cmds = append(cmds, toastCmd(3*time.Second))
+				return m, tea.Batch(cmds...)
 			}
-			return m, tea.Batch(cmds...)
 		}
 
 	case tea.MouseMsg:
@@ -832,6 +842,7 @@ func (m tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.updateTableRows()
 		if closed {
 			m.done = true
+			m.finishWatchSweep()
 		} else {
 			cmds = append(cmds, waitForChunk(m.chunks, m.scanGen))
 		}
@@ -843,6 +854,7 @@ func (m tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		m.loading = false
 		m.done = true
+		m.finishWatchSweep()
 
 	case engineSwitchedMsg:
 		m.switching = false
@@ -894,15 +906,8 @@ func (m tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, tea.Batch(cmds...)
 
 	case watchTickMsg:
-		if m.watchMode && msg.timerID == m.watchTimerID {
-			m.prevStates = make(map[string]string)
-			for _, r := range m.sorted {
-				key := r.ARN
-				if key == "" {
-					key = r.ID
-				}
-				m.prevStates[key] = r.State
-			}
+		if m.watchMode && msg.timerID == m.watchTimerID && m.engine != nil {
+			m.snapshotStates()
 			cmds = append(cmds, m.watchRefreshCmd(), m.watchTick(5*time.Second, m.watchTimerID))
 		}
 		return m, tea.Batch(cmds...)
@@ -979,8 +984,19 @@ func (m *tuiModel) applyChunk(c model.ResultChunk) {
 	}
 }
 
+// resourceKey identifies a resource for dedupe and state tracking: the ARN
+// when present, else a composite of the identifying fields (matching the
+// fallback key used by awsutil.DiffScans).
+func resourceKey(r model.Resource) string {
+	if r.ARN != "" {
+		return r.ARN
+	}
+	return r.Service + "\x00" + r.Type + "\x00" + r.Region + "\x00" + r.ID
+}
+
 // mergeResources folds newly arrived resources into the sorted view. It
-// applies the same ARN dedupe rule as summary.Dedupe (richer entry wins) but
+// applies the same dedupe rule as summary.Dedupe (richer entry wins; an
+// equally rich entry replaces in place so re-scans pick up state changes) but
 // incrementally: the batch is sorted on its own (k log k) and merged into the
 // already-sorted slice (O(n+k)), instead of re-deduping and re-sorting every
 // collected resource on every chunk.
@@ -990,23 +1006,24 @@ func (m *tuiModel) mergeResources(batch []model.Resource) {
 	}
 
 	fresh := make([]model.Resource, 0, len(batch))
-	inBatch := make(map[string]int) // ARN -> index into fresh (same-batch dupes)
+	inBatch := make(map[string]int) // key -> index into fresh (same-batch dupes)
 	var drops []int                 // indexes into m.sorted superseded by a richer entry
 
 	for _, r := range batch {
-		if r.ARN == "" {
-			// No ARN: cannot be matched, always retained (as in Dedupe).
-			fresh = append(fresh, r)
-			continue
+		key := resourceKey(r)
+		if m.watchSeen != nil {
+			m.watchSeen[key] = true
 		}
-		if fi, ok := inBatch[r.ARN]; ok {
+		if fi, ok := inBatch[key]; ok {
 			if summary.Richness(r) > summary.Richness(fresh[fi]) {
 				fresh[fi] = r
 			}
 			continue
 		}
-		if idx, seen := m.byARN[r.ARN]; seen {
-			if summary.Richness(r) > summary.Richness(m.sorted[idx]) {
+		if idx, seen := m.byARN[key]; seen {
+			// ">=" so a re-scan of the same resource updates it in place,
+			// surfacing state changes; only a strictly poorer entry is dropped.
+			if summary.Richness(r) >= summary.Richness(m.sorted[idx]) {
 				if m.sorted[idx].Service == r.Service && m.sorted[idx].Name == r.Name {
 					// Same sort position: replace in place.
 					m.sorted[idx] = r
@@ -1015,13 +1032,13 @@ func (m *tuiModel) mergeResources(batch []model.Resource) {
 					// Sort key changed (e.g. the typed entry carries a real
 					// name the tag sweep lacked): drop and re-insert.
 					drops = append(drops, idx)
-					inBatch[r.ARN] = len(fresh)
+					inBatch[key] = len(fresh)
 					fresh = append(fresh, r)
 				}
 			}
 			continue
 		}
-		inBatch[r.ARN] = len(fresh)
+		inBatch[key] = len(fresh)
 		fresh = append(fresh, r)
 	}
 
@@ -1072,16 +1089,14 @@ func (m *tuiModel) mergeResources(batch []model.Resource) {
 		m.searchText = mergedText
 	}
 
-	// Positions shifted: refresh the ARN index. (In-place replacements alone
+	// Positions shifted: refresh the key index. (In-place replacements alone
 	// don't shift, so the rebuild is skipped for richness-only updates.)
 	if len(fresh) > 0 || len(drops) > 0 {
 		for _, r := range fresh {
 			m.svcSet[r.Service] = true
 		}
 		for i, r := range m.sorted {
-			if r.ARN != "" {
-				m.byARN[r.ARN] = i
-			}
+			m.byARN[resourceKey(r)] = i
 		}
 	}
 
@@ -1089,18 +1104,55 @@ func (m *tuiModel) mergeResources(batch []model.Resource) {
 		if m.changedRows == nil {
 			m.changedRows = make(map[string]time.Time)
 		}
-		for _, r := range m.sorted {
-			key := r.ARN
-			if key == "" {
-				key = r.ID
+		now := time.Now()
+		for key, exp := range m.changedRows {
+			if now.After(exp) {
+				delete(m.changedRows, key)
 			}
-			if oldState, ok := m.prevStates[key]; ok {
-				if oldState != r.State {
-					m.changedRows[key] = time.Now().Add(10 * time.Second)
-				}
+		}
+		for _, r := range m.sorted {
+			key := resourceKey(r)
+			if oldState, ok := m.prevStates[key]; ok && oldState != r.State {
+				m.changedRows[key] = now.Add(10 * time.Second)
 			}
 		}
 	}
+}
+
+// finishWatchSweep removes rows that did not reappear in the just-completed
+// watch refresh, so deleted resources drop out of the table instead of
+// lingering forever.
+func (m *tuiModel) finishWatchSweep() {
+	if m.watchSeen == nil {
+		return
+	}
+	seen := m.watchSeen
+	m.watchSeen = nil
+
+	kept := m.sorted[:0]
+	keptText := m.searchText[:0]
+	removed := false
+	for i, r := range m.sorted {
+		if seen[resourceKey(r)] {
+			kept = append(kept, r)
+			keptText = append(keptText, m.searchText[i])
+		} else {
+			removed = true
+		}
+	}
+	if !removed {
+		return
+	}
+	m.sorted = kept
+	m.searchText = keptText
+	m.byARN = make(map[string]int, len(m.sorted))
+	m.svcSet = make(map[string]bool)
+	for i, r := range m.sorted {
+		m.byARN[resourceKey(r)] = i
+		m.svcSet[r.Service] = true
+	}
+	m.onResultsChanged()
+	m.updateTableRows()
 }
 
 // onResultsChanged re-derives the service list after new chunks were merged,
@@ -1270,24 +1322,16 @@ func (m *tuiModel) rowsFor(svc string) []table.Row {
 		if len(m.cfg.Accounts) > 0 {
 			row = append(row, r.AccountID)
 		}
-		
-		key := r.ARN
-		if key == "" {
-			key = r.ID
-		}
-		
+
+		// Plain-text marker for recent state transitions: escape codes inside
+		// cells would throw off the table's width/truncation accounting.
 		stateStr := r.State
 		if m.changedRows != nil {
-			if exp, ok := m.changedRows[key]; ok && time.Now().Before(exp) {
-				// Colorize state transition
-				stateStr = lipgloss.NewStyle().
-					Foreground(lipgloss.Color(ui.ColorHighlightText())).
-					Background(lipgloss.Color(ui.ColorSuccess())).
-					Bold(true).
-					Render(r.State)
+			if exp, ok := m.changedRows[resourceKey(r)]; ok && time.Now().Before(exp) {
+				stateStr = "* " + r.State
 			}
 		}
-		
+
 		row = append(row, r.Service, r.Type, r.Region, r.ID, r.Name, stateStr)
 		rows = append(rows, row)
 	}
@@ -1559,6 +1603,9 @@ func (m *tuiModel) applySwitcher(profile, region string) tea.Cmd {
 // a fresh StreamRun against the (possibly new) engine. The generation counter
 // makes any stragglers from the old scan inert.
 func (m *tuiModel) restartScan() tea.Cmd {
+	if m.engine == nil {
+		return nil
+	}
 	if m.scanCancel != nil {
 		m.scanCancel()
 	}
@@ -1587,7 +1634,19 @@ func (m *tuiModel) restartScan() tea.Cmd {
 	return tea.Batch(waitForChunk(m.chunks, m.scanGen), m.spinner.Tick)
 }
 
+// snapshotStates records the current state of every row so the next merge can
+// flag transitions.
+func (m *tuiModel) snapshotStates() {
+	m.prevStates = make(map[string]string, len(m.sorted))
+	for _, r := range m.sorted {
+		m.prevStates[resourceKey(r)] = r.State
+	}
+}
+
 func (m *tuiModel) watchRefreshCmd() tea.Cmd {
+	if m.engine == nil {
+		return nil
+	}
 	if m.scanCancel != nil {
 		m.scanCancel()
 	}
@@ -1595,6 +1654,8 @@ func (m *tuiModel) watchRefreshCmd() tea.Cmd {
 	m.scanGen++
 	m.loading = true
 	m.done = false
+	m.watchSeen = make(map[string]bool)
+	m.resetTaskProgress()
 	m.chunks = make(chan model.ResultChunk, 64)
 	go m.engine.StreamRun(m.scanCtx, m.chunks)
 	return waitForChunk(m.chunks, m.scanGen)
@@ -2251,8 +2312,12 @@ func (m tuiModel) renderDetail(r model.Resource, width int) string {
 	}
 
 	if m.showMetrics {
-		ns, name, _ := metricParamsFor(r)
-		b.WriteString("\n" + dSec.Render(fmt.Sprintf("METRICS: %s (%s)", name, ns)) + "\n\n")
+		ns, name, _, hasMetric := metricParamsFor(r)
+		header := "METRICS"
+		if hasMetric {
+			header = fmt.Sprintf("METRICS: %s (%s)", name, ns)
+		}
+		b.WriteString("\n" + dSec.Render(header) + "\n\n")
 		if m.metricsLoading {
 			b.WriteString("  Loading metric data...\n")
 		} else if m.metricsErr != nil {
@@ -2427,7 +2492,7 @@ func logGroupFor(r model.Resource) string {
 	return ""
 }
 
-func metricParamsFor(r model.Resource) (namespace, metricName string, dimensions map[string]string) {
+func metricParamsFor(r model.Resource) (namespace, metricName string, dimensions map[string]string, ok bool) {
 	dimensions = make(map[string]string)
 	switch strings.ToLower(r.Service) {
 	case "ec2":
@@ -2443,15 +2508,19 @@ func metricParamsFor(r model.Resource) (namespace, metricName string, dimensions
 		metricName = "Errors"
 		dimensions["FunctionName"] = r.Name
 	case "elbv2":
+		// The LoadBalancer dimension is the ARN suffix after ":loadbalancer/"
+		// (e.g. "app/my-lb/50dc6c495c0c9188").
+		_, lbDim, found := strings.Cut(r.ARN, ":loadbalancer/")
+		if !found {
+			return "", "", nil, false
+		}
 		namespace = "AWS/ApplicationELB"
-		metricName = "UnHealthyHostCount"
-		dimensions["TargetGroup"] = r.ID
+		metricName = "RequestCount"
+		dimensions["LoadBalancer"] = lbDim
 	default:
-		namespace = "AWS/EC2"
-		metricName = "CPUUtilization"
-		dimensions["InstanceId"] = r.ID
+		return "", "", nil, false
 	}
-	return
+	return namespace, metricName, dimensions, true
 }
 
 func getMin(vals []float64) float64 {
@@ -2542,24 +2611,52 @@ func (m *tuiModel) findReferences(resourceID string) []model.Resource {
 	return refs
 }
 
-func (m tuiModel) fetchTimelineCmd(region, resourceID string) tea.Cmd {
+// debugAWSConfig returns the credentials matching the resource's account so
+// the debug panes query the right account during multi-account sweeps. ok is
+// false when no engine is available (offline snapshot view).
+func (m tuiModel) debugAWSConfig(r model.Resource) (aws.Config, bool) {
+	if m.engine == nil {
+		return aws.Config{}, false
+	}
+	return m.engine.AWSConfigFor(r.AccountID), true
+}
+
+func (m tuiModel) fetchTimelineCmd(res model.Resource) tea.Cmd {
+	cfg, ok := m.debugAWSConfig(res)
+	if !ok {
+		return func() tea.Msg {
+			return timelineMsg{resourceID: res.ID, err: fmt.Errorf("not available in offline snapshot view")}
+		}
+	}
 	return func() tea.Msg {
-		events, err := awsutil.FetchCloudTrailEvents(m.ctx, m.engine.AWSConfig, region, resourceID)
-		return timelineMsg{resourceID: resourceID, events: events, err: err}
+		events, err := awsutil.FetchCloudTrailEvents(m.ctx, cfg, res.Region, res.ID)
+		return timelineMsg{resourceID: res.ID, events: events, err: err}
 	}
 }
 
-func (m tuiModel) fetchLogsCmd(region, logGroupName, resourceID string) tea.Cmd {
+func (m tuiModel) fetchLogsCmd(res model.Resource, logGroupName string) tea.Cmd {
+	cfg, ok := m.debugAWSConfig(res)
+	if !ok {
+		return func() tea.Msg {
+			return logsMsg{resourceID: res.ID, err: fmt.Errorf("not available in offline snapshot view")}
+		}
+	}
 	return func() tea.Msg {
-		lines, err := awsutil.FetchRecentLogs(m.ctx, m.engine.AWSConfig, region, logGroupName, "ERROR")
-		return logsMsg{resourceID: resourceID, lines: lines, err: err}
+		lines, err := awsutil.FetchRecentLogs(m.ctx, cfg, res.Region, logGroupName, "ERROR")
+		return logsMsg{resourceID: res.ID, lines: lines, err: err}
 	}
 }
 
-func (m tuiModel) fetchMetricsCmd(region, namespace, metricName string, dimensions map[string]string, resourceID string) tea.Cmd {
+func (m tuiModel) fetchMetricsCmd(res model.Resource, namespace, metricName string, dimensions map[string]string) tea.Cmd {
+	cfg, ok := m.debugAWSConfig(res)
+	if !ok {
+		return func() tea.Msg {
+			return metricsMsg{resourceID: res.ID, err: fmt.Errorf("not available in offline snapshot view")}
+		}
+	}
 	return func() tea.Msg {
-		data, err := awsutil.FetchMetricData(m.ctx, m.engine.AWSConfig, region, namespace, metricName, dimensions)
-		return metricsMsg{resourceID: resourceID, data: data, err: err}
+		data, err := awsutil.FetchMetricData(m.ctx, cfg, res.Region, namespace, metricName, dimensions)
+		return metricsMsg{resourceID: res.ID, data: data, err: err}
 	}
 }
 

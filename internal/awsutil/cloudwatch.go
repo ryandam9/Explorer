@@ -11,8 +11,13 @@ import (
 	"github.com/aws/aws-sdk-go-v2/service/cloudwatchlogs"
 )
 
-// FetchRecentLogs gets the last N lines matching the error pattern from the given log group.
+// FetchRecentLogs gets the last N lines matching the error pattern from the
+// given log group, looking back over the past hour. FilterLogEvents pages
+// oldest-first, so it walks the window to the end and keeps the tail.
 func FetchRecentLogs(ctx context.Context, cfg aws.Config, region, logGroupName, pattern string) ([]string, error) {
+	const keep = 20
+	const maxPages = 10
+
 	cwlCfg := cfg.Copy()
 	if region != "" && region != "global" {
 		cwlCfg.Region = region
@@ -21,20 +26,28 @@ func FetchRecentLogs(ctx context.Context, cfg aws.Config, region, logGroupName, 
 
 	input := &cloudwatchlogs.FilterLogEventsInput{
 		LogGroupName: aws.String(logGroupName),
-		Limit:        aws.Int32(20),
+		StartTime:    aws.Int64(time.Now().Add(-1 * time.Hour).UnixMilli()),
 	}
 	if pattern != "" {
 		input.FilterPattern = aws.String(pattern)
 	}
 
-	resp, err := client.FilterLogEvents(ctx, input)
-	if err != nil {
-		return nil, err
-	}
-
 	var lines []string
-	for _, ev := range resp.Events {
-		lines = append(lines, strings.TrimSpace(aws.ToString(ev.Message)))
+	for page := 0; page < maxPages; page++ {
+		resp, err := client.FilterLogEvents(ctx, input)
+		if err != nil {
+			return nil, err
+		}
+		for _, ev := range resp.Events {
+			lines = append(lines, strings.TrimSpace(aws.ToString(ev.Message)))
+		}
+		if len(lines) > keep {
+			lines = lines[len(lines)-keep:]
+		}
+		if resp.NextToken == nil {
+			break
+		}
+		input.NextToken = resp.NextToken
 	}
 	return lines, nil
 }
@@ -141,7 +154,7 @@ func GenerateSparkline(data []float64) string {
 	}
 	span := maxVal - minVal
 	// 8 levels of block heights
-	blocks := []rune{' ', ' ', '▂', '▃', '▄', '▅', '▆', '▇', '█'}
+	blocks := []rune{'▁', '▂', '▃', '▄', '▅', '▆', '▇', '█'}
 	var sb strings.Builder
 	for _, v := range data {
 		if span == 0 {

@@ -22,7 +22,6 @@ var (
 	cwRoleARN    string
 	cwRegion     string
 	cwTheme      string
-	cwTui        bool
 )
 
 var cwCmd = &cobra.Command{
@@ -55,8 +54,16 @@ var cwCmd = &cobra.Command{
 			}
 		}
 
-		// Initialize UI Theme & Colors
+		// Initialize UI Theme & Colors.
+		// Theme: CLI flag overrides config; config overrides built-in default.
 		ui.InitFromConfig(AppConfig.UI)
+		activeTheme := cwTheme
+		if AppConfig != nil && AppConfig.UI.Theme != "" && cwTheme == "spotted-pardalote" {
+			activeTheme = AppConfig.UI.Theme
+		}
+		if idx, ok := ui.LookupTheme(activeTheme); ok {
+			ui.SetActiveTheme(idx)
+		}
 		// Redirect scan logging to keep TUI screen clean
 		SilenceLogsForTUI()
 
@@ -71,7 +78,7 @@ var cwCmd = &cobra.Command{
 			region = "us-east-1" // ultimate default region
 		}
 
-		m, err := cwtui.NewModel(ctx, cwCfg, region, configFilePath(), AppConfig)
+		m, err := cwtui.NewModel(ctx, cwCfg, region, configFilePath(), AppConfig, cwGroup, cwStream, cwFilter)
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "Error initializing CloudWatch Logs TUI: %v\n", err)
 			os.Exit(1)
@@ -95,6 +102,5 @@ func init() {
 	cwCmd.Flags().StringVar(&cwRoleARN, "role-arn", "", "IAM role ARN to assume via STS (overrides global --role-arn)")
 	cwCmd.Flags().StringVar(&cwRegion, "region", "", "AWS region (overrides global configs/defaults)")
 	cwCmd.Flags().StringVar(&cwTheme, "theme", "spotted-pardalote", "Color theme ("+strings.Join(ui.ThemeNames(), ", ")+")")
-	cwCmd.Flags().BoolVar(&cwTui, "tui", true, "Launch in interactive TUI mode")
 	rootCmd.AddCommand(cwCmd)
 }

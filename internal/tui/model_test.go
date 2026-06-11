@@ -392,3 +392,68 @@ func TestRawJSONDetailToggle(t *testing.T) {
 		t.Fatal("J should toggle the raw JSON view off")
 	}
 }
+
+func TestMergeUpdatesStateOnRescan(t *testing.T) {
+	m := NewModel(context.Background(), nil, "", &config.Config{}).(tuiModel)
+	m = update(m, tea.WindowSizeMsg{Width: 120, Height: 40})
+
+	m = update(m, chunkMsg{chunk: model.ResultChunk{Resources: []model.Resource{
+		{Service: "ec2", Type: "instance", Name: "web", ID: "i-1", ARN: "arn:aws:ec2:i-1", State: "running"},
+	}}})
+
+	// Watch-style re-scan: identical richness, different state.
+	m.snapshotStates()
+	m = update(m, chunkMsg{chunk: model.ResultChunk{Resources: []model.Resource{
+		{Service: "ec2", Type: "instance", Name: "web", ID: "i-1", ARN: "arn:aws:ec2:i-1", State: "stopped"},
+	}}})
+
+	if len(m.sorted) != 1 {
+		t.Fatalf("expected 1 resource after re-scan, got %d", len(m.sorted))
+	}
+	if m.sorted[0].State != "stopped" {
+		t.Errorf("state not updated on re-scan: got %q, want %q", m.sorted[0].State, "stopped")
+	}
+	if _, ok := m.changedRows["arn:aws:ec2:i-1"]; !ok {
+		t.Errorf("state transition not flagged in changedRows")
+	}
+}
+
+func TestMergeDedupesARNLessResources(t *testing.T) {
+	m := NewModel(context.Background(), nil, "", &config.Config{}).(tuiModel)
+	m = update(m, tea.WindowSizeMsg{Width: 120, Height: 40})
+
+	r := model.Resource{Service: "s3", Type: "bucket", Region: "us-east-1", ID: "b1", Name: "logs", State: "active"}
+	m = update(m, chunkMsg{chunk: model.ResultChunk{Resources: []model.Resource{r}}})
+	m = update(m, chunkMsg{chunk: model.ResultChunk{Resources: []model.Resource{r}}})
+
+	if len(m.sorted) != 1 {
+		t.Fatalf("ARN-less resource duplicated on re-scan: got %d rows, want 1", len(m.sorted))
+	}
+}
+
+func TestFinishWatchSweepPrunesVanishedResources(t *testing.T) {
+	m := NewModel(context.Background(), nil, "", &config.Config{}).(tuiModel)
+	m = update(m, tea.WindowSizeMsg{Width: 120, Height: 40})
+
+	m = update(m, chunkMsg{chunk: model.ResultChunk{Resources: []model.Resource{
+		{Service: "ec2", Type: "instance", Name: "web", ID: "i-1", ARN: "arn:aws:ec2:i-1", State: "running"},
+		{Service: "ec2", Type: "instance", Name: "old", ID: "i-2", ARN: "arn:aws:ec2:i-2", State: "running"},
+	}}})
+
+	// Watch refresh in which only i-1 reappears.
+	m.watchSeen = make(map[string]bool)
+	m = update(m, chunkMsg{chunk: model.ResultChunk{Resources: []model.Resource{
+		{Service: "ec2", Type: "instance", Name: "web", ID: "i-1", ARN: "arn:aws:ec2:i-1", State: "running"},
+	}}})
+	m.finishWatchSweep()
+
+	if len(m.sorted) != 1 {
+		t.Fatalf("expected vanished resource pruned, got %d rows: %+v", len(m.sorted), m.sorted)
+	}
+	if m.sorted[0].ID != "i-1" {
+		t.Errorf("wrong resource survived the sweep: %+v", m.sorted[0])
+	}
+	if m.watchSeen != nil {
+		t.Errorf("watchSeen should be reset after the sweep")
+	}
+}

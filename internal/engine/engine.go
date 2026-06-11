@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"sort"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
@@ -44,6 +45,10 @@ type Engine struct {
 	registry        *services.Registry
 	ResolvedRegions []string
 	AccountID       string
+
+	// Per-account credentials resolved by the latest sweep, for AWSConfigFor.
+	sweepMu   sync.RWMutex
+	sweepCfgs map[string]aws.Config
 }
 
 // NewEngine creates a new scanning engine.
@@ -195,10 +200,7 @@ func (e *Engine) PlannedTaskKeys() []string {
 		return keys
 	}
 	for _, acc := range accounts {
-		name := acc.Name
-		if name == "" {
-			name = "default"
-		}
+		name := accountName(acc)
 		for _, srv := range e.registry.GetAll() {
 			srvCfg, ok := e.Config.Services[srv.Name()]
 			if !ok || !srvCfg.Enabled {
@@ -247,6 +249,97 @@ type accountSweep struct {
 	AccountID string
 }
 
+// accountName returns the display/progress name for a configured account
+// sweep. It must be deterministic so PlannedTaskKeys and StreamRun progress
+// markers agree.
+func accountName(acc config.AccountConfig) string {
+	if acc.Name != "" {
+		return acc.Name
+	}
+	if acc.Profile != "" {
+		return acc.Profile
+	}
+	return "default"
+}
+
+// buildSweeps resolves credentials for every configured account in parallel
+// (credential resolution involves STS round-trips) and caches the per-account
+// configs for AWSConfigFor lookups.
+func (e *Engine) buildSweeps(ctx context.Context) []accountSweep {
+	if len(e.Config.Accounts) == 0 {
+		return []accountSweep{{
+			Name:      e.Config.AWS.Profile,
+			AWSConfig: e.AWSConfig,
+			AccountID: e.AccountID,
+		}}
+	}
+
+	results := make([]*accountSweep, len(e.Config.Accounts))
+	var wg sync.WaitGroup
+	for i, acc := range e.Config.Accounts {
+		wg.Add(1)
+		go func(i int, acc config.AccountConfig) {
+			defer wg.Done()
+			name := accountName(acc)
+
+			accCfg := e.AWSConfig.Copy()
+			if acc.Profile != "" || acc.RoleARN != "" {
+				// One spec covers both: buildSTS bootstraps its AssumeRole
+				// call from the profile/auto chain, so profile+roleArn chains
+				// the role through the account's profile credentials.
+				spec := &config.AWSConfig{
+					Profile:    acc.Profile,
+					AuthMethod: "profile",
+					Retry:      e.Config.AWS.Retry,
+				}
+				if acc.RoleARN != "" {
+					spec.AuthMethod = "sts"
+					spec.STS = config.STSConfig{
+						RoleARN:     acc.RoleARN,
+						SessionName: "aws-explorer-sweep",
+					}
+				}
+				var err error
+				accCfg, err = auth.BuildAWSConfig(ctx, spec, "us-east-1")
+				if err != nil {
+					slog.Error("Failed to build AWS config for account", "name", name, "error", err)
+					return
+				}
+			}
+			results[i] = &accountSweep{
+				Name:      name,
+				AWSConfig: accCfg,
+				AccountID: resolveAccountID(ctx, accCfg),
+			}
+		}(i, acc)
+	}
+	wg.Wait()
+
+	var sweeps []accountSweep
+	e.sweepMu.Lock()
+	e.sweepCfgs = make(map[string]aws.Config, len(results))
+	for _, sw := range results {
+		if sw == nil {
+			continue // credential failure already logged
+		}
+		sweeps = append(sweeps, *sw)
+		e.sweepCfgs[sw.Name] = sw.AWSConfig
+	}
+	e.sweepMu.Unlock()
+	return sweeps
+}
+
+// AWSConfigFor returns the credentials for the named account sweep, falling
+// back to the engine's base config (single-account mode, unknown name).
+func (e *Engine) AWSConfigFor(account string) aws.Config {
+	e.sweepMu.RLock()
+	defer e.sweepMu.RUnlock()
+	if cfg, ok := e.sweepCfgs[account]; ok {
+		return cfg
+	}
+	return e.AWSConfig
+}
+
 // StreamRun emits results to the channel as they arrive, then closes it.
 func (e *Engine) StreamRun(ctx context.Context, chunks chan<- model.ResultChunk) {
 	defer close(chunks)
@@ -259,50 +352,7 @@ func (e *Engine) StreamRun(ctx context.Context, chunks chan<- model.ResultChunk)
 	g.SetLimit(maxConcurrency)
 
 	regions := e.EffectiveRegions()
-
-	var sweeps []accountSweep
-	if len(e.Config.Accounts) == 0 {
-		sweeps = append(sweeps, accountSweep{
-			Name:      e.Config.AWS.Profile,
-			AWSConfig: e.AWSConfig,
-			AccountID: e.AccountID,
-		})
-	} else {
-		for _, acc := range e.Config.Accounts {
-			accCfg := e.AWSConfig.Copy()
-			var err error
-			if acc.Profile != "" {
-				accCfg, err = auth.BuildAWSConfig(ctx, &config.AWSConfig{
-					Profile:    acc.Profile,
-					AuthMethod: "profile",
-				}, "us-east-1")
-			}
-			if err != nil {
-				slog.Error("Failed to build AWS config for account", "name", acc.Name, "error", err)
-				continue
-			}
-			if acc.RoleARN != "" {
-				stsCfg := config.AWSConfig{
-					AuthMethod: "sts",
-					STS: config.STSConfig{
-						RoleARN:     acc.RoleARN,
-						SessionName: "aws-explorer-sweep",
-					},
-				}
-				accCfg, err = auth.BuildAWSConfig(ctx, &stsCfg, "us-east-1")
-				if err != nil {
-					slog.Error("Failed to assume role for account", "name", acc.Name, "error", err)
-					continue
-				}
-			}
-			accID := resolveAccountID(ctx, accCfg)
-			sweeps = append(sweeps, accountSweep{
-				Name:      acc.Name,
-				AWSConfig: accCfg,
-				AccountID: accID,
-			})
-		}
-	}
+	sweeps := e.buildSweeps(ctx)
 
 	for _, sweep := range sweeps {
 		for _, srv := range e.registry.GetAll() {
@@ -365,10 +415,15 @@ func (e *Engine) StreamRun(ctx context.Context, chunks chan<- model.ResultChunk)
 					// the last. emitted counts streamed resources (post-filter)
 					// so the error path below can still flag partial results;
 					// collectors call Emit from this goroutine, so no locking.
+					// In multi-account mode stamp every resource with the sweep
+					// name so the Account column is consistent (collectors set
+					// the raw account ID, which would mix names and IDs) and
+					// AWSConfigFor lookups resolve from a resource's AccountID.
+					multiAcct := len(e.Config.Accounts) > 0
 					emitted := 0
 					input.Emit = func(batch []model.Resource) {
-						for i := range batch {
-							if batch[i].AccountID == "" {
+						if multiAcct {
+							for i := range batch {
 								batch[i].AccountID = sw.Name
 							}
 						}
@@ -380,8 +435,8 @@ func (e *Engine) StreamRun(ctx context.Context, chunks chan<- model.ResultChunk)
 					}
 
 					res, err := s.Collect(collectCtx, input)
-					for i := range res {
-						if res[i].AccountID == "" {
+					if multiAcct {
+						for i := range res {
 							res[i].AccountID = sw.Name
 						}
 					}
