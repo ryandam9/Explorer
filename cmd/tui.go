@@ -9,11 +9,11 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/spf13/cobra"
 
-	"github.com/user/aws_explorer/internal/awsutil"
-	"github.com/user/aws_explorer/internal/engine"
-	"github.com/user/aws_explorer/internal/model"
-	"github.com/user/aws_explorer/internal/tui"
-	"github.com/user/aws_explorer/internal/ui"
+	"github.com/ryandam9/aws_explorer/internal/awsutil"
+	"github.com/ryandam9/aws_explorer/internal/engine"
+	"github.com/ryandam9/aws_explorer/internal/model"
+	"github.com/ryandam9/aws_explorer/internal/tui"
+	"github.com/ryandam9/aws_explorer/internal/ui"
 )
 
 var (

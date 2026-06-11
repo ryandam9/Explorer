@@ -20,15 +20,15 @@ import (
 	"github.com/charmbracelet/x/ansi"
 	zone "github.com/lrstanley/bubblezone"
 
-	"github.com/user/aws_explorer/internal/auth"
-	"github.com/user/aws_explorer/internal/awsutil"
-	"github.com/user/aws_explorer/internal/config"
-	"github.com/user/aws_explorer/internal/csvexport"
-	"github.com/user/aws_explorer/internal/engine"
-	"github.com/user/aws_explorer/internal/model"
-	"github.com/user/aws_explorer/internal/summary"
-	"github.com/user/aws_explorer/internal/table"
-	"github.com/user/aws_explorer/internal/ui"
+	"github.com/ryandam9/aws_explorer/internal/auth"
+	"github.com/ryandam9/aws_explorer/internal/awsutil"
+	"github.com/ryandam9/aws_explorer/internal/config"
+	"github.com/ryandam9/aws_explorer/internal/csvexport"
+	"github.com/ryandam9/aws_explorer/internal/engine"
+	"github.com/ryandam9/aws_explorer/internal/model"
+	"github.com/ryandam9/aws_explorer/internal/summary"
+	"github.com/ryandam9/aws_explorer/internal/table"
+	"github.com/ryandam9/aws_explorer/internal/ui"
 )
 
 // ── Focus ────────────────────────────────────────────────────────────────────

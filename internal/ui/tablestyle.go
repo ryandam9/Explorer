@@ -5,7 +5,7 @@ import (
 
 	"github.com/charmbracelet/lipgloss"
 
-	"github.com/user/aws_explorer/internal/table"
+	"github.com/ryandam9/aws_explorer/internal/table"
 )
 
 // TableStyles returns the one themed style set used by every table in the

@@ -17,9 +17,9 @@ import (
 	"github.com/aws/aws-sdk-go-v2/service/rds"
 	"github.com/aws/smithy-go"
 
-	"github.com/user/aws_explorer/internal/auth"
-	"github.com/user/aws_explorer/internal/awsutil"
-	"github.com/user/aws_explorer/internal/config"
+	"github.com/ryandam9/aws_explorer/internal/auth"
+	"github.com/ryandam9/aws_explorer/internal/awsutil"
+	"github.com/ryandam9/aws_explorer/internal/config"
 )
 
 const awsRequestTimeout = 30 * time.Second

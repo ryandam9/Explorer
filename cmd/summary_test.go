@@ -3,7 +3,7 @@ package cmd
 import (
 	"testing"
 
-	"github.com/user/aws_explorer/internal/config"
+	"github.com/ryandam9/aws_explorer/internal/config"
 )
 
 // TestApplyGlobalAWSOverrides_RegionWins verifies that --region overrides every

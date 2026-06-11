@@ -5,7 +5,7 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/user/aws_explorer/internal/table"
+	"github.com/ryandam9/aws_explorer/internal/table"
 )
 
 func formatSize(size int64) string {

@@ -3,7 +3,7 @@ package vpctui
 import (
 	"testing"
 
-	"github.com/user/aws_explorer/internal/display"
+	"github.com/ryandam9/aws_explorer/internal/display"
 )
 
 func TestENIToMap(t *testing.T) {

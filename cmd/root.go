@@ -10,10 +10,10 @@ import (
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
 
-	"github.com/user/aws_explorer/internal/config"
-	"github.com/user/aws_explorer/internal/engine"
-	"github.com/user/aws_explorer/internal/model"
-	"github.com/user/aws_explorer/internal/output"
+	"github.com/ryandam9/aws_explorer/internal/config"
+	"github.com/ryandam9/aws_explorer/internal/engine"
+	"github.com/ryandam9/aws_explorer/internal/model"
+	"github.com/ryandam9/aws_explorer/internal/output"
 )
 
 var cfgFile string

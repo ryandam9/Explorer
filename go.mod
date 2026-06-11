@@ -1,4 +1,4 @@
-module github.com/user/aws_explorer
+module github.com/ryandam9/aws_explorer
 
 go 1.26.1
 

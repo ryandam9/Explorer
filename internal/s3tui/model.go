@@ -18,11 +18,11 @@ import (
 	"github.com/charmbracelet/bubbles/viewport"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
-	"github.com/user/aws_explorer/internal/config"
-	"github.com/user/aws_explorer/internal/csvexport"
-	"github.com/user/aws_explorer/internal/display"
-	"github.com/user/aws_explorer/internal/table"
-	"github.com/user/aws_explorer/internal/ui"
+	"github.com/ryandam9/aws_explorer/internal/config"
+	"github.com/ryandam9/aws_explorer/internal/csvexport"
+	"github.com/ryandam9/aws_explorer/internal/display"
+	"github.com/ryandam9/aws_explorer/internal/table"
+	"github.com/ryandam9/aws_explorer/internal/ui"
 )
 
 // ---------------------------------------------------------------------------

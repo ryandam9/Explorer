@@ -10,7 +10,7 @@ import (
 	"strings"
 	"text/tabwriter"
 
-	"github.com/user/aws_explorer/internal/model"
+	"github.com/ryandam9/aws_explorer/internal/model"
 )
 
 // PrintResult takes an ExploreResult and formats it according to the given format.

@@ -5,7 +5,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/user/aws_explorer/internal/model"
+	"github.com/ryandam9/aws_explorer/internal/model"
 )
 
 func TestPrintErrors_Empty(t *testing.T) {

@@ -7,8 +7,8 @@ import (
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/service/emr"
 	"github.com/aws/aws-sdk-go-v2/service/emr/types"
-	"github.com/user/aws_explorer/internal/model"
-	"github.com/user/aws_explorer/internal/services"
+	"github.com/ryandam9/aws_explorer/internal/model"
+	"github.com/ryandam9/aws_explorer/internal/services"
 )
 
 type Collector struct{}

@@ -18,8 +18,8 @@ import (
 	"github.com/charmbracelet/lipgloss"
 	"github.com/dustin/go-humanize"
 
-	"github.com/user/aws_explorer/internal/config"
-	"github.com/user/aws_explorer/internal/ui"
+	"github.com/ryandam9/aws_explorer/internal/config"
+	"github.com/ryandam9/aws_explorer/internal/ui"
 )
 
 type focusArea int

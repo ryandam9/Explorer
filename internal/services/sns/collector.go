@@ -6,8 +6,8 @@ import (
 	"strings"
 
 	"github.com/aws/aws-sdk-go-v2/service/sns"
-	"github.com/user/aws_explorer/internal/model"
-	"github.com/user/aws_explorer/internal/services"
+	"github.com/ryandam9/aws_explorer/internal/model"
+	"github.com/ryandam9/aws_explorer/internal/services"
 )
 
 type Collector struct{}

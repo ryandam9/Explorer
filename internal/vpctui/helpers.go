@@ -5,8 +5,8 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/user/aws_explorer/internal/display"
-	"github.com/user/aws_explorer/internal/table"
+	"github.com/ryandam9/aws_explorer/internal/display"
+	"github.com/ryandam9/aws_explorer/internal/table"
 )
 
 // ---------------------------------------------------------------------------

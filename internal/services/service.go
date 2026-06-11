@@ -4,8 +4,8 @@ import (
 	"context"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
-	"github.com/user/aws_explorer/internal/config"
-	"github.com/user/aws_explorer/internal/model"
+	"github.com/ryandam9/aws_explorer/internal/config"
+	"github.com/ryandam9/aws_explorer/internal/model"
 )
 
 // DetailLevel represents the granularity of collected data.

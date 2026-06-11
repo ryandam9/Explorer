@@ -8,7 +8,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/user/aws_explorer/internal/csvexport"
+	"github.com/ryandam9/aws_explorer/internal/csvexport"
 )
 
 // ---------------------------------------------------------------------------

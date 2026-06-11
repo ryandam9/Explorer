@@ -4,7 +4,7 @@ import (
 	"log/slog"
 	"os"
 
-	"github.com/user/aws_explorer/cmd"
+	"github.com/ryandam9/aws_explorer/cmd"
 )
 
 func main() {

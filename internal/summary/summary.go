@@ -13,7 +13,7 @@ import (
 	"strings"
 	"text/tabwriter"
 
-	"github.com/user/aws_explorer/internal/model"
+	"github.com/ryandam9/aws_explorer/internal/model"
 )
 
 // Row is one line of the summary inventory.

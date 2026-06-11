@@ -6,8 +6,8 @@ import (
 	"testing"
 
 	"github.com/charmbracelet/lipgloss"
-	"github.com/user/aws_explorer/internal/config"
-	"github.com/user/aws_explorer/internal/ui"
+	"github.com/ryandam9/aws_explorer/internal/config"
+	"github.com/ryandam9/aws_explorer/internal/ui"
 )
 
 func TestFormatAndParseSize(t *testing.T) {

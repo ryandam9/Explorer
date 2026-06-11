@@ -9,9 +9,9 @@ import (
 
 	"github.com/aws/smithy-go"
 
-	"github.com/user/aws_explorer/internal/config"
-	"github.com/user/aws_explorer/internal/model"
-	"github.com/user/aws_explorer/internal/services"
+	"github.com/ryandam9/aws_explorer/internal/config"
+	"github.com/ryandam9/aws_explorer/internal/model"
+	"github.com/ryandam9/aws_explorer/internal/services"
 )
 
 func TestFilterResources_NoFilters(t *testing.T) {

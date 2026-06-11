@@ -9,7 +9,7 @@ import (
 	"github.com/charmbracelet/lipgloss"
 	"go.yaml.in/yaml/v3"
 
-	"github.com/user/aws_explorer/internal/config"
+	"github.com/ryandam9/aws_explorer/internal/config"
 )
 
 // The settings overlay is an "Appearance" panel floated over the live app,

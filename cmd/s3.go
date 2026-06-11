@@ -8,9 +8,9 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/spf13/cobra"
-	"github.com/user/aws_explorer/internal/config"
-	"github.com/user/aws_explorer/internal/s3tui"
-	"github.com/user/aws_explorer/internal/ui"
+	"github.com/ryandam9/aws_explorer/internal/config"
+	"github.com/ryandam9/aws_explorer/internal/s3tui"
+	"github.com/ryandam9/aws_explorer/internal/ui"
 )
 
 var (
