@@ -1795,9 +1795,11 @@ func (m tuiModel) View() string {
 		centered := lipgloss.Place(m.width, m.height-4, lipgloss.Center, lipgloss.Center, m.errorsOverlay())
 		output = lipgloss.JoinVertical(lipgloss.Left, header, centered, status)
 	} else if m.showSettings {
-		settingsView := m.settings.View()
-		centered := lipgloss.Place(m.width, m.height-4, lipgloss.Center, lipgloss.Center, settingsView)
-		output = lipgloss.JoinVertical(lipgloss.Left, header, centered, status)
+		// The console floats over the live app (HUD-style): render the normal
+		// frame and composite the fixed-size panel into its center, so the
+		// theme changes are visible on the real UI around it.
+		base := lipgloss.JoinVertical(lipgloss.Left, header, m.renderBody(), status)
+		output = ui.OverlayCenter(base, m.settings.View(), m.width, m.height)
 	} else if m.showFilter && m.filterForm != nil {
 		formW := 52
 		formH := 14

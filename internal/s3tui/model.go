@@ -1700,10 +1700,9 @@ func (m *Model) View() string {
 		}
 	}
 
-	// Overlays
-	if m.showSettings {
-		content = lipgloss.Place(m.width-4, max(8, m.height-8), lipgloss.Center, lipgloss.Center, m.settings.View())
-	} else if m.showHelp {
+	// Overlays. (The settings console is composited over the final frame
+	// below, so the live app stays visible around it.)
+	if m.showHelp {
 		content = lipgloss.Place(m.width-4, max(8, m.height-8), lipgloss.Center, lipgloss.Center, m.helpView())
 	} else if m.showPreview {
 		content = lipgloss.Place(m.width-4, max(8, m.height-8), lipgloss.Center, lipgloss.Center, m.previewView())
@@ -1740,6 +1739,13 @@ func (m *Model) View() string {
 	))
 	if m.width > 0 && m.height > 0 {
 		out = ui.ClipToSize(out, m.width, m.height)
+	}
+	if m.showSettings {
+		// HUD-style: float the fixed-size console over the live app.
+		out = ui.OverlayCenter(out, m.settings.View(), m.width, m.height)
+		if m.width > 0 && m.height > 0 {
+			out = ui.ClipToSize(out, m.width, m.height)
+		}
 	}
 	return out
 }

@@ -12,17 +12,29 @@ import (
 	"github.com/user/aws_explorer/internal/config"
 )
 
-// The settings overlay is styled as a sci-fi mission console: a title bar,
-// a theme selector rendered as a dropdown, segmented subsystem tabs, one
-// slider row per color role (the knob position is the color's hue), an
-// interactive HUE/SAT/LUM tuner with live readouts, a "signal monitor"
-// strip previewing the edited theme, and a row of console action buttons.
+// The settings overlay is styled as a sci-fi mission console: a HUD frame
+// floated over the live app, a theme selector, segmented subsystem tabs, one
+// slider row per color role (the knob position is the color's hue), a quick
+// swatch palette for one-keystroke color changes, an interactive HUE/SAT/LUM
+// tuner, and a "signal monitor" preview strip. Every row is a control:
+// ↑/↓ selects a row, ←/→ changes its value — instantly.
+//
+// The console never resizes: its width and height are fixed regardless of
+// terminal size, active tab or input mode.
 
 // SettingsSavedMsg is sent after a successful config save.
 type SettingsSavedMsg struct{ Theme string }
 
 // SettingsErrMsg carries a save error back to the main model.
 type SettingsErrMsg struct{ Err error }
+
+// ── Fixed console geometry ───────────────────────────────────────────────────
+
+const (
+	consoleWidth = 86           // outer panel width (excluding border)
+	consoleInner = consoleWidth // content width inside Padding(0,1)
+	ctrlZoneRows = 6            // tuner / palette zone height
+)
 
 // ── Subsystem groups ─────────────────────────────────────────────────────────
 
@@ -58,6 +70,18 @@ func buildRoleGroups() []roleGroup {
 	return groups
 }
 
+// maxGroupRows is the row count of the largest subsystem tab; smaller tabs are
+// padded to it so the console height never changes when switching tabs.
+var maxGroupRows = func() int {
+	m := 0
+	for _, g := range settingsGroups {
+		if len(g.roles) > m {
+			m = len(g.roles)
+		}
+	}
+	return m
+}()
+
 // roleLabel renders a camelCase role name as a spaced, uppercase console
 // label: "tableSelectedBg" → "TABLE SELECTED BG".
 func roleLabel(name string) string {
@@ -69,6 +93,56 @@ func roleLabel(name string) string {
 		b.WriteRune(r)
 	}
 	return strings.ToUpper(b.String())
+}
+
+// ── Quick palette ────────────────────────────────────────────────────────────
+
+// quickPalette is the swatch ring ←/→ cycles through on a role row: the
+// edited theme's own colors first (the hues the palette was designed around),
+// then a 12-step hue wheel and a gray ramp for everything else.
+func quickPalette(themeIdx int) []string {
+	var out []string
+	seen := map[string]bool{}
+	add := func(c string) {
+		c = strings.ToLower(strings.TrimSpace(c))
+		if _, _, _, ok := parseHexColor(c); !ok {
+			return
+		}
+		if !seen[c] {
+			seen[c] = true
+			out = append(out, c)
+		}
+	}
+	for _, r := range Roles {
+		add(*r.Ptr(&Themes[themeIdx].Colors))
+	}
+	for h := 0; h < 360; h += 30 {
+		add(hslToHex(float64(h), 85, 55))
+	}
+	for _, g := range []string{"#000000", "#3a3a3a", "#6e6e6e", "#a0a0a0", "#d0d0d0", "#ffffff"} {
+		add(g)
+	}
+	return out
+}
+
+// nearestSwatch returns the palette index closest to hex by RGB distance.
+func nearestSwatch(palette []string, hex string) int {
+	r0, g0, b0, ok := parseHexColor(hex)
+	if !ok {
+		return 0
+	}
+	best, bestD := 0, 1<<30
+	for i, p := range palette {
+		r, g, b, ok := parseHexColor(p)
+		if !ok {
+			continue
+		}
+		d := (r-r0)*(r-r0) + (g-g0)*(g-g0) + (b-b0)*(b-b0)
+		if d < bestD {
+			best, bestD = i, d
+		}
+	}
+	return best
 }
 
 // ── Model ────────────────────────────────────────────────────────────────────
@@ -86,12 +160,19 @@ const (
 // color roles comes from the Roles registry in theme.go, so adding a role
 // there automatically makes it editable here.
 type SettingsModel struct {
-	// Width / height of the terminal.
+	// Terminal size (kept for callers; the console itself is fixed-size).
 	width, height int
 
-	themeIdx int // index into Themes
-	fieldIdx int // selected color role (index into Roles)
-	groupIdx int // active subsystem tab (index into settingsGroups)
+	themeIdx int  // index into Themes
+	fieldIdx int  // selected color role (index into Roles)
+	groupIdx int  // active subsystem tab (index into settingsGroups)
+	onTheme  bool // cursor is on the ACTIVE THEME row, above the roles
+
+	// palette is the quick-swatch ring, snapshotted when the console opens or
+	// the theme changes. A snapshot keeps the ring stable while cycling: the
+	// ring is built from the theme's colors, so deriving it live would reshape
+	// it under the user with every change.
+	palette []string
 
 	// Tuner state ("tune mode" captures input until applied/cancelled).
 	tuneMode            bool
@@ -112,6 +193,7 @@ func NewSettingsModel(width, height int, configPath string, cfg *config.Config) 
 		width:      width,
 		height:     height,
 		themeIdx:   getActiveTheme(),
+		palette:    quickPalette(getActiveTheme()),
 		configPath: configPath,
 		fullConfig: cfg,
 	}
@@ -189,23 +271,74 @@ func (s *SettingsModel) selectGroup(gi int) {
 	s.fieldIdx = settingsGroups[gi].roles[0]
 }
 
+// selectTheme switches the edited theme and applies it live, so the entire
+// app — visible around the floating console — restyles instantly. Ctrl+S
+// persists it to config.yaml.
+func (s *SettingsModel) selectTheme(idx int) {
+	if idx < 0 || idx >= len(Themes) || idx == s.themeIdx {
+		return
+	}
+	s.themeIdx = idx
+	s.palette = quickPalette(idx)
+	SetActiveTheme(idx)
+}
+
+// cycleSwatch is the one-keystroke color change: step the selected role
+// through the quick palette and apply immediately. A color that is not in
+// the palette snaps to its nearest swatch first.
+func (s *SettingsModel) cycleSwatch(dir int) {
+	pal := s.palette
+	if len(pal) == 0 {
+		return
+	}
+	cur := strings.ToLower(s.colorForField(s.themeIdx, s.fieldIdx))
+	if cur == "" {
+		cur = strings.ToLower(ResolveRoleAt(s.themeIdx, Roles[s.fieldIdx].Name))
+	}
+	idx := -1
+	for i, p := range pal {
+		if p == cur {
+			idx = i
+			break
+		}
+	}
+	if idx < 0 {
+		idx = nearestSwatch(pal, cur)
+	} else {
+		idx = (idx + dir + len(pal)) % len(pal)
+	}
+	setColorForField(s.themeIdx, s.fieldIdx, pal[idx])
+}
+
 func (s SettingsModel) updateNavMode(msg tea.KeyMsg) (SettingsModel, tea.Cmd) {
 	switch msg.String() {
 	case "up", "k":
+		if s.onTheme {
+			break
+		}
 		if row := s.rowInGroup(); row > 0 {
 			s.fieldIdx = s.group().roles[row-1]
+		} else {
+			s.onTheme = true
 		}
 	case "down", "j":
-		if row := s.rowInGroup(); row < len(s.group().roles)-1 {
+		if s.onTheme {
+			s.onTheme = false
+			s.fieldIdx = s.group().roles[0]
+		} else if row := s.rowInGroup(); row < len(s.group().roles)-1 {
 			s.fieldIdx = s.group().roles[row+1]
 		}
 	case "left", "h":
-		if s.themeIdx > 0 {
-			s.themeIdx--
+		if s.onTheme {
+			s.selectTheme(s.themeIdx - 1)
+		} else {
+			s.cycleSwatch(-1)
 		}
 	case "right", "l":
-		if s.themeIdx < len(Themes)-1 {
-			s.themeIdx++
+		if s.onTheme {
+			s.selectTheme(s.themeIdx + 1)
+		} else {
+			s.cycleSwatch(1)
 		}
 	case "tab":
 		s.selectGroup((s.groupIdx + 1) % len(settingsGroups))
@@ -214,10 +347,17 @@ func (s SettingsModel) updateNavMode(msg tea.KeyMsg) (SettingsModel, tea.Cmd) {
 	case "1", "2", "3", "4":
 		s.selectGroup(int(msg.String()[0] - '1'))
 	case "enter", "e":
-		s.startTune()
+		if s.onTheme {
+			s.onTheme = false
+			s.fieldIdx = s.group().roles[0]
+		} else {
+			s.startTune()
+		}
 	case "a":
 		// Quick-reset the selected role to auto (follow its fallback chain).
-		setColorForField(s.themeIdx, s.fieldIdx, "")
+		if !s.onTheme {
+			setColorForField(s.themeIdx, s.fieldIdx, "")
+		}
 	case "ctrl+s", "w":
 		return s, s.saveCmd()
 	}
@@ -401,9 +541,9 @@ func (s SettingsModel) settingsHints() []KeyHint {
 		}
 	}
 	return []KeyHint{
-		H("↑/↓", "role"),
+		H("↑/↓", "row"),
+		H("←/→", "change"),
 		H("Tab/1-4", "subsystem"),
-		H("←/→", "theme"),
 		H("Enter", "tune"),
 		H("a", "auto"),
 		H("Ctrl+S", "save"),
@@ -484,45 +624,60 @@ func consoleButton(label, key string) string {
 		br.Render(" ⟩")
 }
 
+// padZone pads (or truncates) a section to exactly rows lines, so the console
+// height never changes between modes and tabs.
+func padZone(lines []string, rows int) []string {
+	for len(lines) < rows {
+		lines = append(lines, "")
+	}
+	return lines[:rows]
+}
+
 // ── View ─────────────────────────────────────────────────────────────────────
 
-// View renders the settings console overlay.
+// View renders the settings console overlay at its fixed size.
 func (s SettingsModel) View() string {
-	panelW := s.width - 6
-	if panelW < 78 {
-		panelW = 78
-	}
-	if panelW > 100 {
-		panelW = 100
-	}
-	iw := panelW - 2 // inside the panel's Padding(0,1)
+	iw := consoleInner - 2 // inside the panel's Padding(0,1)
 
 	heading := lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color(ColorHeading()))
 	muted := lipgloss.NewStyle().Foreground(lipgloss.Color(ColorMuted()))
 	text := lipgloss.NewStyle().Foreground(lipgloss.Color(ColorText()))
 	accent := lipgloss.NewStyle().Foreground(lipgloss.Color(ColorAccent())).Bold(true)
+	box := lipgloss.NewStyle().Foreground(lipgloss.Color(ColorBorder()))
 
 	var lines []string
 	add := func(parts ...string) { lines = append(lines, strings.Join(parts, "")) }
 
-	// ── Title bar ──
-	add(heading.Render("THEME CONSOLE — DISPLAY CALIBRATION "), muted.Render("(live preview)"))
+	// ── Title bar with a live-status LED ──
+	title := accent.Render("⟦ ") + heading.Render("THEME CONSOLE") + accent.Render(" ⟧") +
+		muted.Render("  DISPLAY CALIBRATION")
+	led := SuccessStyle().Bold(true).Render("● LIVE")
+	gap := iw - lipgloss.Width(title) - lipgloss.Width(led)
+	if gap < 1 {
+		gap = 1
+	}
+	add(title, strings.Repeat(" ", gap), led)
 	add(consoleRule(iw, ""))
 
-	// ── Theme selector (dropdown look) ──
+	// ── Theme selector (a control row: ←/→ switches and applies live) ──
 	nameW := 0
 	for _, t := range Themes {
 		if len(t.Name) > nameW {
 			nameW = len(t.Name)
 		}
 	}
-	themeName := strings.ToUpper(Themes[s.themeIdx].Name)
-	box := lipgloss.NewStyle().Foreground(lipgloss.Color(ColorBorder()))
+	themeMarker := "  "
+	themeLabelSt := muted
+	if s.onTheme && !s.tuneMode {
+		themeMarker = accent.Render("▶ ")
+		themeLabelSt = heading
+	}
 	add(
-		muted.Render(fmt.Sprintf("%-14s", "ACTIVE THEME")),
+		themeMarker,
+		themeLabelSt.Render(fmt.Sprintf("%-13s", "ACTIVE THEME")),
 		accent.Render("◄ "),
 		box.Render("[ "),
-		text.Bold(true).Render(fmt.Sprintf("%-*s", nameW, themeName)),
+		text.Bold(true).Render(fmt.Sprintf("%-*s", nameW, strings.ToUpper(Themes[s.themeIdx].Name))),
 		box.Render(" ▼ ]"),
 		accent.Render(" ►"),
 		muted.Render(fmt.Sprintf("   %02d/%02d", s.themeIdx+1, len(Themes))),
@@ -541,10 +696,10 @@ func (s SettingsModel) View() string {
 			tabs = append(tabs, box.Render("[")+muted.Render(label)+box.Render("]"))
 		}
 	}
-	add(muted.Render(fmt.Sprintf("%-14s", "SUBSYSTEM")), strings.Join(tabs, " "))
+	add("  ", muted.Render(fmt.Sprintf("%-13s", "SUBSYSTEM")), strings.Join(tabs, " "))
 	add("")
 
-	// ── Role sliders ──
+	// ── Role sliders (padded to the largest tab, so height is constant) ──
 	labelW := 0
 	for _, r := range Roles {
 		if l := len(roleLabel(r.Name)); l > labelW {
@@ -557,10 +712,11 @@ func (s SettingsModel) View() string {
 		sliderW = 10
 	}
 
+	var roleLines []string
 	for _, ri := range s.group().roles {
 		role := Roles[ri]
 		val := s.colorForField(s.themeIdx, ri)
-		selected := ri == s.fieldIdx
+		selected := ri == s.fieldIdx && !s.onTheme
 		// The row under the knobs tracks the tuner live, before apply.
 		if s.tuneMode && selected {
 			if s.tuneAuto {
@@ -591,23 +747,21 @@ func (s SettingsModel) View() string {
 			readout = text.Render(fmt.Sprintf("%-7.7s", val))
 		}
 
-		add(marker, labelSt.Render(fmt.Sprintf("%-*s", labelW, roleLabel(role.Name))),
-			" ", track, "  ", readout, " ", renderSwatch(swatchColor))
+		roleLines = append(roleLines,
+			marker+labelSt.Render(fmt.Sprintf("%-*s", labelW, roleLabel(role.Name)))+
+				" "+track+"  "+readout+" "+renderSwatch(swatchColor))
 	}
-	add("")
+	lines = append(lines, padZone(roleLines, maxGroupRows)...)
 
-	// ── Tuner / role info ──
-	if s.tuneMode {
-		lines = append(lines, s.renderTuner(iw, labelW)...)
-	} else {
-		r := Roles[s.fieldIdx]
-		note := r.Desc
-		if r.Fallback != "" {
-			note += "  ·  auto = follows " + r.Fallback
-		}
-		add(muted.Render("  " + note))
+	// ── Control zone: tuner, quick palette, or theme bank (fixed height) ──
+	switch {
+	case s.tuneMode:
+		lines = append(lines, padZone(s.renderTuner(iw), ctrlZoneRows)...)
+	case s.onTheme:
+		lines = append(lines, padZone(s.renderThemeBank(iw), ctrlZoneRows)...)
+	default:
+		lines = append(lines, padZone(s.renderQuickPalette(iw), ctrlZoneRows)...)
 	}
-	add("")
 
 	// ── Signal monitor (live preview of the edited theme) ──
 	lines = append(lines, s.renderMonitor(iw)...)
@@ -629,19 +783,95 @@ func (s SettingsModel) View() string {
 
 	body := strings.Join(lines, "\n")
 	panel := lipgloss.NewStyle().
-		Width(panelW).
-		MaxWidth(panelW+2).
-		BorderStyle(lipgloss.NormalBorder()).
+		Width(consoleWidth).
+		MaxWidth(consoleWidth+2).
+		BorderStyle(lipgloss.DoubleBorder()).
 		BorderForeground(lipgloss.Color(ColorBorderFocus())).
 		Foreground(lipgloss.Color(ColorText())).
 		Padding(0, 1).
 		Render(body)
-	hintBar := StatusBar(panelW+2, "", s.settingsHints())
+	hintBar := StatusBar(consoleWidth+2, "", s.settingsHints())
 	return lipgloss.JoinVertical(lipgloss.Left, panel, hintBar)
 }
 
+// renderQuickPalette draws the swatch ring for the selected role with a caret
+// under the active swatch, plus the role's description.
+func (s SettingsModel) renderQuickPalette(iw int) []string {
+	muted := lipgloss.NewStyle().Foreground(lipgloss.Color(ColorMuted()))
+	accent := lipgloss.NewStyle().Foreground(lipgloss.Color(ColorAccent())).Bold(true)
+
+	role := Roles[s.fieldIdx]
+	pal := s.palette
+	cur := strings.ToLower(s.colorForField(s.themeIdx, s.fieldIdx))
+	if cur == "" {
+		cur = strings.ToLower(ResolveRoleAt(s.themeIdx, role.Name))
+	}
+	curIdx := -1
+	for i, p := range pal {
+		if p == cur {
+			curIdx = i
+			break
+		}
+	}
+
+	var strip, caret strings.Builder
+	strip.WriteString("  ")
+	caret.WriteString("  ")
+	for i, p := range pal {
+		if i >= iw-4 { // never wider than the console
+			break
+		}
+		strip.WriteString(lipgloss.NewStyle().Foreground(lipgloss.Color(p)).Render("█"))
+		if i == curIdx {
+			caret.WriteString(accent.Render("▲"))
+		} else {
+			caret.WriteString(" ")
+		}
+	}
+
+	note := role.Desc
+	if role.Fallback != "" {
+		note += "  ·  auto = follows " + role.Fallback
+	}
+	return []string{
+		consoleRule(iw, "QUICK PALETTE · "+roleLabel(role.Name)),
+		strip.String(),
+		caret.String(),
+		muted.Render("  " + note),
+		muted.Render("  ←/→ swap color (instant)  ·  Enter opens the HUE/SAT/LUM knobs"),
+	}
+}
+
+// renderThemeBank draws the control zone for the ACTIVE THEME row: the
+// selected theme's palette and what ←/→ does there.
+func (s SettingsModel) renderThemeBank(iw int) []string {
+	muted := lipgloss.NewStyle().Foreground(lipgloss.Color(ColorMuted()))
+
+	var strip strings.Builder
+	strip.WriteString("  ")
+	seen := map[string]bool{}
+	n := 0
+	for _, r := range Roles {
+		c := strings.ToLower(*r.Ptr(&Themes[s.themeIdx].Colors))
+		if c == "" || seen[c] || n >= iw-4 {
+			continue
+		}
+		seen[c] = true
+		strip.WriteString(lipgloss.NewStyle().Foreground(lipgloss.Color(c)).Render("██"))
+		strip.WriteString(" ")
+		n += 3
+	}
+
+	return []string{
+		consoleRule(iw, "THEME BANK · "+strings.ToUpper(Themes[s.themeIdx].Name)),
+		strip.String(),
+		muted.Render("  " + fmt.Sprintf("%d bird palettes loaded — colors from the feathers project", len(Themes))),
+		muted.Render("  ←/→ switch theme — the whole app restyles instantly  ·  Ctrl+S persists"),
+	}
+}
+
 // renderTuner draws the HUE/SAT/LUM/HEX knobs for the selected role.
-func (s SettingsModel) renderTuner(iw, labelW int) []string {
+func (s SettingsModel) renderTuner(iw int) []string {
 	muted := lipgloss.NewStyle().Foreground(lipgloss.Color(ColorMuted()))
 	text := lipgloss.NewStyle().Foreground(lipgloss.Color(ColorText()))
 	accent := lipgloss.NewStyle().Foreground(lipgloss.Color(ColorAccent())).Bold(true)
