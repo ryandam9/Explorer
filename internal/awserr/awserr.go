@@ -33,6 +33,7 @@ var servicePermissions = map[string][]string{
 	"sqs":            {"sqs:ListQueues"},
 	"sns":            {"sns:ListTopics"},
 	"cloudwatch":     {"cloudwatch:DescribeAlarms"},
+	"cloudwatchlogs": {"logs:DescribeLogGroups"},
 	"route53":        {"route53:ListHostedZones"},
 	"resourcegroups": {"tag:GetResources"},
 }

@@ -4,8 +4,9 @@ Discover, monitor, and display AWS resources across accounts and regions via CLI
 
 ## Features
 
-- **Four modes**: CLI (streaming table/JSON output), TUI (interactive exploration), VPC Explorer TUI (drill into a VPC's networking), S3 TUI (dedicated S3 browser)
-- **15 services**: EC2, S3, RDS, IAM, DynamoDB, Lambda, EMR, ECS, EKS, ELBv2, Secrets Manager, SQS, SNS, CloudWatch, Route53
+- **Five modes**: CLI (streaming table/JSON output), TUI (interactive exploration), VPC Explorer TUI (drill into a VPC's networking), S3 TUI (dedicated S3 browser), Logs TUI (CloudWatch Logs browser)
+- **16 services**: EC2, S3, RDS, IAM, DynamoDB, Lambda, EMR, ECS, EKS, ELBv2, Secrets Manager, SQS, SNS, CloudWatch, CloudWatch Logs, Route53
+- **CloudWatch Logs fetching**: list log groups, fetch/search events with filter patterns and time windows from the CLI, or browse interactively — see [Logs Usage](#logs-usage)
 - **VPC Explorer**: browse a VPC's subnets, security groups, network interfaces, route tables, gateways, endpoints, NACLs, peering, flow logs, and attached compute/services in a three-pane TUI
 - **VPC debugging toolkit** (no AI, deterministic): a findings linter, a connectivity path tracer, plain-English SG/NACL rule explanations, cross-reference ("where used"), merged effective security rules, DNS diagnostics, a public-exposure audit, snapshot diffing, Markdown export, and AWS Reachability Analyzer integration — see [VPC Debugging Toolkit](#vpc-debugging-toolkit)
 - **Config-driven**: YAML configuration for services, regions, filters, output, and per-resource display columns
@@ -45,6 +46,12 @@ make build          # produces bin/aws_explorer
 
 # Run S3 browser TUI
 ./bin/aws_explorer s3 --bucket my-bucket --region us-east-1
+
+# Fetch the last hour of ERROR events from a log group
+./bin/aws_explorer logs --group /aws/lambda/my-fn --since 1h --filter ERROR
+
+# Browse CloudWatch Logs interactively
+./bin/aws_explorer logs --tui
 ```
 
 ## Build
@@ -151,7 +158,7 @@ with a built-in collector.
 
 It combines two sources and merges them by ARN:
 
-1. **The 15 typed collectors** (EC2, S3, RDS, …) for rich data — state,
+1. **The 16 typed collectors** (EC2, S3, RDS, …) for rich data — state,
    availability zone, and service-specific summary fields.
 2. **A universal sweep via the [Resource Groups Tagging API]** (`tag:GetResources`),
    which returns ARNs and tags for taggable resources across hundreds of
@@ -214,6 +221,80 @@ Accepts the same `--config`, `--profile`, `--auth-method`, `--role-arn`, and
 > requires the account ID, which is resolved once via `sts:GetCallerIdentity`.
 > If that call is denied, those ARNs are shown as `-` while AWS-provided ARNs
 > still appear.
+
+## Logs Usage
+
+`logs` browses CloudWatch Logs: list log groups, fetch/search log events from
+the CLI, or explore both interactively with `--tui`.
+
+Fetching uses [FilterLogEvents] — the best general-purpose retrieval API: it
+searches **all streams in a group** within a time window and supports
+CloudWatch [filter patterns]. The API is throttled at ~5 requests/second per
+account/region, so pages are fetched sequentially; if a page fails mid-fetch,
+the events retrieved so far are still shown (the same best-effort behaviour as
+the resource collectors). Log groups also appear as `cloudwatchlogs/log_group`
+resources in the main CLI/TUI/summary inventory.
+
+[FilterLogEvents]: https://docs.aws.amazon.com/AmazonCloudWatchLogs/latest/APIReference/API_FilterLogEvents.html
+[filter patterns]: https://docs.aws.amazon.com/AmazonCloudWatch/latest/logs/FilterAndPatternSyntax.html
+
+```bash
+./bin/aws_explorer logs [flags]
+```
+
+### Logs Flags
+
+| Flag | Default | Description |
+|------|---------|-------------|
+| `--group` / `-g` | — | Log group to fetch events from; omit to list log groups |
+| `--since` | `15m` | How far back to fetch (Go duration: `15m`, `2h`, `48h`) |
+| `--filter` / `-f` | — | CloudWatch Logs filter pattern (e.g. `ERROR`, `{ $.level = "error" }`) |
+| `--limit` | `1000` | Maximum events to fetch (`0` = no limit) |
+| `--region` / `-r` | (configured) | AWS region (defaults to the configured/profile region) |
+| `--tui` | `false` | Browse groups and events interactively |
+| `--theme` | `spotted-pardalote` | Color theme for `--tui` |
+
+Also accepts the global `--profile`, `--auth-method`, `--role-arn`, and
+`-o table|json` flags.
+
+### Logs Examples
+
+```bash
+# List log groups in the default region
+./bin/aws_explorer logs
+
+# Last 15 minutes of events from a Lambda function's group
+./bin/aws_explorer logs -g /aws/lambda/my-fn
+
+# Search 48 hours of events for a JSON filter pattern, as JSON
+./bin/aws_explorer logs -g /ecs/web --since 48h -f '{ $.level = "error" }' -o json
+
+# Fetch everything in the window (no event cap)
+./bin/aws_explorer logs -g /aws/lambda/my-fn --since 1h --limit 0
+
+# Browse interactively, starting on a group
+./bin/aws_explorer logs --tui -g /aws/lambda/my-fn
+```
+
+### Logs TUI
+
+A two-pane browser: log groups on the left, events on the right. The status
+bar shows only the keys usable right now.
+
+| Key | Action |
+|-----|--------|
+| `↑` / `↓` | Navigate groups / scroll events |
+| `Enter` | Fetch events for the selected group |
+| `Tab` | Switch focus between groups and events |
+| `/` | Filter the group list |
+| `f` | Edit the event filter pattern |
+| `t` | Cycle the look-back window (15m → 1h → 3h → 12h → 24h → 3d → 7d) |
+| `m` | Load more events (when the window has more pages) |
+| `r` | Refresh |
+| `q` / `Ctrl+C` | Quit |
+
+> **Cost note.** FilterLogEvents itself has no per-GB query charge (unlike
+> Logs Insights), making it the right default for interactive fetching.
 
 ## VPC Explorer TUI Usage
 
@@ -757,6 +838,7 @@ Or via CLI flag:
 | `sqs` | Queues | Regional |
 | `sns` | Topics | Regional |
 | `cloudwatch` | Alarms | Regional |
+| `cloudwatchlogs` | Log groups | Regional |
 | `route53` | Hosted zones | Global |
 
 Global services (S3, IAM, Route53) are collected once regardless of the regions list.
@@ -896,16 +978,19 @@ aws_explorer/
 │   ├── root.go          # Default CLI command (streaming output)
 │   ├── tui.go           # Interactive TUI launcher
 │   ├── vpc.go           # VPC Explorer TUI launcher
-│   └── s3.go            # S3 browser TUI launcher
+│   ├── s3.go            # S3 browser TUI launcher
+│   └── logs.go          # CloudWatch Logs CLI + TUI launcher
 ├── internal/
 │   ├── auth/            # AWS credential building (5 auth methods)
 │   ├── awserr/          # AWS error mapping + IAM permission hints
 │   ├── config/          # Configuration structs (YAML marshaling)
 │   ├── display/         # Per-resource column/detail field registries (VPC, S3)
 │   ├── engine/          # Orchestration: concurrent collection + streaming
+│   ├── logs/            # CloudWatch Logs API wrappers (groups, FilterLogEvents)
+│   ├── logstui/         # CloudWatch Logs browser TUI (group list, event viewer)
 │   ├── model/           # Data models: Resource, Result, Filter, ExploreError
 │   ├── output/          # Table/JSON formatting + streaming writer
-│   ├── services/        # Collector interface, registry, 15 service implementations
+│   ├── services/        # Collector interface, registry, 16 service implementations
 │   │   ├── ec2/
 │   │   ├── s3/
 │   │   ├── rds/
@@ -920,6 +1005,7 @@ aws_explorer/
 │   │   ├── sqs/
 │   │   ├── sns/
 │   │   ├── cloudwatch/
+│   │   ├── cloudwatchlogs/
 │   │   ├── route53/
 │   │   └── service.go   # Collector interface + CollectInput
 │   ├── table/           # Terminal table component (selection, horizontal column scrolling)

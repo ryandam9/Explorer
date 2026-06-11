@@ -20,6 +20,7 @@ import (
 	"github.com/user/aws_explorer/internal/model"
 	"github.com/user/aws_explorer/internal/services"
 	"github.com/user/aws_explorer/internal/services/cloudwatch"
+	"github.com/user/aws_explorer/internal/services/cloudwatchlogs"
 	"github.com/user/aws_explorer/internal/services/dynamodb"
 	"github.com/user/aws_explorer/internal/services/ec2"
 	"github.com/user/aws_explorer/internal/services/ecs"
@@ -102,6 +103,7 @@ func NewEngine(ctx context.Context, cfg *config.Config) (*Engine, error) {
 	registry.Register(sqs.NewCollector())
 	registry.Register(sns.NewCollector())
 	registry.Register(cloudwatch.NewCollector())
+	registry.Register(cloudwatchlogs.NewCollector())
 	registry.Register(route53.NewCollector())
 
 	return &Engine{
