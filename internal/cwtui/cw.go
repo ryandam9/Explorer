@@ -68,12 +68,15 @@ func (c *CWLogsClient) ListLogGroups(ctx context.Context, prefix string) ([]type
 func (c *CWLogsClient) ListLogStreams(ctx context.Context, logGroupName string, prefix string) ([]types.LogStream, error) {
 	input := &cloudwatchlogs.DescribeLogStreamsInput{
 		LogGroupName: aws.String(logGroupName),
-		OrderBy:      types.OrderByLastEventTime,
-		Descending:   aws.Bool(true),
 		Limit:        aws.Int32(50),
 	}
 	if prefix != "" {
+		// The API rejects OrderBy=LastEventTime combined with a name prefix,
+		// so prefix queries fall back to the default (name) ordering.
 		input.LogStreamNamePrefix = aws.String(prefix)
+	} else {
+		input.OrderBy = types.OrderByLastEventTime
+		input.Descending = aws.Bool(true)
 	}
 
 	ctxWithTimeout, cancel := context.WithTimeout(ctx, 15*time.Second)
@@ -86,11 +89,16 @@ func (c *CWLogsClient) ListLogStreams(ctx context.Context, logGroupName string, 
 	return resp.LogStreams, nil
 }
 
-// GetLogEvents retrieves events from a log group/stream with options for time and search filters.
+// GetLogEvents retrieves the most recent events from a log group/stream,
+// optionally constrained by a server-side filter pattern. FilterLogEvents
+// pages oldest-first, so it scans a 24-hour lookback window to the end and
+// keeps the last `limit` events.
 func (c *CWLogsClient) GetLogEvents(ctx context.Context, logGroupName, logStreamName, filterPattern string, limit int32) ([]types.FilteredLogEvent, error) {
+	const maxPages = 20
+
 	input := &cloudwatchlogs.FilterLogEventsInput{
 		LogGroupName: aws.String(logGroupName),
-		Limit:        aws.Int32(limit),
+		StartTime:    aws.Int64(time.Now().Add(-24 * time.Hour).UnixMilli()),
 	}
 	if logStreamName != "" {
 		input.LogStreamNames = []string{logStreamName}
@@ -99,12 +107,23 @@ func (c *CWLogsClient) GetLogEvents(ctx context.Context, logGroupName, logStream
 		input.FilterPattern = aws.String(filterPattern)
 	}
 
-	ctxWithTimeout, cancel := context.WithTimeout(ctx, 15*time.Second)
-	resp, err := c.client.FilterLogEvents(ctxWithTimeout, input)
-	cancel()
-	if err != nil {
-		return nil, err
-	}
+	ctxWithTimeout, cancel := context.WithTimeout(ctx, 60*time.Second)
+	defer cancel()
 
-	return resp.Events, nil
+	var events []types.FilteredLogEvent
+	for page := 0; page < maxPages; page++ {
+		resp, err := c.client.FilterLogEvents(ctxWithTimeout, input)
+		if err != nil {
+			return nil, err
+		}
+		events = append(events, resp.Events...)
+		if int32(len(events)) > limit {
+			events = events[int32(len(events))-limit:]
+		}
+		if resp.NextToken == nil {
+			break
+		}
+		input.NextToken = resp.NextToken
+	}
+	return events, nil
 }

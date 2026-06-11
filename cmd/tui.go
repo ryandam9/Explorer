@@ -48,6 +48,7 @@ var tuiCmd = &cobra.Command{
 		SilenceLogsForTUI()
 
 		var seed []model.Resource
+		offline := snapshotPath != "" || len(diffPaths) > 0
 		if snapshotPath != "" {
 			var err error
 			seed, err = loadSnapshot(snapshotPath)
@@ -55,7 +56,6 @@ var tuiCmd = &cobra.Command{
 				fmt.Fprintf(os.Stderr, "Failed to load snapshot: %v\n", err)
 				os.Exit(1)
 			}
-			AppConfig.Services = nil // Disable live scanning
 		} else if len(diffPaths) > 0 {
 			if len(diffPaths) != 2 {
 				fmt.Fprintf(os.Stderr, "Error: --diff requires exactly two snapshot files\n")
@@ -73,19 +73,19 @@ var tuiCmd = &cobra.Command{
 			}
 			diff := awsutil.DiffScans(oldRes, newRes)
 			seed = awsutil.BuildDiffResources(diff)
-			AppConfig.Services = nil // Disable live scanning
-		}
-
-		eng, err := engine.NewEngine(ctx, AppConfig)
-		if err != nil {
-			fmt.Fprintf(os.Stderr, "Failed to initialize engine: %v\n", err)
-			os.Exit(1)
 		}
 
 		var m tea.Model
-		if len(seed) > 0 {
-			m = tui.NewModelWithSeed(ctx, eng, configFilePath(), AppConfig, seed)
+		if offline {
+			// Offline view: no engine — no credentials, STS calls or region
+			// discovery needed to browse a saved snapshot or a diff.
+			m = tui.NewModelWithSeed(ctx, nil, configFilePath(), AppConfig, seed)
 		} else {
+			eng, err := engine.NewEngine(ctx, AppConfig)
+			if err != nil {
+				fmt.Fprintf(os.Stderr, "Failed to initialize engine: %v\n", err)
+				os.Exit(1)
+			}
 			m = tui.NewModel(ctx, eng, configFilePath(), AppConfig)
 		}
 

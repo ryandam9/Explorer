@@ -79,7 +79,7 @@ type model struct {
 	groupLevelSearch  bool // If true, queries entire group instead of specific stream
 
 	// Expand Event Modal
-	selectedEvent *types.FilteredLogEvent
+	selectedEvent        *types.FilteredLogEvent
 	expandedScrollOffset int
 
 	// Watch Mode (Live tailing)
@@ -112,7 +112,10 @@ type eventsMsg struct {
 type clearToastMsg struct{}
 type watchTickMsg struct{}
 
-func NewModel(ctx context.Context, awsCfg *config.AWSConfig, region string, configPath string, appCfg *config.Config) (tea.Model, error) {
+// NewModel builds the CloudWatch Logs explorer. groupFilter, streamFilter and
+// eventPattern pre-populate the three search inputs (the event pattern is
+// applied server-side on the first event query).
+func NewModel(ctx context.Context, awsCfg *config.AWSConfig, region string, configPath string, appCfg *config.Config, groupFilter, streamFilter, eventPattern string) (tea.Model, error) {
 	client, err := NewCWLogsClient(ctx, awsCfg, region)
 	if err != nil {
 		return nil, err
@@ -133,6 +136,10 @@ func NewModel(ctx context.Context, awsCfg *config.AWSConfig, region string, conf
 	eSearch := textinput.New()
 	eSearch.Placeholder = "CloudWatch pattern (e.g. ERROR, panic)..."
 	eSearch.Width = 40
+
+	gSearch.SetValue(groupFilter)
+	sSearch.SetValue(streamFilter)
+	eSearch.SetValue(eventPattern)
 
 	m := &model{
 		ctx:          ctx,
@@ -192,6 +199,12 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 
 	case streamsMsg:
+		// Drop responses for groups no longer selected (eager loads while
+		// arrowing through the group list race each other).
+		if len(m.filteredGroups) == 0 ||
+			msg.groupName != aws.ToString(m.filteredGroups[m.selectedGroupIdx].LogGroupName) {
+			return m, tea.Batch(cmds...)
+		}
 		m.streamsLoading = false
 		if msg.err != nil {
 			m.err = msg.err
@@ -213,6 +226,21 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 
 	case tea.KeyMsg:
+		// Error screen: Enter/Esc clears the error and retries, q quits.
+		if m.err != nil {
+			switch msg.String() {
+			case "q", "ctrl+c":
+				return m, tea.Quit
+			case "enter", "esc":
+				m.err = nil
+				if len(m.groups) == 0 {
+					m.groupsLoading = true
+					cmds = append(cmds, m.loadGroupsCmd(""))
+				}
+			}
+			return m, tea.Batch(cmds...)
+		}
+
 		// If search inputs are active, direct keys to them
 		if m.groupSearchActive && m.focus == focusGroups {
 			switch msg.String() {
@@ -301,9 +329,9 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.cycleFocus(false)
 
 		case "up", "k":
-			m.navigateList(-1)
+			cmds = append(cmds, m.navigateList(-1))
 		case "down", "j":
-			m.navigateList(1)
+			cmds = append(cmds, m.navigateList(1))
 
 		case "/":
 			m.activateSearch()
@@ -379,14 +407,15 @@ func (m *model) cycleFocus(forward bool) {
 	}
 }
 
-func (m *model) navigateList(dir int) {
+func (m *model) navigateList(dir int) tea.Cmd {
 	switch m.focus {
 	case focusGroups:
 		if len(m.filteredGroups) == 0 {
-			return
+			return nil
 		}
 		m.selectedGroupIdx = (m.selectedGroupIdx + dir + len(m.filteredGroups)) % len(m.filteredGroups)
-		// Eagerly query streams for the newly selected group
+		// Eagerly query streams for the newly selected group; the streamsMsg
+		// handler drops responses for groups that are no longer selected.
 		m.streamsLoading = true
 		m.streams = nil
 		m.filteredStreams = nil
@@ -394,17 +423,19 @@ func (m *model) navigateList(dir int) {
 		m.events = nil
 		m.selectedEventIdx = 0
 		m.view = viewStreams
+		return m.loadStreamsCmd()
 	case focusStreams:
 		if len(m.filteredStreams) == 0 {
-			return
+			return nil
 		}
 		m.selectedStreamIdx = (m.selectedStreamIdx + dir + len(m.filteredStreams)) % len(m.filteredStreams)
 	case focusEvents:
 		if len(m.events) == 0 {
-			return
+			return nil
 		}
 		m.selectedEventIdx = (m.selectedEventIdx + dir + len(m.events)) % len(m.events)
 	}
+	return nil
 }
 
 func (m *model) activateSearch() {
@@ -492,7 +523,10 @@ func (m *model) handleExport(cmds *[]tea.Cmd) {
 	dir := filepath.Join(home, ".aws_explorer", "logs")
 	_ = os.MkdirAll(dir, 0755)
 
-	grpName := sanitizeFilename(aws.ToString(m.filteredGroups[m.selectedGroupIdx].LogGroupName))
+	grpName := "unknown-group"
+	if len(m.filteredGroups) > 0 {
+		grpName = sanitizeFilename(aws.ToString(m.filteredGroups[m.selectedGroupIdx].LogGroupName))
+	}
 	streamName := "all_streams"
 	if !m.groupLevelSearch && len(m.filteredStreams) > 0 {
 		streamName = sanitizeFilename(aws.ToString(m.filteredStreams[m.selectedStreamIdx].LogStreamName))
@@ -514,7 +548,6 @@ func (m *model) handleExport(cmds *[]tea.Cmd) {
 	}
 	*cmds = append(*cmds, toastCmd(4*time.Second))
 }
-
 
 func (m *model) filterGroups() {
 	term := strings.ToLower(m.groupSearch.Value())
@@ -798,7 +831,10 @@ func (m *model) renderEventsPanel(width int) string {
 		Foreground(lipgloss.Color(ui.ColorHeading())).
 		Bold(true)
 
-	grpName := aws.ToString(m.filteredGroups[m.selectedGroupIdx].LogGroupName)
+	grpName := ""
+	if len(m.filteredGroups) > 0 {
+		grpName = aws.ToString(m.filteredGroups[m.selectedGroupIdx].LogGroupName)
+	}
 	title := " EVENTS: " + grpName
 	if !m.groupLevelSearch && len(m.filteredStreams) > 0 {
 		title = " STREAM EVENTS: " + aws.ToString(m.filteredStreams[m.selectedStreamIdx].LogStreamName)
@@ -1040,4 +1076,3 @@ func (m *model) setToast(msg string) {
 	m.toast = msg
 	m.toastExp = time.Now().Add(3 * time.Second)
 }
-
