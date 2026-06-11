@@ -55,7 +55,10 @@ const (
 
 // ── Zone IDs ─────────────────────────────────────────────────────────────────
 
-const zoneSvc = "svc-"
+const (
+	zoneSvc = "svc-"
+	zoneRow = "row-"
+)
 
 // ── Message types ─────────────────────────────────────────────────────────────
 
@@ -287,6 +290,10 @@ func NewModelWithSeed(ctx context.Context, eng *engine.Engine, configPath string
 		table.WithHeight(10),
 		table.WithStyles(ui.TableStyles()),
 	)
+	// Mark every visible row with a mouse zone so clicks can select it.
+	m.table.MarkRow = func(i int, rendered string) string {
+		return zoneM.Mark(fmt.Sprintf("%s%d", zoneRow, i), rendered)
+	}
 
 	// Surface seed resources immediately; typed results stream in and merge.
 	if len(seed) > 0 {
@@ -840,6 +847,7 @@ func (m tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 
 		// Check sidebar zone clicks.
+		sidebarHit := false
 		for i := range m.services {
 			zID := fmt.Sprintf("%s%d", zoneSvc, i)
 			if m.zones.Get(zID).InBounds(msg) {
@@ -849,7 +857,21 @@ func (m tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				}
 				m.focus = focusTable
 				m.table.Focus()
+				sidebarHit = true
 				break
+			}
+		}
+
+		// Table row clicks select the row; only the rendered rows have zones.
+		if !sidebarHit && msg.Button == tea.MouseButtonLeft {
+			start, end := m.table.VisibleRange()
+			for i := start; i < end; i++ {
+				if m.zones.Get(fmt.Sprintf("%s%d", zoneRow, i)).InBounds(msg) {
+					m.table.SetCursor(i)
+					m.focus = focusTable
+					m.table.Focus()
+					break
+				}
 			}
 		}
 

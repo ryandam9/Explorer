@@ -22,6 +22,11 @@ type Model struct {
 	KeyMap KeyMap
 	Help   help.Model
 
+	// MarkRow, when set, wraps each rendered row just before it enters the
+	// viewport. Callers use it to register a mouse hit-zone per visible row
+	// (e.g. with bubblezone) so rows can be selected by clicking.
+	MarkRow func(index int, rendered string) string
+
 	cols   []Column
 	rows   []Row
 	cursor int
@@ -378,12 +383,22 @@ func (m *Model) UpdateViewport() {
 	m.end = clamp(m.cursor+m.viewport.Height, m.cursor, len(m.rows))
 	vis := m.visibleCols() // resolved once per refresh, not once per row
 	for i := m.start; i < m.end; i++ {
-		renderedRows = append(renderedRows, m.renderRow(i, vis))
+		row := m.renderRow(i, vis)
+		if m.MarkRow != nil {
+			row = m.MarkRow(i, row)
+		}
+		renderedRows = append(renderedRows, row)
 	}
 
 	m.viewport.SetContent(
 		lipgloss.JoinVertical(lipgloss.Left, renderedRows...),
 	)
+}
+
+// VisibleRange returns the half-open [start, end) row index range currently
+// rendered into the viewport — the only rows that can have a mouse hit-zone.
+func (m Model) VisibleRange() (start, end int) {
+	return m.start, m.end
 }
 
 // SelectedRow returns the selected row.

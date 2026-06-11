@@ -9,7 +9,7 @@ LDFLAGS := -X github.com/ryandam9/aws_explorer/cmd.version=$(VERSION) \
            -X github.com/ryandam9/aws_explorer/cmd.commit=$(COMMIT) \
            -X github.com/ryandam9/aws_explorer/cmd.date=$(DATE)
 
-.PHONY: all fmt vet test build clean run run-all-regions tidy lint help
+.PHONY: all fmt vet test build clean run run-all-regions tidy lint man help
 
 all: fmt vet test build
 
@@ -27,6 +27,10 @@ build:
 
 clean:
 	rm -f $(BINARY)
+	rm -rf man
+
+man: build
+	./$(BINARY) docs --dir man
 
 run: build
 	./$(BINARY)
@@ -50,7 +54,8 @@ help:
 	@echo "  vet              - Run go vet"
 	@echo "  test             - Run tests"
 	@echo "  build            - Build binary"
-	@echo "  clean            - Remove binary"
+	@echo "  clean            - Remove binary and generated man pages"
+	@echo "  man              - Generate man pages into ./man"
 	@echo "  run              - Build and run CLI mode"
 	@echo "  run-all-regions  - Build and run with --all-regions"
 	@echo "  tidy             - Tidy go modules"
