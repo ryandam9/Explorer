@@ -8,66 +8,46 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/spf13/cobra"
-	"github.com/ryandam9/aws_explorer/internal/config"
+
 	"github.com/ryandam9/aws_explorer/internal/cwtui"
 	"github.com/ryandam9/aws_explorer/internal/ui"
 )
 
 var (
-	cwGroup      string
-	cwStream     string
-	cwFilter     string
-	cwProfile    string
-	cwAuthMethod string
-	cwRoleARN    string
-	cwRegion     string
-	cwTheme      string
+	cwGroup  string
+	cwStream string
+	cwFilter string
+	cwTheme  string
 )
 
 var cwCmd = &cobra.Command{
 	Use:   "cw",
 	Short: "Start the CloudWatch Logs Explorer TUI",
-	Long: `Start a highly interactive terminal user interface (TUI) for exploring, filtering, searching and tailing CloudWatch log groups, streams and events.
+	Long: `Start an interactive TUI for exploring, filtering, searching and tailing
+CloudWatch log groups, streams and events.
 
-Scope: --region pins a single region; --all-regions (or aws.allRegions in the config) sweeps every enabled region and adds a Region column to the group list; otherwise the config's aws.regions list is used.`,
+Scope: --region pins a single region; --all-regions (or aws.allRegions in the
+config) sweeps every enabled region and adds a Region column to the group
+list; otherwise the config's aws.regions list is used.`,
+	Example: `  # Browse log groups in one region
+  aws_explorer cw --region us-east-1
+
+  # Open a group and tail events matching a pattern
+  aws_explorer cw -g /aws/lambda/my-fn -f ERROR`,
 	Run: func(cmd *cobra.Command, args []string) {
 		ctx, cancel := context.WithCancel(context.Background())
 		defer cancel()
 
-		// Build auth config, preferring local cw flags over global ones.
-		cwCfg := &config.AWSConfig{
-			Profile:    awsProfile,
-			AuthMethod: awsAuthMethod,
-		}
-		if cwProfile != "" {
-			cwCfg.Profile = cwProfile
-		}
-		if cwAuthMethod != "" {
-			cwCfg.AuthMethod = cwAuthMethod
-		}
-		roleARN := awsRoleARN
-		if cwRoleARN != "" {
-			roleARN = cwRoleARN
-		}
-		if roleARN != "" {
-			cwCfg.STS.RoleARN = roleARN
-			if cwCfg.AuthMethod == "" || cwCfg.AuthMethod == "auto" {
-				cwCfg.AuthMethod = "sts"
-			}
-		}
+		cwCfg := tuiAWSConfig()
 
-		// Initialize UI Theme & Colors.
-		// Theme: CLI flag overrides config; config overrides built-in default.
+		// Initialize UI theme & colors.
 		ui.InitFromConfig(AppConfig.UI)
-		activeTheme := cwTheme
-		if AppConfig != nil && AppConfig.UI.Theme != "" && cwTheme == "spotted-pardalote" {
-			activeTheme = AppConfig.UI.Theme
-		}
+		activeTheme := resolveTheme(cmd, cwTheme)
 		if idx, ok := ui.LookupTheme(activeTheme); ok {
 			ui.SetActiveTheme(idx)
 		}
-		// Redirect scan logging to keep TUI screen clean
-		SilenceLogsForTUI()
+		// The TUI owns the screen; keep scan logs from corrupting it.
+		SilenceScanLogs()
 
 		// Region scope: --region pins a single region and wins over
 		// everything; otherwise --all-regions / aws.allRegions sweeps every
@@ -76,8 +56,8 @@ Scope: --region pins a single region; --all-regions (or aws.allRegions in the co
 		var regions []string
 		scanAll := false
 		switch {
-		case cwRegion != "":
-			regions = []string{cwRegion}
+		case awsRegion != "":
+			regions = []string{awsRegion}
 		case allRegions || (AppConfig != nil && AppConfig.AWS.AllRegions):
 			scanAll = true
 		case AppConfig != nil && len(AppConfig.AWS.Regions) > 0:
@@ -105,10 +85,7 @@ func init() {
 	cwCmd.Flags().StringVarP(&cwGroup, "group", "g", "", "Initial CloudWatch log group filter/pattern")
 	cwCmd.Flags().StringVarP(&cwStream, "stream", "s", "", "Initial CloudWatch log stream filter")
 	cwCmd.Flags().StringVarP(&cwFilter, "filter", "f", "", "Initial query pattern for log events")
-	cwCmd.Flags().StringVar(&cwProfile, "profile", "", "AWS named profile (overrides global --profile)")
-	cwCmd.Flags().StringVar(&cwAuthMethod, "auth-method", "", "Auth method: auto, profile, env, static, sts (overrides global --auth-method)")
-	cwCmd.Flags().StringVar(&cwRoleARN, "role-arn", "", "IAM role ARN to assume via STS (overrides global --role-arn)")
-	cwCmd.Flags().StringVar(&cwRegion, "region", "", "AWS region (overrides global configs/defaults)")
-	cwCmd.Flags().StringVar(&cwTheme, "theme", "spotted-pardalote", "Color theme ("+strings.Join(ui.ThemeNames(), ", ")+")")
+	cwCmd.Flags().StringVar(&cwTheme, "theme", defaultThemeName, "Color theme ("+strings.Join(ui.ThemeNames(), ", ")+")")
+	registerThemeCompletion(cwCmd, ui.ThemeNames())
 	rootCmd.AddCommand(cwCmd)
 }

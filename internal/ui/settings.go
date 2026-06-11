@@ -3,6 +3,7 @@ package ui
 import (
 	"fmt"
 	"os"
+	"path/filepath"
 	"strings"
 
 	tea "github.com/charmbracelet/bubbletea"
@@ -527,6 +528,13 @@ func (s SettingsModel) saveCmd() tea.Cmd {
 		data, err := yaml.Marshal(s.fullConfig)
 		if err != nil {
 			return SettingsErrMsg{err}
+		}
+		// The app runs without a config file (built-in defaults); the first
+		// save may have to create the user config directory.
+		if dir := filepath.Dir(s.configPath); dir != "." {
+			if err := os.MkdirAll(dir, 0o755); err != nil {
+				return SettingsErrMsg{err}
+			}
 		}
 		if err := os.WriteFile(s.configPath, data, 0o644); err != nil {
 			return SettingsErrMsg{err}

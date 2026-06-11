@@ -10,8 +10,8 @@ import (
 // other region setting: config aws.regions, aws.allRegions, --all-regions, and
 // filters.regions.
 func TestApplyGlobalAWSOverrides_RegionWins(t *testing.T) {
-	prevAll, prevRegion := allRegions, summaryRegion
-	t.Cleanup(func() { allRegions, summaryRegion = prevAll, prevRegion })
+	prevAll, prevRegion := allRegions, awsRegion
+	t.Cleanup(func() { allRegions, awsRegion = prevAll, prevRegion })
 
 	AppConfig = &config.Config{}
 	AppConfig.AWS.Regions = []string{"eu-west-1", "us-east-1"}
@@ -19,7 +19,7 @@ func TestApplyGlobalAWSOverrides_RegionWins(t *testing.T) {
 	AppConfig.Filters.Regions = []string{"eu-west-1"}
 
 	allRegions = true // --all-regions also set; --region must still win
-	summaryRegion = "ap-southeast-2"
+	awsRegion = "ap-southeast-2"
 
 	applyGlobalAWSOverrides()
 
@@ -37,14 +37,14 @@ func TestApplyGlobalAWSOverrides_RegionWins(t *testing.T) {
 // TestApplyGlobalAWSOverrides_NoRegionLeavesConfig confirms the config's own
 // region settings are untouched when --region is not passed.
 func TestApplyGlobalAWSOverrides_NoRegionLeavesConfig(t *testing.T) {
-	prevAll, prevRegion := allRegions, summaryRegion
-	t.Cleanup(func() { allRegions, summaryRegion = prevAll, prevRegion })
+	prevAll, prevRegion := allRegions, awsRegion
+	t.Cleanup(func() { allRegions, awsRegion = prevAll, prevRegion })
 
 	AppConfig = &config.Config{}
 	AppConfig.AWS.Regions = []string{"eu-west-1"}
 
 	allRegions = false
-	summaryRegion = ""
+	awsRegion = ""
 
 	applyGlobalAWSOverrides()
 

@@ -2,6 +2,13 @@ BINARY  := bin/aws_explorer
 GO      := go
 PKG     := ./...
 
+VERSION := $(shell git describe --tags --always --dirty 2>/dev/null || echo dev)
+COMMIT  := $(shell git rev-parse --short HEAD 2>/dev/null || echo none)
+DATE    := $(shell date -u +%Y-%m-%dT%H:%M:%SZ)
+LDFLAGS := -X github.com/ryandam9/aws_explorer/cmd.version=$(VERSION) \
+           -X github.com/ryandam9/aws_explorer/cmd.commit=$(COMMIT) \
+           -X github.com/ryandam9/aws_explorer/cmd.date=$(DATE)
+
 .PHONY: all fmt vet test build clean run run-all-regions tidy lint help
 
 all: fmt vet test build
@@ -16,7 +23,7 @@ test:
 	$(GO) test $(PKG) -v -count=1
 
 build:
-	$(GO) build -o $(BINARY) main.go
+	$(GO) build -ldflags "$(LDFLAGS)" -o $(BINARY) main.go
 
 clean:
 	rm -f $(BINARY)

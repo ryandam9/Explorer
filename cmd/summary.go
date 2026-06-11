@@ -20,7 +20,6 @@ import (
 var (
 	summaryTUI       bool
 	summaryTypedOnly bool
-	summaryRegion    string
 )
 
 var summaryCmd = &cobra.Command{
@@ -31,8 +30,16 @@ region as a single numbered inventory. Each row shows the serial number, the
 resource name (or "-" when it has none), the resource type, the ARN, and the
 region (with availability zone when the resource is zonal).
 
-By default the inventory is printed as a table (use -o json|csv for other
-formats). Pass --tui to explore the same data interactively.`,
+By default the inventory is printed as a table (use -o json|ndjson|csv for
+other formats). Pass --tui to explore the same data interactively.`,
+	Example: `  # Full inventory of every region
+  aws_explorer summary --all-regions
+
+  # One region, exported as CSV
+  aws_explorer summary -r us-east-1 -o csv > inventory.csv
+
+  # Explore interactively
+  aws_explorer summary --tui`,
 	Run: func(cmd *cobra.Command, args []string) {
 		ctx, cancel := context.WithCancel(context.Background())
 		defer cancel()
@@ -41,14 +48,14 @@ formats). Pass --tui to explore the same data interactively.`,
 
 		eng, err := engine.NewEngine(ctx, AppConfig)
 		if err != nil {
-			fmt.Fprintf(os.Stderr, "Failed to initialize engine: %v\n", err)
+			fmt.Fprintf(os.Stderr, "Error: failed to initialize engine: %v\n", err)
 			os.Exit(1)
 		}
 
 		if summaryTUI {
 			ui.InitFromConfig(AppConfig.UI)
 			// The TUI owns the screen; keep scan logs from corrupting it.
-			SilenceLogsForTUI()
+			SilenceScanLogs()
 			// Gather the all-services sweep up front and seed the TUI with it;
 			// the typed collectors then stream in and merge (deduped by ARN).
 			var seed []model.Resource
@@ -64,6 +71,10 @@ formats). Pass --tui to explore the same data interactively.`,
 			}
 			return
 		}
+
+		// Problems are summarized after the run; the raw log stream would
+		// only interleave with the table.
+		SilenceScanLogs()
 
 		result, err := eng.Run(ctx)
 		if err != nil {
@@ -83,55 +94,22 @@ formats). Pass --tui to explore the same data interactively.`,
 			errs = append(errs, dErrs...)
 		}
 
-		if len(errs) > 0 {
-			output.PrintErrors(os.Stderr, errs)
-		}
+		output.PrintErrors(os.Stderr, errs)
 
 		rows := summary.BuildRows(resources)
 		if len(rows) == 0 {
 			fmt.Println("No resources found.")
 			return
 		}
-		if err := summary.Render(os.Stdout, rows, outputFormat); err != nil {
+		if err := summary.Render(os.Stdout, rows, outputFormat, noHeader); err != nil {
 			fmt.Fprintf(os.Stderr, "Error rendering summary: %v\n", err)
 			os.Exit(1)
 		}
 	},
 }
 
-// applyGlobalAWSOverrides applies the persistent CLI auth flags onto AppConfig,
-// mirroring the behaviour of the root and tui commands.
-func applyGlobalAWSOverrides() {
-	if allRegions {
-		AppConfig.AWS.AllRegions = true
-	}
-	if awsProfile != "" {
-		AppConfig.AWS.Profile = awsProfile
-	}
-	if awsAuthMethod != "" {
-		AppConfig.AWS.AuthMethod = awsAuthMethod
-	}
-	if awsRoleARN != "" {
-		AppConfig.AWS.STS.RoleARN = awsRoleARN
-		if AppConfig.AWS.AuthMethod == "" || AppConfig.AWS.AuthMethod == "auto" {
-			AppConfig.AWS.AuthMethod = "sts"
-		}
-	}
-
-	// --region pins the scan to a single region. It wins over every other
-	// region setting: the config's aws.regions, aws.allRegions, --all-regions,
-	// and any filters.regions narrowing. Applied last so it overrides the
-	// --all-regions handling above.
-	if summaryRegion != "" {
-		AppConfig.AWS.Regions = []string{summaryRegion}
-		AppConfig.AWS.AllRegions = false
-		AppConfig.Filters.Regions = nil
-	}
-}
-
 func init() {
 	summaryCmd.Flags().BoolVar(&summaryTUI, "tui", false, "Explore the inventory interactively instead of printing a table")
 	summaryCmd.Flags().BoolVar(&summaryTypedOnly, "typed-only", false, "Only use the built-in typed collectors; skip the all-services Tagging API sweep")
-	summaryCmd.Flags().StringVarP(&summaryRegion, "region", "r", "", "Scan only this region, overriding all other region settings (aws.regions, --all-regions, filters.regions)")
 	rootCmd.AddCommand(summaryCmd)
 }

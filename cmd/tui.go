@@ -24,28 +24,27 @@ var (
 var tuiCmd = &cobra.Command{
 	Use:   "tui",
 	Short: "Start the interactive TUI mode",
-	Long:  `Start the Text User Interface (TUI) for interactive exploration of AWS resources.`,
+	Long: `Start the Text User Interface (TUI) for interactive exploration of AWS
+resources, with live scanning, filtering, sorting, detail views, CSV export
+and snapshot diffing.`,
+	Example: `  # Explore live AWS resources
+  aws_explorer tui --profile prod
+
+  # Browse a saved snapshot offline (no credentials needed)
+  aws_explorer tui --snapshot inventory.json
+
+  # Diff two snapshots
+  aws_explorer tui --diff before.json,after.json`,
 	Run: func(cmd *cobra.Command, args []string) {
 		ctx, cancel := context.WithCancel(context.Background())
 		defer cancel()
 
 		// Apply persistent CLI flag overrides (same as root command).
-		if awsProfile != "" {
-			AppConfig.AWS.Profile = awsProfile
-		}
-		if awsAuthMethod != "" {
-			AppConfig.AWS.AuthMethod = awsAuthMethod
-		}
-		if awsRoleARN != "" {
-			AppConfig.AWS.STS.RoleARN = awsRoleARN
-			if AppConfig.AWS.AuthMethod == "" || AppConfig.AWS.AuthMethod == "auto" {
-				AppConfig.AWS.AuthMethod = "sts"
-			}
-		}
+		applyGlobalAWSOverrides()
 
 		ui.InitFromConfig(AppConfig.UI)
 		// The TUI owns the screen; keep scan logs from corrupting it.
-		SilenceLogsForTUI()
+		SilenceScanLogs()
 
 		var seed []model.Resource
 		offline := snapshotPath != "" || len(diffPaths) > 0

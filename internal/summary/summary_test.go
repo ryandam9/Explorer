@@ -99,7 +99,7 @@ func TestRender_CSVAndJSON(t *testing.T) {
 	})
 
 	var csvBuf bytes.Buffer
-	if err := Render(&csvBuf, rows, "csv"); err != nil {
+	if err := Render(&csvBuf, rows, "csv", false); err != nil {
 		t.Fatalf("csv render: %v", err)
 	}
 	if !strings.Contains(csvBuf.String(), "SNO,Name,Type,ARN,Region/AZ") {
@@ -110,7 +110,7 @@ func TestRender_CSVAndJSON(t *testing.T) {
 	}
 
 	var jsonBuf bytes.Buffer
-	if err := Render(&jsonBuf, rows, "json"); err != nil {
+	if err := Render(&jsonBuf, rows, "json", false); err != nil {
 		t.Fatalf("json render: %v", err)
 	}
 	var out []Row
