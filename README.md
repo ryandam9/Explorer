@@ -864,8 +864,29 @@ ui:
       error: "#FF0000"         # override just this role
 ```
 
-The in-app settings panel (press `S`) lets you edit every role live and saves
-your changes back to `config.yaml`.
+### The theme console
+
+The in-app settings panel (press `S`) is styled as a sci-fi mission console
+and edits every role live, saving your changes back to `config.yaml`:
+
+- **Theme selector** — `←`/`→` cycles the 12 built-in themes, shown as a
+  dropdown readout with a position counter.
+- **Subsystem tabs** — the roles are grouped into segmented `GENERAL` /
+  `TABLES` / `STATUS BAR` / `ALERTS` tabs (`Tab` or `1`–`4` to switch).
+- **Slider rows** — every role renders as a fader: the knob position is the
+  color's hue, the track glows in the color itself, and the hex value and a
+  swatch sit at the end of the row. Roles on `auto` show a dimmed dashed
+  track.
+- **HUE / SAT / LUM tuner** — `Enter` opens three knobs for the selected role
+  (`↑`/`↓` picks a knob, `←`/`→` turns it, `Shift+←/→` turns it coarsely), a
+  `HEX` field for typing an exact value, and `a` to reset the role to `auto`.
+  `Enter` applies, `Esc` cancels.
+- **Signal monitor** — a live preview strip (mini header, table row, status
+  bar and alert glyphs) rendered with the edited theme, updating with every
+  knob turn *before* you apply or save.
+
+`Ctrl+S` saves the theme and all role edits back to `config.yaml` and applies
+them immediately.
 
 ## Architecture
 
