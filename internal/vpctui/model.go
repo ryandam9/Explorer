@@ -1652,16 +1652,19 @@ func firstID(r map[string]string) string {
 // ---------------------------------------------------------------------------
 
 func (m *Model) View() string {
-	if m.showSettings {
-		return m.settings.View()
-	}
-
 	var content string
 	switch m.state {
 	case stateVPCList:
 		content = m.viewVPCListState()
 	case stateResourceBrowser:
 		content = m.viewResourceBrowserState()
+	}
+
+	if m.showSettings {
+		// The console floats over the live app so theme changes are visible
+		// on the real UI around it.
+		base := ui.ClipToSize(content, m.width, m.height)
+		return ui.ClipToSize(ui.OverlayCenter(base, m.settings.View(), m.width, m.height), m.width, m.height)
 	}
 
 	if m.showHelp {

@@ -866,27 +866,32 @@ ui:
 
 ### The theme console
 
-The in-app settings panel (press `S`) is styled as a sci-fi mission console
-and edits every role live, saving your changes back to `config.yaml`:
+The in-app settings panel (press `S`) is styled as a sci-fi mission console.
+It **floats over the live app** (the UI stays visible around it), it has a
+**fixed size** that never changes with the terminal, tab or mode, and every
+row is a control: `↑`/`↓` selects a row, `←`/`→` changes its value —
+**instantly**.
 
-- **Theme selector** — `←`/`→` cycles the 12 built-in themes, shown as a
-  dropdown readout with a position counter.
+- **Theme selector** — the top row. With it selected, `←`/`→` cycles the 12
+  built-in themes and the whole app restyles in real time around the console.
 - **Subsystem tabs** — the roles are grouped into segmented `GENERAL` /
   `TABLES` / `STATUS BAR` / `ALERTS` tabs (`Tab` or `1`–`4` to switch).
 - **Slider rows** — every role renders as a fader: the knob position is the
   color's hue, the track glows in the color itself, and the hex value and a
   swatch sit at the end of the row. Roles on `auto` show a dimmed dashed
   track.
-- **HUE / SAT / LUM tuner** — `Enter` opens three knobs for the selected role
-  (`↑`/`↓` picks a knob, `←`/`→` turns it, `Shift+←/→` turns it coarsely), a
-  `HEX` field for typing an exact value, and `a` to reset the role to `auto`.
-  `Enter` applies, `Esc` cancels.
+- **Quick palette** — with a role selected, `←`/`→` steps it through a swatch
+  ring (the theme's own colors, a hue wheel and a gray ramp), applied
+  immediately — changing a color is one keystroke. `a` resets it to `auto`.
+- **HUE / SAT / LUM tuner** — `Enter` opens three knobs for fine control
+  (`↑`/`↓` picks a knob, `←`/`→` turns it, `Shift+←/→` turns it coarsely),
+  plus a `HEX` field for typing an exact value. `Enter` applies, `Esc`
+  cancels.
 - **Signal monitor** — a live preview strip (mini header, table row, status
-  bar and alert glyphs) rendered with the edited theme, updating with every
-  knob turn *before* you apply or save.
+  bar and alert glyphs) that follows every knob turn *before* you apply.
 
-`Ctrl+S` saves the theme and all role edits back to `config.yaml` and applies
-them immediately.
+All changes apply live to the running app; `Ctrl+S` persists the theme and
+every role edit back to `config.yaml`.
 
 ## Architecture
 

@@ -74,3 +74,30 @@ func TestStatusBarTruncatesLongLeft(t *testing.T) {
 		t.Errorf("hint lost when left text is long: %q", ansi.Strip(out))
 	}
 }
+
+func TestOverlayCompositing(t *testing.T) {
+	bg := "aaaaaaaaaa\nbbbbbbbbbb\ncccccccccc\ndddddddddd"
+	fg := "XX\nYY"
+	got := Overlay(bg, fg, 4, 1)
+	want := "aaaaaaaaaa\nbbbbXXbbbb\nccccYYcccc\ndddddddddd"
+	if got != want {
+		t.Errorf("Overlay = %q, want %q", got, want)
+	}
+}
+
+func TestOverlayPadsShortBackground(t *testing.T) {
+	got := Overlay("ab", "XY", 4, 1)
+	want := "ab\n    XY"
+	if got != want {
+		t.Errorf("Overlay over short bg = %q, want %q", got, want)
+	}
+}
+
+func TestOverlayCenterPosition(t *testing.T) {
+	bg := strings.Repeat(strings.Repeat(".", 10)+"\n", 4) + strings.Repeat(".", 10)
+	got := OverlayCenter(bg, "XX", 10, 5)
+	lines := strings.Split(got, "\n")
+	if lines[2] != "....XX...." {
+		t.Errorf("OverlayCenter middle line = %q", lines[2])
+	}
+}

@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/lipgloss"
 )
 
 func key(s string) tea.KeyMsg {
@@ -206,4 +207,103 @@ func TestConsoleViewRenders(t *testing.T) {
 			}
 		}
 	}
+}
+
+func TestThemeRowLiveApply(t *testing.T) {
+	origActive := getActiveTheme()
+	t.Cleanup(func() { SetActiveTheme(origActive) })
+
+	s := NewSettingsModel(100, 40, "", nil)
+	s, _ = s.Update(key("up")) // from the first role onto the ACTIVE THEME row
+	if !s.onTheme {
+		t.Fatal("up from the first role should land on the theme row")
+	}
+	start := s.themeIdx
+	dir, want := "right", start+1
+	if start == len(Themes)-1 {
+		dir, want = "left", start-1
+	}
+	s, _ = s.Update(key(dir))
+	if s.themeIdx != want {
+		t.Fatalf("theme row ←/→ should switch themes, got %d want %d", s.themeIdx, want)
+	}
+	if getActiveTheme() != want {
+		t.Error("switching themes should apply live (SetActiveTheme)")
+	}
+	s, _ = s.Update(key("down"))
+	if s.onTheme {
+		t.Error("down should leave the theme row")
+	}
+}
+
+func TestQuickSwatchCycleAppliesInstantly(t *testing.T) {
+	s := NewSettingsModel(100, 40, "", nil)
+	withRoleRestore(t, s.themeIdx, s.fieldIdx)
+
+	pal := quickPalette(s.themeIdx)
+	if len(pal) < 3 {
+		t.Fatal("quick palette unexpectedly small")
+	}
+	setColorForField(s.themeIdx, s.fieldIdx, pal[1])
+	s, _ = s.Update(key("right"))
+	if got := s.colorForField(s.themeIdx, s.fieldIdx); got != pal[2] {
+		t.Errorf("right should step to the next swatch instantly, got %q want %q", got, pal[2])
+	}
+	s, _ = s.Update(key("left"))
+	s, _ = s.Update(key("left"))
+	if got := s.colorForField(s.themeIdx, s.fieldIdx); got != pal[0] {
+		t.Errorf("left twice should step back, got %q want %q", got, pal[0])
+	}
+}
+
+func TestQuickSwatchSnapsToNearest(t *testing.T) {
+	s := NewSettingsModel(100, 40, "", nil)
+	withRoleRestore(t, s.themeIdx, s.fieldIdx)
+
+	setColorForField(s.themeIdx, s.fieldIdx, "#fec900") // ≈ spotted-pardalote heading, not in palette
+	s, _ = s.Update(key("right"))
+	got := s.colorForField(s.themeIdx, s.fieldIdx)
+	pal := s.palette
+	found := false
+	for _, p := range pal {
+		if p == got {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Errorf("off-palette color should snap onto the palette, got %q", got)
+	}
+}
+
+// The console must keep identical dimensions across tabs and modes — it
+// never resizes.
+func TestConsoleFixedSize(t *testing.T) {
+	s := NewSettingsModel(100, 40, "", nil)
+	withRoleRestore(t, s.themeIdx, s.fieldIdx)
+
+	w0 := lipgloss.Width(s.View())
+	h0 := lipgloss.Height(s.View())
+
+	check := func(label string, m SettingsModel) {
+		v := m.View()
+		if w, h := lipgloss.Width(v), lipgloss.Height(v); w != w0 || h != h0 {
+			t.Errorf("%s: console resized to %dx%d, want %dx%d", label, w, h, w0, h0)
+		}
+	}
+
+	for i := 1; i < len(settingsGroups); i++ {
+		s2, _ := s.Update(key("tab"))
+		s = s2
+		check(settingsGroups[s.groupIdx].name+" tab", s)
+	}
+	s, _ = s.Update(key("1"))
+	tuned, _ := s.Update(key("enter"))
+	check("tune mode", tuned)
+	themed, _ := s.Update(key("up"))
+	check("theme row", themed)
+
+	// And it must ignore the terminal size entirely.
+	tiny := NewSettingsModel(20, 10, "", nil)
+	check("tiny terminal", tiny)
 }
