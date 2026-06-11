@@ -188,7 +188,12 @@ type Model struct {
 	previewLoading        bool
 	previewErr            error
 	bucketRegionCache     map[string]string
-	themeIdx              int
+	// bucketDetailsCache holds fetched bucket details for the session: each
+	// fetch costs ~19 API calls and is triggered by every selection change in
+	// the bucket list, so revisiting a bucket must not refetch. The refresh
+	// keys invalidate it.
+	bucketDetailsCache map[string]*BucketDetails
+	themeIdx           int
 
 	// Multi-region bucket scan state
 	scanTotal   int
@@ -288,19 +293,20 @@ func NewModel(ctx context.Context, awsCfg *config.AWSConfig, region, bucket, pre
 	ui.SetActiveTheme(themeIdx)
 
 	m := &Model{
-		client:            client,
-		awsCfg:            awsCfg,
-		region:            region,
-		bucket:            bucket,
-		prefix:            prefix,
-		endpointURL:       endpointURL,
-		sortAsc:           true,
-		bucketRegionCache: make(map[string]string),
-		seenBuckets:       make(map[string]bool),
-		themeIdx:          themeIdx,
-		allowDelete:       allowDelete,
-		configPath:        configPath,
-		cfg:               cfg,
+		client:             client,
+		awsCfg:             awsCfg,
+		region:             region,
+		bucket:             bucket,
+		prefix:             prefix,
+		endpointURL:        endpointURL,
+		sortAsc:            true,
+		bucketRegionCache:  make(map[string]string),
+		bucketDetailsCache: make(map[string]*BucketDetails),
+		seenBuckets:        make(map[string]bool),
+		themeIdx:           themeIdx,
+		allowDelete:        allowDelete,
+		configPath:         configPath,
+		cfg:                cfg,
 	}
 	m.settings = ui.NewSettingsModel(0, 0, configPath, cfg)
 
@@ -519,6 +525,22 @@ func (m *Model) fetchBucketDetails(bucket string) tea.Cmd {
 			details: details,
 		}
 	}
+}
+
+// ensureBucketDetails makes bucket's details current, serving them from the
+// session cache when possible. It returns nil when no fetch is needed (cache
+// hit, or the same fetch is already in flight).
+func (m *Model) ensureBucketDetails(bucket string) tea.Cmd {
+	if d, ok := m.bucketDetailsCache[bucket]; ok {
+		m.selectedBucketDetails = d
+		m.detailsLoading = false
+		return nil
+	}
+	if m.detailsLoading && m.bucket == bucket {
+		return nil
+	}
+	m.selectedBucketDetails = nil
+	return m.fetchBucketDetails(bucket)
 }
 
 func (m *Model) fetchObjectDetails(key string) tea.Cmd {
@@ -1033,6 +1055,11 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			case "shift+tab":
 				m.detailTabIdx = (m.detailTabIdx + 4) % 5
 				return m, nil
+			case "r":
+				// Force-refetch this bucket's details, bypassing the cache.
+				delete(m.bucketDetailsCache, m.detailBucket)
+				m.selectedBucketDetails = nil
+				return m, m.fetchBucketDetails(m.detailBucket)
 			}
 			return m, nil
 		}
@@ -1109,7 +1136,9 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					// Trigger fetch if needed
 					if m.selectedBucketDetails == nil || m.bucket != row[1] {
 						m.bucket = row[1]
-						cmds = append(cmds, m.fetchBucketDetails(row[1]))
+						if cmd := m.ensureBucketDetails(row[1]); cmd != nil {
+							cmds = append(cmds, cmd)
+						}
 					}
 					return m, tea.Batch(cmds...)
 				}
@@ -1157,6 +1186,10 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case "r":
 			// Refresh current view
 			if m.state == stateBucketList {
+				// A refresh means "show me live state": drop the cached
+				// bucket details along with the list.
+				m.bucketDetailsCache = make(map[string]*BucketDetails)
+				m.selectedBucketDetails = nil
 				cmds = append(cmds, m.loadBuckets())
 			} else if m.state == stateObjectList {
 				cmds = append(cmds, m.loadObjects())
@@ -1303,7 +1336,9 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.bucketTable.SetRows(seqRows(m.allBucketRows))
 			if firstBucket && m.bucket == "" && len(m.allBucketRows) > 0 {
 				m.bucket = m.allBucketRows[0][1]
-				cmds = append(cmds, m.fetchBucketDetails(m.bucket))
+				if cmd := m.ensureBucketDetails(m.bucket); cmd != nil {
+					cmds = append(cmds, cmd)
+				}
 			}
 		} else if msg.err != nil {
 			// Non-access-denied error: surface it in status rather than crashing.
@@ -1332,7 +1367,9 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		if len(msg.rows) > 0 {
 			m.bucket = msg.rows[0][1]
-			cmds = append(cmds, m.fetchBucketDetails(msg.rows[0][1]))
+			if cmd := m.ensureBucketDetails(msg.rows[0][1]); cmd != nil {
+				cmds = append(cmds, cmd)
+			}
 		}
 		cmds = append(cmds, m.fetchBucketRegions())
 
@@ -1375,6 +1412,9 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 
 	case bucketDetailsMsg:
+		if msg.err == nil && msg.details != nil {
+			m.bucketDetailsCache[msg.bucket] = msg.details
+		}
 		if msg.bucket == m.bucket || msg.bucket == m.detailBucket {
 			m.detailsLoading = false
 			if msg.err == nil {
@@ -1461,7 +1501,11 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			row := m.bucketTable.SelectedRow()
 			if len(row) > 0 && (m.selectedBucketDetails == nil || m.bucket != row[1]) {
 				m.bucket = row[1]
-				cmds = append(cmds, m.fetchBucketDetails(row[1]))
+				// Served from the session cache when this bucket was already
+				// visited — scrolling the list doesn't refetch ~19 calls per row.
+				if cmd := m.ensureBucketDetails(row[1]); cmd != nil {
+					cmds = append(cmds, cmd)
+				}
 			}
 		}
 	} else if m.state == stateObjectList {
@@ -1681,6 +1725,7 @@ func (m *Model) statusHints() []ui.KeyHint {
 	case stateBucketDetail:
 		return []ui.KeyHint{
 			ui.H("Tab/Shift+Tab", "switch tab"),
+			ui.H("r", "refresh"),
 			ui.H("Esc", "back"),
 			ui.H("q", "quit"),
 		}

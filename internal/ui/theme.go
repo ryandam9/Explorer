@@ -4,6 +4,7 @@ import (
 	_ "embed"
 	"fmt"
 	"strings"
+	"sync"
 	"sync/atomic"
 
 	"github.com/charmbracelet/lipgloss"
@@ -116,11 +117,51 @@ func roleIndex(name string) int {
 	return -1
 }
 
+// roleCache memoizes resolved role colors for the active theme. Resolution
+// walks the fallback chain with a linear registry scan per hop and is invoked
+// for every styled element on every rendered frame, so the result is cached
+// until the active theme or one of its colors changes (invalidateRoleCache).
+var roleCache = struct {
+	mu     sync.Mutex
+	theme  int
+	values map[string]string
+}{theme: -1}
+
+// invalidateRoleCache drops the memoized role colors. It must be called after
+// any mutation of Themes[*].Colors or of the active theme index.
+func invalidateRoleCache() {
+	roleCache.mu.Lock()
+	roleCache.values = nil
+	roleCache.theme = -1
+	roleCache.mu.Unlock()
+}
+
 // ResolveRole returns the effective color for a role in the active theme,
 // walking the fallback chain until a non-empty value is found. An empty
 // result means "terminal default".
 func ResolveRole(name string) string {
-	return ResolveRoleAt(getActiveTheme(), name)
+	idx := getActiveTheme()
+	roleCache.mu.Lock()
+	if roleCache.values == nil || roleCache.theme != idx {
+		roleCache.values = make(map[string]string, len(Roles))
+		roleCache.theme = idx
+	}
+	if v, ok := roleCache.values[name]; ok {
+		roleCache.mu.Unlock()
+		return v
+	}
+	roleCache.mu.Unlock()
+
+	v := ResolveRoleAt(idx, name)
+
+	roleCache.mu.Lock()
+	// Store only if the cache still belongs to the same theme (it may have
+	// been invalidated or switched while we resolved).
+	if roleCache.values != nil && roleCache.theme == idx {
+		roleCache.values[name] = v
+	}
+	roleCache.mu.Unlock()
+	return v
 }
 
 // ResolveRoleAt resolves a role's effective color for an arbitrary theme index
@@ -191,6 +232,7 @@ var activeThemeIdx atomic.Int32
 // SetActiveTheme atomically sets the active theme index.
 func SetActiveTheme(idx int) {
 	activeThemeIdx.Store(int32(idx))
+	invalidateRoleCache()
 }
 
 func getActiveTheme() int {
@@ -218,6 +260,7 @@ func InitFromConfig(ui config.UIConfig) {
 			}
 		}
 	}
+	invalidateRoleCache()
 
 	if ui.Theme != "" {
 		if idx, ok := LookupTheme(ui.Theme); ok {

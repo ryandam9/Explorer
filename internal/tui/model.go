@@ -84,13 +84,16 @@ type tuiModel struct {
 	engine *engine.Engine
 	chunks chan model.ResultChunk
 
-	// Data
-	seed    []model.Resource // pre-fetched resources (e.g. the all-services sweep) merged with streamed results
-	results []model.Resource
-	sorted  []model.Resource // results sorted by service+name; rebuilt only when results change
-	errors  []model.ExploreError
-	loading bool
-	done    bool
+	// Data. sorted is the single store of every resource (seed + streamed),
+	// deduped by ARN and kept sorted by service+name: incoming chunks are
+	// merged in (O(n+k)) instead of re-sorting the world on every arrival.
+	sorted     []model.Resource
+	searchText []string       // searchText[i] is sorted[i]'s filterable cells, pre-joined and lower-cased
+	byARN      map[string]int // ARN -> index into sorted, for richer-entry dedupe (see summary.Dedupe)
+	svcSet     map[string]bool
+	errors     []model.ExploreError
+	loading    bool
+	done       bool
 
 	// Terminal size
 	width  int
@@ -173,12 +176,13 @@ func NewModelWithSeed(ctx context.Context, eng *engine.Engine, configPath string
 	m := tuiModel{
 		ctx:        ctx,
 		engine:     eng,
-		seed:       seed,
 		loading:    true,
 		chunks:     chunks,
 		focus:      focusTable,
 		spinner:    sp,
 		zones:      zoneM,
+		byARN:      make(map[string]int),
+		svcSet:     make(map[string]bool),
 		allRows:    make(map[string][]table.Row),
 		allRes:     make(map[string][]model.Resource),
 		configPath: configPath,
@@ -204,6 +208,7 @@ func NewModelWithSeed(ctx context.Context, eng *engine.Engine, configPath string
 
 	// Surface seed resources immediately; typed results stream in and merge.
 	if len(seed) > 0 {
+		m.mergeResources(seed)
 		m.onResultsChanged()
 	}
 	return m
@@ -287,7 +292,7 @@ func (m tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.showFilter = false
 			m.filterRegion = m.filterForm.GetString("region")
 			m.filterState = m.filterForm.GetString("state")
-			m.rebuildAllRows()
+			m.invalidateRows()
 			m.updateTableRows()
 			m.setToast("Filter applied")
 			cmds = append(cmds, toastCmd(3*time.Second))
@@ -311,14 +316,14 @@ func (m tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.filterInput.Blur()
 				m.filterInput.SetValue("")
 				m.filterText = ""
-				m.rebuildAllRows()
+				m.invalidateRows()
 				m.syncTableLayout()
 				return m, nil
 			default:
 				var cmd tea.Cmd
 				m.filterInput, cmd = m.filterInput.Update(msg)
 				m.filterText = m.filterInput.Value()
-				m.rebuildAllRows()
+				m.invalidateRows()
 				m.updateTableRows()
 				return m, cmd
 			}
@@ -433,7 +438,7 @@ func (m tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.filterState = ""
 			m.filterText = ""
 			m.filterInput.SetValue("")
-			m.rebuildAllRows()
+			m.invalidateRows()
 			m.syncTableLayout()
 			m.setToast("Filters cleared")
 			cmds = append(cmds, toastCmd(3*time.Second))
@@ -472,11 +477,30 @@ func (m tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case chunkMsg:
 		m.loading = false
-		m.results = append(m.results, msg.Resources...)
-		m.errors = append(m.errors, msg.Errors...)
+		m.applyChunk(model.ResultChunk(msg))
+		// Drain whatever else is already buffered so a burst of page-level
+		// chunks costs one merge + view rebuild instead of one per chunk.
+		closed := false
+	drain:
+		for {
+			select {
+			case c, ok := <-m.chunks:
+				if !ok {
+					closed = true
+					break drain
+				}
+				m.applyChunk(c)
+			default:
+				break drain
+			}
+		}
 		m.onResultsChanged()
 		m.updateTableRows()
-		cmds = append(cmds, waitForChunk(m.chunks))
+		if closed {
+			m.done = true
+		} else {
+			cmds = append(cmds, waitForChunk(m.chunks))
+		}
 		return m, tea.Batch(cmds...)
 
 	case doneMsg:
@@ -532,36 +556,142 @@ func toastCmd(d time.Duration) tea.Cmd {
 
 // ── Data helpers ──────────────────────────────────────────────────────────────
 
-// matchesTextFilter reports whether any of the row's cells contains the quick
-// filter text. query must already be lower-cased; matching is case-insensitive.
-func matchesTextFilter(query string, cells ...string) bool {
-	if query == "" {
-		return true
+// lessResource is the table's display order: by service, then name.
+func lessResource(a, b model.Resource) bool {
+	if a.Service != b.Service {
+		return a.Service < b.Service
 	}
-	for _, c := range cells {
-		if strings.Contains(strings.ToLower(c), query) {
-			return true
-		}
-	}
-	return false
+	return a.Name < b.Name
 }
 
-// onResultsChanged re-derives the service list and the sorted view after new
-// chunks arrive, then rebuilds the visible rows. Filter changes alone only
-// need rebuildAllRows, which reuses the cached sorted slice.
-func (m *tuiModel) onResultsChanged() {
-	// Merge the pre-fetched seed (all-services sweep) with the streamed typed
-	// results, deduping by ARN so the richer typed entry wins.
-	combined := summary.Dedupe(append(append([]model.Resource{}, m.seed...), m.results...))
+// searchTextFor returns a resource's filterable cells joined and lower-cased
+// once, so the quick filter never re-lowercases every cell on every keystroke.
+// The NUL separator stops the filter text from matching across cell borders.
+func searchTextFor(r model.Resource) string {
+	return strings.ToLower(r.Service + "\x00" + r.Type + "\x00" + r.Region +
+		"\x00" + r.ID + "\x00" + r.Name + "\x00" + r.State)
+}
 
-	// Rebuild service list.
-	svcSet := map[string]bool{}
-	for _, r := range combined {
-		svcSet[r.Service] = true
+// applyChunk folds one streamed chunk into the model's data.
+func (m *tuiModel) applyChunk(c model.ResultChunk) {
+	m.mergeResources(c.Resources)
+	m.errors = append(m.errors, c.Errors...)
+}
+
+// mergeResources folds newly arrived resources into the sorted view. It
+// applies the same ARN dedupe rule as summary.Dedupe (richer entry wins) but
+// incrementally: the batch is sorted on its own (k log k) and merged into the
+// already-sorted slice (O(n+k)), instead of re-deduping and re-sorting every
+// collected resource on every chunk.
+func (m *tuiModel) mergeResources(batch []model.Resource) {
+	if len(batch) == 0 {
+		return
 	}
-	names := make([]string, 0, len(svcSet)+1)
+
+	fresh := make([]model.Resource, 0, len(batch))
+	inBatch := make(map[string]int) // ARN -> index into fresh (same-batch dupes)
+	var drops []int                 // indexes into m.sorted superseded by a richer entry
+
+	for _, r := range batch {
+		if r.ARN == "" {
+			// No ARN: cannot be matched, always retained (as in Dedupe).
+			fresh = append(fresh, r)
+			continue
+		}
+		if fi, ok := inBatch[r.ARN]; ok {
+			if summary.Richness(r) > summary.Richness(fresh[fi]) {
+				fresh[fi] = r
+			}
+			continue
+		}
+		if idx, seen := m.byARN[r.ARN]; seen {
+			if summary.Richness(r) > summary.Richness(m.sorted[idx]) {
+				if m.sorted[idx].Service == r.Service && m.sorted[idx].Name == r.Name {
+					// Same sort position: replace in place.
+					m.sorted[idx] = r
+					m.searchText[idx] = searchTextFor(r)
+				} else {
+					// Sort key changed (e.g. the typed entry carries a real
+					// name the tag sweep lacked): drop and re-insert.
+					drops = append(drops, idx)
+					inBatch[r.ARN] = len(fresh)
+					fresh = append(fresh, r)
+				}
+			}
+			continue
+		}
+		inBatch[r.ARN] = len(fresh)
+		fresh = append(fresh, r)
+	}
+
+	if len(drops) > 0 {
+		sort.Ints(drops)
+		kept := m.sorted[:0]
+		keptText := m.searchText[:0]
+		d := 0
+		for i := range m.sorted {
+			if d < len(drops) && drops[d] == i {
+				d++
+				continue
+			}
+			kept = append(kept, m.sorted[i])
+			keptText = append(keptText, m.searchText[i])
+		}
+		m.sorted = kept
+		m.searchText = keptText
+	}
+
+	if len(fresh) > 0 {
+		sort.SliceStable(fresh, func(i, j int) bool { return lessResource(fresh[i], fresh[j]) })
+
+		merged := make([]model.Resource, 0, len(m.sorted)+len(fresh))
+		mergedText := make([]string, 0, len(m.sorted)+len(fresh))
+		i, j := 0, 0
+		for i < len(m.sorted) && j < len(fresh) {
+			// Strict less keeps existing entries first on ties (stable).
+			if lessResource(fresh[j], m.sorted[i]) {
+				merged = append(merged, fresh[j])
+				mergedText = append(mergedText, searchTextFor(fresh[j]))
+				j++
+			} else {
+				merged = append(merged, m.sorted[i])
+				mergedText = append(mergedText, m.searchText[i])
+				i++
+			}
+		}
+		for ; i < len(m.sorted); i++ {
+			merged = append(merged, m.sorted[i])
+			mergedText = append(mergedText, m.searchText[i])
+		}
+		for ; j < len(fresh); j++ {
+			merged = append(merged, fresh[j])
+			mergedText = append(mergedText, searchTextFor(fresh[j]))
+		}
+		m.sorted = merged
+		m.searchText = mergedText
+	}
+
+	// Positions shifted: refresh the ARN index. (In-place replacements alone
+	// don't shift, so the rebuild is skipped for richness-only updates.)
+	if len(fresh) > 0 || len(drops) > 0 {
+		for _, r := range fresh {
+			m.svcSet[r.Service] = true
+		}
+		for i, r := range m.sorted {
+			if r.ARN != "" {
+				m.byARN[r.ARN] = i
+			}
+		}
+	}
+}
+
+// onResultsChanged re-derives the service list after new chunks were merged,
+// then invalidates the cached rows. Filter changes alone only need
+// invalidateRows, which reuses the sorted slice.
+func (m *tuiModel) onResultsChanged() {
+	names := make([]string, 0, len(m.svcSet)+1)
 	names = append(names, "All")
-	for svc := range svcSet {
+	for svc := range m.svcSet {
 		names = append(names, svc)
 	}
 	sort.Strings(names[1:])
@@ -572,44 +702,49 @@ func (m *tuiModel) onResultsChanged() {
 		m.activeService = 0
 	}
 
-	// Sort the combined resources (by service, then name) so the table renders
-	// in a stable, grouped order regardless of arrival order.
-	m.sorted = combined
-	sort.SliceStable(m.sorted, func(i, j int) bool {
-		if m.sorted[i].Service != m.sorted[j].Service {
-			return m.sorted[i].Service < m.sorted[j].Service
-		}
-		return m.sorted[i].Name < m.sorted[j].Name
-	})
-
-	m.rebuildAllRows()
+	m.invalidateRows()
 }
 
-func (m *tuiModel) rebuildAllRows() {
-	// Build rows grouped by service, applying the structured filters and the
-	// quick text filter.
+// invalidateRows drops the cached per-service row groups. They are rebuilt
+// lazily by rowsFor for whichever service is actually displayed, so a filter
+// keystroke costs one pass over the visible group instead of every group.
+func (m *tuiModel) invalidateRows() {
+	m.allRows = make(map[string][]table.Row)
+	m.allRes = make(map[string][]model.Resource)
+}
+
+// rowsFor returns the filtered rows for svc, building and caching the group on
+// first access. Only mutates the (shared) cache maps, so it is safe to call
+// from value-receiver render methods.
+func (m *tuiModel) rowsFor(svc string) []table.Row {
+	if rows, ok := m.allRows[svc]; ok {
+		return rows
+	}
 	query := strings.ToLower(m.filterText)
-	m.allRows = make(map[string][]table.Row, len(m.services))
-	m.allRes = make(map[string][]model.Resource, len(m.services))
-	for _, r := range m.sorted {
+	rows := []table.Row{}
+	var res []model.Resource
+	for i, r := range m.sorted {
+		if svc != "All" && r.Service != svc {
+			continue
+		}
 		if m.filterRegion != "" && r.Region != m.filterRegion {
 			continue
 		}
 		if m.filterState != "" && r.State != m.filterState {
 			continue
 		}
-		if !matchesTextFilter(query, r.Service, r.Type, r.Region, r.ID, r.Name, r.State) {
+		if query != "" && !strings.Contains(m.searchText[i], query) {
 			continue
 		}
-		for _, key := range []string{"All", r.Service} {
-			row := table.Row{
-				fmt.Sprintf("%d", len(m.allRows[key])+1),
-				r.Service, r.Type, r.Region, r.ID, r.Name, r.State,
-			}
-			m.allRows[key] = append(m.allRows[key], row)
-			m.allRes[key] = append(m.allRes[key], r)
-		}
+		rows = append(rows, table.Row{
+			fmt.Sprintf("%d", len(rows)+1),
+			r.Service, r.Type, r.Region, r.ID, r.Name, r.State,
+		})
+		res = append(res, r)
 	}
+	m.allRows[svc] = rows
+	m.allRes[svc] = res
+	return rows
 }
 
 func (m tuiModel) currentService() string {
@@ -621,6 +756,7 @@ func (m tuiModel) currentService() string {
 
 // selectedResource returns the resource under the table cursor.
 func (m tuiModel) selectedResource() (model.Resource, bool) {
+	m.rowsFor(m.currentService()) // ensure the group cache is built
 	res := m.allRes[m.currentService()]
 	idx := m.table.Cursor()
 	if idx < 0 || idx >= len(res) {
@@ -630,7 +766,7 @@ func (m tuiModel) selectedResource() (model.Resource, bool) {
 }
 
 func (m *tuiModel) updateTableRows() {
-	m.table.SetRows(m.allRows[m.currentService()])
+	m.table.SetRows(m.rowsFor(m.currentService()))
 }
 
 // ── Table layout ──────────────────────────────────────────────────────────────
@@ -720,7 +856,7 @@ func (m *tuiModel) syncTableLayout() {
 func (m tuiModel) buildFilterForm() *huh.Form {
 	regionSet := map[string]bool{}
 	stateSet := map[string]bool{}
-	for _, r := range m.results {
+	for _, r := range m.sorted {
 		if r.Region != "" {
 			regionSet[r.Region] = true
 		}
@@ -984,7 +1120,7 @@ func (m tuiModel) renderTablePanel() string {
 
 	// When a filter is active but nothing matched, replace the empty table
 	// body with a helpful message so the user isn't staring at a blank panel.
-	if filterActive && len(m.allRows[m.currentService()]) == 0 {
+	if filterActive && len(m.rowsFor(m.currentService())) == 0 {
 		hint := lipgloss.NewStyle().
 			Foreground(lipgloss.Color(ui.ColorMuted())).
 			Render("  No resources match current filter  •  press r to reset")

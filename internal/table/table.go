@@ -41,6 +41,14 @@ type Model struct {
 	// grow past it to fit their widest cell so values are never truncated.
 	baseWidths []int
 
+	// colStyles caches the per-column Width/MaxWidth/Inline cell style,
+	// rebuilt when column widths change (fitColumns) instead of being
+	// re-allocated for every cell on every frame.
+	colStyles []lipgloss.Style
+	// selCellStyle caches the selected-row cell style derived from styles,
+	// rebuilt in SetStyles instead of per render.
+	selCellStyle lipgloss.Style
+
 	viewport viewport.Model
 	start    int
 	end      int
@@ -140,7 +148,19 @@ func DefaultStyles() Styles {
 // SetStyles sets the table styles.
 func (m *Model) SetStyles(s Styles) {
 	m.styles = s
+	m.refreshSelStyle()
 	m.UpdateViewport()
+}
+
+// refreshSelStyle rebuilds the cached selected-row cell style: Cell's padding
+// with Selected's colors/bold, so the highlight background covers each cell's
+// full width (including padding) rather than being broken by per-cell ANSI
+// resets when Cell has its own foreground color set.
+func (m *Model) refreshSelStyle() {
+	m.selCellStyle = m.styles.Cell.
+		Foreground(m.styles.Selected.GetForeground()).
+		Background(m.styles.Selected.GetBackground()).
+		Bold(m.styles.Selected.GetBold())
 }
 
 // Option is used to set options in New. For example:
@@ -165,6 +185,7 @@ func New(opts ...Option) Model {
 		opt(&m)
 	}
 
+	m.refreshSelStyle()
 	m.fitColumns()
 	m.UpdateViewport()
 
@@ -202,6 +223,22 @@ func (m *Model) fitColumns() {
 		}
 		m.cols[i].Width = w
 	}
+
+	// Widths are final for this column/row set: rebuild the per-column style
+	// cache used by renderRow and headersView.
+	m.colStyles = make([]lipgloss.Style, len(m.cols))
+	for i, c := range m.cols {
+		m.colStyles[i] = lipgloss.NewStyle().Width(c.Width).MaxWidth(c.Width).Inline(true)
+	}
+}
+
+// colStyle returns the cached per-column style, building one on the fly only
+// when the cache isn't populated yet (e.g. option callbacks during New).
+func (m Model) colStyle(i int) lipgloss.Style {
+	if i < len(m.colStyles) {
+		return m.colStyles[i]
+	}
+	return lipgloss.NewStyle().Width(m.cols[i].Width).MaxWidth(m.cols[i].Width).Inline(true)
 }
 
 // WithColumns sets the table columns (headers).
@@ -339,8 +376,9 @@ func (m *Model) UpdateViewport() {
 		m.start = 0
 	}
 	m.end = clamp(m.cursor+m.viewport.Height, m.cursor, len(m.rows))
+	vis := m.visibleCols() // resolved once per refresh, not once per row
 	for i := m.start; i < m.end; i++ {
-		renderedRows = append(renderedRows, m.renderRow(i))
+		renderedRows = append(renderedRows, m.renderRow(i, vis))
 	}
 
 	m.viewport.SetContent(
@@ -610,8 +648,7 @@ func (m Model) headersView() string {
 	s := make([]string, 0, len(vis))
 	for _, i := range vis {
 		col := m.cols[i]
-		style := lipgloss.NewStyle().Width(col.Width).MaxWidth(col.Width).Inline(true)
-		renderedCell := style.Render(runewidth.Truncate(col.Title, col.Width, "…"))
+		renderedCell := m.colStyle(i).Render(runewidth.Truncate(col.Title, col.Width, "…"))
 		s = append(s, m.styles.Header.Render(renderedCell))
 	}
 	return m.clipToWidth(lipgloss.JoinHorizontal(lipgloss.Top, s...))
@@ -637,33 +674,20 @@ func (m Model) clipToWidth(s string) string {
 	return strings.Join(lines, "\n")
 }
 
-func (m *Model) renderRow(r int) string {
-	vis := m.visibleCols()
+func (m *Model) renderRow(r int, vis []int) string {
 	s := make([]string, 0, len(vis))
-
-	// For the selected row, build a cell style that uses Cell's padding but
-	// overrides colors/bold from Selected. This ensures the highlight background
-	// covers each cell's full width (including padding) rather than being broken
-	// by per-cell ANSI resets when Cell has its own foreground color set.
-	var selectedCellStyle lipgloss.Style
-	if r == m.cursor {
-		selectedCellStyle = m.styles.Cell.
-			Foreground(m.styles.Selected.GetForeground()).
-			Background(m.styles.Selected.GetBackground()).
-			Bold(m.styles.Selected.GetBold())
-	}
 
 	for _, i := range vis {
 		var value string
 		if i < len(m.rows[r]) {
 			value = m.rows[r][i]
 		}
-		style := lipgloss.NewStyle().Width(m.cols[i].Width).MaxWidth(m.cols[i].Width).Inline(true)
-		truncated := style.Render(runewidth.Truncate(value, m.cols[i].Width, "…"))
+		truncated := m.colStyle(i).Render(runewidth.Truncate(value, m.cols[i].Width, "…"))
 
 		var renderedCell string
 		if r == m.cursor {
-			renderedCell = selectedCellStyle.Render(truncated)
+			// Cached Cell-padding + Selected-colors style; see refreshSelStyle.
+			renderedCell = m.selCellStyle.Render(truncated)
 		} else {
 			renderedCell = m.styles.Cell.Render(truncated)
 		}

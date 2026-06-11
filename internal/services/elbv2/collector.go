@@ -36,9 +36,11 @@ func (c *Collector) Collect(ctx context.Context, input services.CollectInput) ([
 			return resources, fmt.Errorf("failed to describe load balancers: %w", err)
 		}
 
+		batch := make([]model.Resource, 0, len(page.LoadBalancers))
 		for _, lb := range page.LoadBalancers {
-			resources = append(resources, c.mapLoadBalancer(input.Region, lb, input.DetailLevel))
+			batch = append(batch, c.mapLoadBalancer(input.Region, lb, input.DetailLevel))
 		}
+		resources = input.EmitOrAppend(resources, batch)
 	}
 
 	return resources, nil

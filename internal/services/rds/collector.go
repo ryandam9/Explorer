@@ -39,9 +39,11 @@ func (c *Collector) Collect(ctx context.Context, input services.CollectInput) ([
 			return resources, fmt.Errorf("failed to describe RDS instances: %w", err)
 		}
 
+		batch := make([]model.Resource, 0, len(page.DBInstances))
 		for _, instance := range page.DBInstances {
-			resources = append(resources, c.mapInstance(input.Region, instance, input.DetailLevel))
+			batch = append(batch, c.mapInstance(input.Region, instance, input.DetailLevel))
 		}
+		resources = input.EmitOrAppend(resources, batch)
 	}
 
 	return resources, nil

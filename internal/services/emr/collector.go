@@ -36,9 +36,11 @@ func (c *Collector) Collect(ctx context.Context, input services.CollectInput) ([
 			return resources, fmt.Errorf("failed to list EMR clusters: %w", err)
 		}
 
+		batch := make([]model.Resource, 0, len(page.Clusters))
 		for _, cluster := range page.Clusters {
-			resources = append(resources, c.mapCluster(input.Region, cluster, input.DetailLevel))
+			batch = append(batch, c.mapCluster(input.Region, cluster, input.DetailLevel))
 		}
+		resources = input.EmitOrAppend(resources, batch)
 	}
 
 	return resources, nil

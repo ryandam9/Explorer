@@ -181,3 +181,40 @@ func TestInitFromConfigOverridesRoles(t *testing.T) {
 		t.Errorf("Heading = %q, want untouched #101010", c.Heading)
 	}
 }
+
+func TestResolveRoleCacheInvalidatedOnEdits(t *testing.T) {
+	// Work on a non-default theme index and restore everything afterwards so
+	// other tests see pristine globals.
+	const themeIdx = 1
+	ri := roleIndex("heading")
+	if ri < 0 {
+		t.Fatal("heading role missing")
+	}
+	origActive := getActiveTheme()
+	origVal := *Roles[ri].Ptr(&Themes[themeIdx].Colors)
+	t.Cleanup(func() {
+		setColorForField(themeIdx, ri, origVal)
+		SetActiveTheme(origActive)
+	})
+
+	SetActiveTheme(themeIdx)
+	before := ResolveRole("heading")
+	if before == "" {
+		t.Fatal("expected a heading color")
+	}
+	// Resolve again (now served from the cache), then mutate the role the way
+	// the settings panel does and check the cache was invalidated.
+	if again := ResolveRole("heading"); again != before {
+		t.Fatalf("cached resolve changed value: %q vs %q", again, before)
+	}
+	setColorForField(themeIdx, ri, "#123456")
+	if got := ResolveRole("heading"); got != "#123456" {
+		t.Errorf("ResolveRole after live edit = %q, want %q (stale cache?)", got, "#123456")
+	}
+
+	// Switching themes must also drop the memoized values.
+	SetActiveTheme(origActive)
+	if got := ResolveRole("heading"); got == "#123456" && origActive != themeIdx {
+		t.Error("ResolveRole still returns the edited theme's color after switching themes")
+	}
+}

@@ -139,6 +139,10 @@ type Model struct {
 	awsCfg *config.AWSConfig
 	region string
 
+	// snapCache reuses the nine-List-call VPC snapshot across the debugging
+	// overlays for a short TTL, instead of re-fetching it per overlay.
+	snapCache *snapshotCache
+
 	state state
 	focus focus
 
@@ -295,6 +299,7 @@ func NewModel(
 		client:           client,
 		awsCfg:           awsCfg,
 		region:           region,
+		snapCache:        newSnapshotCache(),
 		allRegions:       allRegions,
 		seenVPCs:         make(map[string]bool),
 		resourceMaps:     make(map[resourceType][]map[string]string),
@@ -484,7 +489,24 @@ func (m *Model) loadResources(rt resourceType) tea.Cmd {
 
 func (m *Model) refreshResources() tea.Cmd {
 	delete(m.resourceMaps, m.activeResource)
+	if m.selectedVPC != nil {
+		// A refresh means "show me live state": drop the cached snapshot so
+		// the next overlay re-fetches too.
+		m.snapCache.invalidate(m.selectedVPC.ID)
+	}
 	return m.loadResources(m.activeResource)
+}
+
+// cachedSnapshot returns a tea.Cmd-safe getter for the VPC's snapshot that
+// serves overlay loads from the TTL cache.
+func (m *Model) cachedSnapshot(vpcID string) func() (vpcSnapshot, error) {
+	client := m.client
+	cache := m.snapCache
+	return func() (vpcSnapshot, error) {
+		return cache.get(vpcID, func() (vpcSnapshot, error) {
+			return buildVPCSnapshot(client, vpcID)
+		})
+	}
 }
 
 // loadFindings gathers a networking snapshot of the selected VPC and runs the
@@ -497,10 +519,10 @@ func (m *Model) loadFindings() tea.Cmd {
 	m.findingsLoading = true
 	m.findingsErr = nil
 	m.findings = nil
-	client := m.client
 	vpcID := m.selectedVPC.ID
+	getSnap := m.cachedSnapshot(vpcID)
 	return func() tea.Msg {
-		snap, err := buildVPCSnapshot(client, vpcID)
+		snap, err := getSnap()
 		if err != nil {
 			return findingsLoadedMsg{vpcID: vpcID, err: err}
 		}
@@ -515,10 +537,10 @@ func (m *Model) runTrace(req traceRequest) tea.Cmd {
 	m.showTraceResult = true
 	m.traceLoading = true
 	m.traceErr = nil
-	client := m.client
 	vpcID := m.selectedVPC.ID
+	getSnap := m.cachedSnapshot(vpcID)
 	return func() tea.Msg {
-		snap, err := buildVPCSnapshot(client, vpcID)
+		snap, err := getSnap()
 		if err != nil {
 			return traceDoneMsg{vpcID: vpcID, err: err}
 		}
@@ -537,10 +559,10 @@ func (m *Model) loadXref(resourceID string) tea.Cmd {
 	m.xrefErr = nil
 	m.xrefGroups = nil
 	m.xrefTitle = resourceID
-	client := m.client
 	vpcID := m.selectedVPC.ID
+	getSnap := m.cachedSnapshot(vpcID)
 	return func() tea.Msg {
-		snap, err := buildVPCSnapshot(client, vpcID)
+		snap, err := getSnap()
 		if err != nil {
 			return xrefDoneMsg{vpcID: vpcID, err: err}
 		}
@@ -558,10 +580,10 @@ func (m *Model) loadEffectiveRules(eniID string) tea.Cmd {
 	m.effRulesLoading = true
 	m.effRulesErr = nil
 	m.effRules = effectiveRuleSet{ENIID: eniID}
-	client := m.client
 	vpcID := m.selectedVPC.ID
+	getSnap := m.cachedSnapshot(vpcID)
 	return func() tea.Msg {
-		snap, err := buildVPCSnapshot(client, vpcID)
+		snap, err := getSnap()
 		if err != nil {
 			return effRulesDoneMsg{vpcID: vpcID, err: err}
 		}
@@ -578,11 +600,16 @@ func (m *Model) loadDiff() tea.Cmd {
 	m.diffLoading = true
 	m.diffErr = nil
 	client := m.client
+	cache := m.snapCache
 	vpcID := m.selectedVPC.ID
 	region := m.selectedVPC.Region
 	owner := m.selectedVPC.OwnerId
 	return func() tea.Msg {
-		current, err := buildVPCSnapshot(client, vpcID)
+		// The diff exists to detect change, so it must observe live state:
+		// bypass the TTL but store the result for the other overlays.
+		current, err := cache.refresh(vpcID, func() (vpcSnapshot, error) {
+			return buildVPCSnapshot(client, vpcID)
+		})
 		if err != nil {
 			return diffDoneMsg{vpcID: vpcID, err: err}
 		}
@@ -602,8 +629,9 @@ func (m *Model) exportReport() tea.Cmd {
 	m.statusMsg = "Exporting VPC report…"
 	client := m.client
 	vpc := *m.selectedVPC
+	getSnap := m.cachedSnapshot(vpc.ID)
 	return func() tea.Msg {
-		data, err := buildFullExport(client, vpc)
+		data, err := buildFullExport(client, vpc, getSnap)
 		if err != nil {
 			return exportDoneMsg{err: err}
 		}
@@ -646,10 +674,10 @@ func (m *Model) loadExposure() tea.Cmd {
 	m.exposureLoading = true
 	m.exposureErr = nil
 	m.exposureGroups = nil
-	client := m.client
 	vpcID := m.selectedVPC.ID
+	getSnap := m.cachedSnapshot(vpcID)
 	return func() tea.Msg {
-		snap, err := buildVPCSnapshot(client, vpcID)
+		snap, err := getSnap()
 		if err != nil {
 			return exposureDoneMsg{vpcID: vpcID, err: err}
 		}
@@ -738,12 +766,13 @@ func buildVPCSnapshot(c *VPCClient, vpcID string) (vpcSnapshot, error) {
 }
 
 // buildFullExport gathers everything needed for the complete Markdown report:
-// the VPC's own attributes, the networking snapshot, and the workload resources
-// (flow logs, EC2, Lambda, RDS, load balancers) that live in the VPC. The
-// workload fetches are best-effort — a single failure (e.g. missing
-// permissions) leaves that section empty rather than aborting the export.
-func buildFullExport(c *VPCClient, vpc VPCInfo) (fullExport, error) {
-	snap, err := buildVPCSnapshot(c, vpc.ID)
+// the VPC's own attributes, the networking snapshot (via getSnap, normally the
+// TTL cache), and the workload resources (flow logs, EC2, Lambda, RDS, load
+// balancers) that live in the VPC. The workload fetches are best-effort — a
+// single failure (e.g. missing permissions) leaves that section empty rather
+// than aborting the export.
+func buildFullExport(c *VPCClient, vpc VPCInfo, getSnap func() (vpcSnapshot, error)) (fullExport, error) {
+	snap, err := getSnap()
 	if err != nil {
 		return fullExport{}, err
 	}
@@ -788,6 +817,9 @@ func (m *Model) enterVPC(vpc VPCInfo) tea.Cmd {
 	}
 	m.resourceMaps = make(map[resourceType][]map[string]string)
 	m.resourceErr = nil
+	// Entering a VPC starts a fresh look at it: any snapshot cached from an
+	// earlier visit is stale by intent.
+	m.snapCache.invalidate(vpc.ID)
 	// Reset sidebar to the first selectable item so stale state from a
 	// previously browsed VPC is never shown while the new VPC loads.
 	if firstIdx := nextSelectableIdx(m.sidebarItems, -1, 1); firstIdx >= 0 {

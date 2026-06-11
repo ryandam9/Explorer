@@ -39,9 +39,11 @@ func (c *Collector) Collect(ctx context.Context, input services.CollectInput) ([
 			return resources, fmt.Errorf("failed to list IAM roles: %w", err)
 		}
 
+		batch := make([]model.Resource, 0, len(page.Roles))
 		for _, role := range page.Roles {
-			resources = append(resources, c.mapRole(role, input.DetailLevel))
+			batch = append(batch, c.mapRole(role, input.DetailLevel))
 		}
+		resources = input.EmitOrAppend(resources, batch)
 	}
 
 	return resources, nil

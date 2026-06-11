@@ -36,9 +36,11 @@ func (c *Collector) Collect(ctx context.Context, input services.CollectInput) ([
 			return resources, fmt.Errorf("failed to list SQS queues: %w", err)
 		}
 
+		batch := make([]model.Resource, 0, len(page.QueueUrls))
 		for _, queueURL := range page.QueueUrls {
-			resources = append(resources, c.mapQueue(input.Region, queueURL))
+			batch = append(batch, c.mapQueue(input.Region, queueURL))
 		}
+		resources = input.EmitOrAppend(resources, batch)
 	}
 
 	return resources, nil

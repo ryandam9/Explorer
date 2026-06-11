@@ -190,3 +190,66 @@ func lastLine(s string) string {
 	lines := strings.Split(strings.TrimRight(s, "\n"), "\n")
 	return lines[len(lines)-1]
 }
+
+// ── Incremental merge behaviour ──────────────────────────────────────────────
+
+func TestChunksMergeSortedAndDedupedByARN(t *testing.T) {
+	m := NewModel(context.Background(), nil, "", &config.Config{}).(tuiModel)
+	m = update(m, tea.WindowSizeMsg{Width: 120, Height: 40})
+
+	// First chunk: an s3 entry plus a sparse sweep-style entry (ARN, no state).
+	m = update(m, chunkMsg(model.ResultChunk{Resources: []model.Resource{
+		{Service: "s3", Type: "bucket", Name: "logs", ID: "b1"},
+		{Service: "ec2", Type: "instance", Name: "web", ID: "arn-only", ARN: "arn:aws:ec2:i-1"},
+	}}))
+	// Second chunk arrives out of order: a richer typed entry for the same
+	// ARN, and a service that sorts before the existing ones.
+	m = update(m, chunkMsg(model.ResultChunk{Resources: []model.Resource{
+		{Service: "ec2", Type: "instance", Name: "web", ID: "i-1", ARN: "arn:aws:ec2:i-1", State: "running"},
+		{Service: "cloudwatch", Type: "alarm", Name: "alarm-1", ID: "a1"},
+	}}))
+
+	if len(m.sorted) != 3 {
+		t.Fatalf("expected 3 resources after dedupe, got %d: %+v", len(m.sorted), m.sorted)
+	}
+	wantOrder := []string{"cloudwatch", "ec2", "s3"}
+	for i, svc := range wantOrder {
+		if m.sorted[i].Service != svc {
+			t.Errorf("sorted[%d].Service = %q, want %q", i, m.sorted[i].Service, svc)
+		}
+	}
+	// The richer typed entry must have replaced the sparse one.
+	if m.sorted[1].ID != "i-1" || m.sorted[1].State != "running" {
+		t.Errorf("expected the richer entry to win the ARN dedupe, got %+v", m.sorted[1])
+	}
+	// The parallel search-text slice stays in sync and pre-lowered.
+	if len(m.searchText) != len(m.sorted) {
+		t.Fatalf("searchText out of sync: %d vs %d", len(m.searchText), len(m.sorted))
+	}
+	if !strings.Contains(m.searchText[1], "running") {
+		t.Errorf("searchText[1] should contain the replacement's state, got %q", m.searchText[1])
+	}
+	if idx, ok := m.byARN["arn:aws:ec2:i-1"]; !ok || idx != 1 {
+		t.Errorf("byARN index = %d (ok=%v), want 1", idx, ok)
+	}
+}
+
+func TestRowsAreBuiltLazilyPerService(t *testing.T) {
+	m := newTestModel(t, 120, 40)
+
+	// Only the displayed group ("All") is materialized after a chunk.
+	if _, ok := m.allRows["All"]; !ok {
+		t.Fatal("the displayed group should be cached after a chunk")
+	}
+	if _, ok := m.allRows["ec2"]; ok {
+		t.Fatal("undisplayed service groups should not be built eagerly")
+	}
+
+	rows := m.rowsFor("ec2")
+	if len(rows) != 2 {
+		t.Fatalf("expected 2 ec2 rows, got %d", len(rows))
+	}
+	if _, ok := m.allRows["ec2"]; !ok {
+		t.Fatal("rowsFor should cache the group it built")
+	}
+}

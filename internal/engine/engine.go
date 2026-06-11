@@ -2,6 +2,7 @@ package engine
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"sort"
@@ -239,6 +240,16 @@ func (e *Engine) StreamRun(ctx context.Context, chunks chan<- model.ResultChunk)
 					regionalConfig.Region = r
 				}
 
+				// send delivers a chunk unless the whole run is being torn
+				// down (consumer gone), in which case it drops the chunk
+				// instead of blocking the worker forever.
+				send := func(chunk model.ResultChunk) {
+					select {
+					case chunks <- chunk:
+					case <-gCtx.Done():
+					}
+				}
+
 				input := services.CollectInput{
 					Config:    e.Config,
 					AWSConfig: regionalConfig,
@@ -252,26 +263,48 @@ func (e *Engine) StreamRun(ctx context.Context, chunks chan<- model.ResultChunk)
 					DetailLevel: services.DetailLevelSummary,
 				}
 
+				// Stream page-sized batches as the collector gathers them so
+				// results surface after the first page round-trip, not after
+				// the last. emitted counts streamed resources (post-filter)
+				// so the error path below can still flag partial results;
+				// collectors call Emit from this goroutine, so no locking.
+				emitted := 0
+				input.Emit = func(batch []model.Resource) {
+					filtered := filterResources(batch, input.Filters)
+					emitted += len(filtered)
+					if len(filtered) > 0 {
+						send(model.ResultChunk{Resources: filtered})
+					}
+				}
+
 				res, err := s.Collect(collectCtx, input)
 				filteredRes := filterResources(res, input.Filters)
 				if err != nil {
 					// Collectors are best-effort: res may hold resources
-					// gathered before the failure. Keep them and flag the
-					// error as partial so consumers can say so.
-					partial := len(filteredRes) > 0
+					// gathered before the failure (and more may have been
+					// streamed already). Keep them and flag the error as
+					// partial so consumers can say so.
+					partial := len(filteredRes) > 0 || emitted > 0
 					code := "CollectionError"
 					msg := err.Error()
-					if awserr.IsAuthError(err) {
+					switch {
+					case awserr.IsAuthError(err):
 						code = "AccessDenied"
 						msg = awserr.FriendlyMessage(err, s.Name())
 						slog.Warn("Access denied",
-							"service", s.Name(), "region", r, "keptResources", len(filteredRes))
-					} else {
+							"service", s.Name(), "region", r, "keptResources", len(filteredRes)+emitted)
+					case errors.Is(err, context.DeadlineExceeded):
+						code = "Timeout"
+						msg = fmt.Sprintf("collection timed out after %ds (app.timeoutSeconds); results are incomplete",
+							e.Config.App.TimeoutSeconds)
+						slog.Warn("Collection timed out",
+							"service", s.Name(), "region", r, "keptResources", len(filteredRes)+emitted)
+					default:
 						slog.Warn("Collection error",
-							"service", s.Name(), "region", r, "keptResources", len(filteredRes),
+							"service", s.Name(), "region", r, "keptResources", len(filteredRes)+emitted,
 							"error", err.Error())
 					}
-					chunks <- model.ResultChunk{
+					send(model.ResultChunk{
 						Resources: filteredRes,
 						Errors: []model.ExploreError{{
 							Service: s.Name(),
@@ -280,12 +313,12 @@ func (e *Engine) StreamRun(ctx context.Context, chunks chan<- model.ResultChunk)
 							Message: msg,
 							Partial: partial,
 						}},
-					}
+					})
 					return nil
 				}
 
 				if len(filteredRes) > 0 {
-					chunks <- model.ResultChunk{Resources: filteredRes}
+					send(model.ResultChunk{Resources: filteredRes})
 				}
 				return nil
 			})

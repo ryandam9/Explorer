@@ -60,6 +60,7 @@ func (s SettingsModel) colorForField(themeIdx, fieldIdx int) string {
 // setColorForField updates the in-memory Themes[] entry.
 func setColorForField(themeIdx, fieldIdx int, val string) {
 	*Roles[fieldIdx].Ptr(&Themes[themeIdx].Colors) = val
+	invalidateRoleCache()
 }
 
 func (s SettingsModel) Update(msg tea.Msg) (SettingsModel, tea.Cmd) {

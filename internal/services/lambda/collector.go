@@ -36,9 +36,11 @@ func (c *Collector) Collect(ctx context.Context, input services.CollectInput) ([
 			return resources, fmt.Errorf("failed to list Lambda functions: %w", err)
 		}
 
+		batch := make([]model.Resource, 0, len(page.Functions))
 		for _, fn := range page.Functions {
-			resources = append(resources, c.mapFunction(input.Region, fn, input.DetailLevel))
+			batch = append(batch, c.mapFunction(input.Region, fn, input.DetailLevel))
 		}
+		resources = input.EmitOrAppend(resources, batch)
 	}
 
 	return resources, nil

@@ -40,11 +40,13 @@ func (c *Collector) Collect(ctx context.Context, input services.CollectInput) ([
 			return resources, fmt.Errorf("failed to describe EC2 instances: %w", err)
 		}
 
+		var batch []model.Resource
 		for _, reservation := range page.Reservations {
 			for _, instance := range reservation.Instances {
-				resources = append(resources, c.mapInstance(input.Region, input.AccountID, instance, input.DetailLevel))
+				batch = append(batch, c.mapInstance(input.Region, input.AccountID, instance, input.DetailLevel))
 			}
 		}
+		resources = input.EmitOrAppend(resources, batch)
 	}
 
 	// 2. Collect VPCs
@@ -54,9 +56,11 @@ func (c *Collector) Collect(ctx context.Context, input services.CollectInput) ([
 		if err != nil {
 			return resources, fmt.Errorf("failed to describe VPCs: %w", err)
 		}
+		batch := make([]model.Resource, 0, len(page.Vpcs))
 		for _, vpc := range page.Vpcs {
-			resources = append(resources, c.mapVpc(input.Region, input.AccountID, vpc, input.DetailLevel))
+			batch = append(batch, c.mapVpc(input.Region, input.AccountID, vpc, input.DetailLevel))
 		}
+		resources = input.EmitOrAppend(resources, batch)
 	}
 
 	return resources, nil

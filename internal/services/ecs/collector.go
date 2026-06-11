@@ -47,9 +47,11 @@ func (c *Collector) Collect(ctx context.Context, input services.CollectInput) ([
 			return resources, fmt.Errorf("failed to describe ECS clusters: %w", err)
 		}
 
+		batch := make([]model.Resource, 0, len(desc.Clusters))
 		for _, cluster := range desc.Clusters {
-			resources = append(resources, c.mapCluster(input.Region, cluster, input.DetailLevel))
+			batch = append(batch, c.mapCluster(input.Region, cluster, input.DetailLevel))
 		}
+		resources = input.EmitOrAppend(resources, batch)
 	}
 
 	return resources, nil

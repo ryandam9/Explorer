@@ -36,48 +36,56 @@ func (c *Collector) IsGlobal() bool {
 func (c *Collector) Collect(ctx context.Context, input services.CollectInput) ([]model.Resource, error) {
 	client := eks.NewFromConfig(input.AWSConfig)
 
-	var clusterNames []string
+	// Describe each list page's clusters concurrently before fetching the
+	// next page, so memory stays bounded to a page and results can stream
+	// out page by page. Indexed writes keep list order. A failed describe
+	// drops only that cluster, not the whole region.
+	describePage := func(clusterNames []string) ([]model.Resource, []error) {
+		described := make([]*model.Resource, len(clusterNames))
+		var mu sync.Mutex
+		var describeErrs []error
+		var g errgroup.Group
+		g.SetLimit(describeConcurrency)
+		for i, clusterName := range clusterNames {
+			g.Go(func() error {
+				desc, err := client.DescribeCluster(ctx, &eks.DescribeClusterInput{
+					Name: aws.String(clusterName),
+				})
+				if err != nil {
+					mu.Lock()
+					describeErrs = append(describeErrs, fmt.Errorf("failed to describe EKS cluster %s: %w", clusterName, err))
+					mu.Unlock()
+					return nil
+				}
+				res := c.mapCluster(input.Region, desc.Cluster, input.DetailLevel)
+				described[i] = &res
+				return nil
+			})
+		}
+		_ = g.Wait()
+
+		batch := make([]model.Resource, 0, len(described))
+		for _, r := range described {
+			if r != nil {
+				batch = append(batch, *r)
+			}
+		}
+		return batch, describeErrs
+	}
+
+	var resources []model.Resource
 	var errs []error
 	paginator := eks.NewListClustersPaginator(client, &eks.ListClustersInput{})
 	for paginator.HasMorePages() {
 		page, err := paginator.NextPage(ctx)
 		if err != nil {
-			// Keep the clusters listed so far and still describe them below.
+			// Keep everything described from earlier pages.
 			errs = append(errs, fmt.Errorf("failed to list EKS clusters: %w", err))
 			break
 		}
-		clusterNames = append(clusterNames, page.Clusters...)
-	}
-
-	// Describe clusters concurrently; indexed writes keep list order. A failed
-	// describe drops only that cluster, not the whole region.
-	described := make([]*model.Resource, len(clusterNames))
-	var mu sync.Mutex
-	var g errgroup.Group
-	g.SetLimit(describeConcurrency)
-	for i, clusterName := range clusterNames {
-		g.Go(func() error {
-			desc, err := client.DescribeCluster(ctx, &eks.DescribeClusterInput{
-				Name: aws.String(clusterName),
-			})
-			if err != nil {
-				mu.Lock()
-				errs = append(errs, fmt.Errorf("failed to describe EKS cluster %s: %w", clusterName, err))
-				mu.Unlock()
-				return nil
-			}
-			res := c.mapCluster(input.Region, desc.Cluster, input.DetailLevel)
-			described[i] = &res
-			return nil
-		})
-	}
-	_ = g.Wait()
-
-	resources := make([]model.Resource, 0, len(described))
-	for _, r := range described {
-		if r != nil {
-			resources = append(resources, *r)
-		}
+		batch, describeErrs := describePage(page.Clusters)
+		errs = append(errs, describeErrs...)
+		resources = input.EmitOrAppend(resources, batch)
 	}
 	return resources, errors.Join(errs...)
 }
