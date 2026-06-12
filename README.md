@@ -9,6 +9,8 @@ Discover, monitor, and display AWS resources across accounts and regions via CLI
 - **VPC Explorer**: browse a VPC's subnets, security groups, network interfaces, route tables, gateways, endpoints, NACLs, peering, flow logs, and attached compute/services in a three-pane TUI
 - **VPC debugging toolkit** (no AI, deterministic): a findings linter, a connectivity path tracer, plain-English SG/NACL rule explanations, cross-reference ("where used"), merged effective security rules, DNS diagnostics, a public-exposure audit, snapshot diffing, Markdown export, and AWS Reachability Analyzer integration — see [VPC Debugging Toolkit](#vpc-debugging-toolkit)
 - **Cost/waste audit**: `aws_explorer audit` scans for the classic sources of silent spend — unattached EBS volumes, idle Elastic IPs and NAT gateways, load balancers with no healthy targets or no traffic, gp2→gp3 candidates, forgotten snapshots/AMIs, over-provisioned DynamoDB tables — each finding with a stable check ID and an estimated monthly cost, printable or explored in an interactive TUI (`--tui`) — see [Audit Usage](#audit-usage)
+- **IAM debugging**: `aws_explorer iam decode` turns an "Encoded authorization failure message" into a readable verdict (principal, action, resource, explicit vs implicit deny) — see [IAM Tools](#iam-tools)
+- **SSO-aware errors**: an expired AWS SSO session prints the exact fix (`run: aws sso login --profile prod`) instead of an SDK error chain, in the CLI and every TUI
 - **Config-driven**: YAML configuration for services, regions, filters, output, and per-resource display columns
 - **5 auth methods**: auto (SDK default chain), profile, env vars, static credentials, STS AssumeRole
 - **Output formats**: Table (default), JSON, NDJSON, CSV — with `--no-header` for scripting and colored states on terminals
@@ -397,6 +399,49 @@ NatGateways,RouteTables,Instances,Snapshots,Images}`,
 `elasticloadbalancing:Describe{LoadBalancers,TargetGroups,TargetHealth}`,
 `dynamodb:{ListTables,DescribeTable}` and (for the traffic-based checks)
 `cloudwatch:GetMetricData`. Any denial degrades only the checks that need it.
+
+## IAM Tools
+
+Helpers for the most common AWS support question: *"why am I denied?"*
+
+### Decode authorization failure messages
+
+Services like EC2 redact *why* a request was denied into an opaque blob:
+
+```
+An error occurred (UnauthorizedOperation): You are not authorized to perform
+this operation. Encoded authorization failure message: AQoDYXdzEJr…
+```
+
+`iam decode` calls `sts:DecodeAuthorizationMessage` and answers the three
+questions that matter — who, what, on which resource — and whether it was an
+**explicit deny** (a policy forbids it) or an **implicit deny** (no policy
+allows it), which determines the fix:
+
+```bash
+# Pass the blob — or paste the entire error message; the blob is extracted
+aws_explorer iam decode AQoDYXdzEJr…
+pbpaste | aws_explorer iam decode
+
+# Decoded JSON only, for jq
+aws_explorer iam decode AQoDYXdzEJr… -o json
+```
+
+```
+❌ Implicit deny — no policy allows this request (missing allow, not an explicit deny)
+  Principal  arn:aws:iam::123456789012:user/bob
+  Action     ec2:RunInstances
+  Resource   arn:aws:ec2:us-east-1:123456789012:instance/*
+
+  Fix: grant the principal an identity or resource policy that allows the action on the resource.
+
+Full decoded document:
+{ … }
+```
+
+Requires the `sts:DecodeAuthorizationMessage` IAM permission (a denial tells
+you exactly that). The global `--profile`, `--auth-method`, `--role-arn` and
+`--region` flags apply.
 
 ## VPC Explorer TUI Usage
 
@@ -1013,6 +1058,22 @@ Five methods are supported, configured via `authMethod` in `config.yaml` or `--a
 | `env` | Only `AWS_ACCESS_KEY_ID` + `AWS_SECRET_ACCESS_KEY` environment variables |
 | `static` | Plaintext credentials in `config.yaml` under `aws.static` (avoid committing real keys) |
 | `sts` | Assume an IAM role via STS; base credentials come from profile/env/default chain |
+
+### Expired SSO sessions
+
+When an AWS SSO (IAM Identity Center) session expires — or you were never
+logged in — every command surfaces the exact fix instead of the SDK's raw
+error chain:
+
+```
+✗ AWS SSO session for profile 'prod' is expired or missing — run: aws sso login --profile prod
+```
+
+The same one-liner appears in TUI error overlays and as `ExpiredCredentials`
+errors in `-o json` output. Plain expired STS/session tokens get an analogous
+"credentials have expired" hint. Genuinely *missing* credentials (e.g. no
+IMDS role, no env vars) are deliberately **not** rewritten — you see the real
+error.
 
 ### STS AssumeRole Example
 

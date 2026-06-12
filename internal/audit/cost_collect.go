@@ -31,7 +31,11 @@ func (r *errRecorder) record(service string, err error) {
 	}
 	code := "CollectionError"
 	msg := err.Error()
-	if awserr.IsAuthError(err) {
+	switch {
+	case awserr.IsExpiredCreds(err):
+		code = "ExpiredCredentials"
+		msg, _ = awserr.LoginHint(err, "")
+	case awserr.IsAuthError(err):
 		code = "AccessDenied"
 		msg = awserr.FriendlyMessage(err, service)
 	}

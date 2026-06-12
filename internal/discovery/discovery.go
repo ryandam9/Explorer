@@ -51,7 +51,11 @@ func Discover(ctx context.Context, baseCfg aws.Config, regions []string, maxConc
 			if err != nil {
 				code := "CollectionError"
 				msg := err.Error()
-				if awserr.IsAuthError(err) {
+				switch {
+				case awserr.IsExpiredCreds(err):
+					code = "ExpiredCredentials"
+					msg, _ = awserr.LoginHint(err, "")
+				case awserr.IsAuthError(err):
 					code = "AccessDenied"
 					msg = awserr.FriendlyMessage(err, "resourcegroups")
 				}
