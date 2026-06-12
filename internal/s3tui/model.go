@@ -19,6 +19,7 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/ryandam9/aws_explorer/internal/config"
+	"github.com/ryandam9/aws_explorer/internal/consolelink"
 	"github.com/ryandam9/aws_explorer/internal/csvexport"
 	"github.com/ryandam9/aws_explorer/internal/display"
 	"github.com/ryandam9/aws_explorer/internal/table"
@@ -1290,6 +1291,35 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				}
 			}
 
+		case "o":
+			// Console URL for the selection: object, or bucket (with the
+			// current prefix) on the bucket list. Copy, and open in a
+			// browser when the session is local.
+			var url string
+			switch {
+			case m.state == stateObjectList && m.focus == focusObjects:
+				if key, ok := m.selectedObjectKey(); ok {
+					url = consolelink.S3ObjectURL(m.bucket, key, m.region)
+				} else {
+					url = consolelink.S3BucketURL(m.bucket, m.prefix, m.region)
+				}
+			case m.state == stateObjectList:
+				url = consolelink.S3BucketURL(m.bucket, m.prefix, m.region)
+			case m.state == stateBucketList || m.state == stateBucketDetail:
+				if row := m.bucketTable.SelectedRow(); len(row) > 1 && row[1] != "" {
+					url = consolelink.S3BucketURL(row[1], "", m.region)
+				}
+			}
+			if url != "" {
+				_ = clipboard.WriteAll(url)
+				if consolelink.CanOpenBrowser() && consolelink.Open(url) == nil {
+					m.statusMsg = "Opened in browser · copied console URL"
+				} else {
+					m.statusMsg = "Copied console URL"
+				}
+				return m, nil
+			}
+
 		case "y":
 			if m.state == stateObjectList && m.focus == focusObjects {
 				if key, ok := m.selectedObjectKey(); ok {
@@ -1860,6 +1890,7 @@ func (m *Model) statusHints() []ui.KeyHint {
 			ui.H("↑/↓", "navigate"),
 			ui.H("Enter", "open bucket"),
 			ui.H("d", "details"),
+			ui.H("o", "console"),
 			ui.H("/", "search"),
 		}
 		hints = append(hints, colScrollHints(&m.bucketTable)...)
@@ -1883,6 +1914,7 @@ func (m *Model) statusHints() []ui.KeyHint {
 		}
 		hints = append(hints,
 			ui.H("y", "copy URI"),
+			ui.H("o", "console"),
 			ui.H("g", "presign"),
 			ui.H("s", "sort"),
 			ui.H("C", "csv"),
@@ -2370,6 +2402,7 @@ func (m *Model) helpView() string {
 			"  /                  Jump to prefix",
 			"  p                  Preview selected object",
 			"  y                  Copy S3 URI to clipboard",
+		"  o                  Open bucket/object in the AWS console (copies the URL)",
 			"  g                  Generate presigned URL (1 hour)",
 			"  D                  Download object (to app.downloadDir, default current dir)",
 			"  f                  Toggle flat mode (show all objects)",

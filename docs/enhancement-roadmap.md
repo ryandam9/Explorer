@@ -1,6 +1,6 @@
 # AWS Explorer — Enhancement Roadmap & Design Specification
 
-Status: **In progress** — shipped so far: AXE-004 & the `internal/findings` platform (#79), AXE-023 (#80), AXE-001 & AXE-022 (#81), AXE-013 (#82), AXE-007 (#83), AXE-005 (#84 + diff actors), AXE-006 (#85) · Tracking issue: #76
+Status: **In progress** — shipped so far: AXE-004 & the `internal/findings` platform (#79), AXE-023 (#80), AXE-001 & AXE-022 (#81), AXE-013 (#82), AXE-007 (#83), AXE-005 (#84, #86), AXE-006 (#85), AXE-012 · Tracking issue: #76
 
 This document specifies 24 proposed enhancements, grouped into nine themes.
 Each enhancement carries a stable ID (`AXE-NNN`) used in the tracking issue,
@@ -38,7 +38,7 @@ The proposals follow the tool's established design principles:
 | [AXE-009](#axe-009) | Generalized where-used / blast radius | E — Account-wide audit | P2 |
 | [AXE-010](#axe-010) | Relationship graph export (DOT / Mermaid) | E — Account-wide audit | P3 |
 | [AXE-011](#axe-011) | Jump from resource to its CloudWatch logs | F — Cross-navigation | P2 |
-| [AXE-012](#axe-012) | Open selected resource in the AWS console | F — Cross-navigation | P1 |
+| [AXE-012](#axe-012) | Open selected resource in the AWS console | F — Cross-navigation | ✅ shipped |
 | [AXE-013](#axe-013) | Global fuzzy finder | F — Cross-navigation | ✅ shipped (#82) |
 | [AXE-014](#axe-014) | Inline CloudWatch metric sparklines | F — Cross-navigation | P3 |
 | [AXE-015](#axe-015) | ECS stopped-task triage | G — Service-specific triage | P2 |
@@ -526,6 +526,8 @@ returns to where you were.
 TUI's selection, filters, and scroll position.
 
 ### AXE-012 — Open selected resource in the AWS console {#axe-012}
+
+> **Status: ✅ shipped** — `internal/consolelink` (`URL`/`FromARN` + ARN-search fallback, `Open`/`CanOpenBrowser`); `o` in the summary TUI, VPC explorer, S3 browser, and CloudWatch logs TUI.
 
 **Problem.** Sometimes you need the console. Generating the deep link is
 pure string work and saves a minute of clicking every single time.

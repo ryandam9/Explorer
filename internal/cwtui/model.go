@@ -18,6 +18,7 @@ import (
 	"github.com/dustin/go-humanize"
 
 	"github.com/ryandam9/aws_explorer/internal/config"
+	"github.com/ryandam9/aws_explorer/internal/consolelink"
 	"github.com/ryandam9/aws_explorer/internal/ui"
 )
 
@@ -352,6 +353,20 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 		case "y":
 			m.handleCopy(&cmds)
+
+		case "o":
+			// Console URL for the selected log group: copy, and open in a
+			// browser when the session is local.
+			if grp, ok := m.selectedGroup(); ok && grp.LogGroupName != nil {
+				url := consolelink.LogGroupURL(grp.Region, *grp.LogGroupName)
+				_ = clipboard.WriteAll(url)
+				if consolelink.CanOpenBrowser() && consolelink.Open(url) == nil {
+					m.setToast("Opened in browser · copied console URL")
+				} else {
+					m.setToast("Copied console URL")
+				}
+				cmds = append(cmds, toastCmd(3*time.Second))
+			}
 
 		case "s":
 			m.handleExport(&cmds)
@@ -1052,6 +1067,7 @@ func (m *model) getHelpHints() []ui.KeyHint {
 			ui.H("Enter", "select"),
 			ui.H("/", "filter"),
 			ui.H("G", "search entire group"),
+			ui.H("o", "console"),
 		)
 	case focusStreams:
 		hints = append(hints,
