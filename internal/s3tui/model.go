@@ -2402,7 +2402,7 @@ func (m *Model) helpView() string {
 			"  /                  Jump to prefix",
 			"  p                  Preview selected object",
 			"  y                  Copy S3 URI to clipboard",
-		"  o                  Open bucket/object in the AWS console (copies the URL)",
+			"  o                  Open bucket/object in the AWS console (copies the URL)",
 			"  g                  Generate presigned URL (1 hour)",
 			"  D                  Download object (to app.downloadDir, default current dir)",
 			"  f                  Toggle flat mode (show all objects)",

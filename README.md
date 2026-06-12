@@ -9,7 +9,7 @@ Discover, monitor, and display AWS resources across accounts and regions via CLI
 - **VPC Explorer**: browse a VPC's subnets, security groups, network interfaces, route tables, gateways, endpoints, NACLs, peering, flow logs, and attached compute/services in a three-pane TUI
 - **VPC debugging toolkit** (no AI, deterministic): a findings linter, a connectivity path tracer, plain-English SG/NACL rule explanations, cross-reference ("where used"), merged effective security rules, DNS diagnostics, a public-exposure audit, snapshot diffing, Markdown export, and AWS Reachability Analyzer integration — see [VPC Debugging Toolkit](#vpc-debugging-toolkit)
 - **Cost/waste audit**: `aws_explorer audit` scans for the classic sources of silent spend — unattached EBS volumes, idle Elastic IPs and NAT gateways, load balancers with no healthy targets or no traffic, gp2→gp3 candidates, forgotten snapshots/AMIs, over-provisioned DynamoDB tables — each finding with a stable check ID and an estimated monthly cost, printable or explored in an interactive TUI (`--tui`) — see [Audit Usage](#audit-usage)
-- **IAM debugging**: `aws_explorer iam decode` turns an "Encoded authorization failure message" into a readable verdict (principal, action, resource, explicit vs implicit deny) — see [IAM Tools](#iam-tools)
+- **IAM debugging**: `aws_explorer iam decode` turns an "Encoded authorization failure message" into a readable verdict, and `aws_explorer iam can <principal> <action> [resource]` simulates IAM policy ("can X do Y on Z?") with the matched statements named and the simulator's blind spots stated — see [IAM Tools](#iam-tools)
 - **CloudTrail "who changed this"**: `aws_explorer trail <resource-id-or-arn>` lists recent CloudTrail management events for a resource — when, which API call, which principal, from which IP — using the zero-setup 90-day LookupEvents window; the summary TUI's `t` timeline is the interactive twin — see [Trail Usage](#trail-usage)
 - **Account snapshot diff**: `summary --baseline` / `summary --diff` answers "what changed in this account since yesterday?" — added/removed/modified resources across the whole merged-by-ARN inventory, deterministic and volatile-field-free; `D` in the summary TUI is the interactive twin — see [Account snapshot diff](#account-snapshot-diff--what-changed-since-yesterday)
 - **Open in AWS console**: `o` in every TUI (summary, VPC explorer, S3, CloudWatch logs) copies a console deep link for the selection — ARN-aware coverage for all 15 services and every VPC resource type, with an ARN-search fallback for the long tail — and opens it in your browser when the session is local
@@ -487,6 +487,9 @@ DescribeCluster}`, `rds:{DescribeDBInstances,DescribePendingMaintenanceActions}`
 
 Helpers for the most common AWS support question: *"why am I denied?"*
 
+Two tools: `iam decode` explains a denial you already hit; `iam can` predicts
+one before you hit it.
+
 ### Decode authorization failure messages
 
 Services like EC2 redact *why* a request was denied into an opaque blob:
@@ -525,6 +528,39 @@ Full decoded document:
 Requires the `sts:DecodeAuthorizationMessage` IAM permission (a denial tells
 you exactly that). The global `--profile`, `--auth-method`, `--role-arn` and
 `--region` flags apply.
+
+### Simulate policy — "can X do Y on Z?"
+
+`iam can` runs `iam:SimulatePrincipalPolicy` and renders the verdict in the
+path tracer's step-by-step style:
+
+```bash
+aws_explorer iam can arn:aws:iam::123456789012:role/app s3:GetObject arn:aws:s3:::my-bucket/key
+```
+
+```
+❌ Denied: s3:GetObject on arn:aws:s3:::my-bucket/key for role/app — implicit deny (no policy allows it)
+  ✗ Identity policies      no attached or inline policy allows this action
+    Fix: grant an identity policy that allows s3:GetObject on arn:aws:s3:::my-bucket/key
+  ✗ Permissions boundary   the boundary does not include this action — the boundary, not the identity policies, is the blocker
+
+Caveats — the simulator does not evaluate:
+  • Resource-based policies (bucket/queue/key/secret policies) — …
+```
+
+The three outcomes render distinctly: **allowed** (named the policy that
+allows it), **implicit deny** (nothing allows it — add an allow), and
+**explicit deny** (a policy forbids it — removing an allow elsewhere will
+not help), with permissions-boundary and SCP effects called out when AWS
+reports them. The action accepts a comma-separated list to check several at
+once; `-o json` emits the verdicts for automation.
+
+The caveats are printed with **every** verdict, because the simulator's
+blind spots (resource-based policies, session policies, unsupplied condition
+keys) are exactly what makes "but the simulator said allowed!" tickets.
+
+Requires `iam:SimulatePrincipalPolicy`. Read-only — simulation never touches
+the real resource.
 
 ## Trail Usage
 
