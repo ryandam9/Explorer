@@ -12,6 +12,7 @@ Discover, monitor, and display AWS resources across accounts and regions via CLI
 - **IAM debugging**: `aws_explorer iam decode` turns an "Encoded authorization failure message" into a readable verdict (principal, action, resource, explicit vs implicit deny) — see [IAM Tools](#iam-tools)
 - **CloudTrail "who changed this"**: `aws_explorer trail <resource-id-or-arn>` lists recent CloudTrail management events for a resource — when, which API call, which principal, from which IP — using the zero-setup 90-day LookupEvents window; the summary TUI's `t` timeline is the interactive twin — see [Trail Usage](#trail-usage)
 - **Account snapshot diff**: `summary --baseline` / `summary --diff` answers "what changed in this account since yesterday?" — added/removed/modified resources across the whole merged-by-ARN inventory, deterministic and volatile-field-free; `D` in the summary TUI is the interactive twin — see [Account snapshot diff](#account-snapshot-diff--what-changed-since-yesterday)
+- **Open in AWS console**: `o` in every TUI (summary, VPC explorer, S3, CloudWatch logs) copies a console deep link for the selection — ARN-aware coverage for all 15 services and every VPC resource type, with an ARN-search fallback for the long tail — and opens it in your browser when the session is local
 - **Global fuzzy finder**: `Ctrl+P` in the summary TUI jumps to any resource by name/ID/ARN fragment ("I have `eni-0abc` from an error — what is it?"); `aws_explorer find <fragment>` is the CLI twin — see [Find Usage](#find-usage)
 - **SSO-aware errors**: an expired AWS SSO session prints the exact fix (`run: aws sso login --profile prod`) instead of an SDK error chain, in the CLI and every TUI
 - **Expiry watchlist**: `aws_explorer expiring` lists everything that breaks on a calendar date — ACM/IAM certificate expiry, Lambda runtime deprecations, EKS end-of-support, RDS CA certs & pending maintenance, overdue secret rotations — sorted by days remaining — see [Expiring Usage](#expiring-usage)
@@ -181,6 +182,7 @@ what you see in the bar is always what works right now.
 | `r` | Reset all filters |
 | `s` / `R` | Sort by the next column / reverse the sort direction (`↑`/`↓` shown in the header) |
 | `y` / `Y` | Copy the selected resource's ARN / ID to the clipboard |
+| `o` / `k` | Open the resource in the AWS console (`o` copies the deep-link URL and opens a browser when the session is local; ARN-search fallback for unmapped types) / copy an AWS CLI reproduction command |
 | `J` | Toggle a raw-JSON view in the detail panel (`y` then copies the JSON) |
 | `C` | Export the current (filtered, sorted) view to CSV under `~/.aws_explorer/exports/` |
 | `D` | **What changed**: first press saves an account baseline snapshot, later presses diff the live inventory against it (`b` inside the overlay re-baselines) |
@@ -676,6 +678,7 @@ type in `config.yaml` — see [Customizing displayed columns](#customizing-displ
 | `/` | Filter the VPC list by name or ID · quick-filter the resource table (matches any column, live `matched/total` count; `Enter` keeps the filter, `Esc` clears it) |
 | `s` / `R` | Sort the resource table by the next column / reverse the direction |
 | `c` / `y` | Copy the selected resource's ID to the clipboard |
+| `o` | Open the selected resource in the AWS console — copies the deep-link URL, opens a browser when local |
 | `C` | Export the current resource table to CSV under `~/.aws_explorer/exports/` |
 | `r` | Refresh the VPC list or the current resource list |
 | `Esc` | Go back one level (overlay → table → sidebar → VPC list) |
@@ -997,6 +1000,11 @@ apply.
 | `--allow-delete` | `false` | Enable object deletion |
 | `--endpoint-url` | — | Custom endpoint (LocalStack, MinIO, etc.) |
 
+Press `o` anywhere in the browser to open the selection in the AWS console —
+the current bucket on the bucket list, the bucket + prefix or the selected
+object in the object list. The URL is copied to the clipboard, and a browser
+opens when the session is local.
+
 ### S3 Examples
 
 ```bash
@@ -1047,6 +1055,9 @@ otherwise the config's `aws.regions` list is used.
 # Open a group and search for errors
 ./bin/aws_explorer cw -g /aws/lambda/my-fn -f ERROR
 ```
+
+Press `o` on a log group to open it in the CloudWatch console (URL copied;
+browser opened when the session is local).
 
 ### Full log viewer
 

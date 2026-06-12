@@ -16,9 +16,10 @@ import (
 	"github.com/charmbracelet/lipgloss"
 	"github.com/charmbracelet/x/ansi"
 	"github.com/ryandam9/aws_explorer/internal/config"
-	"github.com/ryandam9/aws_explorer/internal/trail"
+	"github.com/ryandam9/aws_explorer/internal/consolelink"
 	"github.com/ryandam9/aws_explorer/internal/display"
 	"github.com/ryandam9/aws_explorer/internal/table"
+	"github.com/ryandam9/aws_explorer/internal/trail"
 	"github.com/ryandam9/aws_explorer/internal/ui"
 )
 
@@ -1576,6 +1577,22 @@ func (m *Model) handleResourceTableKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.statusMsg = "Copied: " + row[1]
 		}
 		return m, nil
+	case "o":
+		// Console deep link for the selected resource: copy, and open in a
+		// browser when the session is local.
+		if m.state == stateResourceBrowser && m.selectedVPC != nil {
+			row := m.resourceTable.SelectedRow()
+			if len(row) >= 2 && row[1] != "" {
+				url, _ := consolelink.URL(consoleResourceFor(m.activeResource, m.selectedVPC.Region, row[1]))
+				_ = clipboard.WriteAll(url)
+				if consolelink.CanOpenBrowser() && consolelink.Open(url) == nil {
+					m.statusMsg = "Opened in browser · copied " + url
+				} else {
+					m.statusMsg = "Copied " + url
+				}
+			}
+		}
+		return m, nil
 	case "t":
 		// Start a connectivity trace from the selected network interface.
 		if m.activeResource == rtNetworkInterfaces {
@@ -2612,6 +2629,7 @@ func (m *Model) statusHints() []ui.KeyHint {
 			hints = append(hints,
 				ui.H("s", "sort"),
 				ui.H("c", "copy ID"),
+				ui.H("o", "console"),
 				ui.H("C", "csv"),
 			)
 			// Where-used, trace, and effective-rules only operate on certain
@@ -2660,6 +2678,7 @@ func (m *Model) helpText() string {
 		"  /        Filter table rows (matches any column; Enter keep, Esc clear)",
 		"  s / R    Sort by next column / reverse sort order",
 		"  c, y     Copy resource ID to clipboard",
+		"  o        Open the resource in the AWS console (copies the URL)",
 		"  C        Export current table to CSV (~/.aws_explorer/exports)",
 		"  F        Run the VPC findings linter (security/routing/capacity issues)",
 		"  P        Public exposure: what is reachable from the internet",

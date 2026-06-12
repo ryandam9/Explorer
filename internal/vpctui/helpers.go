@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"github.com/ryandam9/aws_explorer/internal/display"
+	"github.com/ryandam9/aws_explorer/internal/model"
 	"github.com/ryandam9/aws_explorer/internal/table"
 )
 
@@ -626,4 +627,45 @@ func boolStr(b bool) string {
 		return "Yes"
 	}
 	return "No"
+}
+
+// consoleResourceFor translates a resource-browser selection into the shape
+// internal/consolelink builds URLs from. IDs that are really ARNs (load
+// balancers) are passed as such so the ARN-based links work.
+func consoleResourceFor(rt resourceType, region, id string) model.Resource {
+	svc, typ := "ec2", ""
+	switch rt {
+	case rtSubnets:
+		typ = "subnet"
+	case rtSecurityGroups:
+		typ = "security-group"
+	case rtRouteTables:
+		typ = "route-table"
+	case rtInternetGateways:
+		typ = "internet-gateway"
+	case rtNatGateways:
+		typ = "natgateway"
+	case rtEndpoints:
+		typ = "vpc-endpoint"
+	case rtNetworkACLs:
+		typ = "network-acl"
+	case rtPeering:
+		typ = "vpc-peering-connection"
+	case rtEC2Instances:
+		typ = "instance"
+	case rtNetworkInterfaces:
+		typ = "network-interface"
+	case rtLambda:
+		svc, typ = "lambda", "function"
+	case rtRDS:
+		svc, typ = "rds", "db"
+	case rtLoadBalancers:
+		svc, typ = "elbv2", "loadbalancer"
+	}
+	r := model.Resource{Service: svc, Type: typ, Region: region, ID: id, Name: id}
+	if strings.HasPrefix(id, "arn:") {
+		r.ARN = id
+		r.ID = ""
+	}
+	return r
 }

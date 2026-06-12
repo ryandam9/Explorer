@@ -24,6 +24,7 @@ import (
 	"github.com/ryandam9/aws_explorer/internal/auth"
 	"github.com/ryandam9/aws_explorer/internal/awsutil"
 	"github.com/ryandam9/aws_explorer/internal/config"
+	"github.com/ryandam9/aws_explorer/internal/consolelink"
 	"github.com/ryandam9/aws_explorer/internal/csvexport"
 	"github.com/ryandam9/aws_explorer/internal/engine"
 	"github.com/ryandam9/aws_explorer/internal/model"
@@ -896,11 +897,18 @@ func (m tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 		case "o":
 			if m.focus == focusDetail && m.detail != nil {
-				url := awsutil.ConsoleURL(*m.detail)
+				url, specific := consolelink.URL(*m.detail)
 				if err := clipboard.WriteAll(url); err != nil {
 					m.setToast("Copy URL failed: " + err.Error())
 				} else {
-					m.setToast("Copied AWS Console URL")
+					msg := "Copied AWS Console URL"
+					if !specific {
+						msg = "Copied console ARN-search URL"
+					}
+					if consolelink.CanOpenBrowser() && consolelink.Open(url) == nil {
+						msg += " — opened in browser"
+					}
+					m.setToast(msg)
 				}
 				cmds = append(cmds, toastCmd(3*time.Second))
 				return m, tea.Batch(cmds...)
@@ -1933,7 +1941,7 @@ func (m tuiModel) helpView() string {
 		"  l                  Toggle CloudWatch recent ERROR logs",
 		"  g                  Toggle CloudWatch key metric sparkline (1hr)",
 		"  x                  Toggle cross-resource relationship xrefs",
-		"  o                  Copy AWS Console URL",
+		"  o                  Open in AWS Console (copies URL; opens browser when local)",
 		"  k                  Copy AWS CLI reproduction command",
 		"",
 		"Utility",
