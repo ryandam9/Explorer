@@ -21,11 +21,12 @@ func TestRenderFindings(t *testing.T) {
 	out := ansi.Strip(m.renderFindings())
 
 	for _, want := range []string{
+		"SEVERITY", "RESOURCE", "ISSUE", "FIX",
 		"CRITICAL", "WARNING", "INFO",
-		"SG exposes a sensitive port", "[sg-1]",
-		"NAT gateway is not referenced", "[nat-1]",
-		"Subnet has no outbound internet path", "[subnet-1]",
-		"Fix: Restrict the source.",
+		"SG exposes a sensitive port", "sg-1",
+		"NAT gateway is not referenced", "nat-1",
+		"Subnet has no outbound internet", "subnet-1",
+		"Restrict the source.",
 	} {
 		if !strings.Contains(out, want) {
 			t.Errorf("renderFindings output missing %q:\n%s", want, out)

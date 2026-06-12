@@ -79,10 +79,11 @@ type traceDoneMsg struct {
 }
 
 type xrefDoneMsg struct {
-	vpcID  string
-	title  string
-	groups []xrefGroup
-	err    error
+	vpcID       string
+	title       string
+	groups      []xrefGroup
+	unsupported bool // the resource type cannot be cross-referenced
+	err         error
 }
 
 type effRulesDoneMsg struct {
@@ -206,12 +207,13 @@ type Model struct {
 	traceViewport   viewport.Model
 
 	// Cross-reference ("where used") overlay
-	showXref     bool
-	xrefTitle    string
-	xrefGroups   []xrefGroup
-	xrefLoading  bool
-	xrefErr      error
-	xrefViewport viewport.Model
+	showXref        bool
+	xrefTitle       string
+	xrefGroups      []xrefGroup
+	xrefUnsupported bool
+	xrefLoading     bool
+	xrefErr         error
+	xrefViewport    viewport.Model
 
 	// Effective security rules overlay
 	showEffRules    bool
@@ -599,7 +601,8 @@ func (m *Model) loadXref(resourceID string) tea.Cmd {
 		if err != nil {
 			return xrefDoneMsg{vpcID: vpcID, err: err}
 		}
-		return xrefDoneMsg{vpcID: vpcID, title: resourceID, groups: crossReference(snap, resourceID)}
+		groups, supported := crossReference(snap, resourceID)
+		return xrefDoneMsg{vpcID: vpcID, title: resourceID, groups: groups, unsupported: !supported}
 	}
 }
 
@@ -983,6 +986,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.xrefErr = msg.err
 		m.xrefTitle = msg.title
 		m.xrefGroups = msg.groups
+		m.xrefUnsupported = msg.unsupported
 		m.xrefViewport.SetContent(m.renderXref())
 		m.xrefViewport.GotoTop()
 
@@ -2000,55 +2004,18 @@ func (m *Model) viewFindingsOverlay(bg string) string {
 	return m.overlayFrame(titleText, body, "↑/↓ scroll  •  Esc/F close")
 }
 
-// renderFindings builds the scrollable body of the findings overlay: a coloured,
-// numbered list grouped from most to least severe.
+// renderFindings builds the scrollable body of the findings overlay: a table
+// of severity, impacted resource, issue, and suggested fix, sorted most-severe
+// first.
 func (m *Model) renderFindings() string {
 	if len(m.findings) == 0 {
 		return ui.SuccessStyle().Render("No issues detected. ✓")
 	}
-
-	sevStyle := func(s Severity) lipgloss.Style {
-		switch s {
-		case SevCritical:
-			return lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color(ui.ColorError()))
-		case SevWarning:
-			return lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color(ui.ColorWarning()))
-		default:
-			return lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color(ui.ColorInfo()))
-		}
-	}
-	label := map[Severity]string{SevCritical: "🔴 CRITICAL", SevWarning: "🟡 WARNING", SevInfo: "🔵 INFO"}
-	muted := lipgloss.NewStyle().Foreground(lipgloss.Color(ui.ColorMuted()))
-	heading := lipgloss.NewStyle().Foreground(lipgloss.Color(ui.ColorText()))
-
-	// Wrap the detail/fix paragraphs to the overlay width and indent them, so
-	// long sentences wrap instead of being truncated by the viewport.
 	wrapW := m.findingsViewport.Width
 	if wrapW <= 0 {
-		wrapW = 80
+		wrapW = 100
 	}
-	indented := func(text, prefix string) string {
-		wrapped := lipgloss.NewStyle().Width(wrapW - len(prefix)).Render(text)
-		lines := strings.Split(wrapped, "\n")
-		for i, ln := range lines {
-			lines[i] = prefix + ln
-		}
-		return strings.Join(lines, "\n")
-	}
-
-	var b strings.Builder
-	for i, f := range m.findings {
-		if i > 0 {
-			b.WriteString("\n\n")
-		}
-		b.WriteString(sevStyle(f.Severity).Render(label[f.Severity]) + "  " +
-			heading.Render(f.Title) + muted.Render("  ["+f.Resource+"]"))
-		b.WriteString("\n" + indented(f.Detail, "  "))
-		if f.Fix != "" {
-			b.WriteString("\n" + muted.Render(indented("Fix: "+f.Fix, "  ")))
-		}
-	}
-	return b.String()
+	return buildFindingsTable(m.findings, wrapW)
 }
 
 func (m *Model) viewTraceInputOverlay(bg string) string {
@@ -2108,8 +2075,14 @@ func (m *Model) viewXrefOverlay(bg string) string {
 }
 
 // renderXref builds the scrollable body of the cross-reference overlay: each
-// relationship group with its members.
+// relationship group with its members, or an explicit note when the selected
+// resource type cannot be cross-referenced.
 func (m *Model) renderXref() string {
+	if m.xrefUnsupported {
+		return lipgloss.NewStyle().Foreground(lipgloss.Color(ui.ColorMuted())).
+			Render("Cross-reference is not available for this resource type.\n\nIt works for " +
+				xrefSupportedTypes + ".")
+	}
 	return renderResourceGroups(m.xrefGroups, "No related resources found in this VPC.")
 }
 
@@ -2471,10 +2444,13 @@ func (m *Model) statusHints() []ui.KeyHint {
 				ui.H("s", "sort"),
 				ui.H("c", "copy ID"),
 				ui.H("C", "csv"),
-				ui.H("x", "where used"),
 			)
-			// Trace and effective-rules only operate on network interfaces, so
-			// only advertise them when they would actually do something.
+			// Where-used, trace, and effective-rules only operate on certain
+			// resource types, so only advertise them when they would actually
+			// do something.
+			if xrefSupported(m.activeResource) {
+				hints = append(hints, ui.H("x", "where used"))
+			}
 			if m.activeResource == rtNetworkInterfaces {
 				hints = append(hints, ui.H("t", "trace"), ui.H("e", "eff rules"))
 			}
@@ -2522,7 +2498,7 @@ func (m *Model) helpText() string {
 		"  w        What changed: baseline the VPC, then diff against it later",
 		"  E        Export a Markdown report (resources + findings) to a file",
 		"  t        Trace connectivity from the selected network interface",
-		"  x        Cross-reference the selected resource (where used)",
+		"  x        Where used: SGs, subnets, route tables, ENIs, NAT/IGW, NACLs, endpoints, peering",
 		"  e        Effective merged security rules (network interface)",
 		"  r        Refresh current resource list",
 		"  Esc      Go back to VPC list",

@@ -385,19 +385,23 @@ sentence:
 
 ### Findings linter (`F`)
 
-Scans the whole VPC and opens a scrollable, severity-grouped list of issues
-(`🔴 critical`, `🟡 warning`, `🔵 info`), sorted most-severe first:
+Scans the whole VPC and opens a scrollable table of issues sorted most-severe
+first — severity (`🔴 critical`, `🟡 warning`, `🔵 info`), the impacted
+resource, the issue and why it fired, and the suggested fix:
 
 ```
 VPC Findings — 1 critical, 2 warning, 0 info
 
-🔴 CRITICAL  Security group exposes a sensitive port to the internet  [sg-0a1]
-   sg-0a1 (default): Allow inbound SSH (TCP 22) from anywhere on the internet (0.0.0.0/0)
-   Fix: Restrict the source to specific CIDRs or a security group instead of 0.0.0.0/0.
+SEVERITY     RESOURCE     ISSUE                                  FIX
+─────────────────────────────────────────────────────────────────────────────────────
+🔴 CRITICAL  sg-0a1       Security group exposes a sensitive     Restrict the source to
+                          port to the internet                   specific CIDRs or a
+                          sg-0a1 (default): Allow inbound SSH    security group instead
+                          (TCP 22) from anywhere on the          of 0.0.0.0/0.
+                          internet (0.0.0.0/0)
 ```
 
-Each finding has a **title**, the **resource** it concerns, a **detail** of why
-it fired, and a suggested **fix**. The checks:
+The checks:
 
 | Area | Finding | Severity |
 |------|---------|----------|
@@ -463,8 +467,12 @@ reported as "open up to" that target.
 
 ### Cross-reference — "where used" (`x`)
 
-On any resource, `x` shows everything that references it and what it
-references, turning the flat tables into a navigable graph:
+`x` shows everything that references the selected resource and what it
+references, turning the flat tables into a navigable graph. It works on
+**security groups, subnets, route tables, network interfaces, NAT gateways,
+internet gateways, network ACLs, VPC endpoints, and peering connections** —
+the `x` hint appears in the status bar only on those categories, and pressing
+it elsewhere says so explicitly instead of showing an empty result:
 
 ```
 Where used: subnet-priv

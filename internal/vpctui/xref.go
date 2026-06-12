@@ -21,9 +21,10 @@ type xrefGroup struct {
 }
 
 // crossReference returns the relationship groups for a resource, dispatched by
-// its ID prefix. Empty groups are omitted; a nil result means the resource type
-// is not cross-referenced.
-func crossReference(snap vpcSnapshot, id string) []xrefGroup {
+// its ID prefix. Empty groups are omitted. The bool reports whether the
+// resource type is cross-referenced at all, so the UI can tell "no relations"
+// apart from "not supported".
+func crossReference(snap vpcSnapshot, id string) ([]xrefGroup, bool) {
 	var groups []xrefGroup
 	switch {
 	case strings.HasPrefix(id, "sg-"):
@@ -40,8 +41,12 @@ func crossReference(snap vpcSnapshot, id string) []xrefGroup {
 		groups = xrefInternetGateway(snap, id)
 	case strings.HasPrefix(id, "acl-"):
 		groups = xrefNACL(snap, id)
+	case strings.HasPrefix(id, "vpce-"):
+		groups = xrefEndpoint(snap, id)
+	case strings.HasPrefix(id, "pcx-"):
+		groups = xrefPeering(snap, id)
 	default:
-		return nil
+		return nil, false
 	}
 	// Drop empty groups for a clean display.
 	out := groups[:0]
@@ -50,8 +55,25 @@ func crossReference(snap vpcSnapshot, id string) []xrefGroup {
 			out = append(out, g)
 		}
 	}
-	return out
+	return out, true
 }
+
+// xrefSupported reports whether the "where used" overlay can cross-reference
+// the resources of a sidebar category, so the key hint is only advertised
+// where it works.
+func xrefSupported(rt resourceType) bool {
+	switch rt {
+	case rtSecurityGroups, rtSubnets, rtRouteTables, rtNetworkInterfaces,
+		rtNatGateways, rtInternetGateways, rtNetworkACLs, rtEndpoints, rtPeering:
+		return true
+	default:
+		return false
+	}
+}
+
+// xrefSupportedTypes is shown when x is pressed on an unsupported resource.
+const xrefSupportedTypes = "security groups, subnets, route tables, network interfaces, " +
+	"NAT gateways, internet gateways, network ACLs, VPC endpoints, and peering connections"
 
 func xrefSecurityGroup(snap vpcSnapshot, id string) []xrefGroup {
 	var enis, refs []string
@@ -206,6 +228,57 @@ func xrefNACL(snap vpcSnapshot, id string) []xrefGroup {
 	return []xrefGroup{
 		{Label: "Associated subnets", Items: subnets},
 	}
+}
+
+func xrefEndpoint(snap vpcSnapshot, id string) []xrefGroup {
+	for _, ep := range snap.Endpoints {
+		if ep.ID != id {
+			continue
+		}
+		var svc []string
+		if ep.ServiceName != "" {
+			label := ep.ServiceName
+			if ep.Type != "" {
+				label += " (" + strings.ToLower(ep.Type) + " endpoint)"
+			}
+			svc = append(svc, label)
+		}
+		return []xrefGroup{
+			{Label: "Service", Items: svc},
+			{Label: "Associated route tables", Items: ep.RouteTableIDs},
+			{Label: "Subnets", Items: ep.SubnetIDs},
+			{Label: "Security groups", Items: ep.SecurityGroups},
+			{Label: "Routed to by route tables", Items: routeTablesTargeting(snap, id)},
+		}
+	}
+	return nil
+}
+
+func xrefPeering(snap vpcSnapshot, id string) []xrefGroup {
+	var sides []string
+	for _, p := range snap.Peerings {
+		if p.ID != id {
+			continue
+		}
+		if p.RequesterVPCID != "" {
+			sides = append(sides, "Requester: "+p.RequesterVPCID+peeringCIDRSuffix(p.RequesterCIDR, p.RequesterCIDRs))
+		}
+		if p.AccepterVPCID != "" {
+			sides = append(sides, "Accepter: "+p.AccepterVPCID+peeringCIDRSuffix(p.AccepterCIDR, p.AccepterCIDRs))
+		}
+	}
+	return []xrefGroup{
+		{Label: "Peered VPCs", Items: sides},
+		{Label: "Routed to by route tables", Items: routeTablesTargeting(snap, id)},
+	}
+}
+
+func peeringCIDRSuffix(primary string, set []string) string {
+	cidrs := peeringSideCIDRs(primary, set)
+	if len(cidrs) == 0 {
+		return ""
+	}
+	return " (" + strings.Join(cidrs, ", ") + ")"
 }
 
 // routeTablesTargeting returns route tables with a route whose target is id.
