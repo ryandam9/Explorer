@@ -1,6 +1,6 @@
 # AWS Explorer — Enhancement Roadmap & Design Specification
 
-Status: **In progress** — shipped so far: AXE-004 & the `internal/findings` platform (#79), AXE-023 (#80), AXE-001 & AXE-022 (#81) · Tracking issue: #76
+Status: **In progress** — shipped so far: AXE-004 & the `internal/findings` platform (#79), AXE-023 (#80), AXE-001 & AXE-022 (#81), AXE-013 (#82), AXE-007 · Tracking issue: #76
 
 This document specifies 24 proposed enhancements, grouped into nine themes.
 Each enhancement carries a stable ID (`AXE-NNN`) used in the tracking issue,
@@ -33,13 +33,13 @@ The proposals follow the tool's established design principles:
 | [AXE-004](#axe-004) | Cost/waste linter with monthly estimates | B — Cost & waste | ✅ shipped (#79) |
 | [AXE-005](#axe-005) | CloudTrail "who changed this" | C — Change attribution & drift | P1 |
 | [AXE-006](#axe-006) | Account-wide inventory snapshot diff | C — Change attribution & drift | P2 |
-| [AXE-007](#axe-007) | Expiry & deprecation watchlist (`expiring`) | D — Expiry & deprecation | P1 |
+| [AXE-007](#axe-007) | Expiry & deprecation watchlist (`expiring`) | D — Expiry & deprecation | ✅ shipped |
 | [AXE-008](#axe-008) | Account-wide security audit (`audit`) | E — Account-wide audit | P2 |
 | [AXE-009](#axe-009) | Generalized where-used / blast radius | E — Account-wide audit | P2 |
 | [AXE-010](#axe-010) | Relationship graph export (DOT / Mermaid) | E — Account-wide audit | P3 |
 | [AXE-011](#axe-011) | Jump from resource to its CloudWatch logs | F — Cross-navigation | P2 |
 | [AXE-012](#axe-012) | Open selected resource in the AWS console | F — Cross-navigation | P1 |
-| [AXE-013](#axe-013) | Global fuzzy finder | F — Cross-navigation | ✅ shipped |
+| [AXE-013](#axe-013) | Global fuzzy finder | F — Cross-navigation | ✅ shipped (#82) |
 | [AXE-014](#axe-014) | Inline CloudWatch metric sparklines | F — Cross-navigation | P3 |
 | [AXE-015](#axe-015) | ECS stopped-task triage | G — Service-specific triage | P2 |
 | [AXE-016](#axe-016) | Lambda triage view | G — Service-specific triage | P2 |
@@ -339,6 +339,8 @@ Changes since baseline 2026-06-11 09:00 — 3 added, 1 removed
 ## Theme D — Expiry & deprecation
 
 ### AXE-007 — `expiring` command {#axe-007}
+
+> **Status: ✅ shipped** — `aws_explorer expiring` (`cmd/expiring.go`, `internal/expiry` with static EOL tables in `eol.go`).
 
 **Problem.** Calendar-driven breakage (cert expiry, runtime deprecation,
 version EOL) is 100% predictable and still pages people. One report, sorted

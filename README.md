@@ -12,6 +12,7 @@ Discover, monitor, and display AWS resources across accounts and regions via CLI
 - **IAM debugging**: `aws_explorer iam decode` turns an "Encoded authorization failure message" into a readable verdict (principal, action, resource, explicit vs implicit deny) — see [IAM Tools](#iam-tools)
 - **Global fuzzy finder**: `Ctrl+P` in the summary TUI jumps to any resource by name/ID/ARN fragment ("I have `eni-0abc` from an error — what is it?"); `aws_explorer find <fragment>` is the CLI twin — see [Find Usage](#find-usage)
 - **SSO-aware errors**: an expired AWS SSO session prints the exact fix (`run: aws sso login --profile prod`) instead of an SDK error chain, in the CLI and every TUI
+- **Expiry watchlist**: `aws_explorer expiring` lists everything that breaks on a calendar date — ACM/IAM certificate expiry, Lambda runtime deprecations, EKS end-of-support, RDS CA certs & pending maintenance, overdue secret rotations — sorted by days remaining — see [Expiring Usage](#expiring-usage)
 - **Config-driven**: YAML configuration for services, regions, filters, output, and per-resource display columns
 - **5 auth methods**: auto (SDK default chain), profile, env vars, static credentials, STS AssumeRole
 - **Output formats**: Table (default), JSON, NDJSON, CSV — with `--no-header` for scripting and colored states on terminals
@@ -401,6 +402,49 @@ NatGateways,RouteTables,Instances,Snapshots,Images}`,
 `elasticloadbalancing:Describe{LoadBalancers,TargetGroups,TargetHealth}`,
 `dynamodb:{ListTables,DescribeTable}` and (for the traffic-based checks)
 `cloudwatch:GetMetricData`. Any denial degrades only the checks that need it.
+
+## Expiring Usage
+
+`expiring` answers "what breaks next?" — one report of every calendar-driven
+deadline, sorted by days remaining. Already-passed items lead with negative
+day counts, so the things currently broken are impossible to miss.
+
+```bash
+./bin/aws_explorer expiring [--within 90d] [--all-regions] [-o table|json|ndjson|csv]
+```
+
+```
+ DAYS  WHAT                                 RESOURCE                  REGION      DETAIL
+   -3  Lambda runtime deprecated            payments-fn (python3.9)   us-east-1   runtime python3.9 was deprecated 2025-12-15 — update the function's runtime
+   12  ACM certificate expires              *.example.com             us-east-1   certificate is in use — renew or re-issue before it expires (expires 2026-06-24)
+   61  EKS version end of standard support  prod-cluster (1.33)       eu-west-1   standard support for 1.33 ends 2026-07-29 — upgrade the cluster (extended support bills extra)
+```
+
+What it checks:
+
+| Source | Deadline |
+|--------|----------|
+| ACM certificates | `NotAfter` expiry, noting whether the certificate is in use |
+| IAM server certificates | Expiry of legacy certificates (migrate to ACM) |
+| Lambda functions | The runtime's published deprecation date |
+| EKS clusters | The Kubernetes version's end of standard support (extended support bills extra) |
+| RDS instances | Expired CA certificates (e.g. `rds-ca-2019`) and pending maintenance actions with an apply date |
+| Secrets Manager | Rotation-enabled secrets whose next rotation is overdue |
+
+| Flag | Default | Description |
+|------|---------|-------------|
+| `--within` | `90d` | Horizon for upcoming deadlines (`30`, `30d`); already-passed items always show |
+| `--output` / `-o` | `table` | `table`, `json`, `ndjson`, `csv` |
+
+> **About the EOL tables.** Lambda runtime and EKS version schedules are
+> static tables baked into the binary (`internal/expiry/eol.go`, sources
+> commented), reviewed each release. A runtime or version missing from the
+> table produces no row — the report under-warns rather than mis-warns.
+
+**IAM permissions.** Read-only: `acm:ListCertificates`,
+`iam:ListServerCertificates`, `lambda:ListFunctions`, `eks:{ListClusters,
+DescribeCluster}`, `rds:{DescribeDBInstances,DescribePendingMaintenanceActions}`,
+`secretsmanager:ListSecrets`. Any denial skips that source with a note.
 
 ## IAM Tools
 
