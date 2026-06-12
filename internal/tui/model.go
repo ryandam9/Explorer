@@ -20,6 +20,7 @@ import (
 	"github.com/charmbracelet/x/ansi"
 	zone "github.com/lrstanley/bubblezone"
 
+	"github.com/ryandam9/aws_explorer/internal/acctsnap"
 	"github.com/ryandam9/aws_explorer/internal/auth"
 	"github.com/ryandam9/aws_explorer/internal/awsutil"
 	"github.com/ryandam9/aws_explorer/internal/config"
@@ -207,6 +208,13 @@ type tuiModel struct {
 	// read even when some resources were returned. Scrollable when long.
 	showErrors     bool
 	errorsViewport viewport.Model
+
+	// Account snapshot diff ("d"): what changed since the saved baseline
+	// (internal/acctsnap). First press saves a baseline; later presses show
+	// the diff overlay, where b re-baselines.
+	showAcctDiff bool
+	acctDiffVP   viewport.Model
+	acctDiffRep  acctsnap.Report
 
 	// Config (path + loaded struct) needed to (re)build the settings panel.
 	configPath string
@@ -409,6 +417,37 @@ func (m tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.errorsViewport.LineUp(3)
 			case tea.MouseButtonWheelDown:
 				m.errorsViewport.LineDown(3)
+			}
+		}
+		return m, nil
+	}
+
+	// While the account-diff overlay is open: scroll, b to re-baseline,
+	// Esc/d/q to close.
+	if m.showAcctDiff {
+		switch msg := msg.(type) {
+		case tea.KeyMsg:
+			switch msg.String() {
+			case "esc", "D", "q":
+				m.showAcctDiff = false
+				return m, nil
+			case "up", "k", "[":
+				m.acctDiffVP.LineUp(3)
+				return m, nil
+			case "down", "j", "]":
+				m.acctDiffVP.LineDown(3)
+				return m, nil
+			case "b":
+				m.showAcctDiff = false
+				m.saveAcctBaseline()
+				return m, toastCmd(4 * time.Second)
+			}
+		case tea.MouseMsg:
+			switch msg.Button {
+			case tea.MouseButtonWheelUp:
+				m.acctDiffVP.LineUp(3)
+			case tea.MouseButtonWheelDown:
+				m.acctDiffVP.LineDown(3)
 			}
 		}
 		return m, nil
@@ -745,6 +784,13 @@ func (m tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 		case "w":
 			m.saveSnapshot()
+			cmds = append(cmds, toastCmd(4*time.Second))
+			return m, tea.Batch(cmds...)
+
+		case "D":
+			// What changed since the account baseline: save one on first use,
+			// diff against it thereafter (mirrors the VPC explorer's w).
+			m.openAcctDiff()
 			cmds = append(cmds, toastCmd(4*time.Second))
 			return m, tea.Batch(cmds...)
 
@@ -1880,6 +1926,7 @@ func (m tuiModel) helpView() string {
 		"  C                  Export current view to CSV (~/.aws_explorer/exports)",
 		"  w                  Save full scan snapshot JSON",
 		"  W                  Toggle live watch mode (5s auto-refresh)",
+		"  D                  What changed: baseline the account, then diff against it later",
 		"",
 		"Support Debugging (while in detail panel)",
 		"  t                  Toggle CloudTrail resource mutation timeline",
@@ -1927,6 +1974,9 @@ func (m tuiModel) View() string {
 		output = lipgloss.JoinVertical(lipgloss.Left, header, centered, status)
 	} else if m.showErrors {
 		centered := lipgloss.Place(m.width, m.height-4, lipgloss.Center, lipgloss.Center, m.errorsOverlay())
+		output = lipgloss.JoinVertical(lipgloss.Left, header, centered, status)
+	} else if m.showAcctDiff {
+		centered := lipgloss.Place(m.width, m.height-4, lipgloss.Center, lipgloss.Center, m.acctDiffOverlay())
 		output = lipgloss.JoinVertical(lipgloss.Left, header, centered, status)
 	} else if m.showSettings {
 		// The console floats over the live app (HUD-style): render the normal
@@ -2215,6 +2265,8 @@ func (m tuiModel) statusHints() []ui.KeyHint {
 		return []ui.KeyHint{ui.H("?/Esc", "close help")}
 	case m.showErrors:
 		return []ui.KeyHint{ui.H("↑/↓", "scroll"), ui.H("Esc/e", "close")}
+	case m.showAcctDiff:
+		return []ui.KeyHint{ui.H("↑/↓", "scroll"), ui.H("b", "re-baseline"), ui.H("Esc/D", "close")}
 	case m.showFilter, m.showSwitcher:
 		return []ui.KeyHint{
 			ui.H("↑/↓", "choose"),
@@ -2573,6 +2625,117 @@ func (m *tuiModel) openErrorsOverlay() {
 	m.errorsViewport = viewport.New(w, h)
 	m.errorsViewport.SetContent(m.errorsBody())
 	m.showErrors = true
+}
+
+// ── Account snapshot diff ("d") ───────────────────────────────────────────────
+
+// liveAcctSnapshot builds a snapshot of the current in-memory inventory. ok
+// is false in the offline snapshot view, where there is no account identity
+// to key the baseline by.
+func (m tuiModel) liveAcctSnapshot() (acctsnap.Snapshot, bool) {
+	if m.engine == nil {
+		return acctsnap.Snapshot{}, false
+	}
+	return acctsnap.New(m.sorted, m.engine.AccountID, m.engine.EffectiveRegions()), true
+}
+
+// saveAcctBaseline saves the current inventory as the account baseline.
+func (m *tuiModel) saveAcctBaseline() {
+	live, ok := m.liveAcctSnapshot()
+	if !ok {
+		m.setToast("Account diff unavailable in offline snapshot view")
+		return
+	}
+	if _, err := acctsnap.Save(live); err != nil {
+		m.setToast("Failed to save baseline: " + err.Error())
+		return
+	}
+	m.setToast("Account baseline saved — press D later to see what changed")
+}
+
+// openAcctDiff saves a baseline on first use, and diffs the live inventory
+// against it on later uses, opening the scrollable overlay.
+func (m *tuiModel) openAcctDiff() {
+	live, ok := m.liveAcctSnapshot()
+	if !ok {
+		m.setToast("Account diff unavailable in offline snapshot view")
+		return
+	}
+	baseline, found, err := acctsnap.Load(live.AccountID, live.Regions)
+	if err != nil {
+		m.setToast("Failed to load baseline: " + err.Error())
+		return
+	}
+	if !found {
+		m.saveAcctBaseline()
+		return
+	}
+
+	m.acctDiffRep = acctsnap.NewReport(baseline, acctsnap.Diff(baseline, live))
+	w := m.width - 12
+	if w > 100 {
+		w = 100
+	}
+	if w < 32 {
+		w = 32
+	}
+	h := m.height - 8
+	if h < 6 {
+		h = 6
+	}
+	m.acctDiffVP = viewport.New(w, h)
+	m.acctDiffVP.SetContent(m.acctDiffBody())
+	m.showAcctDiff = true
+}
+
+// acctDiffBody renders the change list for the overlay viewport.
+func (m tuiModel) acctDiffBody() string {
+	if len(m.acctDiffRep.Changes) == 0 {
+		return ui.SuccessStyle().Render("No changes since the baseline snapshot. ✓")
+	}
+	glyphStyles := map[string]lipgloss.Style{
+		acctsnap.KindAdded:    lipgloss.NewStyle().Foreground(lipgloss.Color(ui.ColorSuccess())).Bold(true),
+		acctsnap.KindRemoved:  lipgloss.NewStyle().Foreground(lipgloss.Color(ui.ColorError())).Bold(true),
+		acctsnap.KindModified: lipgloss.NewStyle().Foreground(lipgloss.Color(ui.ColorWarning())).Bold(true),
+	}
+	muted := lipgloss.NewStyle().Foreground(lipgloss.Color(ui.ColorMuted()))
+
+	glyph := map[string]string{
+		acctsnap.KindAdded: "+", acctsnap.KindRemoved: "-", acctsnap.KindModified: "~",
+	}
+	var b strings.Builder
+	for _, c := range m.acctDiffRep.Changes {
+		label := c.ID
+		if c.Name != "" && c.Name != c.ID {
+			label += " (" + c.Name + ")"
+		}
+		region := c.Region
+		if region == "" {
+			region = "global"
+		}
+		b.WriteString(fmt.Sprintf("%s %-22s %s  %s\n",
+			glyphStyles[c.Kind].Render(glyph[c.Kind]), c.Type, label, muted.Render(region)))
+		for _, d := range c.Deltas {
+			b.WriteString("      " + d + "\n")
+		}
+	}
+	return b.String()
+}
+
+// acctDiffOverlay renders the account-diff overlay (title + scrollable body)
+// inside a themed modal frame.
+func (m tuiModel) acctDiffOverlay() string {
+	title := lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color(ui.ColorHeading())).
+		Render(fmt.Sprintf("WHAT CHANGED SINCE BASELINE %s — %d added, %d removed, %d modified",
+			m.acctDiffRep.BaselineTakenAt, m.acctDiffRep.Added, m.acctDiffRep.Removed, m.acctDiffRep.Modified))
+	hint := lipgloss.NewStyle().Foreground(lipgloss.Color(ui.ColorMuted())).
+		Render("↑/↓ scroll · b save current as new baseline · Esc/D close")
+	body := lipgloss.JoinVertical(lipgloss.Left, title, "", m.acctDiffVP.View(), "", hint)
+	return lipgloss.NewStyle().
+		Border(lipgloss.RoundedBorder()).
+		BorderForeground(lipgloss.Color(ui.ColorBorderFocus())).
+		Padding(0, 1).
+		Render(body)
 }
 
 // errorsOverlay renders the errors overlay (title + scrollable body) inside a

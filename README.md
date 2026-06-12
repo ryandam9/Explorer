@@ -11,6 +11,7 @@ Discover, monitor, and display AWS resources across accounts and regions via CLI
 - **Cost/waste audit**: `aws_explorer audit` scans for the classic sources of silent spend — unattached EBS volumes, idle Elastic IPs and NAT gateways, load balancers with no healthy targets or no traffic, gp2→gp3 candidates, forgotten snapshots/AMIs, over-provisioned DynamoDB tables — each finding with a stable check ID and an estimated monthly cost, printable or explored in an interactive TUI (`--tui`) — see [Audit Usage](#audit-usage)
 - **IAM debugging**: `aws_explorer iam decode` turns an "Encoded authorization failure message" into a readable verdict (principal, action, resource, explicit vs implicit deny) — see [IAM Tools](#iam-tools)
 - **CloudTrail "who changed this"**: `aws_explorer trail <resource-id-or-arn>` lists recent CloudTrail management events for a resource — when, which API call, which principal, from which IP — using the zero-setup 90-day LookupEvents window; the summary TUI's `t` timeline is the interactive twin — see [Trail Usage](#trail-usage)
+- **Account snapshot diff**: `summary --baseline` / `summary --diff` answers "what changed in this account since yesterday?" — added/removed/modified resources across the whole merged-by-ARN inventory, deterministic and volatile-field-free; `D` in the summary TUI is the interactive twin — see [Account snapshot diff](#account-snapshot-diff--what-changed-since-yesterday)
 - **Global fuzzy finder**: `Ctrl+P` in the summary TUI jumps to any resource by name/ID/ARN fragment ("I have `eni-0abc` from an error — what is it?"); `aws_explorer find <fragment>` is the CLI twin — see [Find Usage](#find-usage)
 - **SSO-aware errors**: an expired AWS SSO session prints the exact fix (`run: aws sso login --profile prod`) instead of an SDK error chain, in the CLI and every TUI
 - **Expiry watchlist**: `aws_explorer expiring` lists everything that breaks on a calendar date — ACM/IAM certificate expiry, Lambda runtime deprecations, EKS end-of-support, RDS CA certs & pending maintenance, overdue secret rotations — sorted by days remaining — see [Expiring Usage](#expiring-usage)
@@ -182,6 +183,7 @@ what you see in the bar is always what works right now.
 | `y` / `Y` | Copy the selected resource's ARN / ID to the clipboard |
 | `J` | Toggle a raw-JSON view in the detail panel (`y` then copies the JSON) |
 | `C` | Export the current (filtered, sorted) view to CSV under `~/.aws_explorer/exports/` |
+| `D` | **What changed**: first press saves an account baseline snapshot, later presses diff the live inventory against it (`b` inside the overlay re-baselines) |
 | `P` | Switch AWS profile and/or region scope, then rescan — no restart needed |
 | `e` | Open the scan-errors overlay (services with errors also carry a `⚠n` badge in the sidebar) |
 | `S` | Settings panel (themes & colors) |
@@ -244,6 +246,8 @@ Accepts the same global flags as the CLI command (`--config`, `--profile`,
 | `--output` / `-o` | `table` | Output format: `table`, `json`, `ndjson`, or `csv` |
 | `--tui` | `false` | Explore the same inventory interactively instead of printing |
 | `--typed-only` | `false` | Skip the all-services Tagging API sweep; use only the built-in typed collectors |
+| `--baseline` | `false` | Save this scan as the account's baseline snapshot |
+| `--diff` | `false` | Diff this scan against the saved baseline — "what changed since" |
 
 ### Examples
 
@@ -265,6 +269,36 @@ Accepts the same global flags as the CLI command (`--config`, `--profile`,
 > requires the account ID, which is resolved once via `sts:GetCallerIdentity`.
 > If that call is denied, those ARNs are shown as `-` while AWS-provided ARNs
 > still appear.
+
+### Account snapshot diff — "what changed since yesterday?"
+
+The account-level twin of the VPC explorer's snapshot diff: baseline the
+whole merged-by-ARN inventory, then diff a later scan against it.
+
+```bash
+aws_explorer summary --baseline          # save the baseline
+aws_explorer summary --diff              # later: what changed?
+aws_explorer summary --diff -o json      # for automation
+```
+
+```
+Changes since baseline 2026-06-11 09:00 UTC — 2 added, 1 removed, 1 modified
++ ec2/instance      i-0abc (web-3)        us-east-1
++ lambda/function   new-payments-fn       us-east-1
+- s3/bucket         old-logs-bucket       global
+~ ec2/instance      i-0def (web-2)        us-east-1   state: running → stopped; tag Env: dev → prod
+```
+
+- Baselines are stored under `~/.aws_explorer/account-snapshots/<account-id>/`,
+  one file per **region scope** — diffing with a different `-r`/`--all-regions`
+  scope than the baseline refuses with a hint instead of reporting everything
+  as removed.
+- Only stable fields are compared (name, state, tags); volatile detail fields
+  are excluded, so an unchanged account always diffs clean and the output is
+  deterministic.
+- In the summary TUI the same feature lives behind **`D`**: the first press
+  saves a baseline, later presses open the "what changed" overlay, and `b`
+  inside it re-baselines.
 
 ## Audit Usage
 
