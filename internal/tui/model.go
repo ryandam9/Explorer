@@ -28,6 +28,7 @@ import (
 	"github.com/ryandam9/aws_explorer/internal/model"
 	"github.com/ryandam9/aws_explorer/internal/summary"
 	"github.com/ryandam9/aws_explorer/internal/table"
+	"github.com/ryandam9/aws_explorer/internal/trail"
 	"github.com/ryandam9/aws_explorer/internal/ui"
 )
 
@@ -214,7 +215,7 @@ type tuiModel struct {
 	// Cloud Support & Debugging (Feature 1, 3, 7, 8)
 	showTimeline    bool
 	timelineLoading bool
-	timelineEvents  []awsutil.CloudTrailEvent
+	timelineEvents  []trail.Event
 	timelineErr     error
 
 	showLogs    bool
@@ -2431,7 +2432,7 @@ func (m tuiModel) renderDetail(r model.Resource, width int) string {
 	// ── Cloud Support Toggleable Panes (Appended sections) ──
 
 	if m.showTimeline {
-		b.WriteString("\n" + dSec.Render("CLOUDTRAIL TIMELINE") + "\n\n")
+		b.WriteString("\n" + dSec.Render("CLOUDTRAIL TIMELINE (LAST 90 DAYS)") + "\n\n")
 		if m.timelineLoading {
 			b.WriteString("  Loading events…\n")
 		} else if m.timelineErr != nil {
@@ -2614,7 +2615,7 @@ func chunkString(s string, n int) []string {
 
 type timelineMsg struct {
 	resourceID string
-	events     []awsutil.CloudTrailEvent
+	events     []trail.Event
 	err        error
 }
 
@@ -2783,7 +2784,7 @@ func (m tuiModel) fetchTimelineCmd(res model.Resource) tea.Cmd {
 		}
 	}
 	return func() tea.Msg {
-		events, err := awsutil.FetchCloudTrailEvents(m.ctx, cfg, res.Region, res.ID)
+		events, err := trail.Lookup(m.ctx, cfg, res.Region, res.ID, trail.Options{Limit: 20})
 		return timelineMsg{resourceID: res.ID, events: events, err: err}
 	}
 }
