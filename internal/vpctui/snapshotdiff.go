@@ -179,6 +179,10 @@ func diffSections() []diffSection {
 					f = append(f, fmt.Sprintf("%s %d %s %s %s %s",
 						strings.ToLower(r.Direction), r.RuleNumber, r.Action, r.Protocol, r.PortRange, r.CIDR))
 				}
+				// A NACL re-association is a classic silent breaker.
+				for _, a := range n.Associations {
+					f = append(f, "assoc "+a)
+				}
 				sort.Strings(f)
 				for i := range f {
 					m[n.ID] = append(m[n.ID], f[i])
@@ -192,7 +196,7 @@ func diffSections() []diffSection {
 		{"NAT gateway", func(s vpcSnapshot) map[string][]string {
 			m := map[string][]string{}
 			for _, n := range s.NatGateways {
-				m[n.ID] = []string{"state=" + n.State, "subnet=" + n.SubnetID}
+				m[n.ID] = []string{"state=" + n.State, "subnet=" + n.SubnetID, "publicIp=" + n.PublicIP}
 			}
 			return m
 		}},
@@ -216,6 +220,12 @@ func diffSections() []diffSection {
 				f := []string{"state=" + e.State, fmt.Sprintf("privateDns=%t", e.PrivateDNSEnabled)}
 				for _, rt := range e.RouteTableIDs {
 					f = append(f, "rt "+rt)
+				}
+				for _, sg := range e.SecurityGroups {
+					f = append(f, "sg "+sg)
+				}
+				for _, sn := range e.SubnetIDs {
+					f = append(f, "subnet "+sn)
 				}
 				sort.Strings(f)
 				m[e.ID] = f

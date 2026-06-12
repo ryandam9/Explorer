@@ -214,6 +214,9 @@ func TestCheckNACLsStateless(t *testing.T) {
 		}},
 		{ID: "acl-default", IsDefault: true, Rules: []NACLRule{
 			{RuleNumber: 100, Protocol: "All", PortRange: "All", CIDR: "0.0.0.0/0", Action: "allow", Direction: "Inbound"},
+			{RuleNumber: 100, Protocol: "All", PortRange: "All", CIDR: "0.0.0.0/0", Action: "allow", Direction: "Outbound"},
+			{RuleNumber: 32767, Protocol: "All", PortRange: "All", CIDR: "0.0.0.0/0", Action: "deny", Direction: "Inbound"},
+			{RuleNumber: 32767, Protocol: "All", PortRange: "All", CIDR: "0.0.0.0/0", Action: "deny", Direction: "Outbound"},
 		}},
 	}}
 	var out []Finding

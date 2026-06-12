@@ -28,12 +28,17 @@ type dnsNote struct {
 }
 
 // usesCustomDNS reports whether the DHCP option set points at DNS servers other
-// than the Amazon-provided resolver.
+// than the Amazon-provided resolver. The link-local resolver address
+// 169.254.169.253 is the Amazon resolver too, just written as an IP. (The VPC+2
+// address is also the Amazon resolver, but recognizing it needs the VPC CIDR,
+// which this check does not have.)
 func usesCustomDNS(servers []string) bool {
 	for _, s := range servers {
-		if s != "" && !strings.EqualFold(strings.TrimSpace(s), "AmazonProvidedDNS") {
-			return true
+		s = strings.TrimSpace(s)
+		if s == "" || strings.EqualFold(s, "AmazonProvidedDNS") || s == "169.254.169.253" {
+			continue
 		}
+		return true
 	}
 	return false
 }

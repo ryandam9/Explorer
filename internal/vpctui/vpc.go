@@ -231,9 +231,11 @@ type PeeringInfo struct {
 	RequesterVPCID  string
 	RequesterRegion string
 	RequesterCIDR   string
+	RequesterCIDRs  []string // all IPv4 CIDR blocks (primary + secondaries)
 	AccepterVPCID   string
 	AccepterRegion  string
 	AccepterCIDR    string
+	AccepterCIDRs   []string // all IPv4 CIDR blocks (primary + secondaries)
 	Tags            map[string]string
 }
 
@@ -273,7 +275,8 @@ type ENIInfo struct {
 	Type            string // interface type: interface, nat_gateway, lambda, ...
 	Status          string // available | in-use
 	PrivateIP       string
-	PublicIP        string // associated public IP / EIP, if any
+	SecondaryIPs    []string // secondary private IPv4 addresses, if any
+	PublicIP        string   // associated public IP / EIP, if any
 	SubnetID        string
 	VPCID           string
 	AZ              string
@@ -695,11 +698,21 @@ func (c *VPCClient) ListPeeringConnections(vpcID string) ([]PeeringInfo, error) 
 					info.RequesterVPCID = aws.ToString(pc.RequesterVpcInfo.VpcId)
 					info.RequesterCIDR = aws.ToString(pc.RequesterVpcInfo.CidrBlock)
 					info.RequesterRegion = aws.ToString(pc.RequesterVpcInfo.Region)
+					for _, cb := range pc.RequesterVpcInfo.CidrBlockSet {
+						if c := aws.ToString(cb.CidrBlock); c != "" {
+							info.RequesterCIDRs = append(info.RequesterCIDRs, c)
+						}
+					}
 				}
 				if pc.AccepterVpcInfo != nil {
 					info.AccepterVPCID = aws.ToString(pc.AccepterVpcInfo.VpcId)
 					info.AccepterCIDR = aws.ToString(pc.AccepterVpcInfo.CidrBlock)
 					info.AccepterRegion = aws.ToString(pc.AccepterVpcInfo.Region)
+					for _, cb := range pc.AccepterVpcInfo.CidrBlockSet {
+						if c := aws.ToString(cb.CidrBlock); c != "" {
+							info.AccepterCIDRs = append(info.AccepterCIDRs, c)
+						}
+					}
 				}
 				all = append(all, info)
 			}
@@ -829,12 +842,19 @@ func (c *VPCClient) ListNetworkInterfaces(vpcID string) ([]ENIInfo, error) {
 			for _, g := range ni.Groups {
 				groups = append(groups, aws.ToString(g.GroupId))
 			}
+			var secondaries []string
+			for _, addr := range ni.PrivateIpAddresses {
+				if ip := aws.ToString(addr.PrivateIpAddress); ip != "" && !aws.ToBool(addr.Primary) {
+					secondaries = append(secondaries, ip)
+				}
+			}
 			enis = append(enis, ENIInfo{
 				ID:              aws.ToString(ni.NetworkInterfaceId),
 				Description:     aws.ToString(ni.Description),
 				Type:            string(ni.InterfaceType),
 				Status:          string(ni.Status),
 				PrivateIP:       aws.ToString(ni.PrivateIpAddress),
+				SecondaryIPs:    secondaries,
 				PublicIP:        publicIP,
 				SubnetID:        aws.ToString(ni.SubnetId),
 				VPCID:           aws.ToString(ni.VpcId),

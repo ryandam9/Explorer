@@ -119,14 +119,19 @@ func checkSecurityGroups(snap vpcSnapshot, out *[]Finding) {
 
 	for _, sg := range snap.SecurityGroups {
 		for _, r := range sg.Rules {
-			if note := exposureRisk(r.Protocol, r.PortRange, r.Source); note != "" {
-				*out = append(*out, Finding{
-					Severity: riskSeverity(note),
-					Resource: sg.ID,
-					Title:    "Security group exposes a sensitive port to the internet",
-					Detail:   sgLabel(sg) + ": " + explainSGRule(r),
-					Fix:      "Restrict the source to specific CIDRs or a security group instead of 0.0.0.0/0.",
-				})
+			// Exposure applies to inbound rules only: nearly every SG has the
+			// default "all traffic to 0.0.0.0/0" egress rule, which is not an
+			// exposure of the resource itself.
+			if strings.EqualFold(r.Direction, "Inbound") {
+				if note := exposureRisk(r.Protocol, r.PortRange, r.Source); note != "" {
+					*out = append(*out, Finding{
+						Severity: riskSeverity(note),
+						Resource: sg.ID,
+						Title:    "Security group exposes a sensitive port to the internet",
+						Detail:   sgLabel(sg) + ": " + explainSGRule(r),
+						Fix:      "Restrict the source to specific CIDRs or a security group instead of 0.0.0.0/0.",
+					})
+				}
 			}
 			if strings.HasPrefix(r.Source, "sg-") && !known[r.Source] {
 				*out = append(*out, Finding{
@@ -147,7 +152,8 @@ func riskSeverity(note string) Severity {
 	switch {
 	case strings.Contains(note, "ALL ports"),
 		strings.Contains(note, "remote admin"),
-		strings.Contains(note, "database"):
+		strings.Contains(note, "database"),
+		strings.Contains(note, "sensitive ports"):
 		return SevCritical
 	default:
 		return SevWarning
@@ -221,10 +227,17 @@ func checkSubnets(snap vpcSnapshot, out *[]Finding) {
 			})
 		}
 
-		// Routing correctness.
+		// Routing correctness. Auto-assigned public IPs are IPv4, so the
+		// map-public-ip check requires an IPv4 default route specifically — an
+		// ::/0 → igw- route does not make those addresses usable.
 		rt := effectiveRouteTable(snap, s.ID)
-		hasIGW := routeTableHasInternet(rt, "igw-")
-		hasNAT := routeTableHasInternet(rt, "nat-")
+		hasIGW := hasDefaultRoute(rt, "0.0.0.0/0", "igw-")
+		hasNAT := hasDefaultRoute(rt, "0.0.0.0/0", "nat-")
+		// Egress can also flow through an egress-only IGW (IPv6), a transit
+		// gateway or peering (centralized egress VPCs), a NAT instance
+		// (eni-/i- target), or a virtual private gateway.
+		hasOtherEgress := hasDefaultRoute(rt, "0.0.0.0/0", "eigw-", "tgw-", "pcx-", "vgw-", "eni-", "i-") ||
+			hasDefaultRoute(rt, "::/0", "igw-", "eigw-", "tgw-", "pcx-")
 
 		if s.MapPublicIPOnLaunch && !hasIGW {
 			*out = append(*out, Finding{
@@ -236,12 +249,12 @@ func checkSubnets(snap vpcSnapshot, out *[]Finding) {
 				Fix: "Add an internet gateway route, or disable auto-assign public IP on the subnet.",
 			})
 		}
-		if rt != nil && !hasIGW && !hasNAT {
+		if rt != nil && !hasIGW && !hasNAT && !hasOtherEgress {
 			*out = append(*out, Finding{
 				Severity: SevInfo,
 				Resource: s.ID,
 				Title:    "Subnet has no outbound internet path",
-				Detail: subnetLabel(s) + " has no 0.0.0.0/0 route to an internet gateway or NAT gateway; " +
+				Detail: subnetLabel(s) + " has no default route to an internet gateway, NAT gateway, or other egress target; " +
 					"instances cannot reach the internet (this is expected for isolated subnets).",
 				Fix: "Add a NAT gateway route for private egress, or an internet gateway route for public subnets — if internet access is needed.",
 			})
@@ -293,17 +306,20 @@ func effectiveRouteTable(snap vpcSnapshot, subnetID string) *RouteTableInfo {
 	return main
 }
 
-// routeTableHasInternet reports whether rt has a default (0.0.0.0/0 or ::/0)
-// route whose target has the given prefix (e.g. "igw-" or "nat-").
-func routeTableHasInternet(rt *RouteTableInfo, targetPrefix string) bool {
+// hasDefaultRoute reports whether rt has an active route for exactly dest
+// ("0.0.0.0/0" or "::/0") whose target carries one of the given prefixes.
+func hasDefaultRoute(rt *RouteTableInfo, dest string, targetPrefixes ...string) bool {
 	if rt == nil {
 		return false
 	}
 	for _, r := range rt.Routes {
-		if (r.Destination == "0.0.0.0/0" || r.Destination == "::/0") &&
-			strings.HasPrefix(r.Target, targetPrefix) &&
-			!strings.EqualFold(r.State, "blackhole") {
-			return true
+		if r.Destination != dest || strings.EqualFold(r.State, "blackhole") {
+			continue
+		}
+		for _, p := range targetPrefixes {
+			if strings.HasPrefix(r.Target, p) {
+				return true
+			}
 		}
 	}
 	return false
@@ -377,9 +393,10 @@ func checkInternetGateways(snap vpcSnapshot, out *[]Finding) {
 
 func checkNACLs(snap vpcSnapshot, out *[]Finding) {
 	for _, nacl := range snap.NetworkACLs {
-		if nacl.IsDefault {
-			continue // default NACL allows all; the stateless trap only bites custom ones
-		}
+		// The default NACL ships allowing all traffic, but its rules are fully
+		// editable — a hardened default NACL bites exactly like a custom one,
+		// so it is evaluated the same way (an intact allow-all passes anyway).
+		//
 		// A subnet that serves inbound connections needs outbound ephemeral ports
 		// open for the responses, and vice versa. We only treat targeted
 		// service-port allows (not the ephemeral return-range rule itself) as
@@ -439,20 +456,23 @@ func isEphemeralReturnRange(portRange string) bool {
 	return ok && from <= 1024 && to >= 65535
 }
 
-// naclAllowsEphemeral reports whether the NACL has an allow rule in the given
-// direction that covers the ephemeral port range (all ports, or a range that
-// spans 1024-65535).
+// naclAllowsEphemeral reports whether TCP ephemeral return traffic
+// (represented by port 32768) can pass the NACL in the given direction. Rules
+// are evaluated in ascending rule-number order with first-match-wins, the way
+// AWS does: an early matching deny that covers every source (0.0.0.0/0 or
+// ::/0) blocks the return path even if a later rule would allow it, while a
+// narrower deny may still leave room for later allows, so evaluation continues
+// past it.
 func naclAllowsEphemeral(nacl NACLInfo, dir string) bool {
-	for _, r := range nacl.Rules {
-		if !strings.EqualFold(r.Action, "allow") || !strings.EqualFold(r.Direction, dir) {
+	for _, r := range rulesForDir(&nacl, dir) {
+		if !protoMatch(r.Protocol, "tcp") || !portMatch(r.PortRange, 32768) {
 			continue
 		}
-		ports := strings.TrimSpace(r.PortRange)
-		if strings.EqualFold(ports, "All") {
+		if strings.EqualFold(r.Action, "allow") {
 			return true
 		}
-		if from, to, ok := parsePortRange(ports); ok && from <= 1024 && to >= 65535 {
-			return true
+		if r.CIDR == "0.0.0.0/0" || r.CIDR == "::/0" {
+			return false
 		}
 	}
 	return false
@@ -471,13 +491,15 @@ func naclLabel(n NACLInfo) string {
 
 func checkPeerings(snap vpcSnapshot, out *[]Finding) {
 	for _, p := range snap.Peerings {
-		if cidrsOverlap(p.RequesterCIDR, p.AccepterCIDR) {
+		// Compare every requester CIDR against every accepter CIDR — secondary
+		// CIDR blocks overlap just as fatally as the primary ones.
+		if reqCIDR, accCIDR, overlap := peeringOverlap(p); overlap {
 			*out = append(*out, Finding{
 				Severity: SevWarning,
 				Resource: p.ID,
 				Title:    "Peering connection has overlapping CIDRs",
 				Detail: fmt.Sprintf("%s: requester %s and accepter %s overlap; cross-VPC routing to the overlap is ambiguous and will not work.",
-					p.ID, p.RequesterCIDR, p.AccepterCIDR),
+					p.ID, reqCIDR, accCIDR),
 				Fix: "Re-IP one VPC so the peered CIDRs do not overlap.",
 			})
 		}
@@ -491,6 +513,35 @@ func checkPeerings(snap vpcSnapshot, out *[]Finding) {
 			})
 		}
 	}
+}
+
+// peeringOverlap returns the first overlapping requester/accepter CIDR pair.
+// All CIDR blocks of each side (primary plus secondaries, when fetched) are
+// compared pairwise.
+func peeringOverlap(p PeeringInfo) (string, string, bool) {
+	for _, a := range peeringSideCIDRs(p.RequesterCIDR, p.RequesterCIDRs) {
+		for _, b := range peeringSideCIDRs(p.AccepterCIDR, p.AccepterCIDRs) {
+			if cidrsOverlap(a, b) {
+				return a, b, true
+			}
+		}
+	}
+	return "", "", false
+}
+
+// peeringSideCIDRs merges a side's primary CIDR with its CIDR set (baselines
+// saved before secondary CIDRs were captured have only the primary).
+func peeringSideCIDRs(primary string, set []string) []string {
+	out := make([]string, 0, len(set)+1)
+	seen := map[string]bool{}
+	for _, c := range append([]string{primary}, set...) {
+		c = strings.TrimSpace(c)
+		if c != "" && !seen[c] {
+			seen[c] = true
+			out = append(out, c)
+		}
+	}
+	return out
 }
 
 // cidrsOverlap reports whether two IPv4/IPv6 CIDRs share any addresses.
@@ -512,11 +563,12 @@ func cidrsOverlap(a, b string) bool {
 // ---------------------------------------------------------------------------
 
 const (
-	quotaRulesPerSGDir  = 60  // inbound or outbound rules per security group
-	quotaRoutesPerTable = 50  // non-propagated routes per route table
-	quotaSGsPerENI      = 5   // security groups per network interface (max 16)
-	quotaSubnetsPerVPC  = 200 // subnets per VPC
-	quotaWarnFraction   = 0.8 // warn once usage reaches this fraction of the limit
+	quotaRulesPerSGDir   = 60  // inbound or outbound rules per security group
+	quotaRoutesPerTable  = 50  // non-propagated routes per route table
+	quotaSGsPerENI       = 5   // security groups per network interface (max 16)
+	quotaSubnetsPerVPC   = 200 // subnets per VPC
+	quotaRulesPerNACLDir = 20  // inbound or outbound rules per network ACL (max 40)
+	quotaWarnFraction    = 0.8 // warn once usage reaches this fraction of the limit
 )
 
 func checkQuotas(snap vpcSnapshot, out *[]Finding) {
@@ -571,6 +623,42 @@ func checkQuotas(snap vpcSnapshot, out *[]Finding) {
 			Detail:   fmt.Sprintf("%s has %d routes (default limit %d).", rtLabelName(rt), n, quotaRoutesPerTable),
 			Fix:      "Consolidate CIDRs, use prefix lists, or request a route-table quota increase.",
 		})
+	}
+
+	// Rules per network ACL, per direction. The immutable default "*" rule
+	// (number 32767) does not count against the quota.
+	for _, nacl := range snap.NetworkACLs {
+		in, eg := 0, 0
+		for _, r := range nacl.Rules {
+			if r.RuleNumber >= 32767 {
+				continue
+			}
+			if strings.EqualFold(r.Direction, "Inbound") {
+				in++
+			} else {
+				eg++
+			}
+		}
+		for _, d := range []struct {
+			name  string
+			count int
+		}{{"inbound", in}, {"outbound", eg}} {
+			if d.count < warnAt(quotaRulesPerNACLDir) {
+				continue
+			}
+			sev := SevWarning
+			if d.count >= quotaRulesPerNACLDir {
+				sev = SevCritical
+			}
+			*out = append(*out, Finding{
+				Severity: sev,
+				Resource: nacl.ID,
+				Title:    "Network ACL is approaching its rule limit",
+				Detail: fmt.Sprintf("%s has %d %s rules (default limit %d per direction, raisable to 40).",
+					naclLabel(nacl), d.count, d.name, quotaRulesPerNACLDir),
+				Fix: "Consolidate CIDRs into broader rules or request a network-ACL rule quota increase.",
+			})
+		}
 	}
 
 	// Security groups per network interface.
