@@ -67,6 +67,22 @@ func isSSOError(err error) bool {
 	return strings.Contains(strings.ToLower(err.Error()), "sso")
 }
 
+// Classify maps a collection error onto the (code, message) pair the error
+// surfaces use: expired credentials get the login hint, permission errors
+// get the friendly IAM message, anything else passes through. service names
+// the AWS service whose call failed; profile may be empty.
+func Classify(err error, service, profile string) (code, msg string) {
+	switch {
+	case IsExpiredCreds(err):
+		hint, _ := LoginHint(err, profile)
+		return "ExpiredCredentials", hint
+	case IsAuthError(err):
+		return "AccessDenied", FriendlyMessage(err, service)
+	default:
+		return "CollectionError", err.Error()
+	}
+}
+
 // LoginHint returns the actionable one-liner for an expired-credentials
 // error, naming the exact command to run. profile is the active AWS profile
 // ("" or "default" when none was chosen explicitly). ok is false when err is
