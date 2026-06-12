@@ -97,6 +97,10 @@ func tracePath(snap vpcSnapshot, req traceRequest) traceResult {
 			"some security-group rules or routes reference managed prefix lists (pl-…), which this trace cannot expand; the verdict may be incomplete")
 	}
 
+	// NACLs apply only at the subnet boundary: traffic between two interfaces
+	// in the same subnet never traverses them.
+	sameSubnet := dst != nil && src.SubnetID != "" && src.SubnetID == dst.SubnetID
+
 	// 1. Source security-group egress (stateful).
 	if ok, why := sgEgressAllows(snap, src, destIP, dst, req); ok {
 		add(hopPass, "Security group egress", why)
@@ -106,7 +110,10 @@ func tracePath(snap vpcSnapshot, req traceRequest) traceResult {
 
 	// 2. Source NACL egress (stateless).
 	srcNACL := naclForSubnet(snap, src.SubnetID)
-	if ok, why := naclAllows(srcNACL, "Outbound", req.Protocol, req.Port, destIP); ok {
+	if sameSubnet {
+		add(hopNote, "Source NACL egress",
+			"skipped — both interfaces are in "+src.SubnetID+" and NACLs only apply to traffic crossing the subnet boundary")
+	} else if ok, why := naclAllows(srcNACL, "Outbound", req.Protocol, req.Port, destIP); ok {
 		add(hopPass, "Source NACL egress", why)
 	} else {
 		return fail("Source NACL egress", why)
@@ -134,9 +141,11 @@ func tracePath(snap vpcSnapshot, req traceRequest) traceResult {
 			res.Summary = "⚠ Path is open, but no resource is using the destination address"
 			return res
 		}
-		// 4. Destination NACL ingress.
+		// 4. Destination NACL ingress (skipped for same-subnet traffic).
 		dstNACL := naclForSubnet(snap, dst.SubnetID)
-		if ok, why := naclAllows(dstNACL, "Inbound", req.Protocol, req.Port, ipOf(src.PrivateIP)); ok {
+		if sameSubnet {
+			add(hopNote, "Destination NACL ingress", "skipped — same-subnet traffic does not cross the subnet boundary")
+		} else if ok, why := naclAllows(dstNACL, "Inbound", req.Protocol, req.Port, ipOf(src.PrivateIP)); ok {
 			add(hopPass, "Destination NACL ingress", why)
 		} else {
 			return fail("Destination NACL ingress", why)
@@ -148,11 +157,13 @@ func tracePath(snap vpcSnapshot, req traceRequest) traceResult {
 			return fail("Destination security group ingress", why)
 		}
 		// Stateless return: destination NACL egress + source NACL ingress for ephemeral ports.
-		if ok, why := naclAllowsEphemeralReturn(dstNACL, "Outbound", ipOf(src.PrivateIP)); !ok {
-			return fail("Destination NACL return (stateless)", why)
-		}
-		if ok, why := naclAllowsEphemeralReturn(srcNACL, "Inbound", ipOf(dst.PrivateIP)); !ok {
-			return fail("Source NACL return (stateless)", why)
+		if !sameSubnet {
+			if ok, why := naclAllowsEphemeralReturn(dstNACL, "Outbound", ipOf(src.PrivateIP)); !ok {
+				return fail("Destination NACL return (stateless)", why)
+			}
+			if ok, why := naclAllowsEphemeralReturn(srcNACL, "Inbound", ipOf(dst.PrivateIP)); !ok {
+				return fail("Source NACL return (stateless)", why)
+			}
 		}
 		res.Reachable = true
 		res.Summary = "✅ Reachable: " + src.ID + " → " + dst.ID
@@ -164,12 +175,25 @@ func tracePath(snap vpcSnapshot, req traceRequest) traceResult {
 			return fail("Internet gateway", src.ID+" has no public IP or Elastic IP, so it cannot use the internet gateway for direct internet access")
 		}
 		add(hopPass, "Internet gateway", "egress via "+route.Target+" with public IP "+src.PublicIP)
+		// NACLs are stateless: the reply from the internet must be allowed
+		// back in on an ephemeral port or the connection hangs.
+		if ok, why := naclAllowsEphemeralReturn(srcNACL, "Inbound", destIP); !ok {
+			return fail("Source NACL return (stateless)", why)
+		}
 		res.Reachable = true
 		res.Summary = "✅ Reachable: internet via internet gateway"
 		return res
 
 	case strings.HasPrefix(route.Target, "nat-"):
+		if n := findNATGW(snap, route.Target); n != nil && n.State != "" && !strings.EqualFold(n.State, "available") {
+			return fail("NAT gateway", fmt.Sprintf("%s is in state %q and cannot forward traffic", route.Target, n.State))
+		}
 		add(hopPass, "NAT gateway", "private egress to the internet via "+route.Target)
+		// The reply traverses the NAT back to this subnet with the remote
+		// address as its source; the stateless NACL must let it in.
+		if ok, why := naclAllowsEphemeralReturn(srcNACL, "Inbound", destIP); !ok {
+			return fail("Source NACL return (stateless)", why)
+		}
 		res.Reachable = true
 		res.Summary = "✅ Reachable: internet via NAT gateway"
 		return res
@@ -197,8 +221,23 @@ func findENI(snap vpcSnapshot, id string) *ENIInfo {
 
 func findENIByIP(snap vpcSnapshot, ip string) *ENIInfo {
 	for i := range snap.NetworkInterfaces {
-		if snap.NetworkInterfaces[i].PrivateIP == ip {
-			return &snap.NetworkInterfaces[i]
+		e := &snap.NetworkInterfaces[i]
+		if e.PrivateIP == ip {
+			return e
+		}
+		for _, sec := range e.SecondaryIPs {
+			if sec == ip {
+				return e
+			}
+		}
+	}
+	return nil
+}
+
+func findNATGW(snap vpcSnapshot, id string) *NatGWInfo {
+	for i := range snap.NatGateways {
+		if snap.NatGateways[i].ID == id {
+			return &snap.NatGateways[i]
 		}
 	}
 	return nil
@@ -473,7 +512,11 @@ func portMatch(rulePortRange string, reqPort int) bool {
 		return true
 	}
 	if reqPort < 0 {
-		return false // a specific rule cannot satisfy an "any port" request
+		// An "any port" request is satisfied only by a rule covering the whole
+		// port space — AWS renders those as a full numeric range (0-65535 or
+		// 1-65535) when not as "All".
+		from, to, ok := parsePortRange(ports)
+		return ok && from <= 1 && to >= 65535
 	}
 	if !strings.Contains(ports, "-") {
 		p, ok := atoiPort(ports)

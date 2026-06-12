@@ -401,24 +401,28 @@ it fired, and a suggested **fix**. The checks:
 
 | Area | Finding | Severity |
 |------|---------|----------|
-| Security groups | Sensitive port (admin/database/all) open to `0.0.0.0/0` | 🔴 critical |
+| Security groups | Sensitive port (admin/database/all) open **inbound** to `0.0.0.0/0` — ranges covering a sensitive port rank the same as the port itself | 🔴 critical |
 | Security groups | Rule references a security group not in this VPC | 🔵 info |
 | Route tables | Blackhole route (target deleted) | 🟡 warning |
 | Subnets | Low available IPs / >90% utilization | 🟡 warning |
-| Subnets | Auto-assign public IP but no internet-gateway route | 🟡 warning |
-| Subnets | No outbound internet path (no IGW/NAT route) | 🔵 info |
+| Subnets | Auto-assign public IP but no IPv4 internet-gateway route | 🟡 warning |
+| Subnets | No outbound internet path (no IGW/NAT/eigw/TGW/peering/NAT-instance default route) | 🔵 info |
 | NAT gateways | Available but unreferenced by any route (idle, still billing) | 🟡 warning |
 | Internet gateways | Detached from the VPC | 🔵 info |
 | Network ACLs | Stateless return-traffic gap (ephemeral ports not allowed back) | 🟡 warning |
-| Peering | Overlapping CIDRs · not active | 🟡 / 🔵 |
+| Peering | Overlapping CIDRs (all CIDR blocks, including secondaries) · not active | 🟡 / 🔵 |
 | VPC endpoints | Gateway endpoint with no route-table association | 🟡 warning |
 | VPC endpoints | Interface endpoint SGs don't allow inbound 443 · private DNS off | 🟡 / 🔵 |
-| **Capacity** | Rules per SG (limit 60), routes per route table (50), SGs per ENI (5), subnets per VPC (200) | 🟡 ≥80%, 🔴 at limit |
+| **Capacity** | Rules per SG (limit 60), routes per route table (50), rules per NACL (20), SGs per ENI (5), subnets per VPC (200) | 🟡 ≥80%, 🔴 at limit |
 | **Orphans** | Security group attached to nothing & unreferenced · empty subnet | 🔵 info |
 
-The NACL stateless check is careful to *not* flag the correct "inbound 443 +
-outbound ephemeral" pattern. Capacity limits are AWS defaults (adjustable via
-Service Quotas). Orphan checks are skipped if ENI data is unavailable.
+The NACL stateless check evaluates rules in rule-number order with
+first-match-wins (a broad deny shadows later allows, exactly like AWS), is
+careful to *not* flag the correct "inbound 443 + outbound ephemeral" pattern,
+and also covers the default NACL — its rules are editable, so a hardened
+default NACL is linted like any other. Capacity limits are AWS defaults
+(adjustable via Service Quotas; account-specific increases are not reflected).
+Orphan checks are skipped if ENI data is unavailable.
 
 ### Connectivity path tracer (`t`)
 
@@ -444,7 +448,18 @@ destinations, the destination NACL **ingress** and security-group **ingress**
 (resolving `sg-` references against the peer ENI) → and the **stateless return
 path** (ephemeral ports 1024–65535). Internet via an internet gateway requires
 the source to hold a public IP/EIP; via a NAT gateway it's treated as private
-egress.
+egress — and both internet paths also verify the source NACL lets the
+**stateless replies** back in on ephemeral ports. A NAT gateway that is not in
+the `available` state blocks the path. Traffic between two interfaces in the
+**same subnet** correctly skips the NACL hops (NACLs apply only at the subnet
+boundary), and destination IPs are matched against ENIs' **secondary private
+IPs** as well as primaries.
+
+Known limitations: IPv4 only (IPv6 routes and `::/0` rules are not evaluated),
+and managed prefix lists (`pl-…`) in rules or routes cannot be expanded — the
+trace flags a caveat when one is present, since the verdict may be incomplete.
+Paths into peered VPCs or transit gateways are evaluated up to the gateway and
+reported as "open up to" that target.
 
 ### Cross-reference — "where used" (`x`)
 
@@ -509,14 +524,20 @@ A one-screen audit of the VPC's internet-facing surface:
 
 ```
 Public exposure — internet-facing surface
+⚠ Internet-reachable interfaces (public IP + IGW route + open security group)
+                                                                 (1)  • eni-pub (52.1.1.1) → i-web — HTTPS (TCP 443)
 Public subnets (route to an internet gateway)                    (1)  • subnet-pub
 Security groups open to the internet (inbound from 0.0.0.0/0)    (1)  • sg-web (web) — HTTPS (TCP 443)
 Network interfaces with a public IP                              (1)  • eni-pub (52.1.1.1) → i-web
 ```
 
-Public subnets are those routing to an internet gateway; SGs list their
-internet-open ports in plain English (SG-to-SG references excluded); ENIs are
-those holding a public IP/EIP.
+The first group **correlates** the three ingredients of real exposure — an ENI
+holding a public IP, in a subnet routing to an internet gateway, with a
+security group open to the internet — and lists the ports actually reachable,
+so a permissive-but-unrouted security group doesn't read as an incident. The
+remaining groups list each ingredient on its own: public subnets (IPv4 or IPv6
+default route to an IGW), SGs with their internet-open ports in plain English
+(SG-to-SG references excluded), and ENIs holding a public IP/EIP.
 
 ### Snapshot diff — "what changed" (`w`)
 
@@ -536,6 +557,11 @@ Changes since baseline — 1 added, 1 removed, 1 modified
 Baselines are stored as JSON in `~/.aws_explorer/vpc-snapshots/<vpc-id>.json`.
 Inside the overlay, `b` re-baselines to the current state. Volatile fields (like
 available-IP counts) are deliberately excluded so they don't create noise.
+Tracked facts include SG rules, routes and route-table associations, **NACL
+rules and subnet associations**, subnet attributes, NAT gateway state/subnet/
+**public IP**, IGW state, peering status, and endpoint state/private-DNS/route
+tables/**security groups/subnets** — covering the classic silent breakers like
+a NACL re-association or an endpoint SG swap.
 
 ### Markdown export (`E`)
 
