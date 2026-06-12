@@ -22,9 +22,16 @@ import (
 // roadmap lands (security, messaging, …); --only validates against this.
 var auditCategories = []string{"cost"}
 
+// auditExitFindings is the exit code when --fail-on is set and findings at or
+// above the threshold exist (operational errors exit 1, clean runs 0), so CI
+// can distinguish "found waste" from "audit broke".
+const auditExitFindings = 2
+
 var (
-	auditOnly []string
-	auditTUI  bool
+	auditOnly   []string
+	auditTUI    bool
+	auditFailOn string
+	auditIgnore []string
 )
 
 var auditCmd = &cobra.Command{
@@ -40,6 +47,11 @@ Each finding carries a stable check ID (e.g. COST-EBS-001) and an approximate
 monthly cost, with a total at the bottom. Estimates use us-east-1 on-demand
 list prices and are order-of-magnitude, not a bill.
 
+For CI pipelines, --fail-on <severity> exits 2 when findings at or above the
+threshold exist (0 below it, 1 on operational errors), --ignore suppresses
+individual checks by ID, and -o sarif emits SARIF 2.1.0 for upload to GitHub
+code scanning.
+
 The audit is read-only and best-effort: a denied API call skips the affected
 checks (reported on stderr) and never aborts the run. Traffic-based checks
 (idle load balancers, DynamoDB utilization) additionally need
@@ -50,11 +62,38 @@ cloudwatch:GetMetricData and are skipped without it.`,
   # Audit every region, machine-readable
   aws_explorer audit --all-regions -o json
 
-  # Only the cost/waste checks (the default until more categories exist)
-  aws_explorer audit --only cost`,
+  # Explore interactively
+  aws_explorer audit --all-regions --tui
+
+  # CI gate: exit 2 if any warning-or-worse finding exists
+  aws_explorer audit --fail-on warning --ignore COST-EBS-002
+
+  # SARIF for GitHub code scanning
+  aws_explorer audit -o sarif > audit.sarif`,
+	// audit accepts one format beyond the global set (sarif), so it replaces
+	// the root command's format validation with its own.
+	PersistentPreRunE: func(cmd *cobra.Command, args []string) error {
+		if strings.EqualFold(outputFormat, "sarif") {
+			return nil
+		}
+		return output.ValidateFormat(outputFormat)
+	},
 	RunE: func(cmd *cobra.Command, args []string) error {
 		if err := validateAuditCategories(auditOnly); err != nil {
 			return err
+		}
+		ignore, err := parseIgnoreIDs(auditIgnore)
+		if err != nil {
+			return err
+		}
+		var failOn findings.Severity
+		if auditFailOn != "" {
+			if auditTUI {
+				return fmt.Errorf("--fail-on is for scripting and cannot be combined with --tui")
+			}
+			if failOn, err = findings.ParseSeverity(auditFailOn); err != nil {
+				return err
+			}
 		}
 
 		applyGlobalAWSOverrides()
@@ -78,7 +117,7 @@ cloudwatch:GetMetricData and are skipped without it.`,
 			ui.InitFromConfig(AppConfig.UI)
 			ch := make(chan audit.CostChunk, 8)
 			go audit.StreamCost(ctx, eng.AWSConfig, regions, AppConfig.App.MaxConcurrency, timeout, ch)
-			m := audittui.New(regions, ch)
+			m := audittui.New(regions, dropIgnored(ch, ignore))
 			p := tea.NewProgram(ui.WithWindowTitle(m), tea.WithAltScreen(), tea.WithContext(ctx))
 			if _, err := p.Run(); err != nil {
 				fmt.Fprintf(os.Stderr, "Error running audit TUI: %v\n", err)
@@ -89,19 +128,74 @@ cloudwatch:GetMetricData and are skipped without it.`,
 
 		fmt.Fprintf(os.Stderr, "Auditing %d region(s) for cost waste…\n", len(regions))
 		fs, errs := audit.Cost(ctx, eng.AWSConfig, regions, AppConfig.App.MaxConcurrency, timeout)
+		fs = findings.Drop(fs, ignore)
 
 		output.PrintErrors(os.Stderr, errs)
 
-		if len(fs) == 0 && strings.EqualFold(outputFormat, "table") {
-			fmt.Println("No findings.")
-			return nil
-		}
-		if err := findings.Render(os.Stdout, fs, outputFormat, noHeader); err != nil {
+		if err := renderAuditFindings(fs); err != nil {
 			fmt.Fprintf(os.Stderr, "Error rendering findings: %v\n", err)
 			os.Exit(1)
 		}
+		if auditFailOn != "" && findings.AnyAtOrAbove(fs, failOn) {
+			os.Exit(auditExitFindings)
+		}
 		return nil
 	},
+}
+
+// renderAuditFindings writes the findings in the requested output format.
+func renderAuditFindings(fs []findings.Finding) error {
+	if strings.EqualFold(outputFormat, "sarif") {
+		return findings.RenderSARIF(os.Stdout, fs, version)
+	}
+	if len(fs) == 0 && strings.EqualFold(outputFormat, "table") {
+		fmt.Println("No findings.")
+		return nil
+	}
+	return findings.Render(os.Stdout, fs, outputFormat, noHeader)
+}
+
+// dropIgnored wraps the chunk stream, removing suppressed findings before the
+// TUI sees them.
+func dropIgnored(ch <-chan audit.CostChunk, ignore map[string]bool) <-chan audit.CostChunk {
+	if len(ignore) == 0 {
+		return ch
+	}
+	out := make(chan audit.CostChunk, 8)
+	go func() {
+		defer close(out)
+		for c := range ch {
+			c.Findings = findings.Drop(c.Findings, ignore)
+			out <- c
+		}
+	}()
+	return out
+}
+
+// parseIgnoreIDs validates --ignore values against the check registry, so a
+// typo fails loudly instead of silently suppressing nothing.
+func parseIgnoreIDs(ids []string) (map[string]bool, error) {
+	if len(ids) == 0 {
+		return nil, nil
+	}
+	ignore := make(map[string]bool, len(ids))
+	for _, id := range ids {
+		id = strings.ToUpper(strings.TrimSpace(id))
+		if _, ok := findings.CheckByID(id); !ok {
+			return nil, fmt.Errorf("unknown check ID %q in --ignore (known IDs: %s)", id, strings.Join(knownCheckIDs(), ", "))
+		}
+		ignore[id] = true
+	}
+	return ignore, nil
+}
+
+func knownCheckIDs() []string {
+	checks := findings.Checks()
+	ids := make([]string, len(checks))
+	for i, c := range checks {
+		ids[i] = c.ID
+	}
+	return ids
 }
 
 // validateAuditCategories rejects unknown --only values up front.
@@ -126,7 +220,17 @@ func init() {
 		"restrict to these finding categories (available: "+strings.Join(auditCategories, ", ")+")")
 	auditCmd.Flags().BoolVar(&auditTUI, "tui", false,
 		"explore the findings interactively instead of printing")
+	auditCmd.Flags().StringVar(&auditFailOn, "fail-on", "",
+		"exit with code 2 if findings at or above this severity exist: critical, warning, info")
+	auditCmd.Flags().StringSliceVar(&auditIgnore, "ignore", nil,
+		"suppress findings by check ID (e.g. COST-EBS-002)")
 	_ = auditCmd.RegisterFlagCompletionFunc("only",
 		cobra.FixedCompletions(auditCategories, cobra.ShellCompDirectiveNoFileComp))
+	_ = auditCmd.RegisterFlagCompletionFunc("fail-on",
+		cobra.FixedCompletions([]string{"critical", "warning", "info"}, cobra.ShellCompDirectiveNoFileComp))
+	_ = auditCmd.RegisterFlagCompletionFunc("ignore",
+		func(cmd *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {
+			return knownCheckIDs(), cobra.ShellCompDirectiveNoFileComp
+		})
 	rootCmd.AddCommand(auditCmd)
 }
