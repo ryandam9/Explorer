@@ -8,6 +8,7 @@ Discover, monitor, and display AWS resources across accounts and regions via CLI
 - **15 services**: EC2, S3, RDS, IAM, DynamoDB, Lambda, EMR, ECS, EKS, ELBv2, Secrets Manager, SQS, SNS, CloudWatch, Route53
 - **VPC Explorer**: browse a VPC's subnets, security groups, network interfaces, route tables, gateways, endpoints, NACLs, peering, flow logs, and attached compute/services in a three-pane TUI
 - **VPC debugging toolkit** (no AI, deterministic): a findings linter, a connectivity path tracer, plain-English SG/NACL rule explanations, cross-reference ("where used"), merged effective security rules, DNS diagnostics, a public-exposure audit, snapshot diffing, Markdown export, and AWS Reachability Analyzer integration — see [VPC Debugging Toolkit](#vpc-debugging-toolkit)
+- **Cost/waste audit**: `aws_explorer audit` scans for the classic sources of silent spend — unattached EBS volumes, idle Elastic IPs and NAT gateways, load balancers with no healthy targets or no traffic, gp2→gp3 candidates, forgotten snapshots/AMIs, over-provisioned DynamoDB tables — each finding with a stable check ID and an estimated monthly cost, printable or explored in an interactive TUI (`--tui`) — see [Audit Usage](#audit-usage)
 - **Config-driven**: YAML configuration for services, regions, filters, output, and per-resource display columns
 - **5 auth methods**: auto (SDK default chain), profile, env vars, static credentials, STS AssumeRole
 - **Output formats**: Table (default), JSON, NDJSON, CSV — with `--no-header` for scripting and colored states on terminals
@@ -258,6 +259,109 @@ Accepts the same global flags as the CLI command (`--config`, `--profile`,
 > requires the account ID, which is resolved once via `sts:GetCallerIdentity`.
 > If that call is denied, those ARNs are shown as `-` while AWS-provided ARNs
 > still appear.
+
+## Audit Usage
+
+`audit` scans the configured regions for findings — currently the **cost/waste**
+category — and prints them as a ranked table with an estimated monthly cost per
+finding and a total at the bottom. Like everything else in the tool, the audit
+is **deterministic, read-only and best-effort**: a denied API call skips the
+affected checks (reported on stderr) and never aborts the run.
+
+```bash
+./bin/aws_explorer audit [flags]
+```
+
+Accepts the same global flags as the CLI command (`--config`, `--profile`,
+`--auth-method`, `--role-arn`, `--region`, `--all-regions`, `-o`, `--no-header`).
+
+```
+SEVERITY    ID            RESOURCE        REGION     ISSUE                                  EST/MO   FIX
+🟡 WARNING  COST-EBS-001  vol-0abc        us-east-1  Unattached EBS volume (gp2, 1024 GiB)  $102.40  Snapshot the volume and delete it, …
+🟡 WARNING  COST-NAT-001  nat-01 (spare)  us-east-1  NAT gateway not referenced by any route $32.85  Delete the NAT gateway, …
+🔵 INFO     COST-EBS-002  vol-0def        us-east-1  gp2 volume could be gp3 (500 GiB)      $10.00   Modify the volume type to gp3 …
+
+0 critical, 2 warning, 1 info — estimated potential savings ≈ $145.25/month
+```
+
+### The checks
+
+Every check has a **stable ID** (never renumbered, safe to reference in
+runbooks and scripts):
+
+| ID | Finding | Severity |
+|----|---------|----------|
+| `COST-EBS-001` | Unattached EBS volume (status `available`) | 🟡 warning |
+| `COST-EBS-002` | gp2 volume that could be gp3 (~20% cheaper, online migration) | 🔵 info |
+| `COST-EIP-001` | Elastic IP not associated with anything | 🟡 warning |
+| `COST-NAT-001` | NAT gateway no route table routes through (idle, still billing) | 🟡 warning |
+| `COST-ELB-001` | Load balancer with target groups but zero healthy targets | 🟡 warning |
+| `COST-ELB-002` | Load balancer with zero requests/flows in 14 days † | 🟡 warning |
+| `COST-EC2-001` | Stopped instance whose attached EBS volumes keep billing | 🔵 info |
+| `COST-SNAP-001` | Snapshot >180 days old, not referenced by any AMI in the account | 🔵 info |
+| `COST-AMI-001` | AMI >180 days old that no instance uses (backing snapshots still bill) | 🔵 info |
+| `COST-DDB-001` | Provisioned DynamoDB table consuming <10% of its capacity † | 🟡 warning |
+
+† Traffic-based checks use CloudWatch metrics over a 14-day window and need
+`cloudwatch:GetMetricData`; without it they are skipped (with a note) while
+the rest of the audit runs. Resources younger than 14 days are never flagged
+by them.
+
+> **About the estimates.** Each finding's `EST/MO` comes from a static table of
+> us-east-1 on-demand list prices (`internal/costs`, sources commented). They
+> are order-of-magnitude estimates to rank waste and justify action — not a
+> bill: regional price differences, discounts and data-transfer charges are not
+> modeled, and snapshot estimates are upper bounds (snapshots are incremental).
+
+### Audit Flags
+
+| Flag | Default | Description |
+|------|---------|-------------|
+| `--only` | all | Restrict to finding categories (currently: `cost`); more categories are planned |
+| `--tui` | `false` | Explore the findings interactively instead of printing |
+| `--output` / `-o` | `table` | `table`, `json` (findings + total), `ndjson`, `csv` |
+
+```bash
+# Audit every region
+./bin/aws_explorer audit --all-regions
+
+# Machine-readable, e.g. total potential savings
+./bin/aws_explorer audit -o json | jq .totalMonthlyUSD
+
+# One finding per line for scripting
+./bin/aws_explorer audit -o ndjson | jq -r 'select(.id=="COST-EBS-001") | .resource'
+
+# Explore interactively
+./bin/aws_explorer audit --all-regions --tui
+```
+
+### Audit TUI
+
+`--tui` opens the findings in an interactive table that fills in **while the
+scan runs** — each region's findings appear as soon as that region completes,
+with a live progress meter in the header alongside the severity tally and the
+running savings total. The table uses the same theme, pinned-column horizontal
+scrolling and context-aware status bar as every other TUI in the app.
+
+| Key | Action |
+|-----|--------|
+| `↑` / `↓` / `j` / `k` | Navigate findings |
+| `Enter` | Detail overlay — full explanation, fix, ARN and estimate for the selected finding |
+| `/` | Quick filter (matches any field, live `matched/total` count) |
+| `s` / `R` | Sort by the next column / reverse the direction |
+| `r` | Reset filter and sort |
+| `<` / `>` (or `,` / `.`) | Scroll table columns on narrow terminals |
+| `y` | Copy the selected finding's ARN (or resource ID) to the clipboard |
+| `C` | Export the current (filtered, sorted) view to CSV under `~/.aws_explorer/exports/` |
+| `e` | Collection-errors overlay (shown as a `⚠ n errors` badge in the header) |
+| `?` | Help overlay |
+| `q` / `Ctrl+C` | Quit |
+
+**IAM permissions.** Read-only describes: `ec2:Describe{Volumes,Addresses,
+NatGateways,RouteTables,Instances,Snapshots,Images}`,
+`elasticloadbalancing:Describe{LoadBalancers,TargetGroups,TargetHealth}`,
+`dynamodb:{ListTables,DescribeTable}` and (for the traffic-based checks)
+`cloudwatch:GetMetricData`. Any denial degrades only the checks that need it.
 
 ## VPC Explorer TUI Usage
 
