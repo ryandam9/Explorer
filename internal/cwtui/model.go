@@ -616,6 +616,25 @@ func (m *model) selectedGroup() (LogGroup, bool) {
 	return m.filteredGroups[m.selectedGroupIdx], true
 }
 
+// PageTitle names the current screen for the terminal window/tab title, so
+// every page has a unique, shareable name (see ui.WithWindowTitle).
+func (m *model) PageTitle() string {
+	const base = "CloudWatch Logs"
+	if m.viewer.active {
+		return base + " › " + m.viewer.title
+	}
+	grp, ok := m.selectedGroup()
+	if !ok || m.focus == focusGroups {
+		return base + " › Log groups"
+	}
+	title := base + " › " + aws.ToString(grp.LogGroupName)
+	if m.focus == focusEvents && !m.groupLevelSearch &&
+		m.selectedStreamIdx < len(m.filteredStreams) {
+		title += " › " + aws.ToString(m.filteredStreams[m.selectedStreamIdx].LogStreamName)
+	}
+	return title
+}
+
 func (m *model) loadStreamsCmd() tea.Cmd {
 	grp, ok := m.selectedGroup()
 	if !ok {
@@ -994,6 +1013,7 @@ func (m *model) getHelpHints() []ui.KeyHint {
 			ui.H("n/N", "next/prev"),
 			ui.H("G", "tail"),
 			ui.H("f", "follow"),
+			ui.H("J", "format json"),
 			ui.H("y", "copy all"),
 			ui.H("s", "export"),
 			ui.H("Esc", "close"),
