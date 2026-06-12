@@ -1,6 +1,6 @@
 # AWS Explorer — Enhancement Roadmap & Design Specification
 
-Status: **In progress** — shipped so far: AXE-004 & the `internal/findings` platform (#79), AXE-023 (#80), AXE-001 & AXE-022 (#81), AXE-013 (#82), AXE-007 (#83), AXE-005 (#84, #86), AXE-006 (#85), AXE-012 · Tracking issue: #76
+Status: **In progress** — shipped so far: AXE-004 & the `internal/findings` platform (#79), AXE-023 (#80), AXE-001 & AXE-022 (#81), AXE-013 (#82), AXE-007 (#83), AXE-005 (#84, #86), AXE-006 (#85), AXE-012 (#87), AXE-002 · Tracking issue: #76
 
 This document specifies 24 proposed enhancements, grouped into nine themes.
 Each enhancement carries a stable ID (`AXE-NNN`) used in the tracking issue,
@@ -28,7 +28,7 @@ The proposals follow the tool's established design principles:
 | ID | Title | Theme | Priority |
 |----|-------|-------|----------|
 | [AXE-001](#axe-001) | Decode encoded authorization failure messages | A — IAM / access debugging | ✅ shipped (#81) |
-| [AXE-002](#axe-002) | IAM policy simulator ("can X do Y on Z?") | A — IAM / access debugging | P1 |
+| [AXE-002](#axe-002) | IAM policy simulator ("can X do Y on Z?") | A — IAM / access debugging | ✅ shipped |
 | [AXE-003](#axe-003) | IAM hygiene linter | A — IAM / access debugging | P2 |
 | [AXE-004](#axe-004) | Cost/waste linter with monthly estimates | B — Cost & waste | ✅ shipped (#79) |
 | [AXE-005](#axe-005) | CloudTrail "who changed this" | C — Change attribution & drift | ✅ shipped |
@@ -133,6 +133,8 @@ document.
   error (which IAM permission to add), not an SDK stack trace.
 
 ### AXE-002 — IAM policy simulator {#axe-002}
+
+> **Status: ✅ shipped** — `aws_explorer iam can <principal-arn> <action[,action…]> [resource-arn]` (`cmd/iamcan.go`, `internal/iamsim`). The TUI simulate-from-detail-panel hook remains a possible follow-up.
 
 **Problem.** "Why can't role X read bucket Y?" The console policy simulator
 is buried and clunky.
