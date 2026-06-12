@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"regexp"
 	"strings"
 	"time"
 
@@ -63,6 +64,18 @@ type logViewer struct {
 	matches      []int  // line indices containing term
 	matchIdx     int
 
+	// Grep filter (&): when grepRe is set, only matching lines are rendered
+	// — the in-log equivalent of piping through grep. grepSrc keeps the
+	// unwrapped matching lines so copy/export can write exactly what is
+	// shown. An invalid in-progress regex is reported via grepErr while the
+	// last valid filter stays applied.
+	grepActive bool // the grep input has the keyboard
+	grepInput  textinput.Model
+	grepRe     *regexp.Regexp
+	grepErr    string
+	grepSrc    []string // unwrapped lines that passed the filter
+	grepTotal  int      // unwrapped lines before filtering
+
 	wrapW int
 }
 
@@ -94,6 +107,12 @@ func (v *logViewer) open(key viewerKey, title string, wrapW int) {
 	v.term = ""
 	v.matches = nil
 	v.matchIdx = 0
+	v.grepActive = false
+	v.grepInput.SetValue("")
+	v.grepRe = nil
+	v.grepErr = ""
+	v.grepSrc = nil
+	v.grepTotal = 0
 	v.wrapW = wrapW
 }
 
@@ -132,6 +151,8 @@ func (v *logViewer) rebuild(wrapW int) {
 	}
 	v.wrapW = wrapW
 	v.lines = v.lines[:0]
+	v.grepSrc = v.grepSrc[:0]
+	v.grepTotal = 0
 	const indent = "    "
 	for _, ev := range v.events {
 		t := time.Unix(0, aws.ToInt64(ev.Timestamp)*int64(time.Millisecond))
@@ -145,11 +166,44 @@ func (v *logViewer) rebuild(wrapW int) {
 			if i == 0 {
 				line = prefix + raw
 			}
+			v.grepTotal++
+			// The grep filter drops whole logical lines before wrapping, so
+			// a long matching line keeps all its wrapped continuations.
+			if v.grepRe != nil {
+				if !v.grepRe.MatchString(line) {
+					continue
+				}
+				v.grepSrc = append(v.grepSrc, line)
+			}
 			v.lines = append(v.lines, wrapLine(line, wrapW, indent)...)
 		}
 	}
 	v.computeMatches()
 	v.clampOffset()
+}
+
+// grepVisible reports whether the grep bar occupies a line of the viewer:
+// while typing a pattern, and while a filter is applied.
+func (v *logViewer) grepVisible() bool {
+	return v.grepActive || v.grepRe != nil
+}
+
+// setGrep live-applies the grep pattern. An empty pattern clears the filter;
+// a pattern that doesn't compile is flagged but keeps the last valid filter
+// applied, so a half-typed regex never blanks the screen.
+func (v *logViewer) setGrep(pattern string) {
+	if strings.TrimSpace(pattern) == "" {
+		v.grepRe, v.grepErr = nil, ""
+		v.rebuild(v.wrapW)
+		return
+	}
+	re, err := regexp.Compile(pattern)
+	if err != nil {
+		v.grepErr = "invalid regex"
+		return
+	}
+	v.grepRe, v.grepErr = re, ""
+	v.rebuild(v.wrapW)
 }
 
 // prettifyJSON expands a JSON object or array embedded in a log message into
@@ -310,7 +364,11 @@ func (m *model) viewerWrapWidth() int {
 // viewerBodyHeight is how many log lines fit between the viewer header and the
 // status bar.
 func (m *model) viewerBodyHeight() int {
-	return max(5, m.height-8)
+	h := max(5, m.height-8)
+	if m.viewer.grepVisible() {
+		h = max(5, h-1) // the grep bar takes one line
+	}
+	return h
 }
 
 // openViewer opens the full log page for the current group/stream selection.
@@ -402,6 +460,30 @@ func (m *model) handleViewerKeys(msg tea.KeyMsg, cmds *[]tea.Cmd) {
 		return
 	}
 
+	if v.grepActive {
+		switch msg.String() {
+		case "enter":
+			// Keep the filter applied; an empty pattern means no filter.
+			v.grepActive = false
+			v.setGrep(v.grepInput.Value())
+		case "esc":
+			v.grepActive = false
+			v.grepInput.SetValue("")
+			v.setGrep("")
+		default:
+			var cmd tea.Cmd
+			v.grepInput, cmd = v.grepInput.Update(msg)
+			*cmds = append(*cmds, cmd)
+			v.setGrep(v.grepInput.Value())
+		}
+		if v.follow {
+			v.scrollToBottom(m.viewerBodyHeight())
+		} else {
+			v.clampOffsetFor(m.viewerBodyHeight())
+		}
+		return
+	}
+
 	switch msg.String() {
 	case "esc", "q":
 		v.active = false
@@ -441,6 +523,10 @@ func (m *model) handleViewerKeys(msg tea.KeyMsg, cmds *[]tea.Cmd) {
 	case "/":
 		v.searchActive = true
 		v.search.Focus()
+	case "&":
+		// Grep filter, as in less(1): only lines matching the regex render.
+		v.grepActive = true
+		v.grepInput.Focus()
 	case "n":
 		if line := v.nextMatch(1); line >= 0 {
 			v.follow = false
@@ -453,6 +539,17 @@ func (m *model) handleViewerKeys(msg tea.KeyMsg, cmds *[]tea.Cmd) {
 		}
 
 	case "y":
+		// With a grep filter applied, copy exactly the rendered lines;
+		// otherwise the full raw events.
+		if v.grepRe != nil {
+			if len(v.grepSrc) == 0 {
+				break
+			}
+			_ = clipboard.WriteAll(strings.Join(v.grepSrc, "\n") + "\n")
+			m.setToast(fmt.Sprintf("Copied %d matching lines to clipboard", len(v.grepSrc)))
+			*cmds = append(*cmds, toastCmd(3*time.Second))
+			break
+		}
 		if len(v.events) == 0 {
 			break
 		}
@@ -465,7 +562,15 @@ func (m *model) handleViewerKeys(msg tea.KeyMsg, cmds *[]tea.Cmd) {
 		if v.key.stream != "" {
 			streamLabel = sanitizeFilename(v.key.stream)
 		}
-		path, err := exportEvents(v.events, sanitizeFilename(v.key.region+"-"+v.key.group), streamLabel)
+		grpLabel := sanitizeFilename(v.key.region + "-" + v.key.group)
+		var path string
+		var err error
+		if v.grepRe != nil {
+			// Export what is on screen: the grep-filtered lines.
+			path, err = exportText(strings.Join(v.grepSrc, "\n")+"\n", grpLabel+"-grep", streamLabel)
+		} else {
+			path, err = exportEvents(v.events, grpLabel, streamLabel)
+		}
 		if err != nil {
 			m.setToast("Export failed: " + err.Error())
 		} else {
@@ -513,12 +618,30 @@ func (m *model) renderViewer() string {
 		searchLine = mutedStyle.Render("  (Press / to search within the log)")
 	}
 
+	var grepLine string
+	if v.grepActive {
+		grepLine = " Grep: " + v.grepInput.View()
+		if v.grepErr != "" {
+			grepLine += "  " + lipgloss.NewStyle().Foreground(lipgloss.Color(ui.ColorError())).Render("("+v.grepErr+")")
+		}
+	} else if v.grepRe != nil {
+		grepLine = fmt.Sprintf(" Grep: %s  (%d of %d lines, & to edit, y/s copy/export matches)",
+			lipgloss.NewStyle().Foreground(lipgloss.Color(ui.ColorAccent())).Render(v.grepRe.String()),
+			len(v.grepSrc), v.grepTotal)
+	}
+
 	var b strings.Builder
 	b.WriteString(header + "\n")
-	b.WriteString(searchLine + "\n\n")
+	b.WriteString(searchLine + "\n")
+	if grepLine != "" {
+		b.WriteString(grepLine + "\n")
+	}
+	b.WriteString("\n")
 
 	if v.loading {
 		b.WriteString(fmt.Sprintf("  %s Loading full log…\n", m.spinner.View()))
+	} else if len(v.lines) == 0 && v.grepRe != nil {
+		b.WriteString(fmt.Sprintf("  No lines match the grep filter %s. Esc (in &) clears it.\n", v.grepRe.String()))
 	} else if len(v.lines) == 0 {
 		b.WriteString("  No log events in the last 24 hours. Streaming for new events…\n")
 	} else {

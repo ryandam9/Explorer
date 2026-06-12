@@ -140,6 +140,10 @@ func NewModel(ctx context.Context, awsCfg *config.AWSConfig, regions []string, a
 	vSearch.Placeholder = "Find in log…"
 	vSearch.Width = 40
 
+	vGrep := textinput.New()
+	vGrep.Placeholder = "grep regex (e.g. ERROR|timeout)…"
+	vGrep.Width = 40
+
 	gSearch.SetValue(groupFilter)
 	sSearch.SetValue(streamFilter)
 	eSearch.SetValue(eventPattern)
@@ -157,7 +161,7 @@ func NewModel(ctx context.Context, awsCfg *config.AWSConfig, regions []string, a
 		groupSearch:  gSearch,
 		streamSearch: sSearch,
 		eventSearch:  eSearch,
-		viewer:       logViewer{search: vSearch},
+		viewer:       logViewer{search: vSearch, grepInput: vGrep},
 	}
 
 	return m, nil
@@ -545,6 +549,15 @@ func exportEvents(events []types.FilteredLogEvent, grpLabel, streamLabel string)
 	if len(events) == 0 {
 		return "", fmt.Errorf("no events to export")
 	}
+	return exportText(formatEvents(events), grpLabel, streamLabel)
+}
+
+// exportText writes already-rendered log text (e.g. the grep-filtered lines)
+// to ~/.aws_explorer/logs and returns the path.
+func exportText(content, grpLabel, streamLabel string) (string, error) {
+	if strings.TrimSpace(content) == "" {
+		return "", fmt.Errorf("no log lines to export")
+	}
 	home, err := os.UserHomeDir()
 	if err != nil {
 		return "", fmt.Errorf("failed to find home: %w", err)
@@ -555,7 +568,7 @@ func exportEvents(events []types.FilteredLogEvent, grpLabel, streamLabel string)
 	}
 	filename := fmt.Sprintf("cw-logs-%s-%s-%s.log", grpLabel, streamLabel, time.Now().Format("20060102-150405"))
 	path := filepath.Join(dir, filename)
-	if err := os.WriteFile(path, []byte(formatEvents(events)), 0644); err != nil {
+	if err := os.WriteFile(path, []byte(content), 0644); err != nil {
 		return "", err
 	}
 	return path, nil
@@ -1006,16 +1019,28 @@ func (m *model) getHelpHints() []ui.KeyHint {
 				ui.H("Esc", "cancel"),
 			}
 		}
+		if m.viewer.grepActive {
+			return []ui.KeyHint{
+				ui.H("type", "regex filter"),
+				ui.H("Enter", "keep filter"),
+				ui.H("Esc", "clear"),
+			}
+		}
+		copyHint, exportHint := "copy all", "export"
+		if m.viewer.grepRe != nil {
+			copyHint, exportHint = "copy matches", "export matches"
+		}
 		return []ui.KeyHint{
 			ui.H("↑/↓", "scroll"),
 			ui.H("PgUp/PgDn", "page"),
 			ui.H("/", "find"),
+			ui.H("&", "grep"),
 			ui.H("n/N", "next/prev"),
 			ui.H("G", "tail"),
 			ui.H("f", "follow"),
 			ui.H("J", "format json"),
-			ui.H("y", "copy all"),
-			ui.H("s", "export"),
+			ui.H("y", copyHint),
+			ui.H("s", exportHint),
 			ui.H("Esc", "close"),
 		}
 	}

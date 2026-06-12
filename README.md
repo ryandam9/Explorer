@@ -697,9 +697,10 @@ events live as they arrive.
 | `f` | Toggle follow (auto-scroll as new events stream in) |
 | `J` | Toggle JSON formatting: pretty-prints JSON objects/arrays embedded in log messages (a `{} json` badge shows while on) |
 | `/` | Search within the log (case-insensitive, matches highlighted; search works on the formatted lines when `J` is on) |
+| `&` | Grep filter (as in `less`): enter a regex and only matching lines are rendered, with a `kept/total` count; `Enter` keeps the filter, `Esc` clears it. Invalid patterns are flagged while the last valid filter stays applied |
 | `n` / `N` | Jump to next / previous match |
-| `y` | Copy the entire log to the clipboard |
-| `s` | Export the log to `~/.aws_explorer/logs/` |
+| `y` | Copy the entire log to the clipboard — or only the matching lines while a grep filter is applied |
+| `s` | Export the log to `~/.aws_explorer/logs/` — or only the matching lines (file suffixed `-grep`) while a filter is applied |
 | `Esc` / `q` | Close the viewer |
 
 ## Makefile Targets
