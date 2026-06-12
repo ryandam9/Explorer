@@ -1,6 +1,8 @@
 package cwtui
 
 import (
+	"bytes"
+	"encoding/json"
 	"fmt"
 	"strings"
 	"time"
@@ -49,6 +51,11 @@ type logViewer struct {
 	offset  int      // index of the first visible line
 	follow  bool     // stick to the bottom as new events stream in
 	loading bool
+
+	// formatJSON pretty-prints JSON objects/arrays embedded in log messages
+	// (J toggles it). A viewing preference, so it survives re-opening the
+	// viewer on another stream.
+	formatJSON bool
 
 	search       textinput.Model
 	searchActive bool
@@ -130,6 +137,9 @@ func (v *logViewer) rebuild(wrapW int) {
 		t := time.Unix(0, aws.ToInt64(ev.Timestamp)*int64(time.Millisecond))
 		prefix := "[" + t.Format("2006-01-02 15:04:05.000") + "] "
 		msg := strings.TrimRight(aws.ToString(ev.Message), "\n")
+		if v.formatJSON {
+			msg = prettifyJSON(msg)
+		}
 		for i, raw := range strings.Split(msg, "\n") {
 			line := indent + raw
 			if i == 0 {
@@ -140,6 +150,53 @@ func (v *logViewer) rebuild(wrapW int) {
 	}
 	v.computeMatches()
 	v.clampOffset()
+}
+
+// prettifyJSON expands a JSON object or array embedded in a log message into
+// an indented block, keeping any leading text (timestamps, levels, request
+// IDs) on its own line above it and any trailing text below. Messages without
+// a JSON payload are returned unchanged.
+func prettifyJSON(msg string) string {
+	prefix, raw, suffix, ok := extractJSON(msg)
+	var pretty bytes.Buffer
+	if !ok || json.Indent(&pretty, raw, "", "  ") != nil {
+		return msg
+	}
+	var parts []string
+	if p := strings.TrimSpace(prefix); p != "" {
+		parts = append(parts, p)
+	}
+	parts = append(parts, pretty.String())
+	if s := strings.TrimSpace(suffix); s != "" {
+		parts = append(parts, s)
+	}
+	return strings.Join(parts, "\n")
+}
+
+// extractJSON finds the first complete JSON object/array in s, returning the
+// text before it, the raw JSON, and the text after it. Attempts are capped so
+// brace-heavy non-JSON lines don't cost repeated parses.
+func extractJSON(s string) (prefix string, raw []byte, suffix string, ok bool) {
+	const maxAttempts = 5
+	attempts := 0
+	for i := 0; i < len(s) && attempts < maxAttempts; i++ {
+		if s[i] != '{' && s[i] != '[' {
+			continue
+		}
+		attempts++
+		dec := json.NewDecoder(strings.NewReader(s[i:]))
+		var msg json.RawMessage
+		if dec.Decode(&msg) != nil {
+			continue
+		}
+		// A bare number/string/bool is valid JSON but not worth reformatting.
+		if len(msg) < 2 || (msg[0] != '{' && msg[0] != '[') {
+			continue
+		}
+		end := i + int(dec.InputOffset())
+		return s[:i], []byte(msg), s[end:], true
+	}
+	return "", nil, "", false
 }
 
 // wrapLine hard-wraps a line to width, indenting wrapped continuations.
@@ -370,6 +427,16 @@ func (m *model) handleViewerKeys(msg tea.KeyMsg, cmds *[]tea.Cmd) {
 		if v.follow {
 			v.scrollToBottom(bodyH)
 		}
+	case "J":
+		// Re-render every message with embedded JSON expanded (or collapsed
+		// back to the raw line); the search matches follow the new lines.
+		v.formatJSON = !v.formatJSON
+		v.rebuild(v.wrapW)
+		if v.follow {
+			v.scrollToBottom(bodyH)
+		} else {
+			v.clampOffsetFor(bodyH)
+		}
 
 	case "/":
 		v.searchActive = true
@@ -426,6 +493,9 @@ func (m *model) renderViewer() string {
 		header += "  " + liveStyle.Render("● LIVE")
 	} else {
 		header += "  " + mutedStyle.Render("⏸ paused (G to resume tail)")
+	}
+	if v.formatJSON {
+		header += "  " + lipgloss.NewStyle().Foreground(lipgloss.Color(ui.ColorAccent())).Render("{} json")
 	}
 
 	var searchLine string

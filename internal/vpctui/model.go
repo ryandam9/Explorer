@@ -184,6 +184,15 @@ type Model struct {
 	sortCol int
 	sortAsc bool
 
+	// Resource table quick filter (/): while inResourceFilter the input has
+	// the keyboard; Enter keeps the query applied, Esc clears it.
+	inResourceFilter bool
+	resourceFilter   textinput.Model
+	// resourceView is the filtered, sorted slice the visible rows were built
+	// from, so the table cursor indexes it 1:1 — detail, copy, xref and the
+	// CSV export all read the selected entry through it.
+	resourceView []map[string]string
+
 	// Detail overlay
 	showDetail     bool
 	detailViewport viewport.Model
@@ -337,6 +346,12 @@ func NewModel(
 	m.vpcSearch.PlaceholderStyle = lipgloss.NewStyle().Foreground(lipgloss.Color(ui.ColorMuted()))
 	m.vpcSearch.Cursor.Style = lipgloss.NewStyle().Foreground(lipgloss.Color(ui.ColorAccent()))
 
+	m.resourceFilter = textinput.New()
+	m.resourceFilter.Placeholder = "Filter rows…"
+	m.resourceFilter.CharLimit = 128
+	m.resourceFilter.Width = 40
+	m.styleFilterInput(&m.resourceFilter)
+
 	m.spinner = spinner.New(
 		spinner.WithSpinner(spinner.MiniDot),
 		spinner.WithStyle(lipgloss.NewStyle().Foreground(lipgloss.Color(ui.ColorHeading())).Bold(true)),
@@ -399,9 +414,10 @@ func (m *Model) initResourceTable(rt resourceType) {
 }
 
 // rebuildResourceTable refreshes columns and rows for m.activeResource from
-// cached maps, applying the active column sort. The cached slice itself is
-// sorted (stably, in place) so the cursor index always maps to the same
-// entry the row shows — detail, copy, and xref all rely on that.
+// cached maps, applying the active column sort and quick filter. The cached
+// slice itself is sorted (stably, in place); the filtered view ends up in
+// m.resourceView so the cursor index always maps to the same entry the row
+// shows — detail, copy, xref and the CSV export all rely on that.
 func (m *Model) rebuildResourceTable() {
 	rt := m.activeResource
 	maps := m.resourceMaps[rt]
@@ -429,10 +445,20 @@ func (m *Model) rebuildResourceTable() {
 	}
 	m.resourceTable.SetColumns(cols)
 
-	rows := make([]table.Row, len(maps))
-	for i, r := range maps {
-		rows[i] = display.Row(colFields, r)
+	// Quick filter: keep only rows whose displayed cells contain the query
+	// (NUL-joined so it can't match across cell boundaries).
+	query := strings.ToLower(strings.TrimSpace(m.resourceFilter.Value()))
+	view := make([]map[string]string, 0, len(maps))
+	rows := make([]table.Row, 0, len(maps))
+	for _, r := range maps {
+		row := display.Row(colFields, r)
+		if query != "" && !strings.Contains(strings.ToLower(strings.Join(row, "\x00")), query) {
+			continue
+		}
+		view = append(view, r)
+		rows = append(rows, row)
 	}
+	m.resourceView = view
 	m.resourceTable.SetRows(seqRows(rows))
 }
 
@@ -476,10 +502,15 @@ func (m *Model) applyTableStyle(t *table.Model) {
 func (m *Model) restyleForTheme() {
 	m.applyTableStyle(&m.vpcTable)
 	m.applyTableStyle(&m.resourceTable)
-	m.vpcSearch.PromptStyle = lipgloss.NewStyle().Foreground(lipgloss.Color(ui.ColorAccent())).Bold(true)
-	m.vpcSearch.TextStyle = lipgloss.NewStyle().Foreground(lipgloss.Color(ui.ColorText()))
-	m.vpcSearch.PlaceholderStyle = lipgloss.NewStyle().Foreground(lipgloss.Color(ui.ColorMuted()))
-	m.vpcSearch.Cursor.Style = lipgloss.NewStyle().Foreground(lipgloss.Color(ui.ColorAccent()))
+	m.styleFilterInput(&m.vpcSearch)
+	m.styleFilterInput(&m.resourceFilter)
+}
+
+func (m *Model) styleFilterInput(in *textinput.Model) {
+	in.PromptStyle = lipgloss.NewStyle().Foreground(lipgloss.Color(ui.ColorAccent())).Bold(true)
+	in.TextStyle = lipgloss.NewStyle().Foreground(lipgloss.Color(ui.ColorText()))
+	in.PlaceholderStyle = lipgloss.NewStyle().Foreground(lipgloss.Color(ui.ColorMuted()))
+	in.Cursor.Style = lipgloss.NewStyle().Foreground(lipgloss.Color(ui.ColorAccent()))
 }
 
 // ---------------------------------------------------------------------------
@@ -515,6 +546,9 @@ func (m *Model) loadResources(rt resourceType) tea.Cmd {
 			return resourcesLoadedMsg{vpcID: vpcID, rt: rt, maps: cached}
 		}
 	}
+	// No cached data yet: drop the previous type's view so the cursor can't
+	// resolve against stale entries while the fetch is in flight.
+	m.resourceView = nil
 	client := m.client
 	return func() tea.Msg {
 		maps, err := fetchResourceMaps(client, rt, vpcID)
@@ -855,6 +889,7 @@ func (m *Model) enterVPC(vpc VPCInfo) tea.Cmd {
 	m.resourceErr = nil
 	m.sortCol = -1
 	m.sortAsc = true
+	m.clearResourceFilter()
 	// Entering a VPC starts a fresh look at it: any snapshot cached from an
 	// earlier visit is stale by intent.
 	m.snapCache.invalidate(vpc.ID)
@@ -1137,6 +1172,18 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 	}
 
+	// Text-filter inputs own the keyboard while focused: q/S/F/… are typed
+	// into the query, not treated as global shortcuts. Only Ctrl+C quits.
+	if m.inResourceFilter || m.focus == focusVPCSearch {
+		if key == "ctrl+c" {
+			return m, tea.Quit
+		}
+		if m.inResourceFilter {
+			return m.handleResourceFilterKey(msg)
+		}
+		return m.handleVPCSearchKey(msg)
+	}
+
 	// Simple scroll-and-close overlays share one key handler. Each closes on
 	// Esc/q plus its own toggle key.
 	for _, ov := range []struct {
@@ -1367,6 +1414,42 @@ func (m *Model) handleVPCSearchKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	}
 }
 
+// handleResourceFilterKey routes keys to the resource-table quick filter:
+// live-filtering on every keystroke, Enter keeps the query, Esc clears it.
+func (m *Model) handleResourceFilterKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	switch msg.String() {
+	case "esc":
+		m.clearResourceFilter()
+		m.rebuildResourceTable()
+		return m, nil
+	case "enter":
+		m.inResourceFilter = false
+		m.resourceFilter.Blur()
+		m.updateTableSizes() // an empty kept query hides the filter bar
+		return m, nil
+	default:
+		var cmd tea.Cmd
+		m.resourceFilter, cmd = m.resourceFilter.Update(msg)
+		m.rebuildResourceTable()
+		return m, cmd
+	}
+}
+
+// resourceFilterVisible reports whether the filter bar occupies a line under
+// the resource table: while typing, and while a kept query is still applied.
+func (m *Model) resourceFilterVisible() bool {
+	return m.inResourceFilter || strings.TrimSpace(m.resourceFilter.Value()) != ""
+}
+
+// clearResourceFilter drops the quick filter query and leaves input mode.
+// Callers that have rows showing must rebuild the table afterwards.
+func (m *Model) clearResourceFilter() {
+	m.inResourceFilter = false
+	m.resourceFilter.Blur()
+	m.resourceFilter.SetValue("")
+	m.updateTableSizes()
+}
+
 func (m *Model) handleCategoryKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	key := msg.String()
 	switch key {
@@ -1394,10 +1477,11 @@ func (m *Model) handleCategoryKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		m.activeResource = item.rt
-		// Each resource type has its own columns; a sort chosen for one
-		// would point at an unrelated column in the next.
+		// Each resource type has its own columns; a sort or filter chosen
+		// for one would be meaningless on the next.
 		m.sortCol = -1
 		m.sortAsc = true
+		m.clearResourceFilter()
 		m.initResourceTable(m.activeResource)
 		m.updateTableSizes()
 		if _, cached := m.resourceMaps[m.activeResource]; cached {
@@ -1427,6 +1511,13 @@ func (m *Model) handleResourceTableKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, nil
 	case "<", ",":
 		m.resourceTable.ScrollLeft()
+		return m, nil
+	case "/":
+		m.inResourceFilter = true
+		m.resourceFilter.SetValue("")
+		m.resourceFilter.Focus()
+		m.rebuildResourceTable() // an empty query shows all rows again
+		m.updateTableSizes()     // reserve a line for the filter bar
 		return m, nil
 	case "r":
 		return m, m.refreshResources()
@@ -1486,7 +1577,7 @@ func (m *Model) handleResourceTableKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 		return m, nil
 	case "enter":
-		maps := m.resourceMaps[m.activeResource]
+		maps := m.resourceView
 		idx := m.resourceTable.Cursor()
 		if idx >= 0 && idx < len(maps) {
 			r := maps[idx]
@@ -1572,7 +1663,11 @@ func (m *Model) updateTableSizes() {
 	if rightWidth < 20 {
 		rightWidth = 20
 	}
-	m.resourceTable.SetHeight(tableH)
+	resourceH := tableH
+	if m.resourceFilterVisible() {
+		resourceH = max(resourceH-1, 1) // the filter bar takes one line
+	}
+	m.resourceTable.SetHeight(resourceH)
 	// Inner content area = panel width minus its horizontal padding (0,1). The
 	// table uses this to decide how many columns fit before scrolling kicks in.
 	m.resourceTable.SetWidth(rightWidth - 2)
@@ -1626,11 +1721,28 @@ func (m *Model) updateTableSizes() {
 	}
 }
 
+// PageTitle names the current screen for the terminal window/tab title, so
+// every page has a unique, shareable name (see ui.WithWindowTitle).
+func (m *Model) PageTitle() string {
+	if m.state == stateResourceBrowser && m.selectedVPC != nil {
+		return "VPC Explorer › " + vpcLabel(m.selectedVPC) + " › " + rtLabel(m.activeResource)
+	}
+	return "VPC Explorer › VPCs"
+}
+
+// vpcLabel is the human-friendly name of a VPC, falling back to its ID.
+func vpcLabel(vpc *VPCInfo) string {
+	if vpc.Name != "" {
+		return vpc.Name
+	}
+	return vpc.ID
+}
+
 // selectedResourceID returns the primary ID of the resource currently selected
 // in the resource table, resolved from its map row (so it works regardless of
 // which column is shown first).
 func (m *Model) selectedResourceID() string {
-	maps := m.resourceMaps[m.activeResource]
+	maps := m.resourceView
 	idx := m.resourceTable.Cursor()
 	if idx < 0 || idx >= len(maps) {
 		return ""
@@ -1900,7 +2012,12 @@ func (m *Model) viewResourcePanel(height int) string {
 		rightWidth = 20
 	}
 
+	// Name the page uniquely ("my-vpc › Subnets") so a screen is easy to
+	// refer to when several people look at the tool.
 	title := rtLabel(m.activeResource)
+	if m.selectedVPC != nil {
+		title = vpcLabel(m.selectedVPC) + " › " + title
+	}
 	titleStyle := lipgloss.NewStyle().
 		Bold(true).
 		Foreground(lipgloss.Color(ui.ColorHeading()))
@@ -1924,6 +2041,12 @@ func (m *Model) viewResourcePanel(height int) string {
 			Render("No " + rtLabel(m.activeResource) + " found in this VPC.")
 	default:
 		body = m.resourceTable.View()
+		if m.resourceFilterVisible() {
+			muted := lipgloss.NewStyle().Foreground(lipgloss.Color(ui.ColorMuted()))
+			count := fmt.Sprintf("  ·  %d/%d match",
+				len(m.resourceView), len(m.resourceMaps[m.activeResource]))
+			body += "\n" + muted.Render("Filter: ") + m.resourceFilter.View() + muted.Render(count)
+		}
 	}
 
 	header := lipgloss.JoinHorizontal(lipgloss.Left, titleStyle.Render(title), scrollHint)
@@ -2396,7 +2519,7 @@ func (m *Model) viewStatusBar() string {
 // focus. Overlays render their own footer hints (see overlayFrame), so this
 // covers the two main screens plus the VPC search input.
 func (m *Model) statusHints() []ui.KeyHint {
-	if m.inVPCSearch {
+	if m.inVPCSearch || m.inResourceFilter {
 		return []ui.KeyHint{
 			ui.H("type", "to filter"),
 			ui.H("Enter", "keep filter"),
@@ -2438,6 +2561,7 @@ func (m *Model) statusHints() []ui.KeyHint {
 			hints := []ui.KeyHint{
 				ui.H("↑/↓", "navigate"),
 				ui.H("Enter", "detail"),
+				ui.H("/", "filter"),
 			}
 			hints = append(hints, colScrollHints(&m.resourceTable)...)
 			hints = append(hints,
@@ -2488,6 +2612,7 @@ func (m *Model) helpText() string {
 		"  < >      Scroll table columns left/right (when wider than panel)",
 		"  Tab      Switch focus between sidebar and resource table",
 		"  Enter    Load resource type (sidebar) / open detail (table)",
+		"  /        Filter table rows (matches any column; Enter keep, Esc clear)",
 		"  s / R    Sort by next column / reverse sort order",
 		"  c, y     Copy resource ID to clipboard",
 		"  C        Export current table to CSV (~/.aws_explorer/exports)",

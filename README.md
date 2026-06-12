@@ -16,6 +16,7 @@ Discover, monitor, and display AWS resources across accounts and regions via CLI
 - **Resilient**: Best-effort collection — a throttle, timeout, or denied call mid-scan keeps everything already gathered (flagged as partial) instead of dropping the service/region, with configurable retry attempts and adaptive backoff
 - **Themes**: 12 built-in bird-themed color schemes with 24 individually customizable color roles (table header, borders, status bar, alerts, …) — editable live in the in-app settings panel
 - **Context-aware shortcuts**: the status bar in every TUI shows only the keys that work on the current screen
+- **Unique page titles**: every screen names itself in the terminal window/tab title (e.g. `VPC Explorer › my-vpc › Subnets`), so "which page are you on?" has one answer when several people use or discuss the tool
 - **Uniform tables**: every table shares one theme and scrolls horizontally (`<` / `>`) when columns don't fit
 
 ## Prerequisites
@@ -317,7 +318,7 @@ type in `config.yaml` — see [Customizing displayed columns](#customizing-displ
 | `Enter` | Open a VPC · load a category · open the selected row's detail overlay |
 | `Tab` | Switch focus between the category sidebar and the resource table |
 | `<` / `>` (or `,` / `.`) | Scroll table columns left/right when a table is wider than the panel |
-| `/` | Filter the VPC list by name or ID (VPC list only) |
+| `/` | Filter the VPC list by name or ID · quick-filter the resource table (matches any column, live `matched/total` count; `Enter` keeps the filter, `Esc` clears it) |
 | `s` / `R` | Sort the resource table by the next column / reverse the direction |
 | `c` / `y` | Copy the selected resource's ID to the clipboard |
 | `C` | Export the current resource table to CSV under `~/.aws_explorer/exports/` |
@@ -694,7 +695,8 @@ events live as they arrive.
 | `↑`/`↓`, `PgUp`/`PgDn`, `Ctrl+U`/`Ctrl+D` | Scroll (scrolling up pauses tailing) |
 | `g` / `G` | Jump to top / jump to bottom and resume tailing |
 | `f` | Toggle follow (auto-scroll as new events stream in) |
-| `/` | Search within the log (case-insensitive, matches highlighted) |
+| `J` | Toggle JSON formatting: pretty-prints JSON objects/arrays embedded in log messages (a `{} json` badge shows while on) |
+| `/` | Search within the log (case-insensitive, matches highlighted; search works on the formatted lines when `J` is on) |
 | `n` / `N` | Jump to next / previous match |
 | `y` | Copy the entire log to the clipboard |
 | `s` | Export the log to `~/.aws_explorer/logs/` |

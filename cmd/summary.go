@@ -64,7 +64,7 @@ other formats). Pass --tui to explore the same data interactively.`,
 				seed, _ = discovery.Discover(ctx, eng.AWSConfig, eng.EffectiveRegions(), AppConfig.App.MaxConcurrency)
 			}
 			m := tui.NewModelWithSeed(ctx, eng, configFilePath(), AppConfig, seed)
-			p := tea.NewProgram(m, tea.WithAltScreen(), tea.WithMouseCellMotion(), tea.WithContext(ctx))
+			p := tea.NewProgram(ui.WithWindowTitle(m), tea.WithAltScreen(), tea.WithMouseCellMotion(), tea.WithContext(ctx))
 			if _, err := p.Run(); err != nil {
 				fmt.Fprintf(os.Stderr, "Error running summary TUI: %v\n", err)
 				os.Exit(1)
