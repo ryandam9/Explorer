@@ -32,7 +32,7 @@ The proposals follow the tool's established design principles:
 | [AXE-003](#axe-003) | IAM hygiene linter | A — IAM / access debugging | P2 |
 | [AXE-004](#axe-004) | Cost/waste linter with monthly estimates | B — Cost & waste | ✅ shipped (#79) |
 | [AXE-005](#axe-005) | CloudTrail "who changed this" | C — Change attribution & drift | ◐ CLI shipped |
-| [AXE-006](#axe-006) | Account-wide inventory snapshot diff | C — Change attribution & drift | P2 |
+| [AXE-006](#axe-006) | Account-wide inventory snapshot diff | C — Change attribution & drift | ✅ shipped |
 | [AXE-007](#axe-007) | Expiry & deprecation watchlist (`expiring`) | D — Expiry & deprecation | ✅ shipped |
 | [AXE-008](#axe-008) | Account-wide security audit (`audit`) | E — Account-wide audit | P2 |
 | [AXE-009](#axe-009) | Generalized where-used / blast radius | E — Account-wide audit | P2 |
@@ -302,6 +302,8 @@ CloudTrail — sg-0abc123 (last 90 days)
 - Denied permission degrades to a one-line note inside the overlay.
 
 ### AXE-006 — Account-wide inventory snapshot diff {#axe-006}
+
+> **Status: ✅ shipped** — `summary --baseline` / `summary --diff` (`internal/acctsnap`), `D` key in the summary TUI (`d` was already taken by half-page-down; `b` inside the overlay re-baselines).
 
 **Problem.** "What changed in this account since yesterday?" The summary
 command already builds a merged-by-ARN inventory of everything

@@ -4,10 +4,12 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"strings"
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/spf13/cobra"
 
+	"github.com/ryandam9/aws_explorer/internal/acctsnap"
 	"github.com/ryandam9/aws_explorer/internal/discovery"
 	"github.com/ryandam9/aws_explorer/internal/engine"
 	"github.com/ryandam9/aws_explorer/internal/model"
@@ -20,6 +22,8 @@ import (
 var (
 	summaryTUI       bool
 	summaryTypedOnly bool
+	summaryBaseline  bool
+	summaryDiff      bool
 )
 
 var summaryCmd = &cobra.Command{
@@ -31,7 +35,14 @@ resource name (or "-" when it has none), the resource type, the ARN, and the
 region (with availability zone when the resource is zonal).
 
 By default the inventory is printed as a table (use -o json|ndjson|csv for
-other formats). Pass --tui to explore the same data interactively.`,
+other formats). Pass --tui to explore the same data interactively.
+
+--baseline saves the inventory as the account's baseline snapshot
+(~/.aws_explorer/account-snapshots/<account-id>/); --diff scans again later
+and reports what was added, removed, or modified since — "what changed in
+this account since yesterday". Baselines are keyed by account and region
+scope, and only stable fields (name, state, tags) are compared, so an
+unchanged account diffs clean.`,
 	Example: `  # Full inventory of every region
   aws_explorer summary --all-regions
 
@@ -39,10 +50,24 @@ other formats). Pass --tui to explore the same data interactively.`,
   aws_explorer summary -r us-east-1 -o csv > inventory.csv
 
   # Explore interactively
-  aws_explorer summary --tui`,
+  aws_explorer summary --tui
+
+  # What changed in this account since yesterday?
+  aws_explorer summary --baseline            # yesterday
+  aws_explorer summary --diff                # today
+  aws_explorer summary --diff -o json        # for automation`,
 	Run: func(cmd *cobra.Command, args []string) {
 		ctx, cancel := context.WithCancel(context.Background())
 		defer cancel()
+
+		if summaryBaseline && summaryDiff {
+			fmt.Fprintln(os.Stderr, "Error: --baseline and --diff are mutually exclusive")
+			os.Exit(1)
+		}
+		if (summaryBaseline || summaryDiff) && summaryTUI {
+			fmt.Fprintln(os.Stderr, "Error: --baseline/--diff cannot be combined with --tui (use the D key in the TUI instead)")
+			os.Exit(1)
+		}
 
 		applyGlobalAWSOverrides()
 
@@ -96,6 +121,14 @@ other formats). Pass --tui to explore the same data interactively.`,
 
 		output.PrintErrors(os.Stderr, errs)
 
+		if summaryBaseline || summaryDiff {
+			if err := runBaselineOrDiff(resources, eng.AccountID, eng.EffectiveRegions(), summaryDiff); err != nil {
+				fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+				os.Exit(1)
+			}
+			return
+		}
+
 		rows := summary.BuildRows(resources)
 		if len(rows) == 0 {
 			fmt.Println("No resources found.")
@@ -108,8 +141,43 @@ other formats). Pass --tui to explore the same data interactively.`,
 	},
 }
 
+// runBaselineOrDiff saves the scan as the account baseline, or diffs the scan
+// against the saved baseline, depending on diff.
+func runBaselineOrDiff(resources []model.Resource, accountID string, regions []string, diff bool) error {
+	live := acctsnap.New(resources, accountID, regions)
+
+	if !diff {
+		path, err := acctsnap.Save(live)
+		if err != nil {
+			return fmt.Errorf("saving baseline: %w", err)
+		}
+		fmt.Printf("Baseline saved: %s (%d resources) — run 'summary --diff' later to see what changed.\n",
+			path, len(live.Entries))
+		return nil
+	}
+
+	baseline, ok, err := acctsnap.Load(accountID, regions)
+	if err != nil {
+		return fmt.Errorf("loading baseline: %w", err)
+	}
+	if !ok {
+		// A baseline under a different region scope would diff as a flood of
+		// bogus removals; refuse and say which scopes exist instead.
+		if scopes := acctsnap.Scopes(accountID); len(scopes) > 0 {
+			return fmt.Errorf("no baseline for region scope %q — baselines exist for: %s (rerun with the matching regions, or save a new baseline with --baseline)",
+				acctsnap.ScopeKey(regions), strings.Join(scopes, ", "))
+		}
+		return fmt.Errorf("no baseline saved for this account yet — run 'summary --baseline' first")
+	}
+
+	rep := acctsnap.NewReport(baseline, acctsnap.Diff(baseline, live))
+	return acctsnap.Render(os.Stdout, rep, outputFormat, noHeader)
+}
+
 func init() {
 	summaryCmd.Flags().BoolVar(&summaryTUI, "tui", false, "Explore the inventory interactively instead of printing a table")
 	summaryCmd.Flags().BoolVar(&summaryTypedOnly, "typed-only", false, "Only use the built-in typed collectors; skip the all-services Tagging API sweep")
+	summaryCmd.Flags().BoolVar(&summaryBaseline, "baseline", false, "Save this scan as the account's baseline snapshot")
+	summaryCmd.Flags().BoolVar(&summaryDiff, "diff", false, "Diff this scan against the saved baseline (what changed since)")
 	rootCmd.AddCommand(summaryCmd)
 }
