@@ -915,8 +915,18 @@ Changes since baseline — 1 added, 1 removed, 1 modified
 + Security group sg-new
 - Security group sg-old
 ~ Security group sg-web
+    by role/deploy-pipeline — AuthorizeSecurityGroupIngress, 2026-06-11 14:02 UTC
     + inbound|tcp|22|10.0.0.0/8
 ```
+
+Inside the overlay, **`t` attributes each change to its likely actor**: the
+most recent CloudTrail mutation event for every changed resource (when, which
+API call, which principal), via the zero-setup 90-day `LookupEvents` window —
+the same source as `aws_explorer trail`. Lookups run serially (the API allows
+2/s) and are capped at the first 15 changed resources; a denied
+`cloudtrail:LookupEvents` degrades to a one-line note. The actor shown is the
+*latest* to touch the resource — the likely, not guaranteed, author of the
+diff.
 
 Baselines are stored as JSON in `~/.aws_explorer/vpc-snapshots/<vpc-id>.json`.
 Inside the overlay, `b` re-baselines to the current state. Volatile fields (like
