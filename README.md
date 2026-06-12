@@ -8,7 +8,7 @@ Discover, monitor, and display AWS resources across accounts and regions via CLI
 - **15 services**: EC2, S3, RDS, IAM, DynamoDB, Lambda, EMR, ECS, EKS, ELBv2, Secrets Manager, SQS, SNS, CloudWatch, Route53
 - **VPC Explorer**: browse a VPC's subnets, security groups, network interfaces, route tables, gateways, endpoints, NACLs, peering, flow logs, and attached compute/services in a three-pane TUI
 - **VPC debugging toolkit** (no AI, deterministic): a findings linter, a connectivity path tracer, plain-English SG/NACL rule explanations, cross-reference ("where used"), merged effective security rules, DNS diagnostics, a public-exposure audit, snapshot diffing, Markdown export, and AWS Reachability Analyzer integration — see [VPC Debugging Toolkit](#vpc-debugging-toolkit)
-- **Cost/waste audit**: `aws_explorer audit` scans for the classic sources of silent spend — unattached EBS volumes, idle Elastic IPs and NAT gateways, load balancers with no healthy targets or no traffic, gp2→gp3 candidates, forgotten snapshots/AMIs, over-provisioned DynamoDB tables — each finding with a stable check ID and an estimated monthly cost — see [Audit Usage](#audit-usage)
+- **Cost/waste audit**: `aws_explorer audit` scans for the classic sources of silent spend — unattached EBS volumes, idle Elastic IPs and NAT gateways, load balancers with no healthy targets or no traffic, gp2→gp3 candidates, forgotten snapshots/AMIs, over-provisioned DynamoDB tables — each finding with a stable check ID and an estimated monthly cost, printable or explored in an interactive TUI (`--tui`) — see [Audit Usage](#audit-usage)
 - **Config-driven**: YAML configuration for services, regions, filters, output, and per-resource display columns
 - **5 auth methods**: auto (SDK default chain), profile, env vars, static credentials, STS AssumeRole
 - **Output formats**: Table (default), JSON, NDJSON, CSV — with `--no-header` for scripting and colored states on terminals
@@ -318,6 +318,7 @@ by them.
 | Flag | Default | Description |
 |------|---------|-------------|
 | `--only` | all | Restrict to finding categories (currently: `cost`); more categories are planned |
+| `--tui` | `false` | Explore the findings interactively instead of printing |
 | `--output` / `-o` | `table` | `table`, `json` (findings + total), `ndjson`, `csv` |
 
 ```bash
@@ -329,7 +330,32 @@ by them.
 
 # One finding per line for scripting
 ./bin/aws_explorer audit -o ndjson | jq -r 'select(.id=="COST-EBS-001") | .resource'
+
+# Explore interactively
+./bin/aws_explorer audit --all-regions --tui
 ```
+
+### Audit TUI
+
+`--tui` opens the findings in an interactive table that fills in **while the
+scan runs** — each region's findings appear as soon as that region completes,
+with a live progress meter in the header alongside the severity tally and the
+running savings total. The table uses the same theme, pinned-column horizontal
+scrolling and context-aware status bar as every other TUI in the app.
+
+| Key | Action |
+|-----|--------|
+| `↑` / `↓` / `j` / `k` | Navigate findings |
+| `Enter` | Detail overlay — full explanation, fix, ARN and estimate for the selected finding |
+| `/` | Quick filter (matches any field, live `matched/total` count) |
+| `s` / `R` | Sort by the next column / reverse the direction |
+| `r` | Reset filter and sort |
+| `<` / `>` (or `,` / `.`) | Scroll table columns on narrow terminals |
+| `y` | Copy the selected finding's ARN (or resource ID) to the clipboard |
+| `C` | Export the current (filtered, sorted) view to CSV under `~/.aws_explorer/exports/` |
+| `e` | Collection-errors overlay (shown as a `⚠ n errors` badge in the header) |
+| `?` | Help overlay |
+| `q` / `Ctrl+C` | Quit |
 
 **IAM permissions.** Read-only describes: `ec2:Describe{Volumes,Addresses,
 NatGateways,RouteTables,Instances,Snapshots,Images}`,

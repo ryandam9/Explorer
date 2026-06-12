@@ -17,11 +17,23 @@ import (
 	"github.com/ryandam9/aws_explorer/internal/model"
 )
 
-// Cost runs the cost/waste linter (AXE-004) over every region and returns the
-// merged, sorted findings plus any collection errors. baseCfg supplies
-// credentials; the region is overridden per scan. perCallTimeout bounds each
-// service-family collection within a region (0 = no timeout).
-func Cost(ctx context.Context, baseCfg aws.Config, regions []string, maxConcurrency int, perCallTimeout time.Duration) ([]findings.Finding, []model.ExploreError) {
+// CostChunk is the result of auditing one region, emitted as soon as that
+// region's scan completes so consumers (the TUI) can show findings while
+// other regions are still being scanned.
+type CostChunk struct {
+	Region   string
+	Findings []findings.Finding
+	Errors   []model.ExploreError
+}
+
+// StreamCost runs the cost/waste linter (AXE-004) over every region, sending
+// one CostChunk per region as it finishes and closing ch when all are done.
+// baseCfg supplies credentials; the region is overridden per scan.
+// perCallTimeout bounds each service-family collection within a region
+// (0 = no timeout). Chunk findings are sorted within the region; consumers
+// aggregating regions re-sort with findings.Sort.
+func StreamCost(ctx context.Context, baseCfg aws.Config, regions []string, maxConcurrency int, perCallTimeout time.Duration, ch chan<- CostChunk) {
+	defer close(ch)
 	if maxConcurrency <= 0 {
 		maxConcurrency = 8
 	}
@@ -29,32 +41,35 @@ func Cost(ctx context.Context, baseCfg aws.Config, regions []string, maxConcurre
 		regions = []string{"us-east-1"}
 	}
 
-	type regionResult struct {
-		findings []findings.Finding
-		errs     []model.ExploreError
-	}
-	results := make([]regionResult, len(regions))
-
 	g, gctx := errgroup.WithContext(ctx)
 	g.SetLimit(maxConcurrency)
-	for i, region := range regions {
-		i, region := i, region
+	for _, region := range regions {
+		region := region
 		g.Go(func() error {
 			snap, errs := collectCostRegion(gctx, baseCfg, region, perCallTimeout)
-			results[i] = regionResult{
-				findings: findings.AnalyzeCost(snap),
-				errs:     errs,
+			fs := findings.AnalyzeCost(snap)
+			findings.Sort(fs)
+			select {
+			case ch <- CostChunk{Region: region, Findings: fs, Errors: errs}:
+			case <-gctx.Done():
 			}
 			return nil
 		})
 	}
 	_ = g.Wait()
+}
+
+// Cost runs the cost/waste linter over every region and returns the merged,
+// sorted findings plus any collection errors.
+func Cost(ctx context.Context, baseCfg aws.Config, regions []string, maxConcurrency int, perCallTimeout time.Duration) ([]findings.Finding, []model.ExploreError) {
+	ch := make(chan CostChunk, len(regions)+1)
+	go StreamCost(ctx, baseCfg, regions, maxConcurrency, perCallTimeout, ch)
 
 	var fs []findings.Finding
 	var errs []model.ExploreError
-	for _, r := range results {
-		fs = append(fs, r.findings...)
-		errs = append(errs, r.errs...)
+	for chunk := range ch {
+		fs = append(fs, chunk.Findings...)
+		errs = append(errs, chunk.Errors...)
 	}
 	findings.Sort(fs)
 	return fs, errs

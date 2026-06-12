@@ -7,19 +7,25 @@ import (
 	"strings"
 	"time"
 
+	tea "github.com/charmbracelet/bubbletea"
 	"github.com/spf13/cobra"
 
 	"github.com/ryandam9/aws_explorer/internal/audit"
+	"github.com/ryandam9/aws_explorer/internal/audittui"
 	"github.com/ryandam9/aws_explorer/internal/engine"
 	"github.com/ryandam9/aws_explorer/internal/findings"
 	"github.com/ryandam9/aws_explorer/internal/output"
+	"github.com/ryandam9/aws_explorer/internal/ui"
 )
 
 // auditCategories lists the implemented finding categories. More join as the
 // roadmap lands (security, messaging, …); --only validates against this.
 var auditCategories = []string{"cost"}
 
-var auditOnly []string
+var (
+	auditOnly []string
+	auditTUI  bool
+)
 
 var auditCmd = &cobra.Command{
 	Use:   "audit",
@@ -52,7 +58,8 @@ cloudwatch:GetMetricData and are skipped without it.`,
 		}
 
 		applyGlobalAWSOverrides()
-		ctx := context.Background()
+		ctx, cancel := context.WithCancel(context.Background())
+		defer cancel()
 
 		eng, err := engine.NewEngine(ctx, AppConfig)
 		if err != nil {
@@ -60,14 +67,27 @@ cloudwatch:GetMetricData and are skipped without it.`,
 			os.Exit(1)
 		}
 
-		// Problems are summarized after the run; the raw log stream would
-		// only interleave with the table.
+		// Problems are summarized after the run (CLI) or shown in the errors
+		// overlay (TUI); the raw log stream would only corrupt the screen.
 		SilenceScanLogs()
 
 		regions := eng.EffectiveRegions()
-		fmt.Fprintf(os.Stderr, "Auditing %d region(s) for cost waste…\n", len(regions))
-
 		timeout := time.Duration(AppConfig.App.TimeoutSeconds) * time.Second
+
+		if auditTUI {
+			ui.InitFromConfig(AppConfig.UI)
+			ch := make(chan audit.CostChunk, 8)
+			go audit.StreamCost(ctx, eng.AWSConfig, regions, AppConfig.App.MaxConcurrency, timeout, ch)
+			m := audittui.New(regions, ch)
+			p := tea.NewProgram(ui.WithWindowTitle(m), tea.WithAltScreen(), tea.WithContext(ctx))
+			if _, err := p.Run(); err != nil {
+				fmt.Fprintf(os.Stderr, "Error running audit TUI: %v\n", err)
+				os.Exit(1)
+			}
+			return nil
+		}
+
+		fmt.Fprintf(os.Stderr, "Auditing %d region(s) for cost waste…\n", len(regions))
 		fs, errs := audit.Cost(ctx, eng.AWSConfig, regions, AppConfig.App.MaxConcurrency, timeout)
 
 		output.PrintErrors(os.Stderr, errs)
@@ -104,6 +124,8 @@ func validateAuditCategories(only []string) error {
 func init() {
 	auditCmd.Flags().StringSliceVar(&auditOnly, "only", nil,
 		"restrict to these finding categories (available: "+strings.Join(auditCategories, ", ")+")")
+	auditCmd.Flags().BoolVar(&auditTUI, "tui", false,
+		"explore the findings interactively instead of printing")
 	_ = auditCmd.RegisterFlagCompletionFunc("only",
 		cobra.FixedCompletions(auditCategories, cobra.ShellCompDirectiveNoFileComp))
 	rootCmd.AddCommand(auditCmd)
