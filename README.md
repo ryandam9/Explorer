@@ -10,6 +10,7 @@ Discover, monitor, and display AWS resources across accounts and regions via CLI
 - **VPC debugging toolkit** (no AI, deterministic): a findings linter, a connectivity path tracer, plain-English SG/NACL rule explanations, cross-reference ("where used"), merged effective security rules, DNS diagnostics, a public-exposure audit, snapshot diffing, Markdown export, and AWS Reachability Analyzer integration — see [VPC Debugging Toolkit](#vpc-debugging-toolkit)
 - **Cost/waste audit**: `aws_explorer audit` scans for the classic sources of silent spend — unattached EBS volumes, idle Elastic IPs and NAT gateways, load balancers with no healthy targets or no traffic, gp2→gp3 candidates, forgotten snapshots/AMIs, over-provisioned DynamoDB tables — each finding with a stable check ID and an estimated monthly cost, printable or explored in an interactive TUI (`--tui`) — see [Audit Usage](#audit-usage)
 - **IAM debugging**: `aws_explorer iam decode` turns an "Encoded authorization failure message" into a readable verdict (principal, action, resource, explicit vs implicit deny) — see [IAM Tools](#iam-tools)
+- **Global fuzzy finder**: `Ctrl+P` in the summary TUI jumps to any resource by name/ID/ARN fragment ("I have `eni-0abc` from an error — what is it?"); `aws_explorer find <fragment>` is the CLI twin — see [Find Usage](#find-usage)
 - **SSO-aware errors**: an expired AWS SSO session prints the exact fix (`run: aws sso login --profile prod`) instead of an SDK error chain, in the CLI and every TUI
 - **Config-driven**: YAML configuration for services, regions, filters, output, and per-resource display columns
 - **5 auth methods**: auto (SDK default chain), profile, env vars, static credentials, STS AssumeRole
@@ -172,6 +173,7 @@ what you see in the bar is always what works right now.
 | `<` / `>` (or `,` / `.`) | Scroll table columns when the table is wider than the panel |
 | `Enter` | Select service / open the detail panel for the selected resource |
 | `/` | Quick text filter (matches any column; shows a live `matched/total` count) |
+| `Ctrl+P` | **Jump to any resource**: fuzzy-search every collected resource (name, ID, ARN, type, region) across all services; `Enter` selects its service, lands on its row and opens the detail panel |
 | `f` | Advanced filter (region / state) |
 | `r` | Reset all filters |
 | `s` / `R` | Sort by the next column / reverse the sort direction (`↑`/`↓` shown in the header) |
@@ -442,6 +444,46 @@ Full decoded document:
 Requires the `sts:DecodeAuthorizationMessage` IAM permission (a denial tells
 you exactly that). The global `--profile`, `--auth-method`, `--role-arn` and
 `--region` flags apply.
+
+## Find Usage
+
+`find` answers "what is this thing?" for a mystery identifier — an ENI from
+an error message, half a resource name from a ticket. It scans the configured
+regions (typed collectors **plus** the all-services Tagging API sweep, so the
+long tail of services is covered) and fuzzy-matches every resource against
+the fragment; best matches print first.
+
+The match is an in-order subsequence, so separators can be skipped:
+`eni0abc` finds `eni-0abc12`, `prodweb` finds `prod-web-3`. Exact substrings,
+word-start hits and shorter names rank higher.
+
+```bash
+# What is this ENI?
+aws_explorer find eni-0abc
+
+# Find by name fragment across every region
+aws_explorer find prodweb --all-regions
+
+# Machine-readable
+aws_explorer find payments -o json | jq '.[0].arn'
+```
+
+```
+NAME        TYPE           ID                     REGION      ARN
+prod-web-3  ec2/instance   i-0abc12def34567890    us-east-1   arn:aws:ec2:us-east-1:…
+prod-web    elbv2/loadb…   arn:aws:elasticloadb…  us-east-1   arn:aws:elasticloadb…
+```
+
+| Flag | Default | Description |
+|------|---------|-------------|
+| `--limit` | `25` | Maximum number of matches to print |
+| `--output` / `-o` | `table` | `table`, `json`, `ndjson`, `csv` — always in best-match order |
+
+The same search lives in the summary TUI behind **`Ctrl+P`**: a palette
+fuzzy-matches as you type, `↑`/`↓` select, and `Enter` jumps straight to the
+resource — its service selected in the sidebar, its row under the cursor, and
+the detail panel open. Any active filters that would hide the target are
+cleared.
 
 ## VPC Explorer TUI Usage
 

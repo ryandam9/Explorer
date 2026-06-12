@@ -1,6 +1,6 @@
 # AWS Explorer — Enhancement Roadmap & Design Specification
 
-Status: **Proposed** · Tracking issue: see GitHub issue "Enhancement roadmap (AXE-001 … AXE-024)"
+Status: **In progress** — shipped so far: AXE-004 & the `internal/findings` platform (#79), AXE-023 (#80), AXE-001 & AXE-022 (#81) · Tracking issue: #76
 
 This document specifies 24 proposed enhancements, grouped into nine themes.
 Each enhancement carries a stable ID (`AXE-NNN`) used in the tracking issue,
@@ -27,10 +27,10 @@ The proposals follow the tool's established design principles:
 
 | ID | Title | Theme | Priority |
 |----|-------|-------|----------|
-| [AXE-001](#axe-001) | Decode encoded authorization failure messages | A — IAM / access debugging | P1 |
+| [AXE-001](#axe-001) | Decode encoded authorization failure messages | A — IAM / access debugging | ✅ shipped (#81) |
 | [AXE-002](#axe-002) | IAM policy simulator ("can X do Y on Z?") | A — IAM / access debugging | P1 |
 | [AXE-003](#axe-003) | IAM hygiene linter | A — IAM / access debugging | P2 |
-| [AXE-004](#axe-004) | Cost/waste linter with monthly estimates | B — Cost & waste | P1 |
+| [AXE-004](#axe-004) | Cost/waste linter with monthly estimates | B — Cost & waste | ✅ shipped (#79) |
 | [AXE-005](#axe-005) | CloudTrail "who changed this" | C — Change attribution & drift | P1 |
 | [AXE-006](#axe-006) | Account-wide inventory snapshot diff | C — Change attribution & drift | P2 |
 | [AXE-007](#axe-007) | Expiry & deprecation watchlist (`expiring`) | D — Expiry & deprecation | P1 |
@@ -39,7 +39,7 @@ The proposals follow the tool's established design principles:
 | [AXE-010](#axe-010) | Relationship graph export (DOT / Mermaid) | E — Account-wide audit | P3 |
 | [AXE-011](#axe-011) | Jump from resource to its CloudWatch logs | F — Cross-navigation | P2 |
 | [AXE-012](#axe-012) | Open selected resource in the AWS console | F — Cross-navigation | P1 |
-| [AXE-013](#axe-013) | Global fuzzy finder | F — Cross-navigation | P1 |
+| [AXE-013](#axe-013) | Global fuzzy finder | F — Cross-navigation | ✅ shipped |
 | [AXE-014](#axe-014) | Inline CloudWatch metric sparklines | F — Cross-navigation | P3 |
 | [AXE-015](#axe-015) | ECS stopped-task triage | G — Service-specific triage | P2 |
 | [AXE-016](#axe-016) | Lambda triage view | G — Service-specific triage | P2 |
@@ -48,8 +48,8 @@ The proposals follow the tool's established design principles:
 | [AXE-019](#axe-019) | Path tracer: IPv6 evaluation | H — Tracer completeness | P2 |
 | [AXE-020](#axe-020) | Path tracer: managed prefix-list expansion | H — Tracer completeness | P2 |
 | [AXE-021](#axe-021) | Multi-account scanning | I — Multi-account & automation | P2 |
-| [AXE-022](#axe-022) | SSO-aware auth errors | I — Multi-account & automation | P1 |
-| [AXE-023](#axe-023) | CI mode: exit codes, `--fail-on`, SARIF | I — Multi-account & automation | P2 |
+| [AXE-022](#axe-022) | SSO-aware auth errors | I — Multi-account & automation | ✅ shipped (#81) |
+| [AXE-023](#axe-023) | CI mode: exit codes, `--fail-on`, SARIF | I — Multi-account & automation | ✅ shipped (#80) |
 | [AXE-024](#axe-024) | Inventory caching / instant TUI start | I — Multi-account & automation | P3 |
 
 Priorities: **P1** = build first (high demand, modest effort), **P2** = next,
@@ -99,6 +99,8 @@ Where new code plugs in:
 this the way it owns "can't connect" with the VPC path tracer.
 
 ### AXE-001 — Decode encoded authorization failure messages {#axe-001}
+
+> **Status: ✅ shipped** in #81 as `aws_explorer iam decode` (`cmd/iam.go`, `internal/authzmsg`).
 
 **Problem.** Services like EC2 return opaque
 `Encoded authorization failure message: <blob>` errors. Engineers paste these
@@ -202,6 +204,8 @@ gracefully if denied.
 ## Theme B — Cost & waste
 
 ### AXE-004 — Cost/waste linter with monthly estimates {#axe-004}
+
+> **Status: ✅ shipped** in #79 as `aws_explorer audit` (CLI + `--tui`), with `internal/findings`, `internal/costs`, `internal/audit`, `internal/audittui`.
 
 **Problem.** "Why is my bill high?" The most common findable causes are
 deterministic and read-only detectable. The existing idle-NAT-gateway check
@@ -540,6 +544,8 @@ vs global services.
 
 ### AXE-013 — Global fuzzy finder {#axe-013}
 
+> **Status: ✅ shipped** — `Ctrl+P` palette in the summary TUI (`internal/tui/finder.go`), scorer in `internal/fuzzy`, CLI twin `aws_explorer find` (`cmd/find.go`).
+
 **Problem.** "I have `eni-0abc` from an error message — what is it?" Finding
 it today means picking the right service first.
 
@@ -750,6 +756,8 @@ globally, not per account.
 
 ### AXE-022 — SSO-aware auth errors {#axe-022}
 
+> **Status: ✅ shipped** in #81 (`internal/awserr/expired.go`; wired into the engine, discovery and audit error paths).
+
 **Problem.** An expired SSO session today surfaces as a raw SDK error string.
 The fix is always the same command.
 
@@ -772,6 +780,8 @@ in the errors overlay / profile-switch panel, not just stderr.
 classifier over error strings/types → table-driven tests.
 
 ### AXE-023 — CI mode: exit codes, `--fail-on`, SARIF {#axe-023}
+
+> **Status: ✅ shipped** in #80 (`--fail-on`, `--ignore`, `-o sarif`; check registry in `internal/findings/checks.go`).
 
 **Problem.** The linters (AXE-003/004/008/018) become 10× more valuable as a
 pipeline gate.
