@@ -39,7 +39,7 @@ The proposals follow the tool's established design principles:
 | [AXE-010](#axe-010) | Relationship graph export (DOT / Mermaid) | E — Account-wide audit | P3 |
 | [AXE-011](#axe-011) | Jump from resource to its CloudWatch logs | F — Cross-navigation | P2 |
 | [AXE-012](#axe-012) | Open selected resource in the AWS console | F — Cross-navigation | P1 |
-| [AXE-013](#axe-013) | Global fuzzy finder | F — Cross-navigation | P1 |
+| [AXE-013](#axe-013) | Global fuzzy finder | F — Cross-navigation | ✅ shipped |
 | [AXE-014](#axe-014) | Inline CloudWatch metric sparklines | F — Cross-navigation | P3 |
 | [AXE-015](#axe-015) | ECS stopped-task triage | G — Service-specific triage | P2 |
 | [AXE-016](#axe-016) | Lambda triage view | G — Service-specific triage | P2 |
@@ -543,6 +543,8 @@ URL (specific or the ARN-search fallback); URL is correct for region-scoped
 vs global services.
 
 ### AXE-013 — Global fuzzy finder {#axe-013}
+
+> **Status: ✅ shipped** — `Ctrl+P` palette in the summary TUI (`internal/tui/finder.go`), scorer in `internal/fuzzy`, CLI twin `aws_explorer find` (`cmd/find.go`).
 
 **Problem.** "I have `eni-0abc` from an error message — what is it?" Finding
 it today means picking the right service first.

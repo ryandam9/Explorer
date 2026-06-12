@@ -167,6 +167,12 @@ type tuiModel struct {
 	filterInput textinput.Model
 	filterText  string
 
+	// Global fuzzy finder ("Ctrl+P"): jump to any resource (see finder.go).
+	showFinder  bool
+	finderInput textinput.Model
+	finderHits  []int // indices into sorted, best match first
+	finderSel   int
+
 	// Detail panel
 	showDetail     bool
 	detail         *model.Resource
@@ -283,6 +289,15 @@ func NewModelWithSeed(ctx context.Context, eng *engine.Engine, configPath string
 	m.filterInput.TextStyle = lipgloss.NewStyle().Foreground(lipgloss.Color(ui.ColorText()))
 	m.filterInput.PlaceholderStyle = lipgloss.NewStyle().Foreground(lipgloss.Color(ui.ColorMuted()))
 	m.filterInput.Cursor.Style = lipgloss.NewStyle().Foreground(lipgloss.Color(ui.ColorAccent()))
+
+	m.finderInput = textinput.New()
+	m.finderInput.Placeholder = "Search every resource — name, ID, ARN, type…"
+	m.finderInput.CharLimit = 128
+	m.finderInput.Width = 48
+	m.finderInput.PromptStyle = lipgloss.NewStyle().Foreground(lipgloss.Color(ui.ColorAccent())).Bold(true)
+	m.finderInput.TextStyle = lipgloss.NewStyle().Foreground(lipgloss.Color(ui.ColorText()))
+	m.finderInput.PlaceholderStyle = lipgloss.NewStyle().Foreground(lipgloss.Color(ui.ColorMuted()))
+	m.finderInput.Cursor.Style = lipgloss.NewStyle().Foreground(lipgloss.Color(ui.ColorAccent()))
 
 	m.table = table.New(
 		table.WithColumns(m.columns()),
@@ -439,6 +454,43 @@ func (m tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.showFilter = false
 		}
 		return m, tea.Batch(cmds...)
+	}
+
+	// Route keys to the global finder while it is open. Non-key messages
+	// (scan chunks, ticks) fall through so the stream keeps flowing behind
+	// the palette.
+	if m.showFinder {
+		if key, ok := msg.(tea.KeyMsg); ok {
+			switch key.String() {
+			case "esc", "ctrl+p":
+				m.closeFinder()
+				return m, nil
+			case "enter":
+				if m.finderSel >= 0 && m.finderSel < len(m.finderHits) {
+					idx := m.finderHits[m.finderSel]
+					m.closeFinder()
+					m.jumpToResource(idx)
+				} else {
+					m.closeFinder()
+				}
+				return m, nil
+			case "up", "ctrl+k":
+				if m.finderSel > 0 {
+					m.finderSel--
+				}
+				return m, nil
+			case "down", "ctrl+j":
+				if m.finderSel < len(m.finderHits)-1 {
+					m.finderSel++
+				}
+				return m, nil
+			default:
+				var cmd tea.Cmd
+				m.finderInput, cmd = m.finderInput.Update(key)
+				m.computeFinderHits()
+				return m, cmd
+			}
+		}
 	}
 
 	// Route keys to the quick-filter input while it is active.
@@ -668,6 +720,11 @@ func (m tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.showSwitcher = true
 				cmds = append(cmds, m.switcherForm.Init())
 			}
+			return m, tea.Batch(cmds...)
+
+		case "ctrl+p":
+			m.openFinder()
+			cmds = append(cmds, textinput.Blink)
 			return m, tea.Batch(cmds...)
 
 		case ui.KeySettings:
@@ -1812,6 +1869,7 @@ func (m tuiModel) helpView() string {
 		"  Esc                Close detail or overlay",
 		"",
 		"Resources & Audit",
+		"  Ctrl+P             Jump to any resource (fuzzy search across all services)",
 		"  /                  Quick text filter (shows match count)",
 		"  f                  Advanced filter (region / state)",
 		"  r                  Reset all filters",
@@ -1886,6 +1944,9 @@ func (m tuiModel) View() string {
 		formH := 16
 		formView := ui.ModalStyle(formW, formH).Render(m.switcherForm.View())
 		modal := lipgloss.Place(m.width, m.height-4, lipgloss.Center, lipgloss.Center, formView)
+		output = lipgloss.JoinVertical(lipgloss.Left, header, modal, status)
+	} else if m.showFinder {
+		modal := lipgloss.Place(m.width, m.height-4, lipgloss.Center, lipgloss.Center, m.finderView())
 		output = lipgloss.JoinVertical(lipgloss.Left, header, modal, status)
 	} else {
 		body := m.renderBody()
@@ -2165,6 +2226,13 @@ func (m tuiModel) statusHints() []ui.KeyHint {
 			ui.H("Enter", "keep filter"),
 			ui.H("Esc", "clear"),
 		}
+	case m.showFinder:
+		return []ui.KeyHint{
+			ui.H("type", "to search"),
+			ui.H("↑/↓", "select"),
+			ui.H("Enter", "jump"),
+			ui.H("Esc", "close"),
+		}
 	}
 
 	switch m.focus {
@@ -2187,6 +2255,7 @@ func (m tuiModel) statusHints() []ui.KeyHint {
 		}
 		hints = append(hints,
 			ui.H("/", "filter"),
+			ui.H("^P", "jump"),
 			ui.H("f", "adv filter"),
 			ui.H("s", "sort"),
 			ui.H("y", "copy ARN"),
