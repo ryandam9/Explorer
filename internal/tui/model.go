@@ -44,7 +44,7 @@ const (
 // ── Layout constants ─────────────────────────────────────────────────────────
 
 const (
-	sidebarInner  = 16 // inner content width of the sidebar panel
+	sidebarInner  = 18 // inner content width of the sidebar panel
 	detailInner   = 34 // inner content width of the detail panel
 	minTableInner = 40 // table panel keeps at least this much content width
 	// tablePanelHPad is the table panel's horizontal padding (Padding(0,1) =>
@@ -2004,18 +2004,26 @@ func (m tuiModel) renderSidebar() string {
 	var b strings.Builder
 	b.WriteString(ui.PanelTitleStyle().Render("Services") + "\n\n")
 
+	// rowW left-aligns every row and pads it to one uniform width.
+	rowW := sidebarInner - 2
 	activeStyle := lipgloss.NewStyle().
 		Foreground(lipgloss.Color(ui.ColorHighlightText())).
 		Background(lipgloss.Color(ui.ColorHighlight())).
-		Width(sidebarInner - 2)
+		Width(rowW)
 	idleStyle := lipgloss.NewStyle().
 		Foreground(lipgloss.Color(ui.ColorText())).
-		Width(sidebarInner - 2)
+		Width(rowW)
 
 	// Services whose collectors reported errors carry a warning badge so a
 	// permission/throttle problem is visible without opening the errors
 	// overlay. "All" aggregates every error.
 	warnStyle := idleStyle.Foreground(lipgloss.Color(ui.ColorWarning()))
+
+	// Every row is exactly one line: a 2-column marker, the (possibly
+	// truncated) name, then the badge. The name budget is computed in display
+	// columns so a long name can never exceed the row style's Width — one
+	// column over and lipgloss wraps the row, shifting every entry below it.
+	const markerW = 2 // "▶ " / "  "
 
 	for i, svc := range m.services {
 		zID := fmt.Sprintf("%s%d", zoneSvc, i)
@@ -2028,8 +2036,8 @@ func (m tuiModel) renderSidebar() string {
 			badge = fmt.Sprintf(" ⚠%d", errCount)
 		}
 		label := svc
-		if maxLabel := sidebarInner - 3 - len(badge); len(label) > maxLabel {
-			label = label[:maxLabel-1] + "…"
+		if avail := rowW - markerW - ansi.StringWidth(badge); ansi.StringWidth(label) > avail {
+			label = ansi.Truncate(label, avail, "…")
 		}
 		var line string
 		switch {
