@@ -49,7 +49,7 @@ toolkit (findings linter, path tracer, exposure audit, snapshot diff).`,
 			os.Exit(1)
 		}
 
-		p := tea.NewProgram(m, tea.WithAltScreen(), tea.WithContext(ctx))
+		p := tea.NewProgram(ui.WithWindowTitle(m), tea.WithAltScreen(), tea.WithContext(ctx))
 		if _, err := p.Run(); err != nil {
 			fmt.Fprintf(os.Stderr, "Error running VPC TUI: %v\n", err)
 			os.Exit(1)

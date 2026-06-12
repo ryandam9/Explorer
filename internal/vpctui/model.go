@@ -1721,6 +1721,23 @@ func (m *Model) updateTableSizes() {
 	}
 }
 
+// PageTitle names the current screen for the terminal window/tab title, so
+// every page has a unique, shareable name (see ui.WithWindowTitle).
+func (m *Model) PageTitle() string {
+	if m.state == stateResourceBrowser && m.selectedVPC != nil {
+		return "VPC Explorer › " + vpcLabel(m.selectedVPC) + " › " + rtLabel(m.activeResource)
+	}
+	return "VPC Explorer › VPCs"
+}
+
+// vpcLabel is the human-friendly name of a VPC, falling back to its ID.
+func vpcLabel(vpc *VPCInfo) string {
+	if vpc.Name != "" {
+		return vpc.Name
+	}
+	return vpc.ID
+}
+
 // selectedResourceID returns the primary ID of the resource currently selected
 // in the resource table, resolved from its map row (so it works regardless of
 // which column is shown first).
@@ -1995,7 +2012,12 @@ func (m *Model) viewResourcePanel(height int) string {
 		rightWidth = 20
 	}
 
+	// Name the page uniquely ("my-vpc › Subnets") so a screen is easy to
+	// refer to when several people look at the tool.
 	title := rtLabel(m.activeResource)
+	if m.selectedVPC != nil {
+		title = vpcLabel(m.selectedVPC) + " › " + title
+	}
 	titleStyle := lipgloss.NewStyle().
 		Bold(true).
 		Foreground(lipgloss.Color(ui.ColorHeading()))

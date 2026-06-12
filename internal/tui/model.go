@@ -1408,6 +1408,20 @@ func (m tuiModel) currentService() string {
 	return m.services[m.activeService]
 }
 
+// PageTitle names the current screen for the terminal window/tab title, so
+// every page has a unique, shareable name (see ui.WithWindowTitle).
+func (m tuiModel) PageTitle() string {
+	title := "AWS Explorer › " + m.currentService()
+	if m.showDetail && m.detail != nil {
+		id := m.detail.Name
+		if id == "" {
+			id = m.detail.ID
+		}
+		title += " › " + id
+	}
+	return title
+}
+
 // selectedResource returns the resource under the table cursor.
 func (m tuiModel) selectedResource() (model.Resource, bool) {
 	m.rowsFor(m.currentService()) // ensure the group cache is built
@@ -1947,8 +1961,8 @@ func (m tuiModel) renderHeader() string {
 		filterInfo = "  [" + strings.Join(filterParts, ", ") + "]"
 	}
 
-	title := fmt.Sprintf("  AWS Explorer  ·  %s  ·  %d resources%s",
-		status, len(m.sorted), filterInfo)
+	title := fmt.Sprintf("  AWS Explorer › %s  ·  %s  ·  %d resources%s",
+		m.currentService(), status, len(m.sorted), filterInfo)
 	// The error badge goes last (in error color) so a failed scan is
 	// impossible to miss; nothing follows it, so the embedded color reset
 	// cannot bleed into other header text.

@@ -72,7 +72,7 @@ list; otherwise the config's aws.regions list is used.`,
 			os.Exit(1)
 		}
 
-		p := tea.NewProgram(m, tea.WithAltScreen(), tea.WithContext(ctx))
+		p := tea.NewProgram(ui.WithWindowTitle(m), tea.WithAltScreen(), tea.WithContext(ctx))
 
 		if _, err := p.Run(); err != nil {
 			fmt.Fprintf(os.Stderr, "Error running CloudWatch Logs TUI: %v\n", err)

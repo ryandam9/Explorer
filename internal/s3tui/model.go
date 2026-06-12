@@ -1636,6 +1636,23 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	return m, tea.Batch(cmds...)
 }
 
+// PageTitle names the current screen for the terminal window/tab title, so
+// every page has a unique, shareable name (see ui.WithWindowTitle).
+func (m *Model) PageTitle() string {
+	switch m.state {
+	case stateObjectList:
+		title := "S3 Browser › " + m.bucket
+		if m.prefix != "" {
+			title += "/" + m.prefix
+		}
+		return title
+	case stateBucketDetail:
+		return "S3 Browser › " + m.detailBucket + " › Bucket detail"
+	default:
+		return "S3 Browser › Buckets"
+	}
+}
+
 // ---------------------------------------------------------------------------
 // View
 // ---------------------------------------------------------------------------
