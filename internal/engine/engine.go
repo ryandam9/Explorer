@@ -77,6 +77,11 @@ func NewEngine(ctx context.Context, cfg *config.Config) (*Engine, error) {
 
 	awscfg, err := auth.BuildAWSConfig(ctx, &cfg.AWS, bootstrapRegion)
 	if err != nil {
+		// An expired SSO session is the most common failure here; surface the
+		// exact command that fixes it instead of the SDK's error chain.
+		if hint, ok := awserr.LoginHint(err, cfg.AWS.Profile); ok {
+			return nil, errors.New(hint)
+		}
 		return nil, fmt.Errorf("unable to load AWS config: %w", err)
 	}
 
@@ -450,6 +455,11 @@ func (e *Engine) StreamRun(ctx context.Context, chunks chan<- model.ResultChunk)
 						code := "CollectionError"
 						msg := err.Error()
 						switch {
+						case awserr.IsExpiredCreds(err):
+							code = "ExpiredCredentials"
+							msg, _ = awserr.LoginHint(err, e.Config.AWS.Profile)
+							slog.Warn("Credentials expired",
+								"service", s.Name(), "region", r, "keptResources", len(filteredRes)+emitted)
 						case awserr.IsAuthError(err):
 							code = "AccessDenied"
 							msg = awserr.FriendlyMessage(err, s.Name())
