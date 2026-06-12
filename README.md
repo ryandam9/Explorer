@@ -10,6 +10,7 @@ Discover, monitor, and display AWS resources across accounts and regions via CLI
 - **VPC debugging toolkit** (no AI, deterministic): a findings linter, a connectivity path tracer, plain-English SG/NACL rule explanations, cross-reference ("where used"), merged effective security rules, DNS diagnostics, a public-exposure audit, snapshot diffing, Markdown export, and AWS Reachability Analyzer integration — see [VPC Debugging Toolkit](#vpc-debugging-toolkit)
 - **Cost/waste audit**: `aws_explorer audit` scans for the classic sources of silent spend — unattached EBS volumes, idle Elastic IPs and NAT gateways, load balancers with no healthy targets or no traffic, gp2→gp3 candidates, forgotten snapshots/AMIs, over-provisioned DynamoDB tables — each finding with a stable check ID and an estimated monthly cost, printable or explored in an interactive TUI (`--tui`) — see [Audit Usage](#audit-usage)
 - **IAM debugging**: `aws_explorer iam decode` turns an "Encoded authorization failure message" into a readable verdict (principal, action, resource, explicit vs implicit deny) — see [IAM Tools](#iam-tools)
+- **CloudTrail "who changed this"**: `aws_explorer trail <resource-id-or-arn>` lists recent CloudTrail management events for a resource — when, which API call, which principal, from which IP — using the zero-setup 90-day LookupEvents window; the summary TUI's `t` timeline is the interactive twin — see [Trail Usage](#trail-usage)
 - **Global fuzzy finder**: `Ctrl+P` in the summary TUI jumps to any resource by name/ID/ARN fragment ("I have `eni-0abc` from an error — what is it?"); `aws_explorer find <fragment>` is the CLI twin — see [Find Usage](#find-usage)
 - **SSO-aware errors**: an expired AWS SSO session prints the exact fix (`run: aws sso login --profile prod`) instead of an SDK error chain, in the CLI and every TUI
 - **Expiry watchlist**: `aws_explorer expiring` lists everything that breaks on a calendar date — ACM/IAM certificate expiry, Lambda runtime deprecations, EKS end-of-support, RDS CA certs & pending maintenance, overdue secret rotations — sorted by days remaining — see [Expiring Usage](#expiring-usage)
@@ -488,6 +489,56 @@ Full decoded document:
 Requires the `sts:DecodeAuthorizationMessage` IAM permission (a denial tells
 you exactly that). The global `--profile`, `--auth-method`, `--role-arn` and
 `--region` flags apply.
+
+## Trail Usage
+
+`trail` answers the most useful question in an incident: *who changed this
+resource, and when?* It looks up recent CloudTrail management events that
+reference the resource and prints when, which API call, which principal
+(short form — `role/deploy-pipeline`, `user/alice`, `root`), and from which
+source IP. Events are newest first.
+
+```bash
+# Who touched this security group?
+aws_explorer trail sg-0abc123
+
+# Changes to an instance in the last 7 days, in a specific region
+aws_explorer trail i-0abc12345 --since 7d -r eu-west-1
+
+# ARNs work too — they're reduced to the resource name CloudTrail records.
+# Global services (IAM, …) record their events in us-east-1.
+aws_explorer trail arn:aws:iam::123456789012:role/app -r us-east-1
+
+# Machine-readable
+aws_explorer trail my-bucket -o json | jq '.[0]'
+```
+
+```
+TIME                 EVENT                          PRINCIPAL             SOURCE IP
+2026-06-11 14:02:11  AuthorizeSecurityGroupIngress  role/deploy-pipeline  203.0.113.7
+2026-06-09 09:15:42  ModifySecurityGroupRules       user/alice            198.51.100.2
+```
+
+| Flag | Default | Description |
+|------|---------|-------------|
+| `--since` | full window | Only events after this long ago (`7d`, `36h`, or a plain day count) |
+| `--limit` | `50` | Maximum number of events to print |
+| `--read-events` | off | Include read-only (`Describe*`/`List*`/`Get*`) events, marked `(read)` in the table |
+
+Notes:
+
+- Uses `cloudtrail:LookupEvents`, which covers the **last 90 days** of
+  management events with **no trail or S3 bucket setup required** — that one
+  permission is all it needs.
+- CloudTrail records events in the region where the resource lives; pick it
+  with `-r` (default: the first configured region).
+- By default only **mutating** events are shown — the `Describe*` noise would
+  drown out the changes you're looking for.
+- The API is rate-limited (2 TPS); pages are fetched serially and capped, so
+  very chatty resources return the most recent events rather than everything.
+
+The same view lives in the summary TUI: press **`t`** on a resource's detail
+panel for its CloudTrail timeline.
 
 ## Find Usage
 
