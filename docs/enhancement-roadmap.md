@@ -1,6 +1,6 @@
 # AWS Explorer — Enhancement Roadmap & Design Specification
 
-Status: **In progress** — shipped so far: AXE-004 & the `internal/findings` platform (#79), AXE-023 (#80), AXE-001 & AXE-022 (#81), AXE-013 (#82), AXE-007 · Tracking issue: #76
+Status: **In progress** — shipped so far: AXE-004 & the `internal/findings` platform (#79), AXE-023 (#80), AXE-001 & AXE-022 (#81), AXE-013 (#82), AXE-007 (#83), AXE-005 (#84 + diff actors), AXE-006 (#85) · Tracking issue: #76
 
 This document specifies 24 proposed enhancements, grouped into nine themes.
 Each enhancement carries a stable ID (`AXE-NNN`) used in the tracking issue,
@@ -31,7 +31,7 @@ The proposals follow the tool's established design principles:
 | [AXE-002](#axe-002) | IAM policy simulator ("can X do Y on Z?") | A — IAM / access debugging | P1 |
 | [AXE-003](#axe-003) | IAM hygiene linter | A — IAM / access debugging | P2 |
 | [AXE-004](#axe-004) | Cost/waste linter with monthly estimates | B — Cost & waste | ✅ shipped (#79) |
-| [AXE-005](#axe-005) | CloudTrail "who changed this" | C — Change attribution & drift | ◐ CLI shipped |
+| [AXE-005](#axe-005) | CloudTrail "who changed this" | C — Change attribution & drift | ✅ shipped |
 | [AXE-006](#axe-006) | Account-wide inventory snapshot diff | C — Change attribution & drift | ✅ shipped |
 | [AXE-007](#axe-007) | Expiry & deprecation watchlist (`expiring`) | D — Expiry & deprecation | ✅ shipped |
 | [AXE-008](#axe-008) | Account-wide security audit (`audit`) | E — Account-wide audit | P2 |
@@ -264,7 +264,7 @@ note when `cloudwatch:GetMetricData` is denied.
 
 ### AXE-005 — CloudTrail "who changed this" {#axe-005}
 
-> **Status: ◐ partially shipped** — the CLI command (`aws_explorer trail <resource-id-or-arn> [--since 7d]`) and the shared `internal/trail` package shipped; the summary TUI's `t` timeline now uses the same package. Remaining: VPC-diff integration.
+> **Status: ✅ shipped** — CLI `aws_explorer trail <resource-id-or-arn> [--since 7d]` + the shared `internal/trail` package (#84); the summary TUI's `t` timeline uses the same package; the VPC `w` diff overlay's `t` annotates each change with its likely actor (`internal/vpctui/diffactors.go`).
 
 **Problem.** The VPC snapshot diff (AXE precedent: `snapshotdiff.go`) answers
 *what* changed; nothing answers *who/when*. This is the single most useful

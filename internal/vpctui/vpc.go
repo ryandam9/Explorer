@@ -31,6 +31,9 @@ type VPCClient struct {
 	lambda *lambda.Client
 	rds    *rds.Client
 	ctx    context.Context
+	// cfg is the resolved SDK config, kept for one-off clients (CloudTrail
+	// actor lookups) that don't warrant a permanent field.
+	cfg aws.Config
 }
 
 func NewVPCClient(ctx context.Context, awsCfg *config.AWSConfig, region string) (*VPCClient, error) {
@@ -44,6 +47,7 @@ func NewVPCClient(ctx context.Context, awsCfg *config.AWSConfig, region string) 
 		lambda: lambda.NewFromConfig(cfg),
 		rds:    rds.NewFromConfig(cfg),
 		ctx:    ctx,
+		cfg:    cfg,
 	}, nil
 }
 

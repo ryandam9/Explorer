@@ -16,6 +16,7 @@ import (
 	"github.com/charmbracelet/lipgloss"
 	"github.com/charmbracelet/x/ansi"
 	"github.com/ryandam9/aws_explorer/internal/config"
+	"github.com/ryandam9/aws_explorer/internal/trail"
 	"github.com/ryandam9/aws_explorer/internal/display"
 	"github.com/ryandam9/aws_explorer/internal/table"
 	"github.com/ryandam9/aws_explorer/internal/ui"
@@ -245,6 +246,12 @@ type Model struct {
 	diffLoading bool
 	diffErr     error
 	diffVP      viewport.Model
+	// Actor attribution inside the diff overlay (t): resource ID → latest
+	// CloudTrail mutation event. nil until fetched for the current diff.
+	diffActors        map[string]trail.Event
+	diffActorsLoading bool
+	diffActorsNote    string
+	diffActorsSkipped int
 
 	// Public exposure overlay
 	showExposure    bool
@@ -1105,9 +1112,23 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		m.snapDiff = diffSnapshots(msg.baseline, msg.current)
 		m.diffErr = nil
+		m.diffActors = nil
+		m.diffActorsLoading = false
+		m.diffActorsNote = ""
+		m.diffActorsSkipped = 0
 		m.showDiff = true
 		m.diffVP.SetContent(m.renderDiff())
 		m.diffVP.GotoTop()
+
+	case diffActorsDoneMsg:
+		if m.staleVPCMsg(msg.vpcID) {
+			break
+		}
+		m.diffActorsLoading = false
+		m.diffActors = msg.actors
+		m.diffActorsNote = msg.note
+		m.diffActorsSkipped = msg.skipped
+		m.diffVP.SetContent(m.renderDiff())
 
 	case errMsg:
 		m.err = msg.err
@@ -1274,11 +1295,16 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 	}
 
-	// Snapshot-diff overlay: scroll-and-close plus b to re-baseline.
+	// Snapshot-diff overlay: scroll-and-close, t to attribute changes to
+	// their CloudTrail actors, b to re-baseline.
 	if m.showDiff {
 		switch key {
 		case "esc", "q", "w":
 			m.showDiff = false
+		case "t":
+			if !m.diffActorsLoading && m.diffActors == nil && len(m.snapDiff) > 0 {
+				return m, m.loadDiffActors()
+			}
 		case "b":
 			if err := saveSnapshot(m.currentSnap); err != nil {
 				m.statusMsg = "Failed to update baseline: " + err.Error()
@@ -2357,7 +2383,7 @@ func (m *Model) viewDiffOverlay(bg string) string {
 	added, removed, modified := diffCounts(m.snapDiff)
 	titleText := fmt.Sprintf("Changes since baseline — %d added, %d removed, %d modified", added, removed, modified)
 	body := m.overlayBody(m.diffLoading, "Comparing with baseline…", m.diffErr, &m.diffVP)
-	return m.overlayFrame(titleText, body, "↑/↓ scroll  •  b save current as new baseline  •  Esc/w close")
+	return m.overlayFrame(titleText, body, "↑/↓ scroll  •  t who changed it (CloudTrail)  •  b save current as new baseline  •  Esc/w close")
 }
 
 // renderDiff builds the scrollable body of the snapshot-diff overlay.
@@ -2380,12 +2406,31 @@ func (m *Model) renderDiff() string {
 		}
 	}
 
+	muted := lipgloss.NewStyle().Foreground(lipgloss.Color(ui.ColorMuted()))
+
 	var b strings.Builder
+	switch {
+	case m.diffActorsLoading:
+		b.WriteString(muted.Render("Looking up CloudTrail actors… (serial; the API allows 2 lookups/s)") + "\n\n")
+	case m.diffActorsNote != "":
+		b.WriteString(muted.Render("⚠ "+m.diffActorsNote) + "\n\n")
+	case m.diffActors != nil && m.diffActorsSkipped > 0:
+		b.WriteString(muted.Render(fmt.Sprintf(
+			"Actors looked up for the first %d changed resources (%d skipped).",
+			maxActorLookups, m.diffActorsSkipped)) + "\n\n")
+	}
 	for i, c := range m.snapDiff {
 		if i > 0 {
 			b.WriteString("\n")
 		}
 		b.WriteString(style(c.Kind).Render(c.Kind.glyph()+" "+c.Type) + " " + c.ID)
+		if m.diffActors != nil {
+			if ev, ok := m.diffActors[c.ID]; ok {
+				b.WriteString("\n    " + muted.Render(formatActor(ev)))
+			} else {
+				b.WriteString("\n    " + muted.Render("by ? — no CloudTrail event found (90-day window)"))
+			}
+		}
 		for _, f := range c.Added {
 			b.WriteString("\n    " + addStyle.Render("+ "+f))
 		}
@@ -2620,7 +2665,7 @@ func (m *Model) helpText() string {
 		"  P        Public exposure: what is reachable from the internet",
 		"  A        AWS Reachability Analyzer: list analyses; n creates one (paid)",
 		"  D        Show the VPC's DNS configuration (resolution, hostnames, DHCP)",
-		"  w        What changed: baseline the VPC, then diff against it later",
+		"  w        What changed: baseline the VPC, then diff against it later (t attributes actors)",
 		"  E        Export a Markdown report (resources + findings) to a file",
 		"  t        Trace connectivity from the selected network interface",
 		"  x        Where used: SGs, subnets, route tables, ENIs, NAT/IGW, NACLs, endpoints, peering",
