@@ -13,6 +13,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"sort"
+	"strings"
 )
 
 // Severity ranks a finding. Higher values sort first.
@@ -137,4 +138,45 @@ func CountBySeverity(fs []Finding) (crit, warn, info int) {
 func Summary(fs []Finding) string {
 	crit, warn, info := CountBySeverity(fs)
 	return fmt.Sprintf("%d critical, %d warning, %d info", crit, warn, info)
+}
+
+// ParseSeverity parses a severity name ("critical", "warning", "info"),
+// case-insensitively. Used by the --fail-on flag.
+func ParseSeverity(s string) (Severity, error) {
+	switch strings.ToLower(strings.TrimSpace(s)) {
+	case "critical":
+		return SevCritical, nil
+	case "warning":
+		return SevWarning, nil
+	case "info":
+		return SevInfo, nil
+	default:
+		return SevInfo, fmt.Errorf("unknown severity %q (use critical, warning or info)", s)
+	}
+}
+
+// Drop removes findings whose check ID is in ignore, preserving order. A nil
+// or empty ignore set returns the input unchanged.
+func Drop(fs []Finding, ignore map[string]bool) []Finding {
+	if len(ignore) == 0 {
+		return fs
+	}
+	out := make([]Finding, 0, len(fs))
+	for _, f := range fs {
+		if !ignore[f.ID] {
+			out = append(out, f)
+		}
+	}
+	return out
+}
+
+// AnyAtOrAbove reports whether any finding is at least as severe as min.
+// Used by the --fail-on exit-code gate.
+func AnyAtOrAbove(fs []Finding, min Severity) bool {
+	for _, f := range fs {
+		if f.Severity >= min {
+			return true
+		}
+	}
+	return false
 }

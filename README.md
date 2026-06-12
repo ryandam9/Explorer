@@ -319,7 +319,9 @@ by them.
 |------|---------|-------------|
 | `--only` | all | Restrict to finding categories (currently: `cost`); more categories are planned |
 | `--tui` | `false` | Explore the findings interactively instead of printing |
-| `--output` / `-o` | `table` | `table`, `json` (findings + total), `ndjson`, `csv` |
+| `--fail-on` | — | Exit with code 2 if findings at or above this severity exist: `critical`, `warning`, `info` |
+| `--ignore` | — | Suppress findings by check ID (e.g. `--ignore COST-EBS-002,COST-SNAP-001`); unknown IDs are rejected |
+| `--output` / `-o` | `table` | `table`, `json` (findings + total), `ndjson`, `csv`, `sarif` (SARIF 2.1.0) |
 
 ```bash
 # Audit every region
@@ -334,6 +336,39 @@ by them.
 # Explore interactively
 ./bin/aws_explorer audit --all-regions --tui
 ```
+
+### Using audit as a CI gate
+
+`--fail-on` gives the audit meaningful exit codes, and `-o sarif` emits
+[SARIF 2.1.0](https://docs.oasis-open.org/sarif/sarif/v2.1.0/sarif-v2.1.0.html)
+that GitHub code scanning ingests directly — check IDs become rules, findings
+become alerts.
+
+| Exit code | Meaning |
+|-----------|---------|
+| `0` | No findings at or above the `--fail-on` threshold (or no threshold set) |
+| `1` | Operational error (bad flags, engine failed to start, rendering failed) |
+| `2` | Findings at or above the threshold exist |
+
+```bash
+# Fail the pipeline on any warning-or-worse waste, tolerating gp2 volumes
+aws_explorer audit --all-regions --fail-on warning --ignore COST-EBS-002
+
+# Upload to GitHub code scanning
+aws_explorer audit --all-regions -o sarif > audit.sarif
+```
+
+```yaml
+# .github/workflows/cost-audit.yml
+- name: Cost audit
+  run: aws_explorer audit --all-regions -o sarif > audit.sarif
+- uses: github/codeql-action/upload-sarif@v3
+  with:
+    sarif_file: audit.sarif
+```
+
+`--fail-on` is for scripting and cannot be combined with `--tui`; `--ignore`
+works everywhere (CLI, TUI, all output formats).
 
 ### Audit TUI
 
