@@ -317,7 +317,7 @@ type in `config.yaml` — see [Customizing displayed columns](#customizing-displ
 | `Enter` | Open a VPC · load a category · open the selected row's detail overlay |
 | `Tab` | Switch focus between the category sidebar and the resource table |
 | `<` / `>` (or `,` / `.`) | Scroll table columns left/right when a table is wider than the panel |
-| `/` | Filter the VPC list by name or ID (VPC list only) |
+| `/` | Filter the VPC list by name or ID · quick-filter the resource table (matches any column, live `matched/total` count; `Enter` keeps the filter, `Esc` clears it) |
 | `s` / `R` | Sort the resource table by the next column / reverse the direction |
 | `c` / `y` | Copy the selected resource's ID to the clipboard |
 | `C` | Export the current resource table to CSV under `~/.aws_explorer/exports/` |

@@ -566,10 +566,11 @@ func writeExport(data fullExport, findings []Finding, now time.Time) (string, er
 }
 
 // exportResourceCSV writes the currently displayed resource table (full
-// column set, current display order) to a timestamped CSV and returns its
-// path. An empty path with nil error means there was nothing to export.
+// column set, current filter and display order) to a timestamped CSV and
+// returns its path. An empty path with nil error means there was nothing to
+// export.
 func (m *Model) exportResourceCSV() (string, error) {
-	maps := m.resourceMaps[m.activeResource]
+	maps := m.resourceView
 	if len(maps) == 0 || m.selectedVPC == nil {
 		return "", nil
 	}
