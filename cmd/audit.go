@@ -104,10 +104,16 @@ cloudwatch:GetMetricData and are skipped without it.`,
 	// audit accepts one format beyond the global set (sarif), so it replaces
 	// the root command's format validation with its own.
 	PersistentPreRunE: func(cmd *cobra.Command, args []string) error {
-		if strings.EqualFold(outputFormat, "sarif") {
-			return nil
+		// audit accepts one format beyond the global set (sarif), so it
+		// validates the format itself, then runs the shared pre-flight auth
+		// check (audit overrides the root command's PersistentPreRunE, so the
+		// check has to be invoked here too).
+		if !strings.EqualFold(outputFormat, "sarif") {
+			if err := output.ValidateFormat(outputFormat); err != nil {
+				return err
+			}
 		}
-		return output.ValidateFormat(outputFormat)
+		return preflightAuth(cmd)
 	},
 	RunE: func(cmd *cobra.Command, args []string) error {
 		if err := validateAuditCategories(auditOnly); err != nil {
