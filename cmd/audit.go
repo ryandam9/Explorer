@@ -20,7 +20,7 @@ import (
 
 // auditCategories lists the implemented finding categories. More join as the
 // roadmap lands (security, messaging, …); --only validates against this.
-var auditCategories = []string{"cost", "security", "iam"}
+var auditCategories = []string{"cost", "security", "iam", "messaging"}
 
 // auditExitFindings is the exit code when --fail-on is set and findings at or
 // above the threshold exist (operational errors exit 1, clean runs 0), so CI
@@ -61,8 +61,13 @@ days or active-but-unused, roles unused for 90+ days, customer policies
 granting */*, trust policies allowing any AWS principal, and policies
 attached directly to users.
 
+messaging — broken async plumbing: queues filling with no consumers,
+redrive policies pointing at queues that no longer exist, dead-letter
+queues with messages waiting, SNS subscriptions stuck unconfirmed, and
+topics with zero subscriptions.
+
 Every finding carries a stable check ID (e.g. COST-EBS-001, SEC-S3-001,
-IAM-KEY-001).
+IAM-KEY-001, MSG-SQS-001).
 
 For CI pipelines, --fail-on <severity> exits 2 when findings at or above the
 threshold exist (0 below it, 1 on operational errors), --ignore suppresses
@@ -87,6 +92,9 @@ cloudwatch:GetMetricData and are skipped without it.`,
 
   # IAM hygiene only (account-global; region flags don't matter)
   aws_explorer audit --only iam
+
+  # Async plumbing only
+  aws_explorer audit --only messaging
 
   # CI gate: exit 2 if any warning-or-worse finding exists
   aws_explorer audit --fail-on warning --ignore COST-EBS-002,SEC-EC2-001

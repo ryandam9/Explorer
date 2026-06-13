@@ -43,7 +43,7 @@ func Stream(ctx context.Context, baseCfg aws.Config, regions []string, categorie
 	if len(regions) == 0 {
 		regions = []string{"us-east-1"}
 	}
-	wantCost, wantSecurity, wantIAM := false, false, false
+	wantCost, wantSecurity, wantIAM, wantMessaging := false, false, false, false
 	for _, c := range categories {
 		switch c {
 		case "cost":
@@ -52,6 +52,8 @@ func Stream(ctx context.Context, baseCfg aws.Config, regions []string, categorie
 			wantSecurity = true
 		case "iam":
 			wantIAM = true
+		case "messaging":
+			wantMessaging = true
 		}
 	}
 
@@ -72,6 +74,11 @@ func Stream(ctx context.Context, baseCfg aws.Config, regions []string, categorie
 			if wantSecurity {
 				snap, e := collectSecurityRegion(gctx, baseCfg, region, s3Region, perCallTimeout)
 				fs = append(fs, findings.AnalyzeSecurity(snap)...)
+				errs = append(errs, e...)
+			}
+			if wantMessaging {
+				snap, e := collectMessagingRegion(gctx, baseCfg, region, perCallTimeout)
+				fs = append(fs, findings.AnalyzeMessaging(snap)...)
 				errs = append(errs, e...)
 			}
 			// IAM is account-global: collected once, in the first region's

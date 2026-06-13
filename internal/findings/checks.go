@@ -83,6 +83,18 @@ var checkRegistry = []CheckMeta{
 		"policy attached directly to users instead of groups/roles", SevInfo},
 	{CheckOpenTrustPolicy, "TrustPolicyAllowsAnyPrincipal",
 		"role trust policy allowing \"AWS\": \"*\" without conditions", SevCritical},
+
+	// Messaging plumbing category (AXE-018).
+	{CheckQueueNoConsumers, "QueueFillingNoConsumers",
+		"SQS queue accumulating messages with no receive activity in 24h", SevWarning},
+	{CheckRedriveDangling, "RedrivePolicyTargetMissing",
+		"SQS redrive policy whose dead-letter target queue does not exist", SevCritical},
+	{CheckDLQNotEmpty, "DeadLetterQueueNotEmpty",
+		"dead-letter queue holding failed messages awaiting attention", SevWarning},
+	{CheckSubPending, "SubscriptionPendingConfirmation",
+		"SNS subscription stuck in PendingConfirmation, delivering nothing", SevWarning},
+	{CheckTopicNoSubs, "TopicZeroSubscriptions",
+		"SNS topic with no subscriptions — published messages are discarded", SevInfo},
 }
 
 // Checks returns the registry of every known check, in declaration order.
