@@ -43,6 +43,7 @@ type model struct {
 	ctx        context.Context
 	awsCfg     *config.AWSConfig
 	regions    []string
+	allRegions bool
 	configPath string
 	appCfg     *config.Config
 	client     *CWLogsClient
@@ -157,6 +158,7 @@ func NewModel(ctx context.Context, awsCfg *config.AWSConfig, regions []string, a
 		ctx:          ctx,
 		awsCfg:       awsCfg,
 		regions:      client.Regions(),
+		allRegions:   allRegions,
 		configPath:   configPath,
 		appCfg:       appCfg,
 		client:       client,
@@ -739,6 +741,12 @@ func (m *model) View() string {
 	}
 
 	var sb strings.Builder
+
+	// Spotlight the active region scope at the top when not in all-regions
+	// mode, so a single-region session can't be mistaken for the whole account.
+	if badge := ui.RegionBadge(m.regions, m.allRegions); badge != "" {
+		sb.WriteString(badge + "\n")
+	}
 
 	// Main Layout: Sidebar & Content Panel
 	sidebarW := 42

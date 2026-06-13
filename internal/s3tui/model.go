@@ -1729,9 +1729,7 @@ func (m *Model) View() string {
 	if info := authDisplayInfo(m.awsCfg); info != "" {
 		headerText += "   " + info
 	}
-	if m.region != "" {
-		headerText += fmt.Sprintf("   Region: %s", m.region)
-	} else if m.state == stateBucketList {
+	if m.region == "" && m.state == stateBucketList {
 		headerText += "   Regions: all"
 	}
 	if m.flatMode {
@@ -1741,6 +1739,11 @@ func (m *Model) View() string {
 		headerText += "   [VERSIONS:ON]"
 	}
 	header := ui.HeaderStyle().Render(headerText)
+	// A pinned region gets a distinctive badge (joined after the styled header
+	// so its colors don't bleed into the rest of the title).
+	if badge := ui.RegionBadge([]string{m.region}, false); badge != "" {
+		header = lipgloss.JoinHorizontal(lipgloss.Top, header, " ", badge)
+	}
 
 	if m.err != nil {
 		maxErrW := m.width - 20

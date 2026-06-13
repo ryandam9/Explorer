@@ -69,6 +69,10 @@ func (m Model) headerView() string {
 	// JoinHorizontal (not string concat) so progress sits on the title's first
 	// row; ui.HeaderStyle's bottom margin would otherwise drop it a line.
 	line1 := lipgloss.JoinHorizontal(lipgloss.Top, title, "  ", progress)
+	// Spotlight the scanned region scope unless --all-regions widened it.
+	if badge := ui.RegionBadge(m.regionNames, m.allRegions); badge != "" {
+		line1 = lipgloss.JoinHorizontal(lipgloss.Top, line1, "  ", badge)
+	}
 
 	var parts []string
 	parts = append(parts, fmt.Sprintf("%d finding(s)", len(m.all)))

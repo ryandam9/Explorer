@@ -64,10 +64,12 @@ var columns = []table.Column{
 
 // Model is the audit TUI.
 type Model struct {
-	ch       <-chan audit.CostChunk
-	regions  int
-	scanned  int
-	scanning bool
+	ch          <-chan audit.CostChunk
+	regions     int
+	regionNames []string // the scanned region scope, for the header badge
+	allRegions  bool     // true when --all-regions widened the scope
+	scanned     int
+	scanning    bool
 
 	all     []findings.Finding // merged, kept in findings.Sort order
 	visible []findings.Finding // filter + sort applied; row i shows visible[i]
@@ -94,7 +96,7 @@ type Model struct {
 
 // New builds the audit TUI. regions sizes the progress meter; ch streams one
 // chunk per region and is closed by the producer when the scan completes.
-func New(regions []string, ch <-chan audit.CostChunk) Model {
+func New(regions []string, allRegions bool, ch <-chan audit.CostChunk) Model {
 	sp := spinner.New()
 	sp.Spinner = spinner.MiniDot
 	sp.Style = lipgloss.NewStyle().Foreground(lipgloss.Color(ui.ColorAccent()))
@@ -116,13 +118,15 @@ func New(regions []string, ch <-chan audit.CostChunk) Model {
 	)
 
 	return Model{
-		ch:       ch,
-		regions:  len(regions),
-		scanning: true,
-		tbl:      tbl,
-		filter:   fi,
-		sortCol:  -1,
-		spin:     sp,
+		ch:          ch,
+		regions:     len(regions),
+		regionNames: regions,
+		allRegions:  allRegions,
+		scanning:    true,
+		tbl:         tbl,
+		filter:      fi,
+		sortCol:     -1,
+		spin:        sp,
 	}
 }
 
