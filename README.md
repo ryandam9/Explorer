@@ -17,6 +17,7 @@ Discover, monitor, and display AWS resources across accounts and regions via CLI
 - **Global fuzzy finder**: `Ctrl+P` in the summary TUI jumps to any resource by name/ID/ARN fragment ("I have `eni-0abc` from an error — what is it?"); `aws_explorer find <fragment>` is the CLI twin — see [Find Usage](#find-usage)
 - **SSO-aware errors**: an expired AWS SSO session prints the exact fix (`run: aws sso login --profile prod`) instead of an SDK error chain, in the CLI and every TUI
 - **Expiry watchlist**: `aws_explorer expiring` lists everything that breaks on a calendar date — ACM/IAM certificate expiry, Lambda runtime deprecations, EKS end-of-support, RDS CA certs & pending maintenance, overdue secret rotations — sorted by days remaining — see [Expiring Usage](#expiring-usage)
+- **ECS stopped-task triage**: `aws_explorer ecs stopped` answers "why did my task stop?" — the task-level stop reason plus the failing container's exit code, glossed in plain English (137 → possible OOM-kill, 139 → segfault) — see [ECS Stopped-Task Triage](#ecs-stopped-task-triage)
 - **Config-driven**: YAML configuration for services, regions, filters, output, and per-resource display columns
 - **5 auth methods**: auto (SDK default chain), profile, env vars, static credentials, STS AssumeRole
 - **Output formats**: Table (default), JSON, NDJSON, CSV — with `--no-header` for scripting and colored states on terminals
@@ -590,6 +591,48 @@ What it checks:
 `iam:ListServerCertificates`, `lambda:ListFunctions`, `eks:{ListClusters,
 DescribeCluster}`, `rds:{DescribeDBInstances,DescribePendingMaintenanceActions}`,
 `secretsmanager:ListSecrets`. Any denial skips that source with a note.
+
+## ECS Stopped-Task Triage
+
+`ecs stopped` answers the perennial "why did my task stop?" ticket without
+spelunking through the console. For each recently stopped task it prints the
+task-level stop reason and the failing container's exit code, with the exit
+code translated into plain English.
+
+```bash
+./bin/aws_explorer ecs stopped [--cluster <name-or-arn>] [--all-regions] [-o table|json|ndjson|csv]
+```
+
+```
+SNO  STOPPED AT (UTC)  CLUSTER     TASK    REASON                              CONTAINER  EXIT
+1    2026-06-12 01:14  prod        3f9a…   Essential container in task exited  app        137 (possible OOM-kill (137 = 128+9, SIGKILL))
+2    2026-06-12 01:10  prod        77b2…   Task failed to start                web        CannotPullContainerError: pull rate limit
+```
+
+Exit-code glosses (hedged — the same code can have benign causes):
+
+| Signal | Exit code | Note |
+|--------|-----------|------|
+| SIGKILL | `137` (128+9) | possible OOM-kill — raise memory or fix the leak |
+| SIGSEGV | `139` (128+11) | segfault |
+| SIGABRT | `134` (128+6) | likely an `abort()`/assert |
+| SIGTERM | `143` (128+15) | stopped by a signal, often a normal shutdown |
+
+A container reason mentioning memory (`OutOfMemoryError`, `memory limit`) is
+treated as a stronger OOM signal than the exit code alone.
+
+| Flag | Default | Description |
+|------|---------|-------------|
+| `--cluster` | _(all)_ | Limit to one cluster (name or ARN); default scans every cluster in scope |
+| `--output` / `-o` | `table` | `table`, `json`, `ndjson`, `csv` |
+
+> **About the retention window.** ECS keeps stopped tasks for roughly one
+> hour. An empty report means nothing stopped in that window, not that nothing
+> ever fails — run it soon after the failure.
+
+**IAM permissions.** Read-only: `ecs:ListClusters`, `ecs:ListTasks`,
+`ecs:DescribeTasks`. Any denial skips that region with a note on stderr and
+never aborts the run.
 
 ## Bill Usage
 

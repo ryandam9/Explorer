@@ -611,6 +611,8 @@ no metric data renders as "no datapoints" not an empty box.
 
 ### AXE-015 — ECS stopped-task triage {#axe-015}
 
+> **Status: ✅ shipped** — `aws_explorer ecs stopped [--cluster]` (CLI). Pure classification in `internal/ecstriage/triage.go` (`Classify` + `exitNote`, fixture-tested), collection in `internal/ecstriage/collect.go` (`ListTasks(desiredStatus=STOPPED)` + `DescribeTasks`). Exit codes are glossed (137 → possible OOM-kill, 139 → segfault, 143 → SIGTERM, 134 → SIGABRT) and a container reason mentioning memory is treated as a stronger OOM signal. The TUI stopped-tasks view remains a possible follow-up.
+
 **Problem.** "Why did my task stop?" is a perennial ticket; the answer
 (`stoppedReason`, container exit codes) is one API call away but buried.
 
