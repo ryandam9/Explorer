@@ -7,12 +7,12 @@ import (
 )
 
 // RegionBadgeStyle is the high-contrast badge used to spotlight the active
-// region scope at the top of a screen — a filled accent background so the
+// region scope at the top of a screen — a filled highlight background so the
 // region a user is looking at can never be mistaken.
 func RegionBadgeStyle() lipgloss.Style {
 	return lipgloss.NewStyle().
 		Foreground(lipgloss.Color(ColorHighlightText())).
-		Background(lipgloss.Color(ColorAccent())).
+		Background(lipgloss.Color(ColorHighlight())).
 		Bold(true).
 		Padding(0, 1)
 }
