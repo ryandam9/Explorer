@@ -147,7 +147,7 @@ func (m Model) keyHints() []ui.KeyHint {
 		ui.H("/", "filter"),
 		ui.H("s", "sort"),
 	}
-	if m.sortCol >= 0 {
+	if m.sortCol > 0 {
 		hints = append(hints, ui.H("R", "reverse"))
 	}
 	if hl, hr := m.tbl.ColScrollInfo(); hl+hr > 0 {

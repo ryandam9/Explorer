@@ -29,15 +29,15 @@ func Render(w io.Writer, events []Event, format string, noHeader bool) error {
 func renderTable(w io.Writer, events []Event, noHeader bool) error {
 	tw := tabwriter.NewWriter(w, 0, 0, 2, ' ', 0)
 	if !noHeader {
-		fmt.Fprintln(tw, "TIME\tEVENT\tPRINCIPAL\tSOURCE IP")
+		fmt.Fprintln(tw, "SNO\tTIME\tEVENT\tPRINCIPAL\tSOURCE IP")
 	}
-	for _, ev := range events {
+	for i, ev := range events {
 		name := ev.EventName
 		if ev.ReadOnly {
 			name += " (read)"
 		}
-		fmt.Fprintf(tw, "%s\t%s\t%s\t%s\n",
-			ev.Time.UTC().Format("2006-01-02 15:04:05"), name, ev.Principal, ev.SourceIP)
+		fmt.Fprintf(tw, "%d\t%s\t%s\t%s\t%s\n",
+			i+1, ev.Time.UTC().Format("2006-01-02 15:04:05"), name, ev.Principal, ev.SourceIP)
 	}
 	return tw.Flush()
 }

@@ -30,17 +30,17 @@ func Render(w io.Writer, b *Bill, format string, noHeader bool) error {
 func renderTable(w io.Writer, b *Bill, noHeader bool) error {
 	tw := tabwriter.NewWriter(w, 0, 0, 2, ' ', 0)
 	if !noHeader {
-		fmt.Fprintln(tw, "SERVICE\tUSAGE TYPE\tUSAGE\tUNIT\tCOST")
+		fmt.Fprintln(tw, "SNO\tSERVICE\tUSAGE TYPE\tUSAGE\tUNIT\tCOST")
 	}
-	for _, l := range b.Lines {
-		fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%s\n",
-			l.Service, l.UsageType, FormatQty(l.Quantity), l.Unit, FormatAmount(l.Amount, b.Currency))
+	for i, l := range b.Lines {
+		fmt.Fprintf(tw, "%d\t%s\t%s\t%s\t%s\t%s\n",
+			i+1, l.Service, l.UsageType, FormatQty(l.Quantity), l.Unit, FormatAmount(l.Amount, b.Currency))
 	}
 	total := "TOTAL"
 	if b.Estimated {
 		total += " (estimated)"
 	}
-	fmt.Fprintf(tw, "%s\t%s → %s\t\t\t%s\n",
+	fmt.Fprintf(tw, "\t%s\t%s → %s\t\t\t%s\n",
 		total, b.Start.Format(dateFmt), b.End.Format(dateFmt), FormatAmount(b.Total, b.Currency))
 	return tw.Flush()
 }

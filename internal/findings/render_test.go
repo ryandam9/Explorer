@@ -32,7 +32,7 @@ func TestRenderTable(t *testing.T) {
 	}
 	out := buf.String()
 	for _, want := range []string{
-		"SEVERITY", "EST/MO", // header
+		"SNO", "SEVERITY", "EST/MO", // header
 		"COST-EBS-001", "vol-0abc", "$102.40",
 		"🟡 WARNING",
 		"$106.05/month", // total

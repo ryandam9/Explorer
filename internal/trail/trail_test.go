@@ -195,7 +195,7 @@ func TestRender_Table(t *testing.T) {
 	}
 	out := buf.String()
 	for _, want := range []string{
-		"TIME", "AuthorizeSecurityGroupIngress", "role/deploy-pipeline",
+		"SNO", "TIME", "AuthorizeSecurityGroupIngress", "role/deploy-pipeline",
 		"203.0.113.7", "DescribeSecurityGroups (read)",
 	} {
 		if !strings.Contains(out, want) {

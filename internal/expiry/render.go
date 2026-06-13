@@ -29,11 +29,11 @@ func Render(w io.Writer, items []Item, format string, noHeader bool) error {
 func renderTable(w io.Writer, items []Item, noHeader bool) error {
 	tw := tabwriter.NewWriter(w, 0, 0, 2, ' ', 0)
 	if !noHeader {
-		fmt.Fprintln(tw, " DAYS\tWHAT\tRESOURCE\tREGION\tDETAIL")
+		fmt.Fprintln(tw, "SNO\t DAYS\tWHAT\tRESOURCE\tREGION\tDETAIL")
 	}
-	for _, it := range items {
-		fmt.Fprintf(tw, "%5d\t%s\t%s\t%s\t%s\n",
-			it.Days, it.Kind, it.Resource, it.Region, it.Detail)
+	for i, it := range items {
+		fmt.Fprintf(tw, "%d\t%5d\t%s\t%s\t%s\t%s\n",
+			i+1, it.Days, it.Kind, it.Resource, it.Region, it.Detail)
 	}
 	return tw.Flush()
 }

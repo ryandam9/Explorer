@@ -321,10 +321,10 @@ Accepts the same global flags as the CLI command (`--config`, `--profile`,
 `--auth-method`, `--role-arn`, `--region`, `--all-regions`, `-o`, `--no-header`).
 
 ```
-SEVERITY    ID            RESOURCE        REGION     ISSUE                                  EST/MO   FIX
-🟡 WARNING  COST-EBS-001  vol-0abc        us-east-1  Unattached EBS volume (gp2, 1024 GiB)  $102.40  Snapshot the volume and delete it, …
-🟡 WARNING  COST-NAT-001  nat-01 (spare)  us-east-1  NAT gateway not referenced by any route $32.85  Delete the NAT gateway, …
-🔵 INFO     COST-EBS-002  vol-0def        us-east-1  gp2 volume could be gp3 (500 GiB)      $10.00   Modify the volume type to gp3 …
+SNO  SEVERITY    ID            RESOURCE        REGION     ISSUE                                  EST/MO   FIX
+1    🟡 WARNING  COST-EBS-001  vol-0abc        us-east-1  Unattached EBS volume (gp2, 1024 GiB)  $102.40  Snapshot the volume and delete it, …
+2    🟡 WARNING  COST-NAT-001  nat-01 (spare)  us-east-1  NAT gateway not referenced by any route $32.85  Delete the NAT gateway, …
+3    🔵 INFO     COST-EBS-002  vol-0def        us-east-1  gp2 volume could be gp3 (500 GiB)      $10.00   Modify the volume type to gp3 …
 
 0 critical, 2 warning, 1 info — estimated potential savings ≈ $145.25/month
 ```
@@ -539,10 +539,10 @@ day counts, so the things currently broken are impossible to miss.
 ```
 
 ```
- DAYS  WHAT                                 RESOURCE                  REGION      DETAIL
-   -3  Lambda runtime deprecated            payments-fn (python3.9)   us-east-1   runtime python3.9 was deprecated 2025-12-15 — update the function's runtime
-   12  ACM certificate expires              *.example.com             us-east-1   certificate is in use — renew or re-issue before it expires (expires 2026-06-24)
-   61  EKS version end of standard support  prod-cluster (1.33)       eu-west-1   standard support for 1.33 ends 2026-07-29 — upgrade the cluster (extended support bills extra)
+SNO   DAYS  WHAT                                 RESOURCE                  REGION      DETAIL
+1       -3  Lambda runtime deprecated            payments-fn (python3.9)   us-east-1   runtime python3.9 was deprecated 2025-12-15 — update the function's runtime
+2       12  ACM certificate expires              *.example.com             us-east-1   certificate is in use — renew or re-issue before it expires (expires 2026-06-24)
+3       61  EKS version end of standard support  prod-cluster (1.33)       eu-west-1   standard support for 1.33 ends 2026-07-29 — upgrade the cluster (extended support bills extra)
 ```
 
 What it checks:
@@ -595,11 +595,11 @@ charges are estimated and flagged as such.
 ```
 
 ```
-SERVICE                  USAGE TYPE                  USAGE     UNIT    COST
-Amazon EC2               EBS:VolumeUsage.gp3         100       GB-Mo   $8.00
-Amazon EC2               BoxUsage:t3.micro           744       Hrs     $1.50
-Amazon S3                TimedStorage-ByteHrs        10        GB-Mo   $0.25
-TOTAL (estimated)        2026-06-01 → 2026-06-13                       $9.75
+SNO  SERVICE                  USAGE TYPE                  USAGE     UNIT    COST
+1    Amazon EC2               EBS:VolumeUsage.gp3         100       GB-Mo   $8.00
+2    Amazon EC2               BoxUsage:t3.micro           744       Hrs     $1.50
+3    Amazon S3                TimedStorage-ByteHrs        10        GB-Mo   $0.25
+     TOTAL (estimated)        2026-06-01 → 2026-06-13                       $9.75
 ```
 
 ### Live screen (`--tui`)
@@ -748,9 +748,9 @@ aws_explorer trail my-bucket -o json | jq '.[0]'
 ```
 
 ```
-TIME                 EVENT                          PRINCIPAL             SOURCE IP
-2026-06-11 14:02:11  AuthorizeSecurityGroupIngress  role/deploy-pipeline  203.0.113.7
-2026-06-09 09:15:42  ModifySecurityGroupRules       user/alice            198.51.100.2
+SNO  TIME                 EVENT                          PRINCIPAL             SOURCE IP
+1    2026-06-11 14:02:11  AuthorizeSecurityGroupIngress  role/deploy-pipeline  203.0.113.7
+2    2026-06-09 09:15:42  ModifySecurityGroupRules       user/alice            198.51.100.2
 ```
 
 | Flag | Default | Description |
@@ -798,9 +798,9 @@ aws_explorer find payments -o json | jq '.[0].arn'
 ```
 
 ```
-NAME        TYPE           ID                     REGION      ARN
-prod-web-3  ec2/instance   i-0abc12def34567890    us-east-1   arn:aws:ec2:us-east-1:…
-prod-web    elbv2/loadb…   arn:aws:elasticloadb…  us-east-1   arn:aws:elasticloadb…
+SNO  NAME        TYPE           ID                     REGION      ARN
+1    prod-web-3  ec2/instance   i-0abc12def34567890    us-east-1   arn:aws:ec2:us-east-1:…
+2    prod-web    elbv2/loadb…   arn:aws:elasticloadb…  us-east-1   arn:aws:elasticloadb…
 ```
 
 | Flag | Default | Description |

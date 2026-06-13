@@ -25,7 +25,7 @@ func TestRenderTable(t *testing.T) {
 		t.Fatal(err)
 	}
 	out := buf.String()
-	for _, want := range []string{"DAYS", "WHAT", "-3", "payments-fn", "12", "*.example.com"} {
+	for _, want := range []string{"SNO", "DAYS", "WHAT", "-3", "payments-fn", "12", "*.example.com"} {
 		if !strings.Contains(out, want) {
 			t.Errorf("table missing %q:\n%s", want, out)
 		}
