@@ -3,7 +3,7 @@
 // and a running total, and re-fetches from Cost Explorer on a fixed interval
 // so activity that incurs cost surfaces without restarting — each refresh is
 // one paid API request, which is why the interval is user-controlled and the
-// status line names it. A Δ column shows what moved since the last refresh,
+// status line names it. A CHANGE column shows what moved since the last refresh,
 // and a per-service resource breakdown answers "which resource exactly?"
 // when the account has resource-level data enabled.
 package billtui
@@ -56,15 +56,17 @@ const (
 	overlayHelp
 )
 
-// columns of the bill table. Service stays pinned while the rest scroll
-// horizontally on narrow terminals.
+// columns of the bill table. The sequence number and service stay pinned
+// while the rest scroll horizontally on narrow terminals. Column 0 ("#") is a
+// positional row counter, not a sortable field.
 var columns = []table.Column{
-	{Title: "SERVICE", Width: 32},
-	{Title: "USAGE TYPE", Width: 34},
+	{Title: "#", Width: 5},
+	{Title: "SERVICE", Width: 30},
+	{Title: "USAGE TYPE", Width: 32},
 	{Title: "USAGE", Width: 14},
 	{Title: "UNIT", Width: 10},
 	{Title: "COST", Width: 12},
-	{Title: "Δ", Width: 10},
+	{Title: "CHANGE", Width: 11},
 }
 
 // Model is the live bill TUI.
@@ -127,7 +129,7 @@ func New(ctx context.Context, api billing.API, start, end time.Time, label strin
 		table.WithColumns(columns),
 		table.WithFocused(true),
 		table.WithStyles(ui.TableStyles()),
-		table.WithFrozenColumns(1),
+		table.WithFrozenColumns(2),
 	)
 
 	return Model{
@@ -299,16 +301,19 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			return m, tea.Batch(m.resourcesCmd(l.Service), m.spin.Tick)
 		}
 	case "s":
-		// Cycle: cost ranking (-1) → each column → back. Usage, cost and Δ
-		// start descending (biggest first).
+		// Cycle: natural cost ranking (-1) → each data column → back. The "#"
+		// column (index 0) is a positional counter, so it is skipped. USAGE,
+		// COST and CHANGE start descending (biggest first).
 		m.sortCol++
 		if m.sortCol >= len(columns) {
 			m.sortCol = -1
+		} else if m.sortCol == 0 {
+			m.sortCol = 1
 		}
-		m.sortAsc = !(m.sortCol == 2 || m.sortCol == 4 || m.sortCol == 5)
+		m.sortAsc = !(m.sortCol == 3 || m.sortCol == 5 || m.sortCol == 6)
 		m.rebuild()
 	case "R":
-		if m.sortCol >= 0 {
+		if m.sortCol > 0 {
 			m.sortAsc = !m.sortAsc
 			m.rebuild()
 		}
@@ -400,8 +405,9 @@ func (m *Model) rebuild() {
 		currency = m.bill.Currency
 	}
 	rows := make([]table.Row, 0, len(m.visible))
-	for _, l := range m.visible {
+	for i, l := range m.visible {
 		rows = append(rows, table.Row{
+			strconv.Itoa(i + 1),
 			l.Service, l.UsageType, billing.FormatQty(l.Quantity), l.Unit,
 			billing.FormatAmount(l.Amount, currency),
 			formatDelta(m.deltas[l.Key()], currency),
@@ -433,8 +439,8 @@ func diffBills(prev, next *billing.Bill) map[string]float64 {
 	return deltas
 }
 
-// formatDelta renders an amount change for the Δ column ("+$0.42"); zero or
-// untracked is blank so a quiet bill reads quiet.
+// formatDelta renders an amount change for the CHANGE column ("+$0.42"); zero
+// or untracked is blank so a quiet bill reads quiet.
 func formatDelta(d float64, currency string) string {
 	if d == 0 {
 		return ""
@@ -459,23 +465,24 @@ func filterLines(lines []billing.Line, query string) []billing.Line {
 }
 
 // sortVisible orders by the chosen column; col -1 keeps the cost-descending
-// order lines arrive in.
+// order lines arrive in. Column indices match the table header (1=SERVICE …
+// 6=CHANGE); column 0 ("#") is positional and never a sort target.
 func (m *Model) sortVisible() {
 	col, asc := m.sortCol, m.sortAsc
-	if col < 0 {
+	if col <= 0 {
 		return
 	}
 	less := func(a, b billing.Line) bool {
 		switch col {
-		case 0:
-			return a.Service < b.Service
 		case 1:
-			return a.UsageType < b.UsageType
+			return a.Service < b.Service
 		case 2:
-			return a.Quantity < b.Quantity
+			return a.UsageType < b.UsageType
 		case 3:
+			return a.Quantity < b.Quantity
+		case 4:
 			return a.Unit < b.Unit
-		case 5:
+		case 6:
 			return m.deltas[a.Key()] < m.deltas[b.Key()]
 		default:
 			return a.Amount < b.Amount
