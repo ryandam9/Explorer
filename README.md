@@ -19,6 +19,7 @@ Discover, monitor, and display AWS resources across accounts and regions via CLI
 - **Expiry watchlist**: `aws_explorer expiring` lists everything that breaks on a calendar date — ACM/IAM certificate expiry, Lambda runtime deprecations, EKS end-of-support, RDS CA certs & pending maintenance, overdue secret rotations — sorted by days remaining — see [Expiring Usage](#expiring-usage)
 - **ECS stopped-task triage**: `aws_explorer ecs stopped` answers "why did my task stop?" — the task-level stop reason plus the failing container's exit code, glossed in plain English (137 → possible OOM-kill, 139 → segfault) — see [ECS Stopped-Task Triage](#ecs-stopped-task-triage)
 - **Where-used / blast radius**: `aws_explorer whereused <arn-or-id>` answers "can I delete this?" for IAM roles, KMS keys, ACM certificates and security groups — every resource that references the target, with the scanned reference types listed so "not referenced" is a scoped answer — see [Whereused (blast radius)](#whereused-blast-radius)
+- **Service-quota dashboard**: `aws_explorer quotas` reports the AWS limits that actually cause incidents (vCPUs, EIPs, VPCs, ENIs, Lambda concurrency, RDS, EBS storage…) with real account-specific limits and current usage, sorted closest-to-exhaustion first — see [Quotas (service-quota dashboard)](#quotas-service-quota-dashboard)
 - **Config-driven**: YAML configuration for services, regions, filters, output, and per-resource display columns
 - **5 auth methods**: auto (SDK default chain), profile, env vars, static credentials, STS AssumeRole
 - **Output formats**: Table (default), JSON, NDJSON, CSV — with `--no-header` for scripting and colored states on terminals
@@ -634,6 +635,45 @@ treated as a stronger OOM signal than the exit code alone.
 **IAM permissions.** Read-only: `ecs:ListClusters`, `ecs:ListTasks`,
 `ecs:DescribeTasks`. Any denial skips that region with a note on stderr and
 never aborts the run.
+
+## Quotas (service-quota dashboard)
+
+`quotas` reports a curated set of the AWS limits that actually cause incidents
+— vCPUs, Elastic IPs, VPCs, network interfaces, Lambda concurrency, RDS
+instances, EBS storage, load balancers, EKS clusters, IAM roles — with their
+real limits and current usage, sorted so the ones nearest the ceiling lead.
+
+```bash
+./bin/aws_explorer quotas [--threshold 80] [--all-regions] [-o table|json|ndjson|csv]
+```
+
+```
+SNO  QUOTA                                 REGION      USED / LIMIT  %     STATUS
+1    VPCs per Region                       us-east-1   5 / 5         100%  CRITICAL
+2    Running On-Demand Standard instances  us-east-1   58 / 64       91%   WARN
+```
+
+Limits come from the **Service Quotas API's applied value**, so
+account-specific increases are reflected — unlike the VPC linter, which uses
+hardcoded defaults. When a quota has never been adjusted, the AWS default is
+shown instead (the real ceiling either way). Usage comes from each quota's
+CloudWatch usage metric where AWS publishes one; quotas without a usage metric
+are listed with their limit but no percentage (visible only with
+`--threshold 0`) rather than a guess.
+
+| Flag | Default | Description |
+|------|---------|-------------|
+| `--threshold` | `80` | Only show quotas at or above this % utilization; `0` shows all, including those with no usage metric |
+| `--output` / `-o` | `table` | `table`, `json`, `ndjson`, `csv` |
+
+> **Scope.** The curated registry covers ~17 high-impact quotas across EC2,
+> VPC, Lambda, RDS, EBS, ELBv2, EKS and IAM rather than dumping the thousands
+> AWS exposes. A quota whose code is unknown to your account simply degrades to
+> a skipped, reported entry.
+
+**IAM permissions.** Read-only: `servicequotas:{GetServiceQuota,GetAWSDefaultServiceQuota}`
+and `cloudwatch:GetMetricStatistics`. Any denial skips that quota with a note
+on stderr and never aborts the run.
 
 ## Bill Usage
 

@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Getting started · aws_explorer documentation</title>
+<title>aws_explorer quotas · aws_explorer documentation</title>
 <style>
 :root { --bg:#0d1117; --panel:#161b22; --border:#30363d; --text:#c9d1d9; --muted:#8b949e; --link:#58a6ff; --accent:#3fb950; --code:#1f2630; }
 * { box-sizing: border-box; }
@@ -38,7 +38,7 @@ hr { border:none; border-top:1px solid var(--border); margin:2rem 0; }
 <h3>Home</h3>
 <a href="index.html">aws_explorer documentation</a>
 <h3>Guides</h3>
-<a href="guide-getting-started.html" class="active" aria-current="page">Getting started</a>
+<a href="guide-getting-started.html">Getting started</a>
 <a href="guide-authentication.html">Authentication</a>
 <a href="guide-configuration.html">Configuration</a>
 <a href="guide-summary.html">The summary TUI</a>
@@ -62,7 +62,7 @@ hr { border:none; border-top:1px solid var(--border); margin:2rem 0; }
 <a href="iam.html">aws_explorer iam</a>
 <a href="iam_can.html">aws_explorer iam can</a>
 <a href="iam_decode.html">aws_explorer iam decode</a>
-<a href="quotas.html">aws_explorer quotas</a>
+<a href="quotas.html" class="active" aria-current="page">aws_explorer quotas</a>
 <a href="s3.html">aws_explorer s3</a>
 <a href="snapshot-diff.html">aws_explorer snapshot-diff</a>
 <a href="summary.html">aws_explorer summary</a>
@@ -71,99 +71,129 @@ hr { border:none; border-top:1px solid var(--border); margin:2rem 0; }
 <a href="whereused.html">aws_explorer whereused</a>
 </nav>
 <main>
-<p>AWS Explorer discovers, monitors and lists AWS resources — EC2, S3, RDS,
-Lambda and a dozen more services — across accounts and regions, from the
-command line or one of several interactive terminal UIs (TUIs).</p>
+<p>Service-quota dashboard — limits closest to exhaustion</p>
 
-<p>This documentation is generated from the tool itself: the command reference
-below is built from the live command tree, so it always matches the binary
-you are running. The guides cover the interactive screens and their keyboard
-shortcuts, which the command reference cannot show on its own.</p>
+<p>Quotas reports a curated set of the AWS limits that actually cause incidents
+— vCPUs, Elastic IPs, VPCs, network interfaces, Lambda concurrency, RDS
+instances, EBS storage, load balancers, EKS clusters, IAM roles — with their
+real limits and current usage, sorted so the ones nearest the ceiling lead.</p>
 
-<h2 id="install">Install</h2>
+<p>Limits come from the Service Quotas API&rsquo;s applied value, so account-specific
+increases are reflected (the VPC linter uses hardcoded defaults; this does
+not). When a quota has never been adjusted, the AWS default is shown instead.</p>
 
-<pre><code class="language-bash"># Install the latest release
-go install github.com/ryandam9/aws_explorer@latest
+<p>Usage comes from each quota&rsquo;s CloudWatch usage metric where AWS publishes one;
+quotas without a usage metric are listed with their limit but no percentage
+(shown only with &ndash;threshold 0) rather than a guess.</p>
 
-# …or clone and build
-git clone https://github.com/ryandam9/aws_explorer.git
-cd aws_explorer
-make build          # produces bin/aws_explorer
+<p>The report is read-only and best-effort: a denied or failed lookup skips that
+quota (reported on stderr) and never aborts the run.</p>
+
+<h2 id="usage">Usage</h2>
+
+<pre><code>aws_explorer quotas [flags]
 </code></pre>
 
-<h2 id="the-four-modes">The four modes</h2>
+<h2 id="examples">Examples</h2>
+
+<pre><code class="language-bash"># Quotas at or above 80% utilization (default), current region
+aws_explorer quotas
+
+# Tighter alerting threshold, across all regions
+aws_explorer quotas --threshold 90 --all-regions
+
+# Everything, including quotas with no usage metric
+aws_explorer quotas --threshold 0
+
+# Machine-readable; page on anything critical
+aws_explorer quotas --threshold 0 -o json | jq '[.[] | select(.status==&quot;critical&quot;)]'
+</code></pre>
+
+<h2 id="flags">Flags</h2>
 
 <table>
 <thead>
 <tr>
-<th>Mode</th>
-<th>How to start</th>
-<th>What it is</th>
+<th>Flag</th>
+<th>Default</th>
+<th>Description</th>
 </tr>
 </thead>
 
 <tbody>
 <tr>
-<td><strong>CLI</strong></td>
-<td><code>aws_explorer</code> (and most subcommands)</td>
-<td>Streams a table / JSON / NDJSON / CSV to stdout — scriptable, no UI</td>
-</tr>
-
-<tr>
-<td><strong>Summary TUI</strong></td>
-<td><code>aws_explorer summary --tui</code></td>
-<td>One interactive, filterable inventory of every resource — see <a href="guide-summary.html">The summary TUI</a></td>
-</tr>
-
-<tr>
-<td><strong>Offline snapshot</strong></td>
-<td><code>aws_explorer snapshot-diff --snapshot f.json</code></td>
-<td>Browse a saved snapshot, or diff two, with no credentials</td>
-</tr>
-
-<tr>
-<td><strong>Focused TUIs</strong></td>
-<td><code>aws_explorer vpc</code> · <code>s3</code> · <code>cw</code></td>
-<td>Dedicated explorers for a VPC&rsquo;s networking, S3, and CloudWatch Logs</td>
-</tr>
-
-<tr>
-<td><strong>Report TUIs</strong></td>
-<td><code>aws_explorer audit --tui</code> · <code>bill --tui</code></td>
-<td>Live, explorable cost/security findings and the account bill</td>
+<td><code>--threshold</code></td>
+<td>80</td>
+<td>only show quotas at or above this % utilization (0 = show all, including those with no usage metric)</td>
 </tr>
 </tbody>
 </table>
 
-<h2 id="first-runs">First runs</h2>
+<h2 id="global-flags">Global flags</h2>
 
-<pre><code class="language-bash"># Stream every resource in the configured regions to the terminal
-aws_explorer
+<table>
+<thead>
+<tr>
+<th>Flag</th>
+<th>Default</th>
+<th>Description</th>
+</tr>
+</thead>
 
-# The same inventory, but interactive
-aws_explorer summary --tui
+<tbody>
+<tr>
+<td><code>--all-regions</code></td>
+<td>—</td>
+<td>scan all available AWS regions</td>
+</tr>
 
-# Scan every region and write the inventory to CSV
-aws_explorer summary --all-regions -o csv &gt; inventory.csv
+<tr>
+<td><code>--auth-method</code></td>
+<td>—</td>
+<td>auth method: auto, profile, env, static, sts (overrides aws.authMethod in config)</td>
+</tr>
 
-# Audit the account for cost waste and security risks
-aws_explorer audit
-</code></pre>
+<tr>
+<td><code>--config</code></td>
+<td>—</td>
+<td>config file (default: ./config.yaml, then the user config dir, then built-in defaults)</td>
+</tr>
 
-<p>Configuration is optional — with no <code>config.yaml</code> present the tool runs on
-built-in defaults, so it works from any directory with zero setup. When you
-do want to pin services, regions, columns or themes, see
-<a href="guide-configuration.html">Configuration</a>. For credentials and profiles, see
-<a href="guide-authentication.html">Authentication</a>.</p>
+<tr>
+<td><code>--no-header</code></td>
+<td>—</td>
+<td>omit the header row in table and csv output</td>
+</tr>
 
-<h2 id="where-to-go-next">Where to go next</h2>
+<tr>
+<td><code>--output</code> / <code>-o</code></td>
+<td>table</td>
+<td>output format: table, json, ndjson, csv</td>
+</tr>
 
-<ul>
-<li><a href="guide-authentication.html">Authentication</a> — profiles, SSO, env vars, AssumeRole</li>
-<li><a href="guide-configuration.html">Configuration</a> — the <code>config.yaml</code> reference and themes</li>
-<li><a href="guide-shortcuts.html">Keyboard shortcut cheat sheet</a> — every TUI&rsquo;s keys in one place</li>
-<li>The <strong>Command reference</strong> (in the navigation) — one page per command, with flags and examples</li>
-</ul>
+<tr>
+<td><code>--profile</code></td>
+<td>—</td>
+<td>AWS named profile (overrides aws.profile in config)</td>
+</tr>
+
+<tr>
+<td><code>--region</code> / <code>-r</code></td>
+<td>—</td>
+<td>scan only this region (overrides aws.regions, &ndash;all-regions and region filters)</td>
+</tr>
+
+<tr>
+<td><code>--role-arn</code></td>
+<td>—</td>
+<td>IAM role ARN to assume via STS (sets auth method to sts)</td>
+</tr>
+</tbody>
+</table>
+
+<hr />
+
+<p>_Part of <a href="cli.html"><code>aws_explorer</code></a>._</p>
 
 </main>
 </div>

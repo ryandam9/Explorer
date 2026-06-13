@@ -657,6 +657,8 @@ are findings-style pure functions and also surface in `audit` (AXE-008).
 
 ### AXE-017 — Service-quota dashboard {#axe-017}
 
+> **Status: ✅ shipped** — `aws_explorer quotas [--threshold] [--all-regions]` + `internal/quotas`. Limits via `servicequotas:GetServiceQuota` with `GetAWSDefaultServiceQuota` fallback (account-specific increases reflected — fixes the VPC linter's hardcoded-default limitation); usage via each quota's CloudWatch `UsageMetric` (`GetMetricStatistics`), quotas without one shown limit-only rather than guessed. Curated registry of ~17 high-impact quotas (EC2 vCPUs, EIPs, VPCs/ENIs/IGWs/NAT, Lambda concurrency, RDS, EBS gp2/gp3, ALB/NLB, EKS, IAM roles). Pure `Evaluate`/`Filter`/`Sort` are fixture-tested.
+
 **Problem.** Quota exhaustion causes the most mysterious failures ("can't
 launch instances"). The VPC linter already does this for VPC limits
 (`checkQuotas`); generalize with real quota values instead of hardcoded

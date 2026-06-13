@@ -61,6 +61,7 @@ aws_explorer --all-regions
 - [`aws_explorer expiring`](expiring.md) — List everything that breaks on a calendar date
 - [`aws_explorer find`](find.md) — Fuzzy-find any resource by name, ID, ARN or type
 - [`aws_explorer iam`](iam.md) — IAM / access debugging helpers
+- [`aws_explorer quotas`](quotas.md) — Service-quota dashboard — limits closest to exhaustion
 - [`aws_explorer s3`](s3.md) — Start the S3 Explorer TUI
 - [`aws_explorer snapshot-diff`](snapshot-diff.md) — Browse a saved inventory snapshot, or diff two snapshots, offline
 - [`aws_explorer summary`](summary.md) — List every AWS resource across all regions
