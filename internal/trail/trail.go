@@ -48,13 +48,22 @@ const maxPages = 8
 // pageInterval keeps successive page fetches under the 2 TPS service limit.
 const pageInterval = 600 * time.Millisecond
 
+// apiMaxResults is the LookupEvents per-page ceiling.
+const apiMaxResults = 50
+
 // Lookup fetches CloudTrail events that reference the resource, newest first.
 // resourceID should be the bare resource name/ID as CloudTrail records it
 // (use LookupValue to derive it from an ARN). Pages are fetched serially to
 // respect the API's 2 TPS limit.
-func Lookup(ctx context.Context, cfg aws.Config, region, resourceID string, opts Options) ([]Event, error) {
+//
+// The returned truncated flag is true when the scan stopped at the maxPages
+// safety cap with more events still available — i.e. the result is an
+// incomplete prefix of the matching history, not because the caller's Limit
+// was reached. Callers should surface this so a missing older event isn't
+// mistaken for "no such event".
+func Lookup(ctx context.Context, cfg aws.Config, region, resourceID string, opts Options) (events []Event, truncated bool, err error) {
 	if resourceID == "" {
-		return nil, nil
+		return nil, false, nil
 	}
 	limit := opts.Limit
 	if limit <= 0 {
@@ -67,29 +76,35 @@ func Lookup(ctx context.Context, cfg aws.Config, region, resourceID string, opts
 	}
 	client := cloudtrail.NewFromConfig(ctCfg)
 
+	// Don't fetch a full page of 50 when the caller wants fewer; cap the page
+	// size at the limit so a small Limit doesn't pull (and discard) the rest.
+	pageSize := int32(apiMaxResults)
+	if limit < apiMaxResults {
+		pageSize = int32(limit)
+	}
+
 	input := &cloudtrail.LookupEventsInput{
 		LookupAttributes: []types.LookupAttribute{{
 			AttributeKey:   types.LookupAttributeKeyResourceName,
 			AttributeValue: aws.String(resourceID),
 		}},
-		MaxResults: aws.Int32(50),
+		MaxResults: aws.Int32(pageSize),
 	}
 	if !opts.Since.IsZero() {
 		input.StartTime = aws.Time(opts.Since)
 	}
 
-	var events []Event
 	for page := 0; page < maxPages; page++ {
 		if page > 0 {
 			select {
 			case <-ctx.Done():
-				return events, ctx.Err()
+				return events, false, ctx.Err()
 			case <-time.After(pageInterval):
 			}
 		}
 		resp, err := client.LookupEvents(ctx, input)
 		if err != nil {
-			return events, err
+			return events, false, err
 		}
 		for _, e := range resp.Events {
 			ev := summarize(aws.ToString(e.Username), aws.ToString(e.ReadOnly), aws.ToString(e.CloudTrailEvent))
@@ -100,15 +115,16 @@ func Lookup(ctx context.Context, cfg aws.Config, region, resourceID string, opts
 			}
 			events = append(events, ev)
 			if len(events) >= limit {
-				return events, nil
+				return events, false, nil
 			}
 		}
 		if resp.NextToken == nil || *resp.NextToken == "" {
-			return events, nil
+			return events, false, nil // reached the end of the matching events
 		}
 		input.NextToken = resp.NextToken
 	}
-	return events, nil
+	// Stopped at the page cap with a NextToken still pending: more events exist.
+	return events, true, nil
 }
 
 // rawCTEvent is the subset of the CloudTrail event record JSON needed to

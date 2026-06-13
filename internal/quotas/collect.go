@@ -179,6 +179,11 @@ func getQuota(ctx context.Context, client *awssq.Client, ref quotaRef) (*sqtypes
 	return def.Quota, true, nil
 }
 
+// usageLookback is how far back fetchUsage searches for a usage datapoint.
+// Wide enough to catch metrics that publish only hourly or daily; the most
+// recent datapoint in the window is the one used.
+const usageLookback = 48 * time.Hour
+
 // fetchUsage reads the latest value of a quota's CloudWatch usage metric using
 // the statistic AWS recommends. Returns ok=false when there is no usage metric
 // or no datapoint.
@@ -199,7 +204,12 @@ func fetchUsage(ctx context.Context, client *awscw.Client, m *sqtypes.MetricInfo
 		Namespace:  m.MetricNamespace,
 		MetricName: m.MetricName,
 		Dimensions: dims,
-		StartTime:  aws.Time(end.Add(-3 * time.Hour)),
+		// Look back far enough to catch infrequently-published usage metrics.
+		// Several AWS/Usage metrics emit only hourly (or less); a short 3h
+		// window would miss them and report a real, possibly near-limit quota
+		// as "no usage metric". We still take the most-recent datapoint below,
+		// so a wider window only adds resilience, not staleness.
+		StartTime:  aws.Time(end.Add(-usageLookback)),
 		EndTime:    aws.Time(end),
 		Period:     aws.Int32(300),
 		Statistics: []cwtypes.Statistic{cwtypes.Statistic(stat)},

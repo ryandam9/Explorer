@@ -2,6 +2,7 @@ package ecs
 
 import (
 	"context"
+	"errors"
 	"fmt"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
@@ -28,6 +29,7 @@ func (c *Collector) IsGlobal() bool {
 func (c *Collector) Collect(ctx context.Context, input services.CollectInput) ([]model.Resource, error) {
 	client := ecs.NewFromConfig(input.AWSConfig)
 	var resources []model.Resource
+	var errs []error
 
 	clusterPaginator := ecs.NewListClustersPaginator(client, &ecs.ListClustersInput{})
 	for clusterPaginator.HasMorePages() {
@@ -47,6 +49,13 @@ func (c *Collector) Collect(ctx context.Context, input services.CollectInput) ([
 			return resources, fmt.Errorf("failed to describe ECS clusters: %w", err)
 		}
 
+		// DescribeClusters returns per-cluster failures alongside the clusters
+		// it could describe; record them so dropped clusters surface as a
+		// partial result instead of vanishing silently.
+		for _, f := range desc.Failures {
+			errs = append(errs, fmt.Errorf("ECS cluster %s: %s", aws.ToString(f.Arn), aws.ToString(f.Reason)))
+		}
+
 		batch := make([]model.Resource, 0, len(desc.Clusters))
 		for _, cluster := range desc.Clusters {
 			batch = append(batch, c.mapCluster(input.Region, cluster, input.DetailLevel))
@@ -54,7 +63,7 @@ func (c *Collector) Collect(ctx context.Context, input services.CollectInput) ([
 		resources = input.EmitOrAppend(resources, batch)
 	}
 
-	return resources, nil
+	return resources, errors.Join(errs...)
 }
 
 func (c *Collector) mapCluster(region string, cluster types.Cluster, detail services.DetailLevel) model.Resource {

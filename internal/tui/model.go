@@ -3173,7 +3173,7 @@ func (m tuiModel) fetchTimelineCmd(res model.Resource) tea.Cmd {
 		}
 	}
 	return func() tea.Msg {
-		events, err := trail.Lookup(m.ctx, cfg, res.Region, res.ID, trail.Options{Limit: 20})
+		events, _, err := trail.Lookup(m.ctx, cfg, res.Region, res.ID, trail.Options{Limit: 20})
 		return timelineMsg{resourceID: res.ID, events: events, err: err}
 	}
 }

@@ -85,7 +85,7 @@ func (m *Model) loadDiffActors() tea.Cmd {
 				}
 			}
 			ctx, cancel := context.WithTimeout(client.ctx, awsRequestTimeout)
-			events, err := trail.Lookup(ctx, client.cfg, region, id, trail.Options{Limit: 1})
+			events, _, err := trail.Lookup(ctx, client.cfg, region, id, trail.Options{Limit: 1})
 			cancel()
 			if err != nil {
 				note := "CloudTrail lookup failed: " + err.Error()
