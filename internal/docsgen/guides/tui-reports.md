@@ -27,8 +27,8 @@ with a running total of potential savings in the header. See the
 
 `aws_explorer bill --tui` is a **live** screen: it re-fetches the account's
 cost from the AWS Cost Explorer API on a fixed interval (`--interval`, default
-5m), so activity that incurs cost surfaces without restarting. A `Δ` column
-shows what each line moved since the previous refresh, and `x` drills into a
+5m), so activity that incurs cost surfaces without restarting. A `CHANGE`
+column shows what each line moved since the previous refresh, and `x` drills into a
 service's per-resource costs (resource ID/ARN) when the account has
 resource-level data enabled. See the [`bill` command reference](bill.md).
 

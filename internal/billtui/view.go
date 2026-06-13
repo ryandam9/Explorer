@@ -150,7 +150,7 @@ func (m Model) keyHints() []ui.KeyHint {
 		ui.H("/", "filter"),
 		ui.H("s", "sort"),
 	}
-	if m.sortCol >= 0 {
+	if m.sortCol > 0 {
 		hints = append(hints, ui.H("R", "reverse"))
 	}
 	if hl, hr := m.tbl.ColScrollInfo(); hl+hr > 0 {
@@ -208,7 +208,7 @@ func (m Model) detailOverlay() string {
 	b.WriteString(row("Usage", billing.FormatQty(l.Quantity)+" "+l.Unit) + "\n")
 	b.WriteString(row("Cost", fmt.Sprintf("%s (%.6f %s)", billing.FormatAmount(l.Amount, currency), l.Amount, currency)) + "\n")
 	if d := m.deltas[l.Key()]; d != 0 {
-		b.WriteString(row("Δ refresh", formatDelta(d, currency)) + "\n")
+		b.WriteString(row("Change", formatDelta(d, currency)) + "\n")
 	}
 	b.WriteString(row("Period", m.start.Format("2006-01-02")+" → "+m.end.Format("2006-01-02")) + "\n\n")
 	b.WriteString(ui.MutedStyle().Render("x lists this service's resources · y copies the line · Esc closes"))
@@ -289,6 +289,6 @@ func (m Model) helpOverlay() string {
 	}
 	b.WriteString("\n" + lipgloss.NewStyle().Foreground(lipgloss.Color(ui.ColorWarning())).Bold(true).
 		Render("PAID FEATURE: Cost Explorer bills $0.01 per request. ") +
-		ui.MutedStyle().Render("Every automatic refresh at the configured --interval is one such request; the Δ column shows what moved since the previous refresh."))
+		ui.MutedStyle().Render("Every automatic refresh at the configured --interval is one such request; the CHANGE column shows what moved since the previous refresh."))
 	return style.Render(b.String())
 }

@@ -4,6 +4,7 @@ import (
 	"testing"
 
 	"github.com/ryandam9/aws_explorer/internal/billing"
+	"github.com/ryandam9/aws_explorer/internal/table"
 )
 
 func line(service, usage string, amount float64) billing.Line {
@@ -84,18 +85,54 @@ func TestSortVisible(t *testing.T) {
 			line("A-service", "u", 9.0),
 		},
 	}
-	// Sort by SERVICE (col 0) ascending.
-	m.sortCol, m.sortAsc = 0, true
+	// Sort by SERVICE (col 1) ascending.
+	m.sortCol, m.sortAsc = 1, true
 	m.sortVisible()
 	if m.visible[0].Service != "A-service" {
 		t.Errorf("service-asc first = %q, want A-service", m.visible[0].Service)
 	}
 
-	// Sort by COST (col 4) descending (the default direction for that column).
-	m.sortCol, m.sortAsc = 4, false
+	// Sort by COST (col 5) descending (the default direction for that column).
+	m.sortCol, m.sortAsc = 5, false
 	m.sortVisible()
 	if m.visible[0].Amount != 9.0 {
 		t.Errorf("cost-desc first amount = %v, want 9.0", m.visible[0].Amount)
+	}
+}
+
+// TestRebuild_AssignsSequenceNumbers confirms the first column is a 1-based
+// row counter assigned after sorting, and that COST sits at its new index.
+func TestRebuild_AssignsSequenceNumbers(t *testing.T) {
+	m := &Model{
+		bill: &billing.Bill{Currency: "USD", Lines: []billing.Line{
+			line("EC2", "Box", 5), line("S3", "Store", 1),
+		}},
+		tbl:     table.New(table.WithColumns(columns)),
+		sortCol: -1,
+	}
+	m.rebuild()
+	rows := m.tbl.Rows()
+	if len(rows) != 2 {
+		t.Fatalf("got %d rows, want 2", len(rows))
+	}
+	if rows[0][0] != "1" || rows[1][0] != "2" {
+		t.Errorf("sequence numbers = %q, %q; want 1, 2", rows[0][0], rows[1][0])
+	}
+	if rows[0][5] != "$5.00" {
+		t.Errorf("COST cell = %q; want $5.00 at index 5", rows[0][5])
+	}
+}
+
+// TestSortVisible_SkipsSequenceColumn confirms the positional "#" column
+// (index 0) is never treated as a sort field.
+func TestSortVisible_SkipsSequenceColumn(t *testing.T) {
+	orig := []billing.Line{line("Z", "u", 1), line("A", "u", 2)}
+	m := &Model{visible: append([]billing.Line(nil), orig...), sortCol: 0, sortAsc: true}
+	m.sortVisible()
+	for i := range orig {
+		if m.visible[i] != orig[i] {
+			t.Fatalf("col 0 (#) should not reorder rows; changed at %d", i)
+		}
 	}
 }
 
