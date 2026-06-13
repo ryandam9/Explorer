@@ -2060,8 +2060,12 @@ func (m tuiModel) View() string {
 		centered := lipgloss.Place(m.width, m.height-4, lipgloss.Center, lipgloss.Center, m.errorsOverlay())
 		output = lipgloss.JoinVertical(lipgloss.Left, header, centered, status)
 	} else if m.showDebug {
-		centered := lipgloss.Place(m.width, m.height-4, lipgloss.Center, lipgloss.Center, m.debugOverlay())
-		output = lipgloss.JoinVertical(lipgloss.Left, header, centered, status)
+		// Float the debug pane over the live frame (HUD-style, like the
+		// settings panel) instead of replacing the body, so the table and the
+		// header's scanning progress stay visible and refresh in the
+		// background while the user watches the activity log.
+		base := lipgloss.JoinVertical(lipgloss.Left, header, m.renderBody(), status)
+		output = ui.OverlayCenter(base, m.debugOverlay(), m.width, m.height)
 	} else if m.showAcctDiff {
 		centered := lipgloss.Place(m.width, m.height-4, lipgloss.Center, lipgloss.Center, m.acctDiffOverlay())
 		output = lipgloss.JoinVertical(lipgloss.Left, header, centered, status)
@@ -2723,14 +2727,17 @@ func (m *tuiModel) openErrorsOverlay() {
 // scan activity log and scrolls it to the latest line, so the most recent
 // activity is visible the moment it opens.
 func (m *tuiModel) openDebugOverlay() {
-	w := m.width - 8
-	if w > 120 {
-		w = 120
+	// Leave a margin on every side: the pane floats over the live frame, so
+	// the gap lets the table and the header's scanning progress show through
+	// and visibly refresh in the background while the log is open.
+	w := m.width - 20
+	if w > 110 {
+		w = 110
 	}
 	if w < 40 {
 		w = 40
 	}
-	h := m.height - 8
+	h := m.height - 12
 	if h < 6 {
 		h = 6
 	}
