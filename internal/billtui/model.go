@@ -11,6 +11,7 @@ package billtui
 import (
 	"context"
 	"errors"
+	"log/slog"
 	"sort"
 	"strconv"
 	"strings"
@@ -25,6 +26,7 @@ import (
 	"github.com/ryandam9/aws_explorer/internal/awserr"
 	"github.com/ryandam9/aws_explorer/internal/billing"
 	"github.com/ryandam9/aws_explorer/internal/csvexport"
+	"github.com/ryandam9/aws_explorer/internal/debugpane"
 	"github.com/ryandam9/aws_explorer/internal/table"
 	"github.com/ryandam9/aws_explorer/internal/ui"
 )
@@ -106,6 +108,8 @@ type Model struct {
 	spin   spinner.Model
 	status string // transient message in the status bar (copy/export results)
 
+	debug debugpane.Model // "~" live activity overlay
+
 	width, height int
 }
 
@@ -159,7 +163,14 @@ func (m Model) Init() tea.Cmd {
 func (m Model) fetchCmd() tea.Cmd {
 	ctx, api, start, end := m.ctx, m.api, m.start, m.end
 	return func() tea.Msg {
+		slog.Info("Fetching cost & usage from Cost Explorer",
+			"start", start.Format("2006-01-02"), "end", end.Format("2006-01-02"))
 		b, err := billing.Fetch(ctx, api, start, end)
+		if err != nil {
+			slog.Warn("Cost Explorer fetch failed", "error", err.Error())
+		} else if b != nil {
+			slog.Info("Fetched bill", "lines", len(b.Lines))
+		}
 		return billMsg{bill: b, err: err}
 	}
 }
@@ -175,12 +186,24 @@ func (m *Model) scheduleTick() tea.Cmd {
 func (m Model) resourcesCmd(service string) tea.Cmd {
 	ctx, api := m.ctx, m.api
 	return func() tea.Msg {
+		slog.Info("Fetching per-resource costs", "service", service)
 		rows, start, err := billing.FetchResources(ctx, api, service, time.Now())
+		if err != nil {
+			slog.Warn("Per-resource cost fetch failed", "service", service, "error", err.Error())
+		}
 		return resourcesMsg{service: service, rows: rows, start: start, err: err}
 	}
 }
 
 func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+	// While the debug overlay is open, it consumes key/mouse input; every other
+	// message falls through so refreshes keep flowing underneath.
+	if m.debug.Visible() {
+		if m.debug.HandleInput(msg) {
+			return m, nil
+		}
+	}
+
 	switch msg := msg.(type) {
 	case tea.WindowSizeMsg:
 		m.width, m.height = msg.Width, msg.Height
@@ -188,6 +211,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case spinner.TickMsg:
+		m.debug.Refresh()
 		if !m.fetching && !m.resFetching {
 			return m, nil
 		}
@@ -333,6 +357,8 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.exportCSV()
 	case "?":
 		m.overlay = overlayHelp
+	case ui.KeyDebug:
+		m.debug.Open(m.width, m.height)
 	default:
 		var cmd tea.Cmd
 		m.tbl, cmd = m.tbl.Update(msg)

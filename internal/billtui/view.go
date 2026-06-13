@@ -44,13 +44,14 @@ func (m Model) View() string {
 
 	switch m.overlay {
 	case overlayDetail:
-		return ui.OverlayCenter(view, m.detailOverlay(), m.width, m.height)
+		view = ui.OverlayCenter(view, m.detailOverlay(), m.width, m.height)
 	case overlayResources:
-		return ui.OverlayCenter(view, m.resourcesOverlay(), m.width, m.height)
+		view = ui.OverlayCenter(view, m.resourcesOverlay(), m.width, m.height)
 	case overlayHelp:
-		return ui.OverlayCenter(view, m.helpOverlay(), m.width, m.height)
+		view = ui.OverlayCenter(view, m.helpOverlay(), m.width, m.height)
 	}
-	return view
+	// The debug pane floats above any other overlay so it stays reachable.
+	return m.debug.Overlay(view, m.width, m.height)
 }
 
 // headerView is two lines: the page name with a PAID badge and refresh
@@ -166,6 +167,7 @@ func (m Model) keyHints() []ui.KeyHint {
 	hints = append(hints,
 		ui.H("y", "copy"),
 		ui.H("C", "csv"),
+		ui.H("~", "debug"),
 		ui.H("?", "help"),
 		ui.H("q", "quit"),
 	)
@@ -285,6 +287,7 @@ func (m Model) helpOverlay() string {
 		{"</> or ,/.", "Scroll columns when the table is wider than the screen"},
 		{"y", "Copy the selected service and usage type"},
 		{"C", "Export the current view to CSV under ~/.aws_explorer/exports/"},
+		{"~", "Debug: live view of what the tool is doing"},
 		{"?", "Toggle this help"},
 		{"q / Ctrl+C", "Quit"},
 	}

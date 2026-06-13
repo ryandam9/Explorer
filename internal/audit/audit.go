@@ -8,6 +8,8 @@ package audit
 
 import (
 	"context"
+	"log/slog"
+	"strings"
 	"time"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
@@ -57,6 +59,7 @@ func Stream(ctx context.Context, baseCfg aws.Config, regions []string, categorie
 		}
 	}
 
+	slog.Info("Starting audit", "regions", len(regions), "categories", strings.Join(categories, ","))
 	g, gctx := errgroup.WithContext(ctx)
 	g.SetLimit(maxConcurrency)
 	for i, region := range regions {
@@ -64,6 +67,7 @@ func Stream(ctx context.Context, baseCfg aws.Config, regions []string, categorie
 		// The first region also carries the account-global sweeps (S3, IAM).
 		s3Region := i == 0
 		g.Go(func() error {
+			slog.Info("Auditing region", "region", region)
 			var fs []findings.Finding
 			var errs []model.ExploreError
 			if wantCost {
@@ -89,6 +93,7 @@ func Stream(ctx context.Context, baseCfg aws.Config, regions []string, categorie
 				errs = append(errs, e...)
 			}
 			findings.Sort(fs)
+			slog.Info("Audited region", "region", region, "findings", len(fs), "errors", len(errs))
 			select {
 			case ch <- CostChunk{Region: region, Findings: fs, Errors: errs}:
 			case <-gctx.Done():

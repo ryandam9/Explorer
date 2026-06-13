@@ -45,13 +45,14 @@ func (m Model) View() string {
 
 	switch m.overlay {
 	case overlayDetail:
-		return ui.OverlayCenter(view, m.detailOverlay(), m.width, m.height)
+		view = ui.OverlayCenter(view, m.detailOverlay(), m.width, m.height)
 	case overlayErrors:
-		return ui.OverlayCenter(view, m.errorsOverlay(), m.width, m.height)
+		view = ui.OverlayCenter(view, m.errorsOverlay(), m.width, m.height)
 	case overlayHelp:
-		return ui.OverlayCenter(view, m.helpOverlay(), m.width, m.height)
+		view = ui.OverlayCenter(view, m.helpOverlay(), m.width, m.height)
 	}
-	return view
+	// The debug pane floats above any other overlay so it stays reachable.
+	return m.debug.Overlay(view, m.width, m.height)
 }
 
 // headerView is two lines: the page name with scan progress, and the running
@@ -160,7 +161,7 @@ func (m Model) keyHints() []ui.KeyHint {
 	if len(m.errs) > 0 {
 		hints = append(hints, ui.H("e", "errors"))
 	}
-	hints = append(hints, ui.H("?", "help"), ui.H("q", "quit"))
+	hints = append(hints, ui.H("~", "debug"), ui.H("?", "help"), ui.H("q", "quit"))
 	return hints
 }
 
@@ -256,6 +257,7 @@ func (m Model) helpOverlay() string {
 		{"y", "Copy the selected finding's ARN (or resource ID)"},
 		{"C", "Export the current view to CSV under ~/.aws_explorer/exports/"},
 		{"e", "Show collection errors"},
+		{"~", "Debug: live view of what the tool is doing"},
 		{"?", "Toggle this help"},
 		{"q / Ctrl+C", "Quit"},
 	}

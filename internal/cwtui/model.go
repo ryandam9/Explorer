@@ -3,6 +3,7 @@ package cwtui
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"strings"
@@ -19,6 +20,7 @@ import (
 
 	"github.com/ryandam9/aws_explorer/internal/config"
 	"github.com/ryandam9/aws_explorer/internal/consolelink"
+	"github.com/ryandam9/aws_explorer/internal/debugpane"
 	"github.com/ryandam9/aws_explorer/internal/ui"
 )
 
@@ -88,6 +90,8 @@ type model struct {
 	err      error
 	toast    string
 	toastExp time.Time
+
+	debug debugpane.Model // "~" live activity overlay
 }
 
 // Msg types
@@ -179,6 +183,14 @@ func (m *model) Init() tea.Cmd {
 func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	var cmds []tea.Cmd
 
+	// While the debug overlay is open, it consumes key/mouse input; every other
+	// message falls through so loads keep streaming underneath.
+	if m.debug.Visible() {
+		if m.debug.HandleInput(msg) {
+			return m, nil
+		}
+	}
+
 	switch msg := msg.(type) {
 	case tea.WindowSizeMsg:
 		m.width = msg.Width
@@ -188,6 +200,7 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 
 	case spinner.TickMsg:
+		m.debug.Refresh()
 		var cmd tea.Cmd
 		m.spinner, cmd = m.spinner.Update(msg)
 		cmds = append(cmds, cmd)
@@ -370,6 +383,9 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 		case "s":
 			m.handleExport(&cmds)
+
+		case ui.KeyDebug:
+			m.debug.Open(m.width, m.height)
 
 		case "W":
 			if m.view == viewEvents {
@@ -630,7 +646,13 @@ func (m *model) filterStreams() {
 
 func (m *model) loadGroupsCmd(prefix string) tea.Cmd {
 	return func() tea.Msg {
+		slog.Info("Listing CloudWatch log groups", "prefix", prefix)
 		groups, err := m.client.ListLogGroups(m.ctx, prefix)
+		if err != nil {
+			slog.Warn("Listing log groups failed", "error", err.Error())
+		} else {
+			slog.Info("Listed CloudWatch log groups", "count", len(groups))
+		}
 		return groupsMsg{groups: groups, err: err}
 	}
 }
@@ -671,7 +693,11 @@ func (m *model) loadStreamsCmd() tea.Cmd {
 	grpName := aws.ToString(grp.LogGroupName)
 	region := grp.Region
 	return func() tea.Msg {
+		slog.Info("Listing log streams", "group", grpName, "region", region)
 		streams, err := m.client.ListLogStreams(m.ctx, region, grpName, "")
+		if err != nil {
+			slog.Warn("Listing log streams failed", "group", grpName, "region", region, "error", err.Error())
+		}
 		return streamsMsg{groupName: grpName, region: region, streams: streams, err: err}
 	}
 }
@@ -690,7 +716,11 @@ func (m *model) loadEventsCmd() tea.Cmd {
 	pattern := m.eventSearch.Value()
 
 	return func() tea.Msg {
+		slog.Info("Fetching log events", "group", grpName, "region", region, "stream", streamName, "pattern", pattern)
 		events, err := m.client.GetLogEvents(m.ctx, region, grpName, streamName, pattern, 100)
+		if err != nil {
+			slog.Warn("Fetching log events failed", "group", grpName, "region", region, "error", err.Error())
+		}
 		return eventsMsg{events: events, err: err}
 	}
 }
@@ -701,11 +731,11 @@ func (m *model) watchTickCmd() tea.Cmd {
 
 func (m *model) View() string {
 	if m.err != nil {
-		return m.renderErrorView()
+		return m.debug.Overlay(m.renderErrorView(), m.width, m.height)
 	}
 
 	if m.viewer.active {
-		return m.applyToast(m.renderViewer())
+		return m.debug.Overlay(m.applyToast(m.renderViewer()), m.width, m.height)
 	}
 
 	var sb strings.Builder
@@ -748,7 +778,7 @@ func (m *model) View() string {
 
 	sb.WriteString(ui.StatusBar(m.width, statusText, m.getHelpHints()))
 
-	return m.applyToast(sb.String())
+	return m.debug.Overlay(m.applyToast(sb.String()), m.width, m.height)
 }
 
 // applyToast paints the active toast notification over the rendered view.
@@ -1090,6 +1120,7 @@ func (m *model) getHelpHints() []ui.KeyHint {
 
 	hints = append(hints,
 		ui.H("Tab", "panel"),
+		ui.H("~", "debug"),
 		ui.H("q", "quit"),
 	)
 	return hints
