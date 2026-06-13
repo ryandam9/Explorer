@@ -40,10 +40,48 @@ func (c *Collector) Collect(ctx context.Context, input services.CollectInput) ([
 		for _, lb := range page.LoadBalancers {
 			batch = append(batch, c.mapLoadBalancer(input.Region, lb, input.DetailLevel))
 		}
+		// Tags aren't part of DescribeLoadBalancers; enrich the page with one
+		// batched DescribeTags sweep (best-effort — a tag failure must not drop
+		// the load balancers themselves).
+		c.applyTags(ctx, client, batch)
 		resources = input.EmitOrAppend(resources, batch)
 	}
 
 	return resources, nil
+}
+
+// describeTagsBatch is the DescribeTags ResourceArns limit (20 per call).
+const describeTagsBatch = 20
+
+// applyTags fills each resource's Tags from DescribeTags, in batches of 20
+// ARNs. Errors are swallowed: tags are an enrichment, not a reason to fail the
+// whole collection.
+func (c *Collector) applyTags(ctx context.Context, client *elasticloadbalancingv2.Client, batch []model.Resource) {
+	byARN := make(map[string]int, len(batch))
+	arns := make([]string, 0, len(batch))
+	for i, r := range batch {
+		if r.ARN == "" {
+			continue
+		}
+		byARN[r.ARN] = i
+		arns = append(arns, r.ARN)
+	}
+	for start := 0; start < len(arns); start += describeTagsBatch {
+		chunk := arns[start:min(start+describeTagsBatch, len(arns))]
+		out, err := client.DescribeTags(ctx, &elasticloadbalancingv2.DescribeTagsInput{ResourceArns: chunk})
+		if err != nil {
+			return
+		}
+		for _, td := range out.TagDescriptions {
+			idx, ok := byARN[aws.ToString(td.ResourceArn)]
+			if !ok {
+				continue
+			}
+			for _, t := range td.Tags {
+				batch[idx].Tags[aws.ToString(t.Key)] = aws.ToString(t.Value)
+			}
+		}
+	}
 }
 
 func (c *Collector) mapLoadBalancer(region string, lb types.LoadBalancer, detail services.DetailLevel) model.Resource {

@@ -165,15 +165,20 @@ func collectPoliciesIAM(ctx context.Context, client *awsiam.Client, snap *findin
 				policy.Document = findings.DecodePolicyDocument(aws.ToString(ver.PolicyVersion.Document))
 			}
 		}
-		// Direct user attachments only matter for attached policies.
+		// Direct user attachments only matter for attached policies. Paginate:
+		// a policy attached to more than one page of users would otherwise have
+		// its attached-user list silently truncated at the first page.
 		if p.AttachmentCount != nil && *p.AttachmentCount > 0 {
-			ents, err := client.ListEntitiesForPolicy(ctx, &awsiam.ListEntitiesForPolicyInput{
+			pager := awsiam.NewListEntitiesForPolicyPaginator(client, &awsiam.ListEntitiesForPolicyInput{
 				PolicyArn:    p.Arn,
 				EntityFilter: iamtypes.EntityTypeUser,
 			})
-			if err != nil {
-				rec.record("iam", err)
-			} else {
+			for pager.HasMorePages() {
+				ents, err := pager.NextPage(ctx)
+				if err != nil {
+					rec.record("iam", err)
+					break
+				}
 				for _, u := range ents.PolicyUsers {
 					policy.AttachedUsers = append(policy.AttachedUsers, aws.ToString(u.UserName))
 				}

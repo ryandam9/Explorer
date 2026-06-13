@@ -84,7 +84,7 @@ This is the CLI twin of the summary TUI's 't' CloudTrail timeline.`,
 		fmt.Fprintf(os.Stderr, "Looking up CloudTrail events for %s in %s (last 90 days max)…\n",
 			resource, region)
 
-		events, err := trail.Lookup(ctx, awscfg, region, resource, trail.Options{
+		events, truncated, err := trail.Lookup(ctx, awscfg, region, resource, trail.Options{
 			Since:           since,
 			Limit:           trailLimit,
 			IncludeReadOnly: trailIncludeRead,
@@ -106,7 +106,15 @@ This is the CLI twin of the summary TUI's 't' CloudTrail timeline.`,
 				resource, region)
 			return nil
 		}
-		return trail.Render(os.Stdout, events, outputFormat, noHeader)
+		if err := trail.Render(os.Stdout, events, outputFormat, noHeader); err != nil {
+			return err
+		}
+		if truncated && strings.EqualFold(outputFormat, "table") {
+			fmt.Fprintf(os.Stderr,
+				"\nNote: results truncated at the %d-event scan cap — older events exist. "+
+					"Narrow the window with --since to see them.\n", len(events))
+		}
+		return nil
 	},
 }
 
