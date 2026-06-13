@@ -27,6 +27,28 @@ func baseResources() []model.Resource {
 	}
 }
 
+func TestEntryKey_ARNlessNoIDFoldsName(t *testing.T) {
+	// Two distinct ARN-less, ID-less resources of the same type/region must not
+	// collapse to the same key (which would hide one in the diff).
+	a := res("iam", "tag", "global", "", "team=payments", "", "", nil)
+	b := res("iam", "tag", "global", "", "team=billing", "", "", nil)
+	if entryKey(a) == entryKey(b) {
+		t.Errorf("distinct ARN-less/ID-less resources share key %q", entryKey(a))
+	}
+
+	// A diff between two snapshots with two such resources must see both, not
+	// silently merge them.
+	snap := New([]model.Resource{a, b}, "123", []string{"global"})
+	if len(snap.Entries) != 2 {
+		t.Fatalf("entries = %d, want 2 (both ARN-less resources kept)", len(snap.Entries))
+	}
+	// ARN-bearing keys are still the ARN.
+	withARN := res("ec2", "instance", "us-east-1", "i-1", "x", "arn:aws:ec2:us-east-1:1:instance/i-1", "", nil)
+	if entryKey(withARN) != "arn:aws:ec2:us-east-1:1:instance/i-1" {
+		t.Errorf("ARN key = %q", entryKey(withARN))
+	}
+}
+
 func TestNew_DeterministicOrder(t *testing.T) {
 	a := New(baseResources(), "123", []string{"us-east-1"})
 	rev := baseResources()

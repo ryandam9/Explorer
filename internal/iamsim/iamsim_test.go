@@ -111,6 +111,14 @@ func TestRender_BoundaryBlocks(t *testing.T) {
 	if !strings.Contains(out, "the boundary, not the identity policies, is the blocker") {
 		t.Errorf("boundary output:\n%s", out)
 	}
+	// When the boundary is the blocker, we must NOT claim no identity policy
+	// allows the action — the identity policy may well allow it.
+	if strings.Contains(out, "no attached or inline policy allows this action") {
+		t.Errorf("must not assert 'no policy allows' when boundary is the blocker:\n%s", out)
+	}
+	if strings.Contains(out, "(no policy allows it)") {
+		t.Errorf("header must not claim 'no policy allows it' when boundary blocks:\n%s", out)
+	}
 }
 
 func TestRender_MissingContextAndSCP(t *testing.T) {

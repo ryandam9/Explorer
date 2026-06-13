@@ -103,13 +103,22 @@ func renderVerdict(w io.Writer, principal string, v Verdict) {
 			fmt.Fprintf(w, "  ✗ Deny statement         a policy explicitly forbids this action — removing an allow elsewhere will not help\n")
 		}
 	default: // implicit deny
-		fmt.Fprintf(w, "❌ Denied: %s for %s — implicit deny (no policy allows it)\n", target, principal)
-		fmt.Fprintf(w, "  ✗ Identity policies      no attached or inline policy allows this action\n")
-		fmt.Fprintf(w, "    Fix: grant an identity policy that allows %s", v.Action)
-		if v.Resource != "" {
-			fmt.Fprintf(w, " on %s", v.Resource)
+		// When a permissions boundary is the blocker, the identity policies may
+		// well allow the action — AWS still reports implicitDeny. Asserting "no
+		// policy allows this action" would be wrong, so soften the line and let
+		// the boundary section below name the real cause.
+		if v.BoundaryAllowed != nil && !*v.BoundaryAllowed {
+			fmt.Fprintf(w, "❌ Denied: %s for %s — implicit deny\n", target, principal)
+			fmt.Fprintf(w, "  ✗ Identity policies      not the blocker on their own — see the permissions boundary below\n")
+		} else {
+			fmt.Fprintf(w, "❌ Denied: %s for %s — implicit deny (no policy allows it)\n", target, principal)
+			fmt.Fprintf(w, "  ✗ Identity policies      no attached or inline policy allows this action\n")
+			fmt.Fprintf(w, "    Fix: grant an identity policy that allows %s", v.Action)
+			if v.Resource != "" {
+				fmt.Fprintf(w, " on %s", v.Resource)
+			}
+			fmt.Fprintln(w)
 		}
-		fmt.Fprintln(w)
 	}
 
 	switch {

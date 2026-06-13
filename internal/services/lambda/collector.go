@@ -105,5 +105,18 @@ func (c *Collector) mapFunction(region string, fn types.FunctionConfiguration, d
 		res.Summary["lastModified"] = *fn.LastModified
 	}
 
+	if detail == services.DetailLevelDetailed || detail == services.DetailLevelRaw {
+		archs := make([]string, 0, len(fn.Architectures))
+		for _, a := range fn.Architectures {
+			archs = append(archs, string(a))
+		}
+		res.Details = map[string]any{
+			"handler":       aws.ToString(fn.Handler),
+			"codeSize":      fn.CodeSize,
+			"architectures": archs,
+			"role":          aws.ToString(fn.Role),
+		}
+	}
+
 	return res
 }

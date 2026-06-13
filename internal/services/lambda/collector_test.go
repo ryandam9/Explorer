@@ -110,6 +110,38 @@ func TestMapFunction_NoLastModified(t *testing.T) {
 	}
 }
 
+func TestMapFunction_DetailLevel(t *testing.T) {
+	c := NewCollector()
+	fn := lambdatypes.FunctionConfiguration{
+		FunctionArn:   aws.String("arn:aws:lambda:us-east-1:123:function:detailed"),
+		FunctionName:  aws.String("detailed"),
+		Handler:       aws.String("index.handler"),
+		Role:          aws.String("arn:aws:iam::123:role/lambda-role"),
+		CodeSize:      2048,
+		Architectures: []lambdatypes.Architecture{lambdatypes.ArchitectureArm64},
+	}
+
+	// Summary level: no Details.
+	if res := c.mapFunction("us-east-1", fn, services.DetailLevelSummary); res.Details != nil {
+		t.Errorf("summary level should not set Details, got %v", res.Details)
+	}
+
+	// Detailed level: Details populated.
+	res := c.mapFunction("us-east-1", fn, services.DetailLevelDetailed)
+	if res.Details == nil {
+		t.Fatal("detailed level should populate Details")
+	}
+	if res.Details["handler"] != "index.handler" {
+		t.Errorf("Details[handler] = %v", res.Details["handler"])
+	}
+	if res.Details["codeSize"] != int64(2048) {
+		t.Errorf("Details[codeSize] = %v, want 2048", res.Details["codeSize"])
+	}
+	if archs, ok := res.Details["architectures"].([]string); !ok || len(archs) != 1 || archs[0] != "arm64" {
+		t.Errorf("Details[architectures] = %v", res.Details["architectures"])
+	}
+}
+
 func TestMapFunction_ZeroMemoryAndTimeout(t *testing.T) {
 	c := NewCollector()
 	fn := lambdatypes.FunctionConfiguration{
