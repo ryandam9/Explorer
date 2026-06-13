@@ -133,3 +133,123 @@ func TestMapVpc_NoNameTag(t *testing.T) {
 		t.Errorf("expected empty name, got %q", res.Name)
 	}
 }
+
+func TestMapSubnet(t *testing.T) {
+	c := NewCollector()
+	subnet := types.Subnet{
+		SubnetId:                aws.String("subnet-0abc"),
+		VpcId:                   aws.String("vpc-1"),
+		AvailabilityZone:        aws.String("us-east-1a"),
+		CidrBlock:               aws.String("10.0.1.0/24"),
+		State:                   types.SubnetStateAvailable,
+		AvailableIpAddressCount: aws.Int32(250),
+		MapPublicIpOnLaunch:     aws.Bool(true),
+		Tags:                    []types.Tag{{Key: aws.String("Name"), Value: aws.String("public-a")}},
+	}
+	res := c.mapSubnet("us-east-1", "123456789012", subnet)
+
+	if res.Type != "subnet" || res.ID != "subnet-0abc" {
+		t.Errorf("Type/ID = %q/%q", res.Type, res.ID)
+	}
+	if res.Name != "public-a" {
+		t.Errorf("Name = %q, want public-a", res.Name)
+	}
+	if res.AZ != "us-east-1a" {
+		t.Errorf("AZ = %q", res.AZ)
+	}
+	if res.ARN != "arn:aws:ec2:us-east-1:123456789012:subnet/subnet-0abc" {
+		t.Errorf("ARN = %q", res.ARN)
+	}
+	if res.State != "available" {
+		t.Errorf("State = %q", res.State)
+	}
+	if res.Summary["cidrBlock"] != "10.0.1.0/24" || res.Summary["availableIps"] != "250" {
+		t.Errorf("Summary = %v", res.Summary)
+	}
+}
+
+func TestMapSecurityGroup(t *testing.T) {
+	c := NewCollector()
+	sg := types.SecurityGroup{
+		GroupId:     aws.String("sg-0abc"),
+		GroupName:   aws.String("web-sg"),
+		VpcId:       aws.String("vpc-1"),
+		Description: aws.String("web tier"),
+		IpPermissions: []types.IpPermission{
+			{}, {}, // 2 ingress rules
+		},
+		IpPermissionsEgress: []types.IpPermission{{}},
+	}
+	res := c.mapSecurityGroup("us-east-1", "123456789012", sg)
+
+	if res.Type != "security-group" || res.ID != "sg-0abc" || res.Name != "web-sg" {
+		t.Errorf("Type/ID/Name = %q/%q/%q", res.Type, res.ID, res.Name)
+	}
+	if res.ARN != "arn:aws:ec2:us-east-1:123456789012:security-group/sg-0abc" {
+		t.Errorf("ARN = %q", res.ARN)
+	}
+	if res.Summary["ingressRules"] != "2" || res.Summary["egressRules"] != "1" {
+		t.Errorf("rule counts = %v", res.Summary)
+	}
+}
+
+func TestMapVolume(t *testing.T) {
+	c := NewCollector()
+	created := time.Date(2024, 2, 1, 0, 0, 0, 0, time.UTC)
+	vol := types.Volume{
+		VolumeId:         aws.String("vol-0abc"),
+		AvailabilityZone: aws.String("us-east-1b"),
+		VolumeType:       types.VolumeTypeGp3,
+		Size:             aws.Int32(100),
+		Encrypted:        aws.Bool(true),
+		State:            types.VolumeStateInUse,
+		CreateTime:       &created,
+		Attachments:      []types.VolumeAttachment{{InstanceId: aws.String("i-9xyz")}},
+	}
+	res := c.mapVolume("us-east-1", "123456789012", vol)
+
+	if res.Type != "volume" || res.ID != "vol-0abc" {
+		t.Errorf("Type/ID = %q/%q", res.Type, res.ID)
+	}
+	if res.ARN != "arn:aws:ec2:us-east-1:123456789012:volume/vol-0abc" {
+		t.Errorf("ARN = %q", res.ARN)
+	}
+	if res.Summary["volumeType"] != "gp3" || res.Summary["sizeGiB"] != "100" {
+		t.Errorf("Summary = %v", res.Summary)
+	}
+	if res.Summary["attachedTo"] != "i-9xyz" {
+		t.Errorf("attachedTo = %q", res.Summary["attachedTo"])
+	}
+	if res.CreatedAt == nil || !res.CreatedAt.Equal(created) {
+		t.Errorf("CreatedAt = %v", res.CreatedAt)
+	}
+}
+
+func TestMapNetworkInterface(t *testing.T) {
+	c := NewCollector()
+	eni := types.NetworkInterface{
+		NetworkInterfaceId: aws.String("eni-0abc"),
+		AvailabilityZone:   aws.String("us-east-1a"),
+		PrivateIpAddress:   aws.String("10.0.1.5"),
+		VpcId:              aws.String("vpc-1"),
+		SubnetId:           aws.String("subnet-1"),
+		Status:             types.NetworkInterfaceStatusInUse,
+		InterfaceType:      types.NetworkInterfaceTypeInterface,
+		Attachment:         &types.NetworkInterfaceAttachment{InstanceId: aws.String("i-9xyz")},
+		TagSet:             []types.Tag{{Key: aws.String("Name"), Value: aws.String("primary")}},
+	}
+	res := c.mapNetworkInterface("us-east-1", "123456789012", eni)
+
+	if res.Type != "network-interface" || res.ID != "eni-0abc" {
+		t.Errorf("Type/ID = %q/%q", res.Type, res.ID)
+	}
+	if res.Name != "primary" {
+		t.Errorf("Name = %q, want primary (from TagSet)", res.Name)
+	}
+	if res.ARN != "arn:aws:ec2:us-east-1:123456789012:network-interface/eni-0abc" {
+		t.Errorf("ARN = %q", res.ARN)
+	}
+	if res.Summary["privateIp"] != "10.0.1.5" || res.Summary["attachedTo"] != "i-9xyz" {
+		t.Errorf("Summary = %v", res.Summary)
+	}
+}
