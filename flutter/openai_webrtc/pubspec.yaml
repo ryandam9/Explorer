@@ -1,0 +1,29 @@
+name: openai_webrtc
+description: Real-time voice conversations with OpenAI Realtime models over WebRTC.
+publish_to: "none"
+version: 1.0.0+1
+
+environment:
+  sdk: ">=3.3.0 <4.0.0"
+  flutter: ">=3.19.0"
+
+dependencies:
+  flutter:
+    sdk: flutter
+  cupertino_icons: ^1.0.8
+  # WebRTC peer connection + media capture across Android, iOS, Linux, macOS, Windows, web.
+  flutter_webrtc: ^0.12.5
+  # POST the SDP offer to the OpenAI realtime calls endpoint.
+  http: ^1.2.2
+  # Persist API key / model / voice between launches (mirrors the localStorage behaviour).
+  shared_preferences: ^2.3.2
+  # Runtime microphone permission on Android / iOS.
+  permission_handler: ^11.3.1
+
+dev_dependencies:
+  flutter_lints: ^4.0.0
+  flutter_test:
+    sdk: flutter
+
+flutter:
+  uses-material-design: true
