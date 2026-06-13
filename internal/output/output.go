@@ -14,6 +14,7 @@ import (
 	"github.com/charmbracelet/lipgloss"
 	"github.com/mattn/go-isatty"
 
+	"github.com/ryandam9/aws_explorer/internal/csvexport"
 	"github.com/ryandam9/aws_explorer/internal/model"
 )
 
@@ -193,7 +194,7 @@ func streamCSV(w io.Writer, chunks <-chan model.ResultChunk, opts Options) {
 	for chunk := range chunks {
 		errs = append(errs, chunk.Errors...)
 		for _, r := range chunk.Resources {
-			_ = cw.Write([]string{r.Service, r.Type, r.Region, r.ID, r.Name, r.State})
+			_ = cw.Write(csvexport.SanitizeRow([]string{r.Service, r.Type, r.Region, r.ID, r.Name, r.State}))
 		}
 		// Flush per chunk so consumers see rows as they are collected.
 		cw.Flush()

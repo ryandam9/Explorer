@@ -168,11 +168,17 @@ func TestBuildCostMetricQueries(t *testing.T) {
 		t.Fatalf("queries = %d, want 4", len(queries))
 	}
 
-	// Bind resolved sums; IDs missing from the map mean zero datapoints.
-	bind(map[string]float64{
-		"lb0": 12345,
-		"tr0": 3628800, // 3 RCU avg over 14 days (3 * 14 * 86400)
-	})
+	// Bind resolved sums and per-id maxes; IDs missing from a map mean zero
+	// datapoints.
+	bind(
+		map[string]float64{
+			"lb0": 12345,
+			"tr0": 3628800, // 3 RCU avg over 14 days (3 * 14 * 86400)
+		},
+		map[string]float64{
+			"tr0": 36000, // busiest hour: 36000 units => 10 RCU/s peak (36000 / 3600)
+		},
+	)
 
 	if got := snap.LoadBalancers[0].Requests14d; got == nil || *got != 12345 {
 		t.Errorf("ALB Requests14d = %v, want 12345", got)
@@ -188,6 +194,12 @@ func TestBuildCostMetricQueries(t *testing.T) {
 	}
 	if got := snap.Tables[0].AvgConsumedWCU; got == nil || *got != 0 {
 		t.Errorf("AvgConsumedWCU = %v, want 0", got)
+	}
+	if got := snap.Tables[0].PeakConsumedRCU; got == nil || *got != 10 {
+		t.Errorf("PeakConsumedRCU = %v, want 10 (36000 busiest-hour units / 3600s)", got)
+	}
+	if got := snap.Tables[0].PeakConsumedWCU; got == nil || *got != 0 {
+		t.Errorf("PeakConsumedWCU = %v, want 0 (no datapoints)", got)
 	}
 	if snap.Tables[1].AvgConsumedRCU != nil {
 		t.Error("on-demand table should not be queried")

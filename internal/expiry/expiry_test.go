@@ -121,6 +121,28 @@ func TestSecretItems(t *testing.T) {
 	}
 }
 
+func TestDaysUntil_CalendarBoundaries(t *testing.T) {
+	base := time.Date(2026, 6, 12, 12, 0, 0, 0, time.UTC) // noon
+	cases := []struct {
+		name string
+		t    time.Time
+		want int
+	}{
+		{"expires later today", base.Add(9 * time.Hour), 0},    // same calendar day
+		{"expired earlier today", base.Add(-9 * time.Hour), 0}, // same calendar day
+		{"expires tomorrow morning", base.Add(20 * time.Hour), 1},
+		{"47h out crosses two midnights", base.Add(47 * time.Hour), 2},
+		{"expired yesterday", base.Add(-20 * time.Hour), -1},
+		{"exactly 12 days", base.Add(12 * 24 * time.Hour), 12},
+		{"non-UTC input normalized", base.Add(20 * time.Hour).In(time.FixedZone("X", 3600)), 1},
+	}
+	for _, c := range cases {
+		if got := daysUntil(base, c.t); got != c.want {
+			t.Errorf("%s: daysUntil = %d, want %d", c.name, got, c.want)
+		}
+	}
+}
+
 func TestFilterAndSort(t *testing.T) {
 	items := []Item{
 		{Days: 120, Resource: "far"},

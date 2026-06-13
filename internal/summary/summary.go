@@ -13,6 +13,7 @@ import (
 	"strings"
 	"text/tabwriter"
 
+	"github.com/ryandam9/aws_explorer/internal/csvexport"
 	"github.com/ryandam9/aws_explorer/internal/model"
 )
 
@@ -195,7 +196,7 @@ func renderCSV(w io.Writer, rows []Row, noHeader bool) error {
 		}
 	}
 	for _, r := range rows {
-		if err := cw.Write([]string{fmt.Sprintf("%d", r.SNO), r.Name, r.Type, r.ARN, r.RegionAZ}); err != nil {
+		if err := cw.Write(csvexport.SanitizeRow([]string{fmt.Sprintf("%d", r.SNO), r.Name, r.Type, r.ARN, r.RegionAZ})); err != nil {
 			return err
 		}
 	}

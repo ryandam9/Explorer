@@ -37,11 +37,11 @@ func Write(dir, name string, header []string, rows [][]string) (string, error) {
 	defer f.Close()
 
 	w := csv.NewWriter(f)
-	if err := w.Write(header); err != nil {
+	if err := w.Write(SanitizeRow(header)); err != nil {
 		return "", err
 	}
 	for _, row := range rows {
-		if err := w.Write(row); err != nil {
+		if err := w.Write(SanitizeRow(row)); err != nil {
 			return "", err
 		}
 	}
@@ -50,6 +50,33 @@ func Write(dir, name string, header []string, rows [][]string) (string, error) {
 		return "", err
 	}
 	return path, nil
+}
+
+// Sanitize neutralizes CSV formula injection: spreadsheet apps (Excel, Sheets,
+// LibreOffice) evaluate a cell whose first character is '=', '+', '-', '@', or
+// a leading tab/carriage return as a formula. Since these exports are meant to
+// be opened in a spreadsheet, a value beginning with one of those characters
+// is prefixed with a single quote so it renders literally. Other values are
+// returned unchanged. RFC-4180 quoting (commas/quotes/newlines) is handled by
+// encoding/csv and is unaffected.
+func Sanitize(field string) string {
+	if field == "" {
+		return field
+	}
+	switch field[0] {
+	case '=', '+', '-', '@', '\t', '\r':
+		return "'" + field
+	}
+	return field
+}
+
+// SanitizeRow returns a copy of row with every field passed through Sanitize.
+func SanitizeRow(row []string) []string {
+	out := make([]string, len(row))
+	for i, f := range row {
+		out[i] = Sanitize(f)
+	}
+	return out
 }
 
 // sanitize keeps a name filesystem-friendly.
