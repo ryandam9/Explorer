@@ -269,6 +269,9 @@ func TestRender_TableHasTotal(t *testing.T) {
 		t.Fatal(err)
 	}
 	out := buf.String()
+	if !strings.Contains(out, "SNO") {
+		t.Errorf("table output missing the SNO header:\n%s", out)
+	}
 	if !strings.Contains(out, "TOTAL (estimated)") {
 		t.Errorf("table output missing estimated total:\n%s", out)
 	}

@@ -8,6 +8,7 @@ import (
 	"io"
 	"os"
 	"sort"
+	"strconv"
 	"strings"
 
 	"github.com/charmbracelet/lipgloss"
@@ -120,7 +121,7 @@ func (m *meter) finish() { m.pause() }
 // widths per flush, and flushing per chunk (required for streaming) makes
 // columns drift between chunks. Values longer than their floor extend only
 // their own row.
-const streamRowFmt = "%-14s  %-14s  %-15s  %-44s  %-30s  %s\n"
+const streamRowFmt = "%-5s  %-14s  %-14s  %-15s  %-44s  %-30s  %s\n"
 
 // stateStyle colors well-known resource states with the terminal's base
 // palette: green for healthy, yellow for transitional, red for stopped or
@@ -150,23 +151,25 @@ func streamTable(w io.Writer, chunks <-chan model.ResultChunk, opts Options) {
 		// The whole line is styled after formatting so the fixed column
 		// widths are computed on plain text.
 		header := strings.TrimSuffix(
-			fmt.Sprintf(streamRowFmt, "SERVICE", "TYPE", "REGION", "ID", "NAME", "STATE"), "\n")
+			fmt.Sprintf(streamRowFmt, "SNO", "SERVICE", "TYPE", "REGION", "ID", "NAME", "STATE"), "\n")
 		m.pause()
 		fmt.Fprintln(w, lipgloss.NewStyle().Bold(true).Render(header))
 	}
 
 	var errs []model.ExploreError
 	anyOutput := false
+	seq := 0 // 1-based row counter, continuous across streamed chunks
 	for chunk := range chunks {
 		errs = append(errs, chunk.Errors...)
 		if len(chunk.Resources) > 0 {
 			m.pause()
 		}
 		for _, r := range chunk.Resources {
+			seq++
 			// State is the final column, so styling it cannot skew the
 			// fixed-width padding of the columns before it.
 			fmt.Fprintf(w, streamRowFmt,
-				r.Service, r.Type, r.Region, r.ID, r.Name, stateStyle(r.State))
+				strconv.Itoa(seq), r.Service, r.Type, r.Region, r.ID, r.Name, stateStyle(r.State))
 			anyOutput = true
 		}
 		m.observe(chunk)

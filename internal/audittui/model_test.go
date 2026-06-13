@@ -133,18 +133,19 @@ func TestQuickFilter(t *testing.T) {
 func TestSortCycleAndReverse(t *testing.T) {
 	m := newTestModel(t)
 
-	// First press: severity column, descending (worst first) — same top row.
+	// First press: severity column (1; the "#" column 0 is skipped),
+	// descending (worst first) — same top row.
 	mm, _ := m.Update(key("s"))
 	m = mm.(Model)
-	if m.sortCol != 0 || m.sortAsc {
-		t.Fatalf("sortCol/asc = %d/%v, want 0/false", m.sortCol, m.sortAsc)
+	if m.sortCol != 1 || m.sortAsc {
+		t.Fatalf("sortCol/asc = %d/%v, want 1/false", m.sortCol, m.sortAsc)
 	}
 
-	// Cycle to ID column (ascending).
+	// Cycle to ID column (2, ascending).
 	mm, _ = m.Update(key("s"))
 	m = mm.(Model)
-	if m.sortCol != 1 || !m.sortAsc {
-		t.Fatalf("sortCol/asc = %d/%v, want 1/true", m.sortCol, m.sortAsc)
+	if m.sortCol != 2 || !m.sortAsc {
+		t.Fatalf("sortCol/asc = %d/%v, want 2/true", m.sortCol, m.sortAsc)
 	}
 	if m.visible[0].ID != "COST-EBS-001" {
 		t.Errorf("first by ID = %q", m.visible[0].ID)
@@ -161,6 +162,22 @@ func TestSortCycleAndReverse(t *testing.T) {
 	m = mm.(Model)
 	if m.sortCol != -1 || m.visible[0].Resource != "vol-0abc" {
 		t.Errorf("reset: sortCol=%d first=%q", m.sortCol, m.visible[0].Resource)
+	}
+}
+
+func TestSequenceColumn(t *testing.T) {
+	m := newTestModel(t)
+	rows := m.tbl.Rows()
+	if len(rows) != 3 {
+		t.Fatalf("got %d rows, want 3", len(rows))
+	}
+	for i, want := range []string{"1", "2", "3"} {
+		if rows[i][0] != want {
+			t.Errorf("row %d sequence cell = %q, want %q", i, rows[i][0], want)
+		}
+	}
+	if columns[0].Title != "#" {
+		t.Errorf("first column = %q, want the # sequence column", columns[0].Title)
 	}
 }
 
@@ -289,11 +306,12 @@ func TestFilterFindings(t *testing.T) {
 
 func TestSortFindingsByEstimate(t *testing.T) {
 	fs := testFindings()
-	sortFindings(fs, 5, false)
+	// EST/MO is column 6 now that the "#" column leads the table.
+	sortFindings(fs, 6, false)
 	if fs[0].EstMonthlyUSD != 102.40 || fs[2].EstMonthlyUSD != 3.65 {
 		t.Errorf("desc by est = %v, %v, %v", fs[0].EstMonthlyUSD, fs[1].EstMonthlyUSD, fs[2].EstMonthlyUSD)
 	}
-	sortFindings(fs, 5, true)
+	sortFindings(fs, 6, true)
 	if fs[0].EstMonthlyUSD != 3.65 {
 		t.Errorf("asc by est should start at 3.65, got %v", fs[0].EstMonthlyUSD)
 	}

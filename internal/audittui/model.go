@@ -48,9 +48,11 @@ const (
 	overlayHelp
 )
 
-// columns of the findings table. Severity stays pinned while the rest scroll
-// horizontally on narrow terminals.
+// columns of the findings table. The sequence number and severity stay pinned
+// while the rest scroll horizontally on narrow terminals. Column 0 ("#") is a
+// positional row counter, not a sortable field.
 var columns = []table.Column{
+	{Title: "#", Width: 5},
 	{Title: "SEVERITY", Width: 12},
 	{Title: "ID", Width: 14},
 	{Title: "RESOURCE", Width: 26},
@@ -107,7 +109,7 @@ func New(regions []string, ch <-chan audit.CostChunk) Model {
 		table.WithColumns(columns),
 		table.WithFocused(true),
 		table.WithStyles(ui.TableStyles()),
-		table.WithFrozenColumns(1),
+		table.WithFrozenColumns(2),
 	)
 
 	return Model{
@@ -211,16 +213,19 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.overlay = overlayDetail
 		}
 	case "s":
-		// Cycle: ranking (-1) → each column → back to ranking. Severity and
-		// EST/MO start descending (worst/most expensive first).
+		// Cycle: ranking (-1) → each data column → back to ranking. The "#"
+		// column (index 0) is a positional counter, so it is skipped. SEVERITY
+		// and EST/MO start descending (worst/most expensive first).
 		m.sortCol++
 		if m.sortCol >= len(columns) {
 			m.sortCol = -1
+		} else if m.sortCol == 0 {
+			m.sortCol = 1
 		}
-		m.sortAsc = !(m.sortCol == 0 || m.sortCol == 5)
+		m.sortAsc = !(m.sortCol == 1 || m.sortCol == 6)
 		m.rebuild()
 	case "R":
-		if m.sortCol >= 0 {
+		if m.sortCol > 0 {
 			m.sortAsc = !m.sortAsc
 			m.rebuild()
 		}
@@ -304,8 +309,9 @@ func (m *Model) rebuild() {
 	sortFindings(m.visible, m.sortCol, m.sortAsc)
 
 	rows := make([]table.Row, 0, len(m.visible))
-	for _, f := range m.visible {
+	for i, f := range m.visible {
 		rows = append(rows, table.Row{
+			strconv.Itoa(i + 1),
 			f.Severity.Badge(), f.ID, f.Resource, f.Region, f.Title,
 			costs.Dollars(f.EstMonthlyUSD),
 		})
@@ -338,22 +344,23 @@ func matchesFinding(f findings.Finding, q string) bool {
 }
 
 // sortFindings orders by the chosen column; col -1 keeps the incoming
-// findings.Sort ranking.
+// findings.Sort ranking. Column indices match the table header (1=SEVERITY …
+// 6=EST/MO); column 0 ("#") is positional and never a sort target.
 func sortFindings(fs []findings.Finding, col int, asc bool) {
-	if col < 0 {
+	if col <= 0 {
 		return
 	}
 	less := func(a, b findings.Finding) bool {
 		switch col {
-		case 0:
-			return a.Severity < b.Severity
 		case 1:
-			return a.ID < b.ID
+			return a.Severity < b.Severity
 		case 2:
-			return a.Resource < b.Resource
+			return a.ID < b.ID
 		case 3:
-			return a.Region < b.Region
+			return a.Resource < b.Resource
 		case 4:
+			return a.Region < b.Region
+		case 5:
 			return a.Title < b.Title
 		default:
 			return a.EstMonthlyUSD < b.EstMonthlyUSD

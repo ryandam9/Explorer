@@ -163,10 +163,10 @@ func renderFindResults(w io.Writer, matched []model.Resource, format string, noH
 	default:
 		tw := tabwriter.NewWriter(w, 0, 0, 3, ' ', 0)
 		if !noHeader {
-			fmt.Fprintln(tw, "NAME\tTYPE\tID\tREGION\tARN")
+			fmt.Fprintln(tw, "SNO\tNAME\tTYPE\tID\tREGION\tARN")
 		}
-		for _, r := range rows {
-			fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%s\n", r.Name, r.Type, r.ID, r.Region, r.ARN)
+		for i, r := range rows {
+			fmt.Fprintf(tw, "%d\t%s\t%s\t%s\t%s\t%s\n", i+1, r.Name, r.Type, r.ID, r.Region, r.ARN)
 		}
 		return tw.Flush()
 	}

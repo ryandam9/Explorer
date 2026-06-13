@@ -32,11 +32,11 @@ func Render(w io.Writer, fs []Finding, format string, noHeader bool) error {
 func renderTable(w io.Writer, fs []Finding, noHeader bool) error {
 	tw := tabwriter.NewWriter(w, 0, 0, 2, ' ', 0)
 	if !noHeader {
-		fmt.Fprintln(tw, "SEVERITY\tID\tRESOURCE\tREGION\tISSUE\tEST/MO\tFIX")
+		fmt.Fprintln(tw, "SNO\tSEVERITY\tID\tRESOURCE\tREGION\tISSUE\tEST/MO\tFIX")
 	}
-	for _, f := range fs {
-		fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%s\t%s\t%s\n",
-			f.Severity.Badge(), f.ID, f.Resource, f.Region, f.Title,
+	for i, f := range fs {
+		fmt.Fprintf(tw, "%d\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n",
+			i+1, f.Severity.Badge(), f.ID, f.Resource, f.Region, f.Title,
 			costs.Dollars(f.EstMonthlyUSD), f.Fix)
 	}
 	if err := tw.Flush(); err != nil {
