@@ -20,7 +20,7 @@ import (
 
 // auditCategories lists the implemented finding categories. More join as the
 // roadmap lands (security, messaging, …); --only validates against this.
-var auditCategories = []string{"cost"}
+var auditCategories = []string{"cost", "security"}
 
 // auditExitFindings is the exit code when --fail-on is set and findings at or
 // above the threshold exist (operational errors exit 1, clean runs 0), so CI
@@ -36,16 +36,26 @@ var (
 
 var auditCmd = &cobra.Command{
 	Use:   "audit",
-	Short: "Scan the account for cost waste (findings linter)",
-	Long: `Audit scans the configured regions and reports findings — currently the
-cost/waste category: unattached EBS volumes, gp2 volumes that could be gp3,
-unassociated Elastic IPs, idle NAT gateways, load balancers with no healthy
-targets or no traffic, stopped instances still paying for EBS storage, old
-unreferenced snapshots and AMIs, and over-provisioned DynamoDB tables.
+	Short: "Scan the account for cost waste and security risks (findings linter)",
+	Long: `Audit scans the configured regions and reports findings in two categories
+(both run by default; --only narrows):
 
-Each finding carries a stable check ID (e.g. COST-EBS-001) and an approximate
-monthly cost, with a total at the bottom. Estimates use us-east-1 on-demand
-list prices and are order-of-magnitude, not a bill.
+cost — unattached EBS volumes, gp2 volumes that could be gp3, unassociated
+Elastic IPs, idle NAT gateways, load balancers with no healthy targets or no
+traffic, stopped instances still paying for EBS storage, old unreferenced
+snapshots and AMIs, and over-provisioned DynamoDB tables. Each cost finding
+carries an approximate monthly cost, with a total at the bottom (us-east-1
+on-demand list prices; order-of-magnitude, not a bill).
+
+security — public S3 buckets and missing Public Access Blocks, buckets
+without default encryption, unencrypted EBS volumes and regions without
+EBS encryption-by-default, publicly shared EBS/RDS snapshots, publicly
+accessible or unencrypted RDS instances, EC2 instances still allowing
+IMDSv1, security groups opening sensitive ports (SSH, RDP, databases) to
+the internet, Lambda function URLs with no auth, SQS/SNS policies that
+allow everyone, and alarms stuck in INSUFFICIENT_DATA.
+
+Every finding carries a stable check ID (e.g. COST-EBS-001, SEC-S3-001).
 
 For CI pipelines, --fail-on <severity> exits 2 when findings at or above the
 threshold exist (0 below it, 1 on operational errors), --ignore suppresses
@@ -65,8 +75,11 @@ cloudwatch:GetMetricData and are skipped without it.`,
   # Explore interactively
   aws_explorer audit --all-regions --tui
 
+  # Security category only
+  aws_explorer audit --only security
+
   # CI gate: exit 2 if any warning-or-worse finding exists
-  aws_explorer audit --fail-on warning --ignore COST-EBS-002
+  aws_explorer audit --fail-on warning --ignore COST-EBS-002,SEC-EC2-001
 
   # SARIF for GitHub code scanning
   aws_explorer audit -o sarif > audit.sarif`,
@@ -113,10 +126,15 @@ cloudwatch:GetMetricData and are skipped without it.`,
 		regions := eng.EffectiveRegions()
 		timeout := time.Duration(AppConfig.App.TimeoutSeconds) * time.Second
 
+		categories := auditOnly
+		if len(categories) == 0 {
+			categories = auditCategories
+		}
+
 		if auditTUI {
 			ui.InitFromConfig(AppConfig.UI)
 			ch := make(chan audit.CostChunk, 8)
-			go audit.StreamCost(ctx, eng.AWSConfig, regions, AppConfig.App.MaxConcurrency, timeout, ch)
+			go audit.Stream(ctx, eng.AWSConfig, regions, categories, AppConfig.App.MaxConcurrency, timeout, ch)
 			m := audittui.New(regions, dropIgnored(ch, ignore))
 			p := tea.NewProgram(ui.WithWindowTitle(m), tea.WithAltScreen(), tea.WithContext(ctx))
 			if _, err := p.Run(); err != nil {
@@ -126,8 +144,8 @@ cloudwatch:GetMetricData and are skipped without it.`,
 			return nil
 		}
 
-		fmt.Fprintf(os.Stderr, "Auditing %d region(s) for cost waste…\n", len(regions))
-		fs, errs := audit.Cost(ctx, eng.AWSConfig, regions, AppConfig.App.MaxConcurrency, timeout)
+		fmt.Fprintf(os.Stderr, "Auditing %d region(s) for %s…\n", len(regions), strings.Join(categories, " + "))
+		fs, errs := audit.Run(ctx, eng.AWSConfig, regions, categories, AppConfig.App.MaxConcurrency, timeout)
 		fs = findings.Drop(fs, ignore)
 
 		output.PrintErrors(os.Stderr, errs)

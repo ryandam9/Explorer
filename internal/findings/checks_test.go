@@ -11,6 +11,11 @@ func TestEveryCheckIDIsRegistered(t *testing.T) {
 		CheckIdleNATGateway, CheckLBNoHealthyTarget, CheckLBIdle,
 		CheckStoppedWithEBS, CheckOldSnapshot, CheckUnusedAMI,
 		CheckDDBOverProvision,
+		CheckS3Public, CheckS3PABOff, CheckS3EncryptionOff,
+		CheckEBSUnencrypted, CheckEBSDefaultEncOff, CheckPublicEBSSnapshot,
+		CheckRDSPublic, CheckRDSUnencrypted, CheckPublicRDSSnapshot,
+		CheckIMDSv1, CheckSGOpenPort, CheckLambdaURLNoAuth,
+		CheckSQSOpenPolicy, CheckSNSOpenPolicy, CheckAlarmNoData,
 	}
 	if len(Checks()) != len(ids) {
 		t.Errorf("registry has %d checks, constants list %d", len(Checks()), len(ids))

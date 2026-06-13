@@ -26,13 +26,16 @@ type CostChunk struct {
 	Errors   []model.ExploreError
 }
 
-// StreamCost runs the cost/waste linter (AXE-004) over every region, sending
-// one CostChunk per region as it finishes and closing ch when all are done.
-// baseCfg supplies credentials; the region is overridden per scan.
-// perCallTimeout bounds each service-family collection within a region
-// (0 = no timeout). Chunk findings are sorted within the region; consumers
-// aggregating regions re-sort with findings.Sort.
-func StreamCost(ctx context.Context, baseCfg aws.Config, regions []string, maxConcurrency int, perCallTimeout time.Duration, ch chan<- CostChunk) {
+// Stream runs the selected finding categories ("cost", "security") over
+// every region, sending one CostChunk per region as it finishes and closing
+// ch when all are done. baseCfg supplies credentials; the region is
+// overridden per scan. perCallTimeout bounds each service-family collection
+// within a region (0 = no timeout). Chunk findings are sorted within the
+// region; consumers aggregating regions re-sort with findings.Sort.
+//
+// S3 is account-global, so its security sweep runs in the first region only
+// and lands in that region's chunk.
+func Stream(ctx context.Context, baseCfg aws.Config, regions []string, categories []string, maxConcurrency int, perCallTimeout time.Duration, ch chan<- CostChunk) {
 	defer close(ch)
 	if maxConcurrency <= 0 {
 		maxConcurrency = 8
@@ -40,14 +43,34 @@ func StreamCost(ctx context.Context, baseCfg aws.Config, regions []string, maxCo
 	if len(regions) == 0 {
 		regions = []string{"us-east-1"}
 	}
+	wantCost, wantSecurity := false, false
+	for _, c := range categories {
+		switch c {
+		case "cost":
+			wantCost = true
+		case "security":
+			wantSecurity = true
+		}
+	}
 
 	g, gctx := errgroup.WithContext(ctx)
 	g.SetLimit(maxConcurrency)
-	for _, region := range regions {
+	for i, region := range regions {
 		region := region
+		s3Region := i == 0
 		g.Go(func() error {
-			snap, errs := collectCostRegion(gctx, baseCfg, region, perCallTimeout)
-			fs := findings.AnalyzeCost(snap)
+			var fs []findings.Finding
+			var errs []model.ExploreError
+			if wantCost {
+				snap, e := collectCostRegion(gctx, baseCfg, region, perCallTimeout)
+				fs = append(fs, findings.AnalyzeCost(snap)...)
+				errs = append(errs, e...)
+			}
+			if wantSecurity {
+				snap, e := collectSecurityRegion(gctx, baseCfg, region, s3Region, perCallTimeout)
+				fs = append(fs, findings.AnalyzeSecurity(snap)...)
+				errs = append(errs, e...)
+			}
 			findings.Sort(fs)
 			select {
 			case ch <- CostChunk{Region: region, Findings: fs, Errors: errs}:
@@ -59,11 +82,11 @@ func StreamCost(ctx context.Context, baseCfg aws.Config, regions []string, maxCo
 	_ = g.Wait()
 }
 
-// Cost runs the cost/waste linter over every region and returns the merged,
-// sorted findings plus any collection errors.
-func Cost(ctx context.Context, baseCfg aws.Config, regions []string, maxConcurrency int, perCallTimeout time.Duration) ([]findings.Finding, []model.ExploreError) {
+// Run executes the selected categories over every region and returns the
+// merged, sorted findings plus any collection errors.
+func Run(ctx context.Context, baseCfg aws.Config, regions []string, categories []string, maxConcurrency int, perCallTimeout time.Duration) ([]findings.Finding, []model.ExploreError) {
 	ch := make(chan CostChunk, len(regions)+1)
-	go StreamCost(ctx, baseCfg, regions, maxConcurrency, perCallTimeout, ch)
+	go Stream(ctx, baseCfg, regions, categories, maxConcurrency, perCallTimeout, ch)
 
 	var fs []findings.Finding
 	var errs []model.ExploreError
@@ -73,4 +96,15 @@ func Cost(ctx context.Context, baseCfg aws.Config, regions []string, maxConcurre
 	}
 	findings.Sort(fs)
 	return fs, errs
+}
+
+// StreamCost runs the cost/waste linter (AXE-004) only. Kept as the
+// single-category convenience wrapper around Stream.
+func StreamCost(ctx context.Context, baseCfg aws.Config, regions []string, maxConcurrency int, perCallTimeout time.Duration, ch chan<- CostChunk) {
+	Stream(ctx, baseCfg, regions, []string{"cost"}, maxConcurrency, perCallTimeout, ch)
+}
+
+// Cost runs the cost/waste linter only, returning merged sorted findings.
+func Cost(ctx context.Context, baseCfg aws.Config, regions []string, maxConcurrency int, perCallTimeout time.Duration) ([]findings.Finding, []model.ExploreError) {
+	return Run(ctx, baseCfg, regions, []string{"cost"}, maxConcurrency, perCallTimeout)
 }

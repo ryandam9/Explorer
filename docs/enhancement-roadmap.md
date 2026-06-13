@@ -1,6 +1,6 @@
 # AWS Explorer — Enhancement Roadmap & Design Specification
 
-Status: **In progress** — shipped so far: AXE-004 & the `internal/findings` platform (#79), AXE-023 (#80), AXE-001 & AXE-022 (#81), AXE-013 (#82), AXE-007 (#83), AXE-005 (#84, #86), AXE-006 (#85), AXE-012 (#87), AXE-002 · Tracking issue: #76
+Status: **In progress** — shipped so far: AXE-004 & the `internal/findings` platform (#79), AXE-023 (#80), AXE-001 & AXE-022 (#81), AXE-013 (#82), AXE-007 (#83), AXE-005 (#84, #86), AXE-006 (#85), AXE-012 (#87), AXE-002 (#88), AXE-008 · Tracking issue: #76
 
 This document specifies 24 proposed enhancements, grouped into nine themes.
 Each enhancement carries a stable ID (`AXE-NNN`) used in the tracking issue,
@@ -34,7 +34,7 @@ The proposals follow the tool's established design principles:
 | [AXE-005](#axe-005) | CloudTrail "who changed this" | C — Change attribution & drift | ✅ shipped |
 | [AXE-006](#axe-006) | Account-wide inventory snapshot diff | C — Change attribution & drift | ✅ shipped |
 | [AXE-007](#axe-007) | Expiry & deprecation watchlist (`expiring`) | D — Expiry & deprecation | ✅ shipped |
-| [AXE-008](#axe-008) | Account-wide security audit (`audit`) | E — Account-wide audit | P2 |
+| [AXE-008](#axe-008) | Account-wide security audit (`audit`) | E — Account-wide audit | ✅ shipped |
 | [AXE-009](#axe-009) | Generalized where-used / blast radius | E — Account-wide audit | P2 |
 | [AXE-010](#axe-010) | Relationship graph export (DOT / Mermaid) | E — Account-wide audit | P3 |
 | [AXE-011](#axe-011) | Jump from resource to its CloudWatch logs | F — Cross-navigation | P2 |
@@ -398,6 +398,8 @@ DAYS  WHAT                          RESOURCE                       DETAIL
 ## Theme E — Account-wide audit
 
 ### AXE-008 — `audit` command (account-wide security linter) {#axe-008}
+
+> **Status: ✅ shipped** — security category added to `aws_explorer audit` (15 `SEC-*` checks in `internal/findings/security.go`, collection in `internal/audit/security_collect.go`; both categories run by default, `--only` narrows; CLI + TUI, `--fail-on`/`--ignore`/SARIF all apply).
 
 **Problem.** The VPC findings linter is the tool's best feature; security
 issues outside VPC networking deserve the same treatment.
