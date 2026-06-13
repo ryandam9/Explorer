@@ -7,10 +7,10 @@ import (
 
 func TestEvaluate_StatusThresholds(t *testing.T) {
 	in := []Quota{
-		{Name: "VPCs per Region", Service: "vpc", Region: "us-east-1", Limit: 5, Used: 5, UsageKnown: true},     // 100% critical
-		{Name: "Standard vCPUs", Service: "ec2", Region: "us-east-1", Limit: 64, Used: 58, UsageKnown: true},    // 90.6% warn
-		{Name: "Elastic IPs", Service: "ec2", Region: "us-east-1", Limit: 5, Used: 1, UsageKnown: true},         // 20% ok
-		{Name: "Roles per account", Service: "iam", Region: "global", Limit: 1000, UsageKnown: false},           // unknown
+		{Name: "VPCs per Region", Service: "vpc", Region: "us-east-1", Limit: 5, Used: 5, UsageKnown: true},  // 100% critical
+		{Name: "Standard vCPUs", Service: "ec2", Region: "us-east-1", Limit: 64, Used: 58, UsageKnown: true}, // 90.6% warn
+		{Name: "Elastic IPs", Service: "ec2", Region: "us-east-1", Limit: 5, Used: 1, UsageKnown: true},      // 20% ok
+		{Name: "Roles per account", Service: "iam", Region: "global", Limit: 1000, UsageKnown: false},        // unknown
 	}
 	rows := Evaluate(in, 80)
 
@@ -67,9 +67,9 @@ func TestEvaluate_ZeroLimitNoPanic(t *testing.T) {
 
 func TestFilter(t *testing.T) {
 	rows := Evaluate([]Quota{
-		{Name: "high", Limit: 10, Used: 9, UsageKnown: true},  // 90%
-		{Name: "low", Limit: 10, Used: 1, UsageKnown: true},   // 10%
-		{Name: "unk", Limit: 10, UsageKnown: false},           // unknown
+		{Name: "high", Limit: 10, Used: 9, UsageKnown: true}, // 90%
+		{Name: "low", Limit: 10, Used: 1, UsageKnown: true},  // 10%
+		{Name: "unk", Limit: 10, UsageKnown: false},          // unknown
 	}, 80)
 
 	kept, dropped := Filter(rows, 80)
