@@ -203,6 +203,7 @@ type tuiModel struct {
 
 	// Help & settings overlays
 	showHelp     bool
+	helpViewport viewport.Model // scrolls the help body when it is taller than the screen
 	showSettings bool
 	settings     ui.SettingsModel
 
@@ -393,14 +394,35 @@ func (m tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, tea.Batch(cmds...)
 	}
 
-	// Swallow keys while the help overlay is open; Esc or ? closes it.
+	// While the help overlay is open, scroll the reference and close on
+	// Esc/?/q. Only input is intercepted; scan messages fall through so an
+	// in-progress scan keeps collecting underneath.
 	if m.showHelp {
-		if key, ok := msg.(tea.KeyMsg); ok {
-			if s := key.String(); s == "esc" || s == ui.KeyHelp || s == "q" {
+		switch msg := msg.(type) {
+		case tea.KeyMsg:
+			switch msg.String() {
+			case "esc", ui.KeyHelp, "q":
 				m.showHelp = false
+			case "up", "k", "[":
+				m.helpViewport.LineUp(3)
+			case "down", "j", "]":
+				m.helpViewport.LineDown(3)
+			case "g":
+				m.helpViewport.GotoTop()
+			case "G":
+				m.helpViewport.GotoBottom()
 			}
+			return m, nil
+		case tea.MouseMsg:
+			switch msg.Button {
+			case tea.MouseButtonWheelUp:
+				m.helpViewport.LineUp(3)
+			case tea.MouseButtonWheelDown:
+				m.helpViewport.LineDown(3)
+			}
+			return m, nil
 		}
-		return m, nil
+		// Non-input messages fall through to the normal update path below.
 	}
 
 	// While the debug overlay is open, intercept only key and mouse events
@@ -825,7 +847,7 @@ func (m tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, tea.Batch(cmds...)
 
 		case ui.KeyHelp:
-			m.showHelp = true
+			m.openHelpOverlay()
 			return m, tea.Batch(cmds...)
 
 		case "e":
@@ -1979,10 +2001,11 @@ func (m *tuiModel) syncDetailViewport() {
 
 // ── View ──────────────────────────────────────────────────────────────────────
 
-// helpView renders the keybinding help overlay for the summary explorer,
-// using the shared themed renderer so it matches the other browsers' help.
-func (m tuiModel) helpView() string {
-	body := lipgloss.JoinVertical(lipgloss.Left,
+// helpBody returns the full keybinding reference as a single block. It is
+// taller than most terminals, so it is shown inside a scrollable viewport
+// rather than rendered as one fixed block (which would clip the bottom rows).
+func (m tuiModel) helpBody() string {
+	return lipgloss.JoinVertical(lipgloss.Left,
 		"Navigation",
 		"  ↑/↓, [ ]           Move selection / scroll detail",
 		"  < >                Scroll table columns (when more columns than fit)",
@@ -2019,6 +2042,12 @@ func (m tuiModel) helpView() string {
 		"  ?                  Toggle this help",
 		"  q, Ctrl+C          Quit",
 	)
+}
+
+// openHelpOverlay (re)builds the scrollable help overlay sized to the current
+// terminal, so the full reference is reachable by scrolling even when it is
+// taller than the screen.
+func (m *tuiModel) openHelpOverlay() {
 	w := m.width - 12
 	if w > 72 {
 		w = 72
@@ -2026,7 +2055,27 @@ func (m tuiModel) helpView() string {
 	if w < 32 {
 		w = 32
 	}
-	return ui.HelpView("AWS Explorer Help", body, w)
+	// Reserve rows for the surrounding frame: border (2), padding (2), title
+	// and its blank line (2), and the scroll hint and its blank line (2).
+	h := m.height - 12
+	if h < 6 {
+		h = 6
+	}
+	m.helpViewport = viewport.New(w, h)
+	m.helpViewport.SetContent(m.helpBody())
+	m.helpViewport.GotoTop()
+	m.showHelp = true
+}
+
+// helpView renders the scrollable help overlay (title + body + scroll hint)
+// inside the shared themed frame so it matches the other browsers' help.
+func (m tuiModel) helpView() string {
+	hint := lipgloss.NewStyle().Foreground(lipgloss.Color(ui.ColorMuted())).
+		Render("↑/↓ scroll · ?/Esc close")
+	body := lipgloss.JoinVertical(lipgloss.Left, m.helpViewport.View(), "", hint)
+	// HelpView pads 2 cols on each side inside its width, so add that back so
+	// the viewport's lines fit exactly instead of wrapping.
+	return ui.HelpView("AWS Explorer Help", body, m.helpViewport.Width+4)
 }
 
 func (m tuiModel) View() string {
@@ -2353,7 +2402,7 @@ func (m tuiModel) statusHints() []ui.KeyHint {
 		// The settings panel renders its own hint bar.
 		return nil
 	case m.showHelp:
-		return []ui.KeyHint{ui.H("?/Esc", "close help")}
+		return []ui.KeyHint{ui.H("↑/↓", "scroll"), ui.H("?/Esc", "close help")}
 	case m.showErrors:
 		return []ui.KeyHint{ui.H("↑/↓", "scroll"), ui.H("Esc/e", "close")}
 	case m.showDebug:
