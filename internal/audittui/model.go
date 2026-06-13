@@ -326,6 +326,13 @@ func (m *Model) rebuild() {
 	m.visible = filterFindings(m.all, m.filter.Value())
 	sortFindings(m.visible, m.sortCol, m.sortAsc)
 
+	// Re-title the columns so the active sort column carries the direction
+	// arrow. Column 0 ("#") is a positional counter and never sorts. Widths are
+	// reserved for the arrow, so the table does not reflow when the sort moves.
+	cols := append([]table.Column(nil), columns...)
+	table.ApplySortHeader(cols, m.sortCol, m.sortAsc, func(i int) bool { return i > 0 })
+	m.tbl.SetColumns(cols)
+
 	rows := make([]table.Row, 0, len(m.visible))
 	for i, f := range m.visible {
 		rows = append(rows, table.Row{

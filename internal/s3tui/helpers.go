@@ -53,16 +53,6 @@ func parentPrefix(prefix string) string {
 	return strings.Join(parts[:len(parts)-1], "/") + "/"
 }
 
-func sortTitle(title string, col, active int, asc bool) string {
-	if col != active {
-		return title
-	}
-	if asc {
-		return title + " ↑"
-	}
-	return title + " ↓"
-}
-
 // breadcrumb joins the bucket and prefix segments into a "bucket / seg / seg/"
 // path, truncating from the left when wider than maxW so the trailing
 // components stay visible.

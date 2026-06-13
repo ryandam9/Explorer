@@ -448,13 +448,14 @@ func (m *Model) rebuildResourceTable() {
 	}
 
 	cols := display.Columns(colFields)
-	if m.sortCol >= 0 && m.sortCol+1 < len(cols) {
-		arrow := " ↑"
-		if !m.sortAsc {
-			arrow = " ↓"
-		}
-		cols[m.sortCol+1].Title += arrow // +1: leading "#" column
+	// cols has a leading "#" column, so the display index of the sort column is
+	// sortCol+1. Column 0 is not sortable; every other column reserves room for
+	// the arrow so the table does not reflow when the sort moves.
+	active := -1
+	if m.sortCol >= 0 {
+		active = m.sortCol + 1
 	}
+	table.ApplySortHeader(cols, active, m.sortAsc, func(i int) bool { return i > 0 })
 	m.resourceTable.SetColumns(cols)
 
 	// Quick filter: keep only rows whose displayed cells contain the query

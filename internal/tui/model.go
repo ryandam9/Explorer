@@ -1542,8 +1542,8 @@ func (m tuiModel) sortField(r model.Resource, col int) string {
 		return ""
 	}
 	title := cols[col].Title
-	title = strings.TrimSuffix(title, " ↑")
-	title = strings.TrimSuffix(title, " ↓")
+	title = strings.TrimSuffix(title, table.SortAscArrow)
+	title = strings.TrimSuffix(title, table.SortDescArrow)
 	switch title {
 	case "Account":
 		return r.AccountID
@@ -1709,13 +1709,10 @@ func (m tuiModel) columns() []table.Column {
 		{Title: "State", Width: 10},
 	}...)
 
-	if m.sortCol > 0 && m.sortCol < len(cols) {
-		arrow := " ↑"
-		if !m.sortAsc {
-			arrow = " ↓"
-		}
-		cols[m.sortCol].Title += arrow
-	}
+	// Column 0 ("#") is a positional counter, not a sortable field. The arrow
+	// goes on the active column; every sortable column reserves room for it so
+	// the table does not reflow when the sort moves.
+	table.ApplySortHeader(cols, m.sortCol, m.sortAsc, func(i int) bool { return i > 0 })
 	return cols
 }
 
