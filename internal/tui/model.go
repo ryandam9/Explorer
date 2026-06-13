@@ -403,33 +403,34 @@ func (m tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 
-	// While the debug overlay is open, allow scrolling and close on Esc/~/q.
-	// It is refreshed from the live sink on every key so an in-progress scan's
-	// activity keeps appearing while the pane is open.
+	// While the debug overlay is open, intercept only key and mouse events
+	// (to scroll the pane or close it); every other message — scan chunks,
+	// completion, spinner ticks — must fall through to the normal update path
+	// so the scan keeps progressing underneath. The scan is a pull loop where
+	// each chunk re-issues waitForChunk, so swallowing a chunkMsg here would
+	// stall collection and freeze the inventory.
 	if m.showDebug {
 		switch msg := msg.(type) {
 		case tea.KeyMsg:
 			switch msg.String() {
 			case "esc", ui.KeyDebug, "q":
 				m.showDebug = false
-				return m, nil
 			case "up", "k", "[":
 				m.debugViewport.SetContent(m.debugBody())
 				m.debugViewport.LineUp(3)
-				return m, nil
 			case "down", "j", "]":
 				m.debugViewport.SetContent(m.debugBody())
 				m.debugViewport.LineDown(3)
-				return m, nil
 			case "g":
 				m.debugViewport.SetContent(m.debugBody())
 				m.debugViewport.GotoTop()
-				return m, nil
 			case "G":
 				m.debugViewport.SetContent(m.debugBody())
 				m.debugViewport.GotoBottom()
-				return m, nil
 			}
+			// Swallow every key while the pane is open so it never leaks to
+			// the table/sidebar underneath.
+			return m, nil
 		case tea.MouseMsg:
 			switch msg.Button {
 			case tea.MouseButtonWheelUp:
@@ -439,25 +440,27 @@ func (m tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.debugViewport.SetContent(m.debugBody())
 				m.debugViewport.LineDown(3)
 			}
+			return m, nil
 		}
-		return m, nil
+		// Non-input messages fall through to the normal update path below.
 	}
 
 	// While the errors overlay is open, allow scrolling and close on Esc/e/q.
+	// Intercept only key/mouse input; let scan messages fall through so an
+	// in-progress scan keeps collecting underneath (see the debug overlay note
+	// above: swallowing a chunkMsg here would stall the pull loop).
 	if m.showErrors {
 		switch msg := msg.(type) {
 		case tea.KeyMsg:
 			switch msg.String() {
 			case "esc", "e", "q":
 				m.showErrors = false
-				return m, nil
 			case "up", "k", "[":
 				m.errorsViewport.LineUp(3)
-				return m, nil
 			case "down", "j", "]":
 				m.errorsViewport.LineDown(3)
-				return m, nil
 			}
+			return m, nil
 		case tea.MouseMsg:
 			// Wheel scrolls the overlay's viewport.
 			switch msg.Button {
@@ -466,30 +469,30 @@ func (m tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			case tea.MouseButtonWheelDown:
 				m.errorsViewport.LineDown(3)
 			}
+			return m, nil
 		}
-		return m, nil
+		// Non-input messages fall through to the normal update path below.
 	}
 
 	// While the account-diff overlay is open: scroll, b to re-baseline,
-	// Esc/d/q to close.
+	// Esc/d/q to close. As with the other overlays, only input is intercepted
+	// so a running scan keeps progressing underneath.
 	if m.showAcctDiff {
 		switch msg := msg.(type) {
 		case tea.KeyMsg:
 			switch msg.String() {
 			case "esc", "D", "q":
 				m.showAcctDiff = false
-				return m, nil
 			case "up", "k", "[":
 				m.acctDiffVP.LineUp(3)
-				return m, nil
 			case "down", "j", "]":
 				m.acctDiffVP.LineDown(3)
-				return m, nil
 			case "b":
 				m.showAcctDiff = false
 				m.saveAcctBaseline()
 				return m, toastCmd(4 * time.Second)
 			}
+			return m, nil
 		case tea.MouseMsg:
 			switch msg.Button {
 			case tea.MouseButtonWheelUp:
@@ -497,8 +500,9 @@ func (m tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			case tea.MouseButtonWheelDown:
 				m.acctDiffVP.LineDown(3)
 			}
+			return m, nil
 		}
-		return m, nil
+		// Non-input messages fall through to the normal update path below.
 	}
 
 	// Route all events to the profile/region switcher form when it is open.
@@ -1101,6 +1105,18 @@ func (m tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		var cmd tea.Cmd
 		m.spinner, cmd = m.spinner.Update(msg)
 		cmds = append(cmds, cmd)
+		// Keep the debug pane live while a scan runs: the spinner ticks
+		// continuously during loading, so refresh the captured activity on
+		// each tick rather than only when the user scrolls. Tail-follow only
+		// when already at the bottom, so scrolling up to read earlier lines
+		// isn't yanked back down by the next tick.
+		if m.showDebug {
+			atBottom := m.debugViewport.AtBottom()
+			m.debugViewport.SetContent(m.debugBody())
+			if atBottom {
+				m.debugViewport.GotoBottom()
+			}
+		}
 
 	case timelineMsg:
 		if m.showDetail && m.detail != nil && m.detail.ID == msg.resourceID {
