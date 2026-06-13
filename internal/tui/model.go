@@ -446,20 +446,21 @@ func (m tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	}
 
 	// While the errors overlay is open, allow scrolling and close on Esc/e/q.
+	// Intercept only key/mouse input; let scan messages fall through so an
+	// in-progress scan keeps collecting underneath (see the debug overlay note
+	// above: swallowing a chunkMsg here would stall the pull loop).
 	if m.showErrors {
 		switch msg := msg.(type) {
 		case tea.KeyMsg:
 			switch msg.String() {
 			case "esc", "e", "q":
 				m.showErrors = false
-				return m, nil
 			case "up", "k", "[":
 				m.errorsViewport.LineUp(3)
-				return m, nil
 			case "down", "j", "]":
 				m.errorsViewport.LineDown(3)
-				return m, nil
 			}
+			return m, nil
 		case tea.MouseMsg:
 			// Wheel scrolls the overlay's viewport.
 			switch msg.Button {
@@ -468,30 +469,30 @@ func (m tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			case tea.MouseButtonWheelDown:
 				m.errorsViewport.LineDown(3)
 			}
+			return m, nil
 		}
-		return m, nil
+		// Non-input messages fall through to the normal update path below.
 	}
 
 	// While the account-diff overlay is open: scroll, b to re-baseline,
-	// Esc/d/q to close.
+	// Esc/d/q to close. As with the other overlays, only input is intercepted
+	// so a running scan keeps progressing underneath.
 	if m.showAcctDiff {
 		switch msg := msg.(type) {
 		case tea.KeyMsg:
 			switch msg.String() {
 			case "esc", "D", "q":
 				m.showAcctDiff = false
-				return m, nil
 			case "up", "k", "[":
 				m.acctDiffVP.LineUp(3)
-				return m, nil
 			case "down", "j", "]":
 				m.acctDiffVP.LineDown(3)
-				return m, nil
 			case "b":
 				m.showAcctDiff = false
 				m.saveAcctBaseline()
 				return m, toastCmd(4 * time.Second)
 			}
+			return m, nil
 		case tea.MouseMsg:
 			switch msg.Button {
 			case tea.MouseButtonWheelUp:
@@ -499,8 +500,9 @@ func (m tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			case tea.MouseButtonWheelDown:
 				m.acctDiffVP.LineDown(3)
 			}
+			return m, nil
 		}
-		return m, nil
+		// Non-input messages fall through to the normal update path below.
 	}
 
 	// Route all events to the profile/region switcher form when it is open.
