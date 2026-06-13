@@ -9,6 +9,7 @@ Discover, monitor, and display AWS resources across accounts and regions via CLI
 - **VPC Explorer**: browse a VPC's subnets, security groups, network interfaces, route tables, gateways, endpoints, NACLs, peering, flow logs, and attached compute/services in a three-pane TUI
 - **VPC debugging toolkit** (no AI, deterministic): a findings linter, a connectivity path tracer, plain-English SG/NACL rule explanations, cross-reference ("where used"), merged effective security rules, DNS diagnostics, a public-exposure audit, snapshot diffing, Markdown export, and AWS Reachability Analyzer integration — see [VPC Debugging Toolkit](#vpc-debugging-toolkit)
 - **Cost/waste audit**: `aws_explorer audit` scans for the classic sources of silent spend — unattached EBS volumes, idle Elastic IPs and NAT gateways, load balancers with no healthy targets or no traffic, gp2→gp3 candidates, forgotten snapshots/AMIs, over-provisioned DynamoDB tables — each finding with a stable check ID and an estimated monthly cost, printable or explored in an interactive TUI (`--tui`) — see [Audit Usage](#audit-usage)
+- **Live bill**: `aws_explorer bill` shows the actual bill from the Cost Explorer API — every service and usage type with its usage quantity, price and a grand total (the Billing console's numbers, not list-price estimates); `--tui` is a live screen that re-fetches on an interval, flags what moved since the last refresh, and drills into per-resource costs (resource ID/ARN) for a service — see [Bill Usage](#bill-usage)
 - **IAM debugging**: `aws_explorer iam decode` turns an "Encoded authorization failure message" into a readable verdict, and `aws_explorer iam can <principal> <action> [resource]` simulates IAM policy ("can X do Y on Z?") with the matched statements named and the simulator's blind spots stated — see [IAM Tools](#iam-tools)
 - **CloudTrail "who changed this"**: `aws_explorer trail <resource-id-or-arn>` lists recent CloudTrail management events for a resource — when, which API call, which principal, from which IP — using the zero-setup 90-day LookupEvents window; the summary TUI's `t` timeline is the interactive twin — see [Trail Usage](#trail-usage)
 - **Account snapshot diff**: `summary --baseline` / `summary --diff` answers "what changed in this account since yesterday?" — added/removed/modified resources across the whole merged-by-ARN inventory, deterministic and volatile-field-free; `D` in the summary TUI is the interactive twin — see [Account snapshot diff](#account-snapshot-diff--what-changed-since-yesterday)
@@ -569,6 +570,80 @@ What it checks:
 `iam:ListServerCertificates`, `lambda:ListFunctions`, `eks:{ListClusters,
 DescribeCluster}`, `rds:{DescribeDBInstances,DescribePendingMaintenanceActions}`,
 `secretsmanager:ListSecrets`. Any denial skips that source with a note.
+
+## Bill Usage
+
+`bill` shows the account's actual cost from the AWS Cost Explorer API, grouped
+by service and usage type, each line carrying its usage quantity and a grand
+total at the bottom — the numbers the Billing console shows, not the
+list-price estimates the [audit](#audit-usage) linter attaches to waste
+findings. By default it reports the current month to date; today's partial
+charges are estimated and flagged as such.
+
+```bash
+# Current month to date, grouped by service and usage type
+./bin/aws_explorer bill
+
+# A past month, machine-readable
+./bin/aws_explorer bill --month 2026-05 -o json
+
+# Live screen, re-fetching every 10 minutes
+./bin/aws_explorer bill --tui --interval 10m
+
+# CSV for a spreadsheet
+./bin/aws_explorer bill -o csv --no-header > bill.csv
+```
+
+```
+SERVICE                  USAGE TYPE                  USAGE     UNIT    COST
+Amazon EC2               EBS:VolumeUsage.gp3         100       GB-Mo   $8.00
+Amazon EC2               BoxUsage:t3.micro           744       Hrs     $1.50
+Amazon S3                TimedStorage-ByteHrs        10        GB-Mo   $0.25
+TOTAL (estimated)        2026-06-01 → 2026-06-13                       $9.75
+```
+
+### Live screen (`--tui`)
+
+`--tui` opens a live bill that re-fetches on a fixed interval (`--interval`,
+default 5m), so activity that incurs cost surfaces without restarting — this
+is the "Live screen" the page is meant to be. A `Δ` column shows what each
+line moved since the previous refresh, and the header timestamps the last
+update.
+
+| Key | Action |
+|-----|--------|
+| `↑`/`↓` | Navigate bill lines |
+| `Enter` | Detail overlay for the selected line |
+| `x` | Per-resource breakdown for the selected service (resource ID/ARN, usage, amount) |
+| `u` | Refresh now |
+| `/` | Filter by service, usage type or unit |
+| `s` / `R` | Sort by the next column / reverse |
+| `y` | Copy the selected service and usage type |
+| `C` | Export the current view to CSV |
+| `?` / `q` | Help / quit |
+
+The per-resource drill-down (`x`) uses Cost Explorer's resource-level data,
+which AWS keeps for the trailing **14 days** and only when the account has
+opted in (Billing → Cost Management Preferences → "Daily granularity
+resource-level data"). Without it, the overlay says so instead of failing.
+
+| Flag | Default | Description |
+|------|---------|-------------|
+| `--month` | current month | Billing period as `YYYY-MM`; past months cover the full month, the current month clamps to month-to-date |
+| `--tui` | off | Open the live screen instead of printing once |
+| `--interval` | `5m` | Auto-refresh cadence for `--tui` (minimum 1m) |
+| `--output` / `-o` | `table` | `table`, `json`, `ndjson`, `csv` |
+
+> **Cost note.** Cost Explorer is a paid API — AWS bills every request
+> (`GetCostAndUsage`, `GetCostAndUsageWithResources`) at **$0.01**, including
+> each automatic refresh in `--tui`. The live screen names the cadence and its
+> per-refresh cost in the header; raise `--interval` to spend less. The
+> minimum interval is 1 minute because the numbers only move every few
+> minutes anyway.
+
+**IAM permissions.** Read-only: `ce:GetCostAndUsage`, plus
+`ce:GetCostAndUsageWithResources` for the per-resource drill-down. Cost
+Explorer is a global service; the region flags don't affect it.
 
 ## IAM Tools
 
