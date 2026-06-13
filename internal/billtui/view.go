@@ -49,10 +49,14 @@ func (m Model) View() string {
 	return view
 }
 
-// headerView is two lines: the page name with refresh state, and the running
-// total with line count and refresh cadence.
+// headerView is two lines: the page name with a PAID badge and refresh
+// state, and the running total with line count and refresh cadence.
 func (m Model) headerView() string {
 	title := ui.HeaderStyle().Render("Bill — " + m.label)
+	paid := lipgloss.NewStyle().
+		Foreground(lipgloss.Color(ui.ColorStatusBarText())).
+		Background(lipgloss.Color(ui.ColorWarning())).
+		Bold(true).Padding(0, 1).Render("PAID")
 
 	var state string
 	switch {
@@ -61,7 +65,7 @@ func (m Model) headerView() string {
 	case !m.updated.IsZero():
 		state = ui.MutedStyle().Render("updated " + m.updated.Format("15:04:05"))
 	}
-	line1 := title + "  " + state
+	line1 := title + "  " + paid + "  " + state
 
 	var parts []string
 	if m.bill != nil {
@@ -71,8 +75,10 @@ func (m Model) headerView() string {
 		}
 		parts = append(parts, total, fmt.Sprintf("%d line item(s)", len(m.bill.Lines)))
 	}
-	parts = append(parts, fmt.Sprintf("auto-refresh %s ($0.01/refresh)", m.interval))
+	parts = append(parts, fmt.Sprintf("auto-refresh %s", m.interval))
 	line2 := ui.MutedStyle().Render(strings.Join(parts, " · "))
+	line2 += "  " + lipgloss.NewStyle().Foreground(lipgloss.Color(ui.ColorWarning())).
+		Render("· Cost Explorer is a paid API — every refresh is a $0.01 request")
 	if m.fetchErr != "" {
 		line2 += "  " + ui.ErrorStyle().Render("⚠ "+m.fetchErr)
 	}
@@ -265,7 +271,7 @@ func (m Model) helpOverlay() string {
 		{"↑/↓, j/k", "Navigate bill lines"},
 		{"Enter", "Open the detail overlay for the selected line"},
 		{"x", "Per-resource breakdown for the selected service (needs resource-level data enabled)"},
-		{"u", "Refresh now (one $0.01 Cost Explorer request)"},
+		{"u", "Refresh now (PAID — one $0.01 Cost Explorer request)"},
 		{"/", "Quick filter (matches service, usage type, unit)"},
 		{"s / R", "Sort by the next column / reverse the direction"},
 		{"r", "Reset filter and sort"},
@@ -281,7 +287,8 @@ func (m Model) helpOverlay() string {
 	for _, r := range rows {
 		b.WriteString(keyStyle.Render(r.key) + r.action + "\n")
 	}
-	b.WriteString("\n" + ui.MutedStyle().Render(
-		"The screen re-fetches automatically at the configured --interval; the Δ column shows what moved since the previous refresh."))
+	b.WriteString("\n" + lipgloss.NewStyle().Foreground(lipgloss.Color(ui.ColorWarning())).Bold(true).
+		Render("PAID FEATURE: Cost Explorer bills $0.01 per request. ") +
+		ui.MutedStyle().Render("Every automatic refresh at the configured --interval is one such request; the Δ column shows what moved since the previous refresh."))
 	return style.Render(b.String())
 }
