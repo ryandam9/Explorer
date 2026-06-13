@@ -7,6 +7,8 @@ import (
 	"io"
 	"strings"
 	"text/tabwriter"
+
+	"github.com/ryandam9/aws_explorer/internal/csvexport"
 )
 
 // Report is the machine-readable shape of a diff: the baseline's metadata
@@ -87,7 +89,7 @@ func renderCSV(w io.Writer, rep Report, noHeader bool) error {
 	}
 	for _, c := range rep.Changes {
 		rec := []string{c.Kind, c.Type, c.Name, c.ID, c.Region, strings.Join(c.Deltas, "; ")}
-		if err := cw.Write(rec); err != nil {
+		if err := cw.Write(csvexport.SanitizeRow(rec)); err != nil {
 			return err
 		}
 	}

@@ -21,6 +21,12 @@ const costMetricWindow = 14 * 24 * time.Hour
 // aggregated client-side over the window.
 const metricPeriodSeconds = 86400
 
+// ddbMetricPeriodSeconds samples DynamoDB consumption hourly rather than
+// daily, so the busiest hour stands out as a peak. Provisioned capacity must
+// cover that peak, so the over-provisioning estimate sizes from it; a daily
+// period would smear a short spike into a low daily average.
+const ddbMetricPeriodSeconds = 3600
+
 // maxQueriesPerCall is the GetMetricData limit on MetricDataQueries.
 const maxQueriesPerCall = 500
 
@@ -42,6 +48,7 @@ func fetchCostMetrics(ctx context.Context, cfg aws.Config, snap *findings.CostSn
 	start := end.Add(-costMetricWindow)
 
 	sums := make(map[string]float64, len(queries))
+	maxes := make(map[string]float64, len(queries))
 	for offset := 0; offset < len(queries); offset += maxQueriesPerCall {
 		chunk := queries[offset:min(offset+maxQueriesPerCall, len(queries))]
 		pager := awscloudwatch.NewGetMetricDataPaginator(client, &awscloudwatch.GetMetricDataInput{
@@ -59,11 +66,14 @@ func fetchCostMetrics(ctx context.Context, cfg aws.Config, snap *findings.CostSn
 				id := aws.ToString(r.Id)
 				for _, v := range r.Values {
 					sums[id] += v
+					if v > maxes[id] {
+						maxes[id] = v
+					}
 				}
 			}
 		}
 	}
-	bind(sums)
+	bind(sums, maxes)
 }
 
 // buildCostMetricQueries assembles the GetMetricData queries for the
@@ -72,15 +82,15 @@ func fetchCostMetrics(ctx context.Context, cfg aws.Config, snap *findings.CostSn
 // CloudWatch never returns datapoints for periods with no activity, so an ID
 // missing from the results means zero — which is exactly the signal the idle
 // checks look for; only a failed call leaves the fields nil.
-func buildCostMetricQueries(snap *findings.CostSnapshot) ([]cwtypes.MetricDataQuery, func(map[string]float64)) {
+func buildCostMetricQueries(snap *findings.CostSnapshot) ([]cwtypes.MetricDataQuery, func(map[string]float64, map[string]float64)) {
 	var queries []cwtypes.MetricDataQuery
 	type binding struct {
 		id    string
-		apply func(v float64)
+		apply func(sum, max float64)
 	}
 	var bindings []binding
 
-	addQuery := func(id, namespace, metric, dimName, dimValue string, apply func(float64)) {
+	addQuery := func(id, namespace, metric, dimName, dimValue string, period int32, apply func(sum, max float64)) {
 		queries = append(queries, cwtypes.MetricDataQuery{
 			Id: aws.String(id),
 			MetricStat: &cwtypes.MetricStat{
@@ -92,7 +102,7 @@ func buildCostMetricQueries(snap *findings.CostSnapshot) ([]cwtypes.MetricDataQu
 						Value: aws.String(dimValue),
 					}},
 				},
-				Period: aws.Int32(metricPeriodSeconds),
+				Period: aws.Int32(period),
 				Stat:   aws.String("Sum"),
 			},
 		})
@@ -108,11 +118,11 @@ func buildCostMetricQueries(snap *findings.CostSnapshot) ([]cwtypes.MetricDataQu
 		id := fmt.Sprintf("lb%d", i)
 		switch lb.Type {
 		case "application":
-			addQuery(id, "AWS/ApplicationELB", "RequestCount", "LoadBalancer", dim,
-				func(v float64) { lb.Requests14d = &v })
+			addQuery(id, "AWS/ApplicationELB", "RequestCount", "LoadBalancer", dim, metricPeriodSeconds,
+				func(sum, _ float64) { lb.Requests14d = &sum })
 		case "network":
-			addQuery(id, "AWS/NetworkELB", "NewFlowCount", "LoadBalancer", dim,
-				func(v float64) { lb.Requests14d = &v })
+			addQuery(id, "AWS/NetworkELB", "NewFlowCount", "LoadBalancer", dim, metricPeriodSeconds,
+				func(sum, _ float64) { lb.Requests14d = &sum })
 			// Gateway load balancers have no request-style metric worth an
 			// idle verdict; they are skipped.
 		}
@@ -124,15 +134,26 @@ func buildCostMetricQueries(snap *findings.CostSnapshot) ([]cwtypes.MetricDataQu
 		if t.ProvisionedRCU+t.ProvisionedWCU == 0 {
 			continue // on-demand tables have nothing to over-provision
 		}
-		addQuery(fmt.Sprintf("tr%d", i), "AWS/DynamoDB", "ConsumedReadCapacityUnits", "TableName", t.Name,
-			func(v float64) { avg := v / windowSeconds; t.AvgConsumedRCU = &avg })
-		addQuery(fmt.Sprintf("tw%d", i), "AWS/DynamoDB", "ConsumedWriteCapacityUnits", "TableName", t.Name,
-			func(v float64) { avg := v / windowSeconds; t.AvgConsumedWCU = &avg })
+		// avg = total consumed over the window / window seconds; peak = the
+		// busiest hour's consumption / hour seconds (a per-second rate
+		// comparable to provisioned units).
+		addQuery(fmt.Sprintf("tr%d", i), "AWS/DynamoDB", "ConsumedReadCapacityUnits", "TableName", t.Name, ddbMetricPeriodSeconds,
+			func(sum, max float64) {
+				avg := sum / windowSeconds
+				peak := max / ddbMetricPeriodSeconds
+				t.AvgConsumedRCU, t.PeakConsumedRCU = &avg, &peak
+			})
+		addQuery(fmt.Sprintf("tw%d", i), "AWS/DynamoDB", "ConsumedWriteCapacityUnits", "TableName", t.Name, ddbMetricPeriodSeconds,
+			func(sum, max float64) {
+				avg := sum / windowSeconds
+				peak := max / ddbMetricPeriodSeconds
+				t.AvgConsumedWCU, t.PeakConsumedWCU = &avg, &peak
+			})
 	}
 
-	bind := func(sums map[string]float64) {
+	bind := func(sums, maxes map[string]float64) {
 		for _, b := range bindings {
-			b.apply(sums[b.id]) // missing ID = 0 datapoints = zero activity
+			b.apply(sums[b.id], maxes[b.id]) // missing ID = 0 datapoints = zero activity
 		}
 	}
 	return queries, bind

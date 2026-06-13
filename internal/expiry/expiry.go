@@ -25,9 +25,18 @@ type Item struct {
 	Detail   string    `json:"detail"` // what breaks and the action to take
 }
 
-// daysUntil counts whole days from now to t, negative when t is past.
+// daysUntil counts whole calendar days (UTC) from now to t, negative when t
+// is past. Counting on calendar-day boundaries rather than raw 24h spans means
+// "expires today" is 0, "expired yesterday" is -1, and a deadline 47 hours out
+// reads 2 — independent of the time of day. (Truncating the raw difference
+// toward zero, as a naive hours/24 does, would report an item that lapsed
+// earlier today as 0 instead of a negative "already passed", and would
+// under-count every non-midnight deadline.)
 func daysUntil(now, t time.Time) int {
-	return int(t.Sub(now).Hours() / 24)
+	now, t = now.UTC(), t.UTC()
+	nowDay := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, time.UTC)
+	tDay := time.Date(t.Year(), t.Month(), t.Day(), 0, 0, 0, 0, time.UTC)
+	return int(tDay.Sub(nowDay) / (24 * time.Hour))
 }
 
 // ---------------------------------------------------------------------------

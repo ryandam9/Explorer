@@ -320,6 +320,45 @@ func TestDDBOverProvisioned(t *testing.T) {
 	}
 }
 
+func TestDDBOverProvisioned_PeakSizing(t *testing.T) {
+	old := testNow.Add(-90 * 24 * time.Hour)
+
+	// Bursty table: low 14-day average (3 RCU/WCU => flagged on utilization)
+	// but peaks at 90/90, near the 100/100 provisioned. Sizing headroom off
+	// the peak (90 * 1.x) leaves no real savings, so it must NOT be reported —
+	// recommending a downsize here would throttle the table.
+	bursty := baseSnap()
+	bursty.Tables = []CostTable{{
+		Name: "bursty", Created: old, ProvisionedRCU: 100, ProvisionedWCU: 100,
+		AvgConsumedRCU: f64(3), AvgConsumedWCU: f64(3),
+		PeakConsumedRCU: f64(90), PeakConsumedWCU: f64(90),
+	}}
+	if got := findByID(AnalyzeCost(bursty), CheckDDBOverProvision); len(got) != 0 {
+		t.Errorf("bursty table flagged despite near-peak usage: %+v", got)
+	}
+
+	// Genuinely over-provisioned: low average and a modest peak. Savings are
+	// sized from the peak, not the (smaller) average.
+	idle := baseSnap()
+	idle.Tables = []CostTable{{
+		Name: "idle", Created: old, ProvisionedRCU: 100, ProvisionedWCU: 100,
+		AvgConsumedRCU: f64(3), AvgConsumedWCU: f64(3),
+		PeakConsumedRCU: f64(8), PeakConsumedWCU: f64(8),
+	}}
+	got := findByID(AnalyzeCost(idle), CheckDDBOverProvision)
+	if len(got) != 1 {
+		t.Fatalf("idle table findings = %d, want 1", len(got))
+	}
+	provCost := costs.DynamoDBProvisionedMonth(100, 100)
+	wantEst := provCost - costs.DynamoDBProvisionedMonth(8*ddbHeadroomFactor, 8*ddbHeadroomFactor)
+	if got[0].EstMonthlyUSD != wantEst {
+		t.Errorf("Est = %v, want %v (sized from peak)", got[0].EstMonthlyUSD, wantEst)
+	}
+	if !strings.Contains(got[0].Detail, "Peak observed") {
+		t.Errorf("Detail should mention peak: %q", got[0].Detail)
+	}
+}
+
 func TestAnalyzeCostEmptySnapshot(t *testing.T) {
 	if fs := AnalyzeCost(baseSnap()); len(fs) != 0 {
 		t.Errorf("empty snapshot produced findings: %+v", fs)

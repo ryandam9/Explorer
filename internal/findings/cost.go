@@ -159,6 +159,14 @@ type CostTable struct {
 	// nil = metrics unavailable.
 	AvgConsumedRCU *float64
 	AvgConsumedWCU *float64
+
+	// Peak consumed capacity units per second observed over the lookback
+	// window (the busiest sampling period). nil = peak metrics unavailable,
+	// in which case the savings estimate falls back to the average. Sizing
+	// off the peak rather than the mean is what keeps the estimate from
+	// recommending a downsize that would throttle a bursty table.
+	PeakConsumedRCU *float64
+	PeakConsumedWCU *float64
 }
 
 // AnalyzeCost runs every cost/waste check over the snapshot. The result is
@@ -452,25 +460,39 @@ func checkDynamoDBTables(snap CostSnapshot, out *[]Finding) {
 		if util >= ddbLowUtilFrac {
 			continue
 		}
+		// Size the headroom-padded "needed" capacity from the peak observed
+		// consumption, not the average: provisioned throughput has to cover
+		// spikes, so estimating savings off the mean overstates them and can
+		// recommend a downsize that throttles a bursty table. Fall back to the
+		// average only when peak metrics are unavailable.
+		neededRCU, neededWCU := *t.AvgConsumedRCU, *t.AvgConsumedWCU
+		if t.PeakConsumedRCU != nil && t.PeakConsumedWCU != nil {
+			neededRCU, neededWCU = *t.PeakConsumedRCU, *t.PeakConsumedWCU
+		}
 		provCost := costs.DynamoDBProvisionedMonth(float64(t.ProvisionedRCU), float64(t.ProvisionedWCU))
 		neededCost := costs.DynamoDBProvisionedMonth(
-			*t.AvgConsumedRCU*ddbHeadroomFactor,
-			*t.AvgConsumedWCU*ddbHeadroomFactor,
+			neededRCU*ddbHeadroomFactor,
+			neededWCU*ddbHeadroomFactor,
 		)
 		est := provCost - neededCost
 		if est <= 0 {
 			continue
 		}
+		detail := fmt.Sprintf("Provisioned %d RCU / %d WCU, but 14-day average consumption is %.1f RCU / %.1f WCU.",
+			t.ProvisionedRCU, t.ProvisionedWCU, *t.AvgConsumedRCU, *t.AvgConsumedWCU)
+		if t.PeakConsumedRCU != nil && t.PeakConsumedWCU != nil {
+			detail += fmt.Sprintf(" Peak observed %.1f RCU / %.1f WCU; the savings estimate sizes headroom from the peak.",
+				*t.PeakConsumedRCU, *t.PeakConsumedWCU)
+		}
 		*out = append(*out, Finding{
-			ID:       CheckDDBOverProvision,
-			Severity: SevWarning,
-			Service:  "dynamodb",
-			Region:   snap.Region,
-			Resource: t.Name,
-			ARN:      t.ARN,
-			Title:    fmt.Sprintf("Table uses %s of its provisioned capacity", percent(util)),
-			Detail: fmt.Sprintf("Provisioned %d RCU / %d WCU, but 14-day average consumption is %.1f RCU / %.1f WCU.",
-				t.ProvisionedRCU, t.ProvisionedWCU, *t.AvgConsumedRCU, *t.AvgConsumedWCU),
+			ID:            CheckDDBOverProvision,
+			Severity:      SevWarning,
+			Service:       "dynamodb",
+			Region:        snap.Region,
+			Resource:      t.Name,
+			ARN:           t.ARN,
+			Title:         fmt.Sprintf("Table uses %s of its provisioned capacity", percent(util)),
+			Detail:        detail,
 			Fix:           "Lower the provisioned capacity, enable auto scaling, or switch the table to on-demand billing.",
 			EstMonthlyUSD: est,
 		})
