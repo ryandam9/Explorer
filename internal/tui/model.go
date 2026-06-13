@@ -2786,7 +2786,13 @@ func (m *tuiModel) openDebugOverlay() {
 	if w < 40 {
 		w = 40
 	}
-	h := m.height - 12
+	// A compact pane (about 15 lines) is enough — the user can scroll for the
+	// rest — and keeping it short leaves more of the live table visible
+	// behind it. Shrink further only when the terminal is too short to fit.
+	h := 15
+	if max := m.height - 12; h > max {
+		h = max
+	}
 	if h < 6 {
 		h = 6
 	}
