@@ -1,0 +1,230 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>The summary TUI · aws_explorer documentation</title>
+<style>
+:root { --bg:#0d1117; --panel:#161b22; --border:#30363d; --text:#c9d1d9; --muted:#8b949e; --link:#58a6ff; --accent:#3fb950; --code:#1f2630; }
+* { box-sizing: border-box; }
+body { margin:0; font:16px/1.6 -apple-system,BlinkMacSystemFont,"Segoe UI",Helvetica,Arial,sans-serif; color:var(--text); background:var(--bg); }
+.layout { display:flex; align-items:flex-start; max-width:1200px; margin:0 auto; }
+nav.sidebar { position:sticky; top:0; width:270px; flex:0 0 270px; height:100vh; overflow-y:auto; padding:1.5rem 1rem; border-right:1px solid var(--border); background:var(--panel); }
+nav.sidebar .site { font-weight:700; font-size:1.05rem; margin:0 0 1rem; color:var(--text); text-decoration:none; display:block; }
+nav.sidebar h3 { text-transform:uppercase; font-size:.72rem; letter-spacing:.06em; color:var(--muted); margin:1.2rem 0 .4rem; }
+nav.sidebar a { display:block; padding:.18rem .5rem; color:var(--muted); text-decoration:none; border-radius:5px; font-size:.92rem; }
+nav.sidebar a:hover { color:var(--text); background:rgba(110,118,129,.12); }
+nav.sidebar a.active { color:var(--text); background:rgba(88,166,255,.15); font-weight:600; }
+nav.sidebar code { font-size:.85rem; }
+main { flex:1 1 auto; min-width:0; padding:2rem 2.5rem 4rem; }
+main h1 { margin-top:0; border-bottom:1px solid var(--border); padding-bottom:.4rem; }
+main h2 { margin-top:2rem; border-bottom:1px solid var(--border); padding-bottom:.3rem; }
+a { color:var(--link); }
+code { background:var(--code); padding:.12em .35em; border-radius:5px; font-size:.88em; font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace; }
+pre { background:var(--code); padding:1rem; border-radius:8px; overflow-x:auto; border:1px solid var(--border); }
+pre code { background:none; padding:0; }
+table { border-collapse:collapse; width:100%; margin:1rem 0; display:block; overflow-x:auto; }
+th, td { border:1px solid var(--border); padding:.5rem .7rem; text-align:left; vertical-align:top; }
+th { background:rgba(110,118,129,.1); }
+blockquote { margin:1rem 0; padding:.4rem 1rem; border-left:4px solid var(--accent); background:rgba(63,185,80,.08); color:var(--text); }
+hr { border:none; border-top:1px solid var(--border); margin:2rem 0; }
+@media (max-width:800px){ .layout{display:block;} nav.sidebar{position:static;width:auto;height:auto;border-right:none;border-bottom:1px solid var(--border);} main{padding:1.5rem;} }
+</style>
+</head>
+<body>
+<div class="layout">
+<nav class="sidebar">
+<a class="site" href="index.html">aws_explorer documentation</a>
+<h3>Home</h3>
+<a href="index.html">aws_explorer documentation</a>
+<h3>Guides</h3>
+<a href="guide-getting-started.html">Getting started</a>
+<a href="guide-authentication.html">Authentication</a>
+<a href="guide-configuration.html">Configuration</a>
+<a href="guide-summary.html" class="active" aria-current="page">The summary TUI</a>
+<a href="guide-vpc.html">VPC explorer TUI</a>
+<a href="guide-s3.html">S3 browser TUI</a>
+<a href="guide-cloudwatch.html">CloudWatch Logs TUI</a>
+<a href="guide-reports.html">Audit &amp; Bill TUIs</a>
+<a href="guide-shortcuts.html">Keyboard shortcut cheat sheet</a>
+<h3>Command reference</h3>
+<a href="cli.html">aws_explorer</a>
+<a href="audit.html">aws_explorer audit</a>
+<a href="bill.html">aws_explorer bill</a>
+<a href="config.html">aws_explorer config</a>
+<a href="config_init.html">aws_explorer config init</a>
+<a href="config_path.html">aws_explorer config path</a>
+<a href="cw.html">aws_explorer cw</a>
+<a href="expiring.html">aws_explorer expiring</a>
+<a href="find.html">aws_explorer find</a>
+<a href="iam.html">aws_explorer iam</a>
+<a href="iam_can.html">aws_explorer iam can</a>
+<a href="iam_decode.html">aws_explorer iam decode</a>
+<a href="s3.html">aws_explorer s3</a>
+<a href="summary.html">aws_explorer summary</a>
+<a href="trail.html">aws_explorer trail</a>
+<a href="tui.html">aws_explorer tui</a>
+<a href="vpc.html">aws_explorer vpc</a>
+</nav>
+<main>
+<p>Start it with <code>aws_explorer tui</code> (or <code>aws_explorer summary --tui</code> for the same
+inventory). It is one interactive, filterable table of <strong>every</strong> discovered
+resource across all configured regions and services, with a service sidebar on
+the left and a detail panel on the right.</p>
+
+<p>While a scan runs, the header shows real progress (<code>scanning 23/60</code> with the
+pending <code>service@region</code> tasks named) and surfaces collection errors inline: a
+red <code>⚠ n errors</code> badge in the header plus per-service warning badges in the
+sidebar.</p>
+
+<h2 id="layout">Layout</h2>
+
+<pre><code>┌─ Services ──┬─ Resources ───────────────────────────────┬─ Detail ──────┐
+│ ▸ EC2   (12)│  NAME        TYPE          STATE   REGION  │ id   i-0abc…  │
+│   S3     (4)│  prod-web-3   ec2/instance running us-east │ type t3.micro │
+│   RDS    (2)│  …                                         │ …             │
+│   IAM  ⚠1   │                                            │               │
+└─────────────┴────────────────────────────────────────────┴──────────────┘
+</code></pre>
+
+<h2 id="keyboard-shortcuts">Keyboard shortcuts</h2>
+
+<p>The status bar at the bottom is <strong>context-aware</strong>: it lists only the shortcuts
+usable on the current screen and panel focus, so what you see is always what
+works right now.</p>
+
+<table>
+<thead>
+<tr>
+<th>Key</th>
+<th>Action</th>
+</tr>
+</thead>
+
+<tbody>
+<tr>
+<td><code>↑</code> / <code>↓</code> / <code>j</code> / <code>k</code></td>
+<td>Navigate rows</td>
+</tr>
+
+<tr>
+<td><code>[</code> / <code>]</code></td>
+<td>Move through the service sidebar / scroll the detail panel</td>
+</tr>
+
+<tr>
+<td><code>Tab</code> / <code>Shift+Tab</code></td>
+<td>Switch focus between sidebar, table and detail panel</td>
+</tr>
+
+<tr>
+<td><code>&lt;</code> / <code>&gt;</code> (or <code>,</code> / <code>.</code>)</td>
+<td>Scroll table columns when wider than the panel</td>
+</tr>
+
+<tr>
+<td><code>Enter</code></td>
+<td>Select service / open the detail panel for the selected resource</td>
+</tr>
+
+<tr>
+<td><code>/</code></td>
+<td>Quick text filter (matches any column; live <code>matched/total</code> count)</td>
+</tr>
+
+<tr>
+<td><code>Ctrl+P</code></td>
+<td><strong>Jump to any resource</strong>: fuzzy-search every resource (name, ID, ARN, type, region) across all services; <code>Enter</code> lands on its row</td>
+</tr>
+
+<tr>
+<td><code>f</code></td>
+<td>Advanced filter (region / state)</td>
+</tr>
+
+<tr>
+<td><code>r</code></td>
+<td>Reset all filters</td>
+</tr>
+
+<tr>
+<td><code>s</code> / <code>R</code></td>
+<td>Sort by the next column / reverse the direction</td>
+</tr>
+
+<tr>
+<td><code>y</code> / <code>Y</code></td>
+<td>Copy the selected resource&rsquo;s ARN / ID</td>
+</tr>
+
+<tr>
+<td><code>o</code></td>
+<td>Open the resource in the AWS console (copies a deep link; opens a browser when local)</td>
+</tr>
+
+<tr>
+<td><code>J</code></td>
+<td>Toggle a raw-JSON view in the detail panel (<code>y</code> then copies the JSON)</td>
+</tr>
+
+<tr>
+<td><code>C</code></td>
+<td>Export the current (filtered, sorted) view to CSV under <code>~/.aws_explorer/exports/</code></td>
+</tr>
+
+<tr>
+<td><code>D</code></td>
+<td><strong>What changed</strong>: first press saves a baseline snapshot, later presses diff the live inventory against it (<code>b</code> re-baselines)</td>
+</tr>
+
+<tr>
+<td><code>t</code></td>
+<td>Timeline — recent CloudTrail &ldquo;who changed this&rdquo; events for the selected resource</td>
+</tr>
+
+<tr>
+<td><code>P</code></td>
+<td>Switch AWS profile and/or region scope, then rescan — no restart</td>
+</tr>
+
+<tr>
+<td><code>e</code></td>
+<td>Open the scan-errors overlay</td>
+</tr>
+
+<tr>
+<td><code>S</code></td>
+<td>Settings panel (themes &amp; colors)</td>
+</tr>
+
+<tr>
+<td><code>?</code></td>
+<td>Help overlay</td>
+</tr>
+
+<tr>
+<td><code>Esc</code></td>
+<td>Close detail panel / overlay</td>
+</tr>
+
+<tr>
+<td><code>q</code> / <code>Ctrl+C</code></td>
+<td>Quit</td>
+</tr>
+</tbody>
+</table>
+
+<h2 id="related-cli-twins">Related CLI twins</h2>
+
+<p>Several TUI features have a non-interactive equivalent for scripting:</p>
+
+<ul>
+<li><code>Ctrl+P</code> jump → <a href="find.html"><code>aws_explorer find &lt;fragment&gt;</code></a></li>
+<li><code>D</code> what-changed → <a href="summary.html"><code>aws_explorer summary --baseline</code> / <code>--diff</code></a></li>
+<li><code>t</code> timeline → <a href="trail.html"><code>aws_explorer trail &lt;resource&gt;</code></a></li>
+</ul>
+
+</main>
+</div>
+</body>
+</html>

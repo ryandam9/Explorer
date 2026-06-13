@@ -1,0 +1,225 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Configuration · aws_explorer documentation</title>
+<style>
+:root { --bg:#0d1117; --panel:#161b22; --border:#30363d; --text:#c9d1d9; --muted:#8b949e; --link:#58a6ff; --accent:#3fb950; --code:#1f2630; }
+* { box-sizing: border-box; }
+body { margin:0; font:16px/1.6 -apple-system,BlinkMacSystemFont,"Segoe UI",Helvetica,Arial,sans-serif; color:var(--text); background:var(--bg); }
+.layout { display:flex; align-items:flex-start; max-width:1200px; margin:0 auto; }
+nav.sidebar { position:sticky; top:0; width:270px; flex:0 0 270px; height:100vh; overflow-y:auto; padding:1.5rem 1rem; border-right:1px solid var(--border); background:var(--panel); }
+nav.sidebar .site { font-weight:700; font-size:1.05rem; margin:0 0 1rem; color:var(--text); text-decoration:none; display:block; }
+nav.sidebar h3 { text-transform:uppercase; font-size:.72rem; letter-spacing:.06em; color:var(--muted); margin:1.2rem 0 .4rem; }
+nav.sidebar a { display:block; padding:.18rem .5rem; color:var(--muted); text-decoration:none; border-radius:5px; font-size:.92rem; }
+nav.sidebar a:hover { color:var(--text); background:rgba(110,118,129,.12); }
+nav.sidebar a.active { color:var(--text); background:rgba(88,166,255,.15); font-weight:600; }
+nav.sidebar code { font-size:.85rem; }
+main { flex:1 1 auto; min-width:0; padding:2rem 2.5rem 4rem; }
+main h1 { margin-top:0; border-bottom:1px solid var(--border); padding-bottom:.4rem; }
+main h2 { margin-top:2rem; border-bottom:1px solid var(--border); padding-bottom:.3rem; }
+a { color:var(--link); }
+code { background:var(--code); padding:.12em .35em; border-radius:5px; font-size:.88em; font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace; }
+pre { background:var(--code); padding:1rem; border-radius:8px; overflow-x:auto; border:1px solid var(--border); }
+pre code { background:none; padding:0; }
+table { border-collapse:collapse; width:100%; margin:1rem 0; display:block; overflow-x:auto; }
+th, td { border:1px solid var(--border); padding:.5rem .7rem; text-align:left; vertical-align:top; }
+th { background:rgba(110,118,129,.1); }
+blockquote { margin:1rem 0; padding:.4rem 1rem; border-left:4px solid var(--accent); background:rgba(63,185,80,.08); color:var(--text); }
+hr { border:none; border-top:1px solid var(--border); margin:2rem 0; }
+@media (max-width:800px){ .layout{display:block;} nav.sidebar{position:static;width:auto;height:auto;border-right:none;border-bottom:1px solid var(--border);} main{padding:1.5rem;} }
+</style>
+</head>
+<body>
+<div class="layout">
+<nav class="sidebar">
+<a class="site" href="index.html">aws_explorer documentation</a>
+<h3>Home</h3>
+<a href="index.html">aws_explorer documentation</a>
+<h3>Guides</h3>
+<a href="guide-getting-started.html">Getting started</a>
+<a href="guide-authentication.html">Authentication</a>
+<a href="guide-configuration.html" class="active" aria-current="page">Configuration</a>
+<a href="guide-summary.html">The summary TUI</a>
+<a href="guide-vpc.html">VPC explorer TUI</a>
+<a href="guide-s3.html">S3 browser TUI</a>
+<a href="guide-cloudwatch.html">CloudWatch Logs TUI</a>
+<a href="guide-reports.html">Audit &amp; Bill TUIs</a>
+<a href="guide-shortcuts.html">Keyboard shortcut cheat sheet</a>
+<h3>Command reference</h3>
+<a href="cli.html">aws_explorer</a>
+<a href="audit.html">aws_explorer audit</a>
+<a href="bill.html">aws_explorer bill</a>
+<a href="config.html">aws_explorer config</a>
+<a href="config_init.html">aws_explorer config init</a>
+<a href="config_path.html">aws_explorer config path</a>
+<a href="cw.html">aws_explorer cw</a>
+<a href="expiring.html">aws_explorer expiring</a>
+<a href="find.html">aws_explorer find</a>
+<a href="iam.html">aws_explorer iam</a>
+<a href="iam_can.html">aws_explorer iam can</a>
+<a href="iam_decode.html">aws_explorer iam decode</a>
+<a href="s3.html">aws_explorer s3</a>
+<a href="summary.html">aws_explorer summary</a>
+<a href="trail.html">aws_explorer trail</a>
+<a href="tui.html">aws_explorer tui</a>
+<a href="vpc.html">aws_explorer vpc</a>
+</nav>
+<main>
+<p>Configuration is <strong>optional</strong>. With no config file, AWS Explorer runs on
+built-in defaults. When you want to pin services, regions, output columns or a
+theme, write a <code>config.yaml</code>.</p>
+
+<h2 id="where-the-config-is-found">Where the config is found</h2>
+
+<p>The search order is:</p>
+
+<ol>
+<li>The <code>--config &lt;path&gt;</code> flag, if given.</li>
+<li><code>./config.yaml</code> in the current directory.</li>
+<li>The per-user config directory (<code>~/.config/aws_explorer/config.yaml</code> on
+Linux, the equivalent on macOS/Windows).</li>
+<li>The built-in defaults embedded in the binary.</li>
+</ol>
+
+<p>Run <code>aws_explorer config init</code> to write a starter file, and
+<code>aws_explorer config show</code> / <code>config path</code> to inspect the active settings.
+See the <a href="config.html">config command reference</a>.</p>
+
+<h2 id="key-sections">Key sections</h2>
+
+<pre><code class="language-yaml">app:
+  defaultoutput: table      # table | json | ndjson | csv
+  defaultmode: cli
+  timeoutseconds: 30        # per service/region collection timeout
+  maxconcurrency: 8         # bounded goroutine pool for parallel collection
+  downloaddir: &quot;&quot;           # where the S3 browser saves downloads
+
+aws:
+  profile: default
+  authmethod: auto          # see the Authentication guide
+  regions:
+    - us-east-1
+  allregions: false
+  retry:
+    maxattempts: 0          # 0 = SDK default (3); raise for throttled accounts
+    mode: &quot;&quot;                # &quot;&quot; = standard; &quot;adaptive&quot; adds client-side rate limiting
+
+services:
+  ec2:   { enabled: true }
+  s3:    { enabled: true }
+  # …one entry per service key; set enabled:false to skip a collector
+
+ui:
+  theme: princess-parrot    # one of the 12 built-in themes
+</code></pre>
+
+<h2 id="resilient-scanning">Resilient scanning</h2>
+
+<p>Collection is best-effort and concurrent. When a service/region fails partway
+through — a later page throttles, or a per-item call is denied — everything
+collected before the failure is kept and flagged <em>partial</em> rather than
+discarded. For large, throttled accounts (<code>RequestLimitExceeded</code>), tune
+<code>aws.retry</code>:</p>
+
+<pre><code class="language-yaml">aws:
+  retry:
+    maxattempts: 8       # keep retrying longer than the default 3 attempts
+    mode: adaptive       # client-side rate limiting that backs off automatically
+</code></pre>
+
+<p><code>adaptive</code> mode is usually the right choice for <code>--all-regions</code> sweeps of busy
+accounts.</p>
+
+<h2 id="themes">Themes</h2>
+
+<p>The TUIs ship with 12 color themes, all named after Australian birds (the
+default is <code>princess-parrot</code>). Set the active theme under <code>ui.theme</code>, or pass
+<code>--theme</code> on the TUIs that accept it (<code>s3</code>, <code>cw</code>, <code>vpc</code>). Each theme exposes 24
+granular color <em>roles</em> (heading, table header, status bar, alerts, …) that you
+can override individually; unset roles fall back to a sensible related role.
+Themes and colors are also editable live from the <strong>settings panel</strong> (<code>S</code>) in
+the summary and VPC TUIs.</p>
+
+<table>
+<thead>
+<tr>
+<th>Theme</th>
+<th>Palette feel</th>
+</tr>
+</thead>
+
+<tbody>
+<tr>
+<td><code>princess-parrot</code></td>
+<td>Green, blue and pink (default)</td>
+</tr>
+
+<tr>
+<td><code>spotted-pardalote</code></td>
+<td>Warm yellow, orange and red</td>
+</tr>
+
+<tr>
+<td><code>plains-wanderer</code></td>
+<td>Cream, tan and golden brown</td>
+</tr>
+
+<tr>
+<td><code>bee-eater</code></td>
+<td>Cyan, blue and amber</td>
+</tr>
+
+<tr>
+<td><code>rose-crowned-fruit-dove</code></td>
+<td>Magenta, coral and green</td>
+</tr>
+
+<tr>
+<td><code>eastern-rosella</code></td>
+<td>Yellow, lime and red</td>
+</tr>
+
+<tr>
+<td><code>oriole</code></td>
+<td>Gold, salmon and lavender</td>
+</tr>
+
+<tr>
+<td><code>superb-fairy-wren</code></td>
+<td>Rust, tan and cream</td>
+</tr>
+
+<tr>
+<td><code>cassowary</code></td>
+<td>Teal, gold and pink</td>
+</tr>
+
+<tr>
+<td><code>yellow-robin</code></td>
+<td>Bright yellow, slate and amber</td>
+</tr>
+
+<tr>
+<td><code>galah</code></td>
+<td>Pink, blush and slate</td>
+</tr>
+
+<tr>
+<td><code>blue-winged-kookaburra</code></td>
+<td>Light cyan, teal and orange</td>
+</tr>
+</tbody>
+</table>
+
+<h2 id="customising-displayed-columns">Customising displayed columns</h2>
+
+<p>For the typed services you can override which summary columns and detail
+fields show, per resource type, under <code>services.&lt;key&gt;.resources</code>. This applies
+in the CLI tables, the summary TUI and the VPC explorer alike.</p>
+
+</main>
+</div>
+</body>
+</html>

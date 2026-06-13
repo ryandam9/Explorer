@@ -1,0 +1,207 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>CloudWatch Logs TUI · aws_explorer documentation</title>
+<style>
+:root { --bg:#0d1117; --panel:#161b22; --border:#30363d; --text:#c9d1d9; --muted:#8b949e; --link:#58a6ff; --accent:#3fb950; --code:#1f2630; }
+* { box-sizing: border-box; }
+body { margin:0; font:16px/1.6 -apple-system,BlinkMacSystemFont,"Segoe UI",Helvetica,Arial,sans-serif; color:var(--text); background:var(--bg); }
+.layout { display:flex; align-items:flex-start; max-width:1200px; margin:0 auto; }
+nav.sidebar { position:sticky; top:0; width:270px; flex:0 0 270px; height:100vh; overflow-y:auto; padding:1.5rem 1rem; border-right:1px solid var(--border); background:var(--panel); }
+nav.sidebar .site { font-weight:700; font-size:1.05rem; margin:0 0 1rem; color:var(--text); text-decoration:none; display:block; }
+nav.sidebar h3 { text-transform:uppercase; font-size:.72rem; letter-spacing:.06em; color:var(--muted); margin:1.2rem 0 .4rem; }
+nav.sidebar a { display:block; padding:.18rem .5rem; color:var(--muted); text-decoration:none; border-radius:5px; font-size:.92rem; }
+nav.sidebar a:hover { color:var(--text); background:rgba(110,118,129,.12); }
+nav.sidebar a.active { color:var(--text); background:rgba(88,166,255,.15); font-weight:600; }
+nav.sidebar code { font-size:.85rem; }
+main { flex:1 1 auto; min-width:0; padding:2rem 2.5rem 4rem; }
+main h1 { margin-top:0; border-bottom:1px solid var(--border); padding-bottom:.4rem; }
+main h2 { margin-top:2rem; border-bottom:1px solid var(--border); padding-bottom:.3rem; }
+a { color:var(--link); }
+code { background:var(--code); padding:.12em .35em; border-radius:5px; font-size:.88em; font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace; }
+pre { background:var(--code); padding:1rem; border-radius:8px; overflow-x:auto; border:1px solid var(--border); }
+pre code { background:none; padding:0; }
+table { border-collapse:collapse; width:100%; margin:1rem 0; display:block; overflow-x:auto; }
+th, td { border:1px solid var(--border); padding:.5rem .7rem; text-align:left; vertical-align:top; }
+th { background:rgba(110,118,129,.1); }
+blockquote { margin:1rem 0; padding:.4rem 1rem; border-left:4px solid var(--accent); background:rgba(63,185,80,.08); color:var(--text); }
+hr { border:none; border-top:1px solid var(--border); margin:2rem 0; }
+@media (max-width:800px){ .layout{display:block;} nav.sidebar{position:static;width:auto;height:auto;border-right:none;border-bottom:1px solid var(--border);} main{padding:1.5rem;} }
+</style>
+</head>
+<body>
+<div class="layout">
+<nav class="sidebar">
+<a class="site" href="index.html">aws_explorer documentation</a>
+<h3>Home</h3>
+<a href="index.html">aws_explorer documentation</a>
+<h3>Guides</h3>
+<a href="guide-getting-started.html">Getting started</a>
+<a href="guide-authentication.html">Authentication</a>
+<a href="guide-configuration.html">Configuration</a>
+<a href="guide-summary.html">The summary TUI</a>
+<a href="guide-vpc.html">VPC explorer TUI</a>
+<a href="guide-s3.html">S3 browser TUI</a>
+<a href="guide-cloudwatch.html" class="active" aria-current="page">CloudWatch Logs TUI</a>
+<a href="guide-reports.html">Audit &amp; Bill TUIs</a>
+<a href="guide-shortcuts.html">Keyboard shortcut cheat sheet</a>
+<h3>Command reference</h3>
+<a href="cli.html">aws_explorer</a>
+<a href="audit.html">aws_explorer audit</a>
+<a href="bill.html">aws_explorer bill</a>
+<a href="config.html">aws_explorer config</a>
+<a href="config_init.html">aws_explorer config init</a>
+<a href="config_path.html">aws_explorer config path</a>
+<a href="cw.html">aws_explorer cw</a>
+<a href="expiring.html">aws_explorer expiring</a>
+<a href="find.html">aws_explorer find</a>
+<a href="iam.html">aws_explorer iam</a>
+<a href="iam_can.html">aws_explorer iam can</a>
+<a href="iam_decode.html">aws_explorer iam decode</a>
+<a href="s3.html">aws_explorer s3</a>
+<a href="summary.html">aws_explorer summary</a>
+<a href="trail.html">aws_explorer trail</a>
+<a href="tui.html">aws_explorer tui</a>
+<a href="vpc.html">aws_explorer vpc</a>
+</nav>
+<main>
+<p><code>aws_explorer cw</code> is an interactive explorer for CloudWatch log groups,
+streams and events, with filtering, search and live tailing. <code>--region</code> pins
+one region; <code>--all-regions</code> sweeps every enabled region and adds a Region
+column to the group list.</p>
+
+<pre><code class="language-bash"># Browse log groups in one region
+aws_explorer cw --region us-east-1
+
+# Open a group and search for errors
+aws_explorer cw -g /aws/lambda/my-fn -f ERROR
+</code></pre>
+
+<p>See the <a href="cw.html"><code>cw</code> command reference</a> for every flag.</p>
+
+<h2 id="group-stream-event-navigation">Group / stream / event navigation</h2>
+
+<table>
+<thead>
+<tr>
+<th>Key</th>
+<th>Action</th>
+</tr>
+</thead>
+
+<tbody>
+<tr>
+<td><code>↑</code> / <code>↓</code></td>
+<td>Move through groups, streams or events</td>
+</tr>
+
+<tr>
+<td><code>Enter</code></td>
+<td>Select a group → its streams → a stream&rsquo;s events → the full log viewer</td>
+</tr>
+
+<tr>
+<td><code>/</code></td>
+<td>Filter the current list</td>
+</tr>
+
+<tr>
+<td><code>G</code></td>
+<td>Search the <strong>entire group</strong> (across streams)</td>
+</tr>
+
+<tr>
+<td><code>W</code></td>
+<td>Tail-watch the event list</td>
+</tr>
+
+<tr>
+<td><code>o</code></td>
+<td>Open the selected log group in the CloudWatch console</td>
+</tr>
+
+<tr>
+<td><code>y</code> / <code>s</code></td>
+<td>Copy / export events</td>
+</tr>
+
+<tr>
+<td><code>Tab</code></td>
+<td>Switch panel · <code>Esc</code> Back · <code>q</code> Quit</td>
+</tr>
+</tbody>
+</table>
+
+<h2 id="full-log-viewer">Full log viewer</h2>
+
+<p>Pressing <code>Enter</code> on an event opens the full-screen log viewer: the entire log
+(24-hour lookback, most recent 2000 events) for the selected stream — or the
+whole group in group-level search — streaming new events live as they arrive.</p>
+
+<table>
+<thead>
+<tr>
+<th>Key</th>
+<th>Action</th>
+</tr>
+</thead>
+
+<tbody>
+<tr>
+<td><code>↑</code>/<code>↓</code>, <code>PgUp</code>/<code>PgDn</code>, <code>Ctrl+U</code>/<code>Ctrl+D</code></td>
+<td>Scroll (scrolling up pauses tailing)</td>
+</tr>
+
+<tr>
+<td><code>g</code> / <code>G</code></td>
+<td>Jump to top / bottom and resume tailing</td>
+</tr>
+
+<tr>
+<td><code>f</code></td>
+<td>Toggle follow (auto-scroll as new events stream in)</td>
+</tr>
+
+<tr>
+<td><code>J</code></td>
+<td>Toggle JSON formatting — pretty-prints embedded JSON (a <code>{} json</code> badge shows while on)</td>
+</tr>
+
+<tr>
+<td><code>/</code></td>
+<td>Search within the log (case-insensitive, matches highlighted)</td>
+</tr>
+
+<tr>
+<td><code>&amp;</code></td>
+<td>Grep filter (as in <code>less</code>): a regex keeps only matching lines, with a <code>kept/total</code> count</td>
+</tr>
+
+<tr>
+<td><code>n</code> / <code>N</code></td>
+<td>Jump to next / previous match</td>
+</tr>
+
+<tr>
+<td><code>y</code></td>
+<td>Copy the whole log — or only the matching lines while a grep filter is applied</td>
+</tr>
+
+<tr>
+<td><code>s</code></td>
+<td>Export the log to <code>~/.aws_explorer/logs/</code> (suffixed <code>-grep</code> while filtered)</td>
+</tr>
+
+<tr>
+<td><code>Esc</code> / <code>q</code></td>
+<td>Close the viewer</td>
+</tr>
+</tbody>
+</table>
+
+</main>
+</div>
+</body>
+</html>

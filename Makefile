@@ -9,7 +9,7 @@ LDFLAGS := -X github.com/ryandam9/aws_explorer/cmd.version=$(VERSION) \
            -X github.com/ryandam9/aws_explorer/cmd.commit=$(COMMIT) \
            -X github.com/ryandam9/aws_explorer/cmd.date=$(DATE)
 
-.PHONY: all fmt vet test build clean run run-all-regions tidy lint man help
+.PHONY: all fmt vet test build clean run run-all-regions tidy lint man docs help
 
 all: fmt vet test build
 
@@ -27,10 +27,15 @@ build:
 
 clean:
 	rm -f $(BINARY)
-	rm -rf man
+	rm -rf man docs/site
 
 man: build
-	./$(BINARY) docs --dir man
+	./$(BINARY) docs --format man --dir man
+
+docs: build
+	./$(BINARY) docs --format markdown --dir docs/site
+	./$(BINARY) docs --format html --dir docs/site
+	@echo "Open docs/site/index.html in a browser, or browse docs/site/README.md"
 
 run: build
 	./$(BINARY)
@@ -54,8 +59,9 @@ help:
 	@echo "  vet              - Run go vet"
 	@echo "  test             - Run tests"
 	@echo "  build            - Build binary"
-	@echo "  clean            - Remove binary and generated man pages"
+	@echo "  clean            - Remove binary and generated docs"
 	@echo "  man              - Generate man pages into ./man"
+	@echo "  docs             - Generate Markdown + HTML docs into ./docs/site"
 	@echo "  run              - Build and run CLI mode"
 	@echo "  run-all-regions  - Build and run with --all-regions"
 	@echo "  tidy             - Tidy go modules"

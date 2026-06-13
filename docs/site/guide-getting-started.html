@@ -1,0 +1,161 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Getting started · aws_explorer documentation</title>
+<style>
+:root { --bg:#0d1117; --panel:#161b22; --border:#30363d; --text:#c9d1d9; --muted:#8b949e; --link:#58a6ff; --accent:#3fb950; --code:#1f2630; }
+* { box-sizing: border-box; }
+body { margin:0; font:16px/1.6 -apple-system,BlinkMacSystemFont,"Segoe UI",Helvetica,Arial,sans-serif; color:var(--text); background:var(--bg); }
+.layout { display:flex; align-items:flex-start; max-width:1200px; margin:0 auto; }
+nav.sidebar { position:sticky; top:0; width:270px; flex:0 0 270px; height:100vh; overflow-y:auto; padding:1.5rem 1rem; border-right:1px solid var(--border); background:var(--panel); }
+nav.sidebar .site { font-weight:700; font-size:1.05rem; margin:0 0 1rem; color:var(--text); text-decoration:none; display:block; }
+nav.sidebar h3 { text-transform:uppercase; font-size:.72rem; letter-spacing:.06em; color:var(--muted); margin:1.2rem 0 .4rem; }
+nav.sidebar a { display:block; padding:.18rem .5rem; color:var(--muted); text-decoration:none; border-radius:5px; font-size:.92rem; }
+nav.sidebar a:hover { color:var(--text); background:rgba(110,118,129,.12); }
+nav.sidebar a.active { color:var(--text); background:rgba(88,166,255,.15); font-weight:600; }
+nav.sidebar code { font-size:.85rem; }
+main { flex:1 1 auto; min-width:0; padding:2rem 2.5rem 4rem; }
+main h1 { margin-top:0; border-bottom:1px solid var(--border); padding-bottom:.4rem; }
+main h2 { margin-top:2rem; border-bottom:1px solid var(--border); padding-bottom:.3rem; }
+a { color:var(--link); }
+code { background:var(--code); padding:.12em .35em; border-radius:5px; font-size:.88em; font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace; }
+pre { background:var(--code); padding:1rem; border-radius:8px; overflow-x:auto; border:1px solid var(--border); }
+pre code { background:none; padding:0; }
+table { border-collapse:collapse; width:100%; margin:1rem 0; display:block; overflow-x:auto; }
+th, td { border:1px solid var(--border); padding:.5rem .7rem; text-align:left; vertical-align:top; }
+th { background:rgba(110,118,129,.1); }
+blockquote { margin:1rem 0; padding:.4rem 1rem; border-left:4px solid var(--accent); background:rgba(63,185,80,.08); color:var(--text); }
+hr { border:none; border-top:1px solid var(--border); margin:2rem 0; }
+@media (max-width:800px){ .layout{display:block;} nav.sidebar{position:static;width:auto;height:auto;border-right:none;border-bottom:1px solid var(--border);} main{padding:1.5rem;} }
+</style>
+</head>
+<body>
+<div class="layout">
+<nav class="sidebar">
+<a class="site" href="index.html">aws_explorer documentation</a>
+<h3>Home</h3>
+<a href="index.html">aws_explorer documentation</a>
+<h3>Guides</h3>
+<a href="guide-getting-started.html" class="active" aria-current="page">Getting started</a>
+<a href="guide-authentication.html">Authentication</a>
+<a href="guide-configuration.html">Configuration</a>
+<a href="guide-summary.html">The summary TUI</a>
+<a href="guide-vpc.html">VPC explorer TUI</a>
+<a href="guide-s3.html">S3 browser TUI</a>
+<a href="guide-cloudwatch.html">CloudWatch Logs TUI</a>
+<a href="guide-reports.html">Audit &amp; Bill TUIs</a>
+<a href="guide-shortcuts.html">Keyboard shortcut cheat sheet</a>
+<h3>Command reference</h3>
+<a href="cli.html">aws_explorer</a>
+<a href="audit.html">aws_explorer audit</a>
+<a href="bill.html">aws_explorer bill</a>
+<a href="config.html">aws_explorer config</a>
+<a href="config_init.html">aws_explorer config init</a>
+<a href="config_path.html">aws_explorer config path</a>
+<a href="cw.html">aws_explorer cw</a>
+<a href="expiring.html">aws_explorer expiring</a>
+<a href="find.html">aws_explorer find</a>
+<a href="iam.html">aws_explorer iam</a>
+<a href="iam_can.html">aws_explorer iam can</a>
+<a href="iam_decode.html">aws_explorer iam decode</a>
+<a href="s3.html">aws_explorer s3</a>
+<a href="summary.html">aws_explorer summary</a>
+<a href="trail.html">aws_explorer trail</a>
+<a href="tui.html">aws_explorer tui</a>
+<a href="vpc.html">aws_explorer vpc</a>
+</nav>
+<main>
+<p>AWS Explorer discovers, monitors and lists AWS resources — EC2, S3, RDS,
+Lambda and a dozen more services — across accounts and regions, from the
+command line or one of several interactive terminal UIs (TUIs).</p>
+
+<p>This documentation is generated from the tool itself: the command reference
+below is built from the live command tree, so it always matches the binary
+you are running. The guides cover the interactive screens and their keyboard
+shortcuts, which the command reference cannot show on its own.</p>
+
+<h2 id="install">Install</h2>
+
+<pre><code class="language-bash"># Install the latest release
+go install github.com/ryandam9/aws_explorer@latest
+
+# …or clone and build
+git clone https://github.com/ryandam9/aws_explorer.git
+cd aws_explorer
+make build          # produces bin/aws_explorer
+</code></pre>
+
+<h2 id="the-four-modes">The four modes</h2>
+
+<table>
+<thead>
+<tr>
+<th>Mode</th>
+<th>How to start</th>
+<th>What it is</th>
+</tr>
+</thead>
+
+<tbody>
+<tr>
+<td><strong>CLI</strong></td>
+<td><code>aws_explorer</code> (and most subcommands)</td>
+<td>Streams a table / JSON / NDJSON / CSV to stdout — scriptable, no UI</td>
+</tr>
+
+<tr>
+<td><strong>Summary TUI</strong></td>
+<td><code>aws_explorer tui</code></td>
+<td>One interactive, filterable inventory of every resource — see <a href="guide-summary.html">The summary TUI</a></td>
+</tr>
+
+<tr>
+<td><strong>Focused TUIs</strong></td>
+<td><code>aws_explorer vpc</code> · <code>s3</code> · <code>cw</code></td>
+<td>Dedicated explorers for a VPC&rsquo;s networking, S3, and CloudWatch Logs</td>
+</tr>
+
+<tr>
+<td><strong>Report TUIs</strong></td>
+<td><code>aws_explorer audit --tui</code> · <code>bill --tui</code></td>
+<td>Live, explorable cost/security findings and the account bill</td>
+</tr>
+</tbody>
+</table>
+
+<h2 id="first-runs">First runs</h2>
+
+<pre><code class="language-bash"># Stream every resource in the configured regions to the terminal
+aws_explorer
+
+# The same inventory, but interactive
+aws_explorer tui
+
+# Scan every region and write the inventory to CSV
+aws_explorer summary --all-regions -o csv &gt; inventory.csv
+
+# Audit the account for cost waste and security risks
+aws_explorer audit
+</code></pre>
+
+<p>Configuration is optional — with no <code>config.yaml</code> present the tool runs on
+built-in defaults, so it works from any directory with zero setup. When you
+do want to pin services, regions, columns or themes, see
+<a href="guide-configuration.html">Configuration</a>. For credentials and profiles, see
+<a href="guide-authentication.html">Authentication</a>.</p>
+
+<h2 id="where-to-go-next">Where to go next</h2>
+
+<ul>
+<li><a href="guide-authentication.html">Authentication</a> — profiles, SSO, env vars, AssumeRole</li>
+<li><a href="guide-configuration.html">Configuration</a> — the <code>config.yaml</code> reference and themes</li>
+<li><a href="guide-shortcuts.html">Keyboard shortcut cheat sheet</a> — every TUI&rsquo;s keys in one place</li>
+<li>The <strong>Command reference</strong> (in the navigation) — one page per command, with flags and examples</li>
+</ul>
+
+</main>
+</div>
+</body>
+</html>
