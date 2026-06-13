@@ -18,6 +18,7 @@ Discover, monitor, and display AWS resources across accounts and regions via CLI
 - **SSO-aware errors**: an expired AWS SSO session prints the exact fix (`run: aws sso login --profile prod`) instead of an SDK error chain, in the CLI and every TUI
 - **Expiry watchlist**: `aws_explorer expiring` lists everything that breaks on a calendar date — ACM/IAM certificate expiry, Lambda runtime deprecations, EKS end-of-support, RDS CA certs & pending maintenance, overdue secret rotations — sorted by days remaining — see [Expiring Usage](#expiring-usage)
 - **ECS stopped-task triage**: `aws_explorer ecs stopped` answers "why did my task stop?" — the task-level stop reason plus the failing container's exit code, glossed in plain English (137 → possible OOM-kill, 139 → segfault) — see [ECS Stopped-Task Triage](#ecs-stopped-task-triage)
+- **Where-used / blast radius**: `aws_explorer whereused <arn-or-id>` answers "can I delete this?" for IAM roles, KMS keys, ACM certificates and security groups — every resource that references the target, with the scanned reference types listed so "not referenced" is a scoped answer — see [Whereused (blast radius)](#whereused-blast-radius)
 - **Config-driven**: YAML configuration for services, regions, filters, output, and per-resource display columns
 - **5 auth methods**: auto (SDK default chain), profile, env vars, static credentials, STS AssumeRole
 - **Output formats**: Table (default), JSON, NDJSON, CSV — with `--no-header` for scripting and colored states on terminals
@@ -876,6 +877,58 @@ fuzzy-matches as you type, `↑`/`↓` select, and `Enter` jumps straight to the
 resource — its service selected in the sidebar, its row under the cursor, and
 the detail panel open. Any active filters that would hide the target are
 cleared.
+
+## Whereused (blast radius)
+
+`whereused` answers "can I delete this?" for the resources people actually ask
+about — IAM roles, KMS keys, ACM certificates and security groups. It scans
+the account for the linking fields the inventory does not keep (a Lambda's
+execution role, a volume's KMS key, a listener's certificate, an ENI's
+security groups) and lists every resource that references the target. It is
+the CLI generalization of the VPC explorer's `x` cross-reference.
+
+```bash
+./bin/aws_explorer whereused <arn-or-id> [--all-regions] [-o table|json|ndjson|csv]
+```
+
+```
+Where-used: app-task (iam-role)
+
+SNO  SERVICE  TYPE             RESOURCE           REGION      VIA
+1    ecs      task-definition  checkout:7         us-east-1   ECS task role
+2    lambda   function         payments           us-east-1   execution role
+
+Reference types checked: Lambda execution roles, EC2 instance profiles, ECS task and execution roles, EKS cluster and node-group roles, IAM role trust policies.
+(Absence above means none of these reference it — not that nothing anywhere does.)
+```
+
+Accepted targets (full ARN or bare ID):
+
+| Target | Reference types checked |
+|--------|-------------------------|
+| **IAM role** (`arn:…:role/app` or `app`) | Lambda execution roles, EC2 instance profiles, ECS task & execution roles, EKS cluster & node-group roles, IAM role trust policies |
+| **KMS key** (`arn:…:key/<uuid>`) | EBS volume / RDS instance / Secrets Manager / SQS queue / Lambda environment encryption |
+| **ACM certificate** (`arn:…:certificate/<id>`) | ELBv2 (ALB/NLB) listeners |
+| **Security group** (`sg-…` or its ARN) | Elastic network interface attachments (account-wide) |
+
+> **Scoped "not referenced".** The report always prints the reference types it
+> checked. Absence of evidence is therefore explicitly bounded — it means none
+> of *those* reference types point at the target, not that nothing anywhere
+> does. A denied or failed API call narrows what was checked (reported on
+> stderr) and never aborts the run. KMS keys referenced by alias are matched on
+> the raw alias string rather than resolved to the key.
+
+| Flag | Default | Description |
+|------|---------|-------------|
+| `--output` / `-o` | `table` | `table`, `json`, `ndjson`, `csv` |
+
+**IAM permissions.** Read-only: `iam:{ListRoles,ListInstanceProfiles}`,
+`lambda:ListFunctions`, `ec2:{DescribeInstances,DescribeVolumes,DescribeNetworkInterfaces}`,
+`rds:DescribeDBInstances`, `secretsmanager:ListSecrets`,
+`sqs:{ListQueues,GetQueueAttributes}`, `ecs:{ListTaskDefinitions,DescribeTaskDefinition}`,
+`eks:{ListClusters,DescribeCluster,ListNodegroups,DescribeNodegroup}`,
+`elasticloadbalancing:{DescribeLoadBalancers,DescribeListeners}`. Any denial
+skips that source with a note.
 
 ## VPC Explorer TUI Usage
 

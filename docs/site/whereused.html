@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>aws_explorer ecs · aws_explorer documentation</title>
+<title>aws_explorer whereused · aws_explorer documentation</title>
 <style>
 :root { --bg:#0d1117; --panel:#161b22; --border:#30363d; --text:#c9d1d9; --muted:#8b949e; --link:#58a6ff; --accent:#3fb950; --code:#1f2630; }
 * { box-sizing: border-box; }
@@ -55,7 +55,7 @@ hr { border:none; border-top:1px solid var(--border); margin:2rem 0; }
 <a href="config_init.html">aws_explorer config init</a>
 <a href="config_path.html">aws_explorer config path</a>
 <a href="cw.html">aws_explorer cw</a>
-<a href="ecs.html" class="active" aria-current="page">aws_explorer ecs</a>
+<a href="ecs.html">aws_explorer ecs</a>
 <a href="ecs_stopped.html">aws_explorer ecs stopped</a>
 <a href="expiring.html">aws_explorer expiring</a>
 <a href="find.html">aws_explorer find</a>
@@ -67,16 +67,51 @@ hr { border:none; border-top:1px solid var(--border); margin:2rem 0; }
 <a href="summary.html">aws_explorer summary</a>
 <a href="trail.html">aws_explorer trail</a>
 <a href="vpc.html">aws_explorer vpc</a>
-<a href="whereused.html">aws_explorer whereused</a>
+<a href="whereused.html" class="active" aria-current="page">aws_explorer whereused</a>
 </nav>
 <main>
-<p>ECS triage helpers</p>
+<p>Where-used / blast radius — &ldquo;can I delete this?&rdquo;</p>
 
-<p>ECS-specific subcommands. Currently: &ldquo;stopped&rdquo; triages recently stopped tasks.</p>
+<p>Whereused answers &ldquo;can I delete this?&rdquo; for the resources people actually ask
+about: IAM roles, KMS keys, ACM certificates and security groups. It scans the
+account for the linking fields the inventory does not keep — a Lambda&rsquo;s
+execution role, a volume&rsquo;s KMS key, a listener&rsquo;s certificate, an ENI&rsquo;s
+security groups — and lists every resource that references the target.</p>
+
+<p>Pass a full ARN or a bare ID:</p>
+
+<ul>
+<li>IAM role     arn:aws:iam::123456789012:role/app   (or just the role name)</li>
+<li>KMS key      arn:aws:kms:us-east-1:…:key/<uuid></li>
+<li>ACM cert     arn:aws:acm:us-east-1:…:certificate/<id></li>
+<li>Security grp sg-0abc123                            (or its ARN)</li>
+</ul>
+
+<p>Crucially, a &ldquo;not referenced&rdquo; answer is scoped: the report always lists the
+reference types it checked, so absence of evidence is never presented as proof
+of absence. The report is read-only and best-effort — a denied or failed API
+call narrows what was checked (reported on stderr) and never aborts the run.</p>
+
+<p>This is the CLI generalization of the summary TUI&rsquo;s &lsquo;x&rsquo; cross-reference.</p>
 
 <h2 id="usage">Usage</h2>
 
-<pre><code>aws_explorer ecs
+<pre><code>aws_explorer whereused &lt;arn-or-id&gt;
+</code></pre>
+
+<h2 id="examples">Examples</h2>
+
+<pre><code class="language-bash"># What uses this IAM role?
+aws_explorer whereused arn:aws:iam::123456789012:role/app-task
+
+# What encrypts with this KMS key, across all regions?
+aws_explorer whereused arn:aws:kms:us-east-1:123456789012:key/abcd-… --all-regions
+
+# What is this security group attached to?
+aws_explorer whereused sg-0abc123 -r eu-west-1
+
+# Machine-readable
+aws_explorer whereused sg-0abc123 -o json | jq '.references'
 </code></pre>
 
 <h2 id="global-flags">Global flags</h2>
@@ -140,12 +175,6 @@ hr { border:none; border-top:1px solid var(--border); margin:2rem 0; }
 </tr>
 </tbody>
 </table>
-
-<h2 id="subcommands">Subcommands</h2>
-
-<ul>
-<li><a href="ecs_stopped.html"><code>aws_explorer ecs stopped</code></a> — Triage recently stopped ECS tasks (&ldquo;why did my task stop?&rdquo;)</li>
-</ul>
 
 <hr />
 
