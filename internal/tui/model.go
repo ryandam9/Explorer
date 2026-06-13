@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"os/exec"
 	"sort"
 	"strings"
 	"time"
@@ -28,7 +29,9 @@ import (
 	"github.com/ryandam9/aws_explorer/internal/csvexport"
 	"github.com/ryandam9/aws_explorer/internal/debuglog"
 	"github.com/ryandam9/aws_explorer/internal/engine"
+	"github.com/ryandam9/aws_explorer/internal/loggroup"
 	"github.com/ryandam9/aws_explorer/internal/model"
+	"github.com/ryandam9/aws_explorer/internal/sparkline"
 	"github.com/ryandam9/aws_explorer/internal/summary"
 	"github.com/ryandam9/aws_explorer/internal/table"
 	"github.com/ryandam9/aws_explorer/internal/trail"
@@ -934,6 +937,24 @@ func (m tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				return m, tea.Batch(cmds...)
 			}
 
+		case "L":
+			// Jump to the CloudWatch Logs TUI pre-filtered to this resource's
+			// log group (AXE-011). The summary TUI suspends, the cw TUI runs in
+			// the same terminal, and quitting it returns here with selection,
+			// filters and scroll intact (the model is untouched).
+			if m.focus == focusDetail && m.detail != nil {
+				res := *m.detail
+				group, ok := loggroup.For(loggroup.Resource{
+					Service: res.Service, Type: res.Type, ID: res.ID, Name: res.Name,
+				})
+				if !ok {
+					m.setToast(fmt.Sprintf("No CloudWatch log group derivable for %s — press 'l' for inline logs", res.Service))
+					cmds = append(cmds, toastCmd(4*time.Second))
+					return m, tea.Batch(cmds...)
+				}
+				return m, m.jumpToLogsCmd(res.Region, group)
+			}
+
 		case "g":
 			if m.focus == focusDetail && m.detail != nil {
 				res := *m.detail
@@ -942,7 +963,7 @@ func (m tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					m.showTimeline = false
 					m.showLogs = false
 					m.showXref = false
-					ns, name, dims, ok := metricParamsFor(res)
+					ns, name, dims, _, ok := metricParamsFor(res)
 					if !ok {
 						m.metricsErr = fmt.Errorf("no metric mapping for service %s", res.Service)
 						m.metricsLoading = false
@@ -1164,6 +1185,15 @@ func (m tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.metricsData = msg.data
 			m.metricsErr = msg.err
 			m.syncDetailViewport()
+		}
+		return m, tea.Batch(cmds...)
+
+	case cwJumpDoneMsg:
+		// Returned from the suspended cw Logs TUI. Surface a launch failure;
+		// a clean exit just lands the user back where they were.
+		if msg.err != nil {
+			m.setToast("Could not open CloudWatch logs: " + msg.err.Error())
+			cmds = append(cmds, toastCmd(4*time.Second))
 		}
 		return m, tea.Batch(cmds...)
 
@@ -2028,7 +2058,8 @@ func (m tuiModel) helpBody() string {
 		"",
 		"Support Debugging (while in detail panel)",
 		"  t                  Toggle CloudTrail resource mutation timeline",
-		"  l                  Toggle CloudWatch recent ERROR logs",
+		"  l                  Toggle CloudWatch recent ERROR logs (inline)",
+		"  L                  Open the CloudWatch Logs explorer on this resource's log group (Lambda/RDS/EKS)",
 		"  g                  Toggle CloudWatch key metric sparkline (1hr)",
 		"  x                  Toggle cross-resource relationship xrefs",
 		"  o                  Open in AWS Console (copies URL; opens browser when local)",
@@ -2487,6 +2518,7 @@ func (m tuiModel) statusHints() []ui.KeyHint {
 			ui.H("J", "raw json"),
 			ui.H("y", "copy"),
 			ui.H("t/l/g/x", "debug info"),
+			ui.H("L", "logs explorer"),
 			ui.H("o/k", "copy console/cli"),
 			ui.H("Tab", "panel"),
 			ui.H("q", "quit"),
@@ -2670,7 +2702,7 @@ func (m tuiModel) renderDetail(r model.Resource, width int) string {
 	}
 
 	if m.showMetrics {
-		ns, name, _, hasMetric := metricParamsFor(r)
+		ns, name, _, unit, hasMetric := metricParamsFor(r)
 		header := "METRICS"
 		if hasMetric {
 			header = fmt.Sprintf("METRICS: %s (%s)", name, ns)
@@ -2681,13 +2713,16 @@ func (m tuiModel) renderDetail(r model.Resource, width int) string {
 		} else if m.metricsErr != nil {
 			b.WriteString("  Error: " + m.metricsErr.Error() + "\n")
 		} else if m.metricsData == nil || len(m.metricsData.Values) == 0 {
-			b.WriteString("  No metric data available for the last hour.\n")
+			b.WriteString("  No datapoints in the last hour.\n")
 		} else {
-			spark := awsutil.GenerateSparkline(m.metricsData.Values)
-			minV := getMin(m.metricsData.Values)
-			maxV := getMax(m.metricsData.Values)
-			b.WriteString(fmt.Sprintf("  Sparkline: %s\n", lipgloss.NewStyle().Foreground(lipgloss.Color(ui.ColorAccent())).Render(spark)))
-			b.WriteString(fmt.Sprintf("  Range: Min %.2f · Max %.2f · Unit %s\n", minV, maxV, m.metricsData.Unit))
+			vals := m.metricsData.Values
+			spark := lipgloss.NewStyle().Foreground(lipgloss.Color(ui.ColorAccent())).Render(sparkline.Render(vals))
+			stats, _ := sparkline.Summarize(vals)
+			b.WriteString(fmt.Sprintf("  %s  (1h, 5m avg)\n", spark))
+			b.WriteString(fmt.Sprintf("  now %s · max %s · min %s\n",
+				sparkline.FormatValue(stats.Now, unit),
+				sparkline.FormatValue(stats.Max, unit),
+				sparkline.FormatValue(stats.Min, unit)))
 		}
 	}
 
@@ -3013,61 +3048,49 @@ func logGroupFor(r model.Resource) string {
 	return ""
 }
 
-func metricParamsFor(r model.Resource) (namespace, metricName string, dimensions map[string]string, ok bool) {
+// metricParamsFor maps a resource to its headline CloudWatch metric: the one
+// number that answers "is it healthy?" for that service. unit is a short
+// display suffix ("%" for utilization, "" for plain counts). ok is false for
+// services without a mapping.
+func metricParamsFor(r model.Resource) (namespace, metricName string, dimensions map[string]string, unit string, ok bool) {
 	dimensions = make(map[string]string)
 	switch strings.ToLower(r.Service) {
 	case "ec2":
 		namespace = "AWS/EC2"
 		metricName = "CPUUtilization"
 		dimensions["InstanceId"] = r.ID
+		unit = "%"
 	case "rds":
 		namespace = "AWS/RDS"
 		metricName = "CPUUtilization"
 		dimensions["DBInstanceIdentifier"] = r.ID
+		unit = "%"
 	case "lambda":
 		namespace = "AWS/Lambda"
 		metricName = "Errors"
 		dimensions["FunctionName"] = r.Name
+	case "sqs":
+		namespace = "AWS/SQS"
+		metricName = "ApproximateNumberOfMessagesVisible"
+		dimensions["QueueName"] = r.Name
+	case "dynamodb":
+		namespace = "AWS/DynamoDB"
+		metricName = "ThrottledRequests"
+		dimensions["TableName"] = r.Name
 	case "elbv2":
 		// The LoadBalancer dimension is the ARN suffix after ":loadbalancer/"
 		// (e.g. "app/my-lb/50dc6c495c0c9188").
 		_, lbDim, found := strings.Cut(r.ARN, ":loadbalancer/")
 		if !found {
-			return "", "", nil, false
+			return "", "", nil, "", false
 		}
 		namespace = "AWS/ApplicationELB"
-		metricName = "RequestCount"
+		metricName = "HTTPCode_Target_5XX_Count"
 		dimensions["LoadBalancer"] = lbDim
 	default:
-		return "", "", nil, false
+		return "", "", nil, "", false
 	}
-	return namespace, metricName, dimensions, true
-}
-
-func getMin(vals []float64) float64 {
-	if len(vals) == 0 {
-		return 0
-	}
-	m := vals[0]
-	for _, v := range vals {
-		if v < m {
-			m = v
-		}
-	}
-	return m
-}
-
-func getMax(vals []float64) float64 {
-	if len(vals) == 0 {
-		return 0
-	}
-	m := vals[0]
-	for _, v := range vals {
-		if v > m {
-			m = v
-		}
-	}
-	return m
+	return namespace, metricName, dimensions, unit, true
 }
 
 func (m *tuiModel) saveSnapshot() {
@@ -3153,6 +3176,34 @@ func (m tuiModel) fetchTimelineCmd(res model.Resource) tea.Cmd {
 		events, err := trail.Lookup(m.ctx, cfg, res.Region, res.ID, trail.Options{Limit: 20})
 		return timelineMsg{resourceID: res.ID, events: events, err: err}
 	}
+}
+
+// cwJumpDoneMsg is delivered after the suspended cw TUI exits, carrying any
+// launch error so the parent can surface it.
+type cwJumpDoneMsg struct{ err error }
+
+// jumpToLogsCmd suspends the summary TUI and runs the cw Logs TUI as a child
+// process of this same binary, pre-filtered to group in region. tea.ExecProcess
+// hands the terminal to the child and restores it on exit. Credentials follow
+// from the same --profile/--config the summary TUI is using.
+func (m tuiModel) jumpToLogsCmd(region, group string) tea.Cmd {
+	self, err := os.Executable()
+	if err != nil {
+		return func() tea.Msg { return cwJumpDoneMsg{err: err} }
+	}
+	args := []string{"cw", "--group", group}
+	if region != "" && region != "global" {
+		args = append(args, "--region", region)
+	}
+	if m.cfg != nil && m.cfg.AWS.Profile != "" {
+		args = append(args, "--profile", m.cfg.AWS.Profile)
+	}
+	if m.configPath != "" {
+		args = append(args, "--config", m.configPath)
+	}
+	return tea.ExecProcess(exec.Command(self, args...), func(err error) tea.Msg {
+		return cwJumpDoneMsg{err: err}
+	})
 }
 
 func (m tuiModel) fetchLogsCmd(res model.Resource, logGroupName string) tea.Cmd {

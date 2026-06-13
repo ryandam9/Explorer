@@ -190,6 +190,8 @@ what you see in the bar is always what works right now.
 | `y` / `Y` | Copy the selected resource's ARN / ID to the clipboard |
 | `o` / `k` | Open the resource in the AWS console (`o` copies the deep-link URL and opens a browser when the session is local; ARN-search fallback for unmapped types) / copy an AWS CLI reproduction command |
 | `J` | Toggle a raw-JSON view in the detail panel (`y` then copies the JSON) |
+| `t` / `l` / `g` / `x` | In the detail panel: CloudTrail timeline / inline recent ERROR logs / headline-metric **sparkline** (now·max·min over the last hour) / cross-references |
+| `L` | In the detail panel: **open the CloudWatch Logs explorer** pre-filtered to this resource's log group (Lambda → `/aws/lambda/…`, RDS → `/aws/rds/instance/…`, EKS → `/aws/eks/…/cluster`); `q` returns you here with selection and scroll intact |
 | `C` | Export the current (filtered, sorted) view to CSV under `~/.aws_explorer/exports/` |
 | `D` | **What changed**: first press saves an account baseline snapshot, later presses diff the live inventory against it (`b` inside the overlay re-baselines) |
 | `P` | Switch AWS profile and/or region scope, then rescan — no restart needed |

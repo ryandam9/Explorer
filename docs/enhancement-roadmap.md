@@ -509,6 +509,8 @@ DOT passes `dot -Tsvg` cleanly; snapshot-based golden-file tests.
 
 ### AXE-011 — Jump from resource to its CloudWatch logs {#axe-011}
 
+> **Status: ✅ shipped** — `L` in the summary TUI detail panel jumps to the cw Logs TUI pre-filtered to the resource's log group. Log-group derivation is a pure, table-tested function (`internal/loggroup`, covering Lambda → `/aws/lambda/<fn>`, RDS → `/aws/rds/instance/<id>/` prefix, EKS → `/aws/eks/<cluster>/cluster`). The jump uses `tea.ExecProcess` to suspend the summary TUI and run `aws_explorer cw --group …` as a child in the same terminal, so the round-trip preserves selection/filters/scroll for free and degrades to a toast off a TTY. ECS is intentionally excluded (its group lives in the task definition's awslogs driver — needs an API call; a follow-up). The inline `l` ERROR-log view is unchanged.
+
 **Problem.** Four good TUIs that don't talk to each other. The most common
 hop: resource → its logs.
 
@@ -584,6 +586,8 @@ result line shows name, type, region; `Enter` lands on the exact row with
 detail open.
 
 ### AXE-014 — Inline CloudWatch metric sparklines {#axe-014}
+
+> **Status: ✅ shipped** — `g` in the summary TUI detail panel renders the resource's headline metric as a block-character sparkline with `now`/`max`/`min` annotations. The renderer is a pure, golden-tested package (`internal/sparkline`: `Render` scales between the series min/max, NaN gaps render blank, `Summarize`/`FormatValue` annotate). Per-type coverage (`metricParamsFor`): EC2/RDS `CPUUtilization` (%), Lambda `Errors`, SQS `ApproximateNumberOfMessagesVisible`, DynamoDB `ThrottledRequests`, ALB `HTTPCode_Target_5XX_Count`. Still one on-demand `GetMetricData` call per press (1h, 5m). Follow-ups: batching Lambda errors+throttles into one render, a 3h window, and rolling the sparkline into the VPC/other TUIs.
 
 **Problem.** "Is it healthy?" requires the console. One metric per resource
 answers 80% of it.
