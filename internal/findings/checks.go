@@ -65,6 +65,24 @@ var checkRegistry = []CheckMeta{
 		"SNS topic policy with an unconditioned Allow for Principal \"*\"", SevCritical},
 	{CheckAlarmNoData, "AlarmInsufficientData",
 		"CloudWatch alarm stuck in INSUFFICIENT_DATA for over 7 days", SevInfo},
+
+	// IAM hygiene category (AXE-003).
+	{CheckOldAccessKey, "AccessKeyOlderThan90Days",
+		"access key not rotated in over 90 days", SevWarning},
+	{CheckUnusedAccessKey, "ActiveAccessKeyUnused90Days",
+		"active access key unused for over 90 days (standing credential nobody needs)", SevCritical},
+	{CheckUserNoMFA, "ConsoleUserWithoutMFA",
+		"IAM user with console password but no MFA device", SevCritical},
+	{CheckRootAccessKey, "RootAccessKeyExists",
+		"active access key on the root account", SevCritical},
+	{CheckUnusedRole, "RoleUnused90Days",
+		"role not assumed in over 90 days (per RoleLastUsed)", SevInfo},
+	{CheckWildcardPolicy, "CustomerPolicyFullAdmin",
+		"customer-managed policy granting Action \"*\" on Resource \"*\"", SevCritical},
+	{CheckUserAttachedPolicy, "PolicyAttachedDirectlyToUsers",
+		"policy attached directly to users instead of groups/roles", SevInfo},
+	{CheckOpenTrustPolicy, "TrustPolicyAllowsAnyPrincipal",
+		"role trust policy allowing \"AWS\": \"*\" without conditions", SevCritical},
 }
 
 // Checks returns the registry of every known check, in declaration order.

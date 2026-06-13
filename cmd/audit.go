@@ -20,7 +20,7 @@ import (
 
 // auditCategories lists the implemented finding categories. More join as the
 // roadmap lands (security, messaging, …); --only validates against this.
-var auditCategories = []string{"cost", "security"}
+var auditCategories = []string{"cost", "security", "iam"}
 
 // auditExitFindings is the exit code when --fail-on is set and findings at or
 // above the threshold exist (operational errors exit 1, clean runs 0), so CI
@@ -55,7 +55,14 @@ IMDSv1, security groups opening sensitive ports (SSH, RDP, databases) to
 the internet, Lambda function URLs with no auth, SQS/SNS policies that
 allow everyone, and alarms stuck in INSUFFICIENT_DATA.
 
-Every finding carries a stable check ID (e.g. COST-EBS-001, SEC-S3-001).
+iam — account-global hygiene via the credential report and policy scan:
+root access keys, console users without MFA, access keys older than 90
+days or active-but-unused, roles unused for 90+ days, customer policies
+granting */*, trust policies allowing any AWS principal, and policies
+attached directly to users.
+
+Every finding carries a stable check ID (e.g. COST-EBS-001, SEC-S3-001,
+IAM-KEY-001).
 
 For CI pipelines, --fail-on <severity> exits 2 when findings at or above the
 threshold exist (0 below it, 1 on operational errors), --ignore suppresses
@@ -77,6 +84,9 @@ cloudwatch:GetMetricData and are skipped without it.`,
 
   # Security category only
   aws_explorer audit --only security
+
+  # IAM hygiene only (account-global; region flags don't matter)
+  aws_explorer audit --only iam
 
   # CI gate: exit 2 if any warning-or-worse finding exists
   aws_explorer audit --fail-on warning --ignore COST-EBS-002,SEC-EC2-001
