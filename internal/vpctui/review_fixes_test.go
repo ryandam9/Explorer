@@ -69,6 +69,31 @@ func TestNACLDenyShadowsEphemeralAllow(t *testing.T) {
 	}
 }
 
+func TestNACLPartialEphemeralRangeFlagged(t *testing.T) {
+	// An outbound allow that covers only the low ephemeral ports (1024-49151)
+	// still drops return traffic on higher ports (e.g. 60999, 65535); probing
+	// only 32768 would miss this, so it must be flagged.
+	partial := NACLInfo{ID: "acl-partial", Rules: []NACLRule{
+		{RuleNumber: 100, Protocol: "TCP", PortRange: "443", CIDR: "0.0.0.0/0", Action: "allow", Direction: "Inbound"},
+		{RuleNumber: 200, Protocol: "TCP", PortRange: "1024-49151", CIDR: "0.0.0.0/0", Action: "allow", Direction: "Outbound"},
+	}}
+	var out []Finding
+	checkNACLs(vpcSnapshot{NetworkACLs: []NACLInfo{partial}}, &out)
+	if findOne(out, "may block return traffic") == nil {
+		t.Error("a partial ephemeral allow (1024-49151) should be flagged for higher return ports")
+	}
+
+	// The full range clears it.
+	full := partial
+	full.Rules = append([]NACLRule(nil), partial.Rules...)
+	full.Rules[1].PortRange = "1024-65535"
+	out = nil
+	checkNACLs(vpcSnapshot{NetworkACLs: []NACLInfo{full}}, &out)
+	if findOne(out, "may block return traffic") != nil {
+		t.Error("the full ephemeral range should clear the finding")
+	}
+}
+
 func TestHardenedDefaultNACLFlagged(t *testing.T) {
 	// The default NACL's rules are editable; a hardened one must be linted too.
 	snap := vpcSnapshot{NetworkACLs: []NACLInfo{

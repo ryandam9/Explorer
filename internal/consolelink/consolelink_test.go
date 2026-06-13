@@ -33,6 +33,11 @@ func TestURL_DeepLinks(t *testing.T) {
 			"dynamodbv2/home?region=us-east-1#table?name=orders"},
 		{"iam role", model.Resource{Service: "iam", Type: "role", ID: "service-role/my-role"},
 			"iam/home#/roles/my-role"},
+		{"iam policy", model.Resource{Service: "iam", Type: "policy",
+			ARN: "arn:aws:iam::123:policy/my-policy"},
+			// PathEscape keeps ':' literal in the fragment path (QueryEscape
+			// would emit %3A and turn any space into '+').
+			"iam/home#/policies/details/arn:aws:iam::123:policy"},
 		{"eks", model.Resource{Service: "eks", Type: "cluster", Region: "us-east-1", ID: "prod"},
 			"/eks/home?region=us-east-1#/clusters/prod"},
 		{"ecs cluster", model.Resource{Service: "ecs", Type: "cluster", Region: "us-east-1", ID: "prod"},

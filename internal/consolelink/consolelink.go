@@ -205,7 +205,10 @@ func deepLink(n linkInput) (string, bool) {
 			return "https://console.aws.amazon.com/iam/home#/groups/" + q(lastSegment(n.id)), true
 		case "policy":
 			if n.arn != "" {
-				return "https://console.aws.amazon.com/iam/home#/policies/details/" + q(n.arn), true
+				// The ARN sits in the fragment path, not a query string, so use
+				// PathEscape: QueryEscape would turn any space into "+" (a
+				// literal plus in a path) and is the wrong encoding here.
+				return "https://console.aws.amazon.com/iam/home#/policies/details/" + url.PathEscape(n.arn), true
 			}
 		}
 
