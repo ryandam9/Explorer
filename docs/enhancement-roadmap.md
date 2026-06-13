@@ -1,6 +1,6 @@
 # AWS Explorer — Enhancement Roadmap & Design Specification
 
-Status: **In progress** — shipped so far: AXE-004 & the `internal/findings` platform (#79), AXE-023 (#80), AXE-001 & AXE-022 (#81), AXE-013 (#82), AXE-007 (#83), AXE-005 (#84, #86), AXE-006 (#85), AXE-012 (#87), AXE-002 (#88), AXE-008 · Tracking issue: #76
+Status: **In progress** — shipped so far: AXE-004 & the `internal/findings` platform (#79), AXE-023 (#80), AXE-001 & AXE-022 (#81), AXE-013 (#82), AXE-007 (#83), AXE-005 (#84, #86), AXE-006 (#85), AXE-012 (#87), AXE-002 (#88), AXE-008 (#89), AXE-003 · Tracking issue: #76
 
 This document specifies 24 proposed enhancements, grouped into nine themes.
 Each enhancement carries a stable ID (`AXE-NNN`) used in the tracking issue,
@@ -29,7 +29,7 @@ The proposals follow the tool's established design principles:
 |----|-------|-------|----------|
 | [AXE-001](#axe-001) | Decode encoded authorization failure messages | A — IAM / access debugging | ✅ shipped (#81) |
 | [AXE-002](#axe-002) | IAM policy simulator ("can X do Y on Z?") | A — IAM / access debugging | ✅ shipped |
-| [AXE-003](#axe-003) | IAM hygiene linter | A — IAM / access debugging | P2 |
+| [AXE-003](#axe-003) | IAM hygiene linter | A — IAM / access debugging | ✅ shipped |
 | [AXE-004](#axe-004) | Cost/waste linter with monthly estimates | B — Cost & waste | ✅ shipped (#79) |
 | [AXE-005](#axe-005) | CloudTrail "who changed this" | C — Change attribution & drift | ✅ shipped |
 | [AXE-006](#axe-006) | Account-wide inventory snapshot diff | C — Change attribution & drift | ✅ shipped |
@@ -176,6 +176,8 @@ principal).
   printed.
 
 ### AXE-003 — IAM hygiene linter {#axe-003}
+
+> **Status: ✅ shipped** — `iam` category in `aws_explorer audit` (8 `IAM-*` checks in `internal/findings/iam.go`; credential-report parsing is a pure fixture-tested function; collection in `internal/audit/iam_collect.go`, account-global, run once per audit).
 
 **Problem.** Stale credentials and over-broad policies accumulate silently.
 

@@ -43,13 +43,15 @@ func Stream(ctx context.Context, baseCfg aws.Config, regions []string, categorie
 	if len(regions) == 0 {
 		regions = []string{"us-east-1"}
 	}
-	wantCost, wantSecurity := false, false
+	wantCost, wantSecurity, wantIAM := false, false, false
 	for _, c := range categories {
 		switch c {
 		case "cost":
 			wantCost = true
 		case "security":
 			wantSecurity = true
+		case "iam":
+			wantIAM = true
 		}
 	}
 
@@ -57,6 +59,7 @@ func Stream(ctx context.Context, baseCfg aws.Config, regions []string, categorie
 	g.SetLimit(maxConcurrency)
 	for i, region := range regions {
 		region := region
+		// The first region also carries the account-global sweeps (S3, IAM).
 		s3Region := i == 0
 		g.Go(func() error {
 			var fs []findings.Finding
@@ -69,6 +72,13 @@ func Stream(ctx context.Context, baseCfg aws.Config, regions []string, categorie
 			if wantSecurity {
 				snap, e := collectSecurityRegion(gctx, baseCfg, region, s3Region, perCallTimeout)
 				fs = append(fs, findings.AnalyzeSecurity(snap)...)
+				errs = append(errs, e...)
+			}
+			// IAM is account-global: collected once, in the first region's
+			// pass, with findings labeled Region "global".
+			if wantIAM && s3Region {
+				snap, e := collectIAMAccount(gctx, baseCfg, perCallTimeout)
+				fs = append(fs, findings.AnalyzeIAM(snap)...)
 				errs = append(errs, e...)
 			}
 			findings.Sort(fs)

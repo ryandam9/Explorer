@@ -304,10 +304,10 @@ Changes since baseline 2026-06-11 09:00 UTC — 2 added, 1 removed, 1 modified
 
 ## Audit Usage
 
-`audit` scans the configured regions for findings in two categories —
-**cost/waste** and **security** (both run by default; `--only cost` /
-`--only security` narrows) — and prints them as a ranked table, with an
-estimated monthly cost per cost finding and a total at the bottom. Like everything else in the tool, the audit
+`audit` scans the configured regions for findings in three categories —
+**cost/waste**, **security**, and **IAM hygiene** (all run by default;
+`--only cost,security,iam` narrows) — and prints them as a ranked table,
+with an estimated monthly cost per cost finding and a total at the bottom. Like everything else in the tool, the audit
 is **deterministic, read-only and best-effort**: a denied API call skips the
 affected checks (reported on stderr) and never aborts the run.
 
@@ -380,6 +380,32 @@ Security-category notes:
   `ec2:{GetEbsEncryptionByDefault}`, `rds:{DescribeDBSnapshots,DescribeDBSnapshotAttributes}`,
   `lambda:{ListFunctions,ListFunctionUrlConfigs}`, `sqs:{ListQueues,GetQueueAttributes}`,
   `sns:{ListTopics,GetTopicAttributes}`, `cloudwatch:DescribeAlarms`.
+
+**IAM hygiene category** (`--only iam`; check IDs `IAM-*`; account-global —
+runs once per audit and reports with region `global`):
+
+| ID | Finding | Severity |
+|----|---------|----------|
+| `IAM-ROOT-001` | Root account has an active access key | 🔴 critical |
+| `IAM-USER-001` | Console user (password enabled) without MFA | 🔴 critical |
+| `IAM-KEY-001` | Access key not rotated in over 90 days | 🟡 warning |
+| `IAM-KEY-002` | Active access key unused for 90+ days (or never used and 90+ days old) | 🔴 critical |
+| `IAM-ROLE-001` | Role not assumed in 90+ days (`RoleLastUsed`; service-linked and <90-day-old roles exempt) | 🔵 info |
+| `IAM-POLICY-001` | Customer-managed policy granting `Action "*"` on `Resource "*"` | 🔴 critical |
+| `IAM-POLICY-002` | Policy attached directly to users instead of groups/roles | 🔵 info |
+| `IAM-TRUST-001` | Role trust policy with an unconditioned `Allow` for `"AWS": "*"` | 🔴 critical |
+
+IAM-category notes:
+
+- User and key checks come from the **credential report**; generation is
+  asynchronous, so the audit polls briefly (~16s max) and skips those
+  checks with a note if the report isn't ready — rerun a minute later.
+- Role usage needs one `GetRole` per role and policy documents one
+  `GetPolicyVersion` per customer policy; both sweeps are capped at 200
+  (reported as `Truncated` when hit). Denied calls leave facts unknown and
+  fire nothing.
+- Extra IAM needed: `iam:{GenerateCredentialReport,GetCredentialReport,
+  ListRoles,GetRole,ListPolicies,GetPolicyVersion,ListEntitiesForPolicy}`.
 
 † Traffic-based checks use CloudWatch metrics over a 14-day window and need
 `cloudwatch:GetMetricData`; without it they are skipped (with a note) while

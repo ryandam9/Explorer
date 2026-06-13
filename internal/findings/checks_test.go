@@ -16,6 +16,9 @@ func TestEveryCheckIDIsRegistered(t *testing.T) {
 		CheckRDSPublic, CheckRDSUnencrypted, CheckPublicRDSSnapshot,
 		CheckIMDSv1, CheckSGOpenPort, CheckLambdaURLNoAuth,
 		CheckSQSOpenPolicy, CheckSNSOpenPolicy, CheckAlarmNoData,
+		CheckOldAccessKey, CheckUnusedAccessKey, CheckUserNoMFA,
+		CheckRootAccessKey, CheckUnusedRole, CheckWildcardPolicy,
+		CheckUserAttachedPolicy, CheckOpenTrustPolicy,
 	}
 	if len(Checks()) != len(ids) {
 		t.Errorf("registry has %d checks, constants list %d", len(Checks()), len(ids))
