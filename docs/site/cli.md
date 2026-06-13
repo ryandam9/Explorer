@@ -66,3 +66,4 @@ aws_explorer --all-regions
 - [`aws_explorer summary`](summary.md) — List every AWS resource across all regions
 - [`aws_explorer trail`](trail.md) — CloudTrail "who changed this" — recent events for a resource
 - [`aws_explorer vpc`](vpc.md) — Start the VPC Explorer TUI
+- [`aws_explorer whereused`](whereused.md) — Where-used / blast radius — "can I delete this?"

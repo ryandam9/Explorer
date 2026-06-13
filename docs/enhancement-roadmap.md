@@ -451,6 +451,8 @@ Renders the findings table grouped by severity; `--fail-on` ties into AXE-023.
 
 ### AXE-009 — Generalized where-used / blast radius {#axe-009}
 
+> **Status: ✅ shipped** — `aws_explorer whereused <arn-or-id>` (CLI) + `internal/xref`. Pure, fixture-tested `Classify`/`BuildIndex`/`WhereUsed` over typed `Edge`s; best-effort collection (`internal/xref/collect.go`) reads the linking fields the inventory omits across Lambda, EC2 (instances/volumes/ENIs), RDS, Secrets Manager, SQS, ECS task defs, EKS clusters & node groups, ELBv2 listeners, and IAM (instance profiles + trust policies). "Not referenced" is scoped — every result lists the reference types checked. The summary TUI's `x` still uses its in-memory substring scan; replacing it with this typed index is a possible follow-up.
+
 **Problem.** "Can I delete this?" The VPC explorer's `x` answers it for
 networking; the most-asked non-networking targets are IAM roles, KMS keys,
 security groups (account-wide), and certificates.
