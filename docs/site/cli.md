@@ -57,6 +57,7 @@ aws_explorer --all-regions
 - [`aws_explorer bill`](bill.md) — Show the account's bill from Cost Explorer (live --tui)
 - [`aws_explorer config`](config.md) — Manage the configuration file
 - [`aws_explorer cw`](cw.md) — Start the CloudWatch Logs Explorer TUI
+- [`aws_explorer ecs`](ecs.md) — ECS triage helpers
 - [`aws_explorer expiring`](expiring.md) — List everything that breaks on a calendar date
 - [`aws_explorer find`](find.md) — Fuzzy-find any resource by name, ID, ARN or type
 - [`aws_explorer iam`](iam.md) — IAM / access debugging helpers

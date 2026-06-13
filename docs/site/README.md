@@ -25,6 +25,8 @@ This documentation is generated from the tool itself — the command reference b
 - [`aws_explorer config init`](config_init.md) — Write a starter config.yaml with the built-in defaults.
 - [`aws_explorer config path`](config_path.md) — Print the path of the active configuration file.
 - [`aws_explorer cw`](cw.md) — Start the CloudWatch Logs Explorer TUI.
+- [`aws_explorer ecs`](ecs.md) — ECS triage helpers.
+- [`aws_explorer ecs stopped`](ecs_stopped.md) — Triage recently stopped ECS tasks ("why did my task stop?").
 - [`aws_explorer expiring`](expiring.md) — List everything that breaks on a calendar date.
 - [`aws_explorer find`](find.md) — Fuzzy-find any resource by name, ID, ARN or type.
 - [`aws_explorer iam`](iam.md) — IAM / access debugging helpers.
