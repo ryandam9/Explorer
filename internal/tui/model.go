@@ -26,6 +26,7 @@ import (
 	"github.com/ryandam9/aws_explorer/internal/config"
 	"github.com/ryandam9/aws_explorer/internal/consolelink"
 	"github.com/ryandam9/aws_explorer/internal/csvexport"
+	"github.com/ryandam9/aws_explorer/internal/debuglog"
 	"github.com/ryandam9/aws_explorer/internal/engine"
 	"github.com/ryandam9/aws_explorer/internal/model"
 	"github.com/ryandam9/aws_explorer/internal/summary"
@@ -210,6 +211,12 @@ type tuiModel struct {
 	showErrors     bool
 	errorsViewport viewport.Model
 
+	// Debug overlay ("~"): a live view of the captured scan activity log, so
+	// the user can see what the tool is doing — which regions, services and
+	// API calls are in flight — instead of staring at a blank screen.
+	showDebug     bool
+	debugViewport viewport.Model
+
 	// Account snapshot diff ("d"): what changed since the saved baseline
 	// (internal/acctsnap). First press saves a baseline; later presses show
 	// the diff overlay, where b re-baselines.
@@ -391,6 +398,46 @@ func (m tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if key, ok := msg.(tea.KeyMsg); ok {
 			if s := key.String(); s == "esc" || s == ui.KeyHelp || s == "q" {
 				m.showHelp = false
+			}
+		}
+		return m, nil
+	}
+
+	// While the debug overlay is open, allow scrolling and close on Esc/~/q.
+	// It is refreshed from the live sink on every key so an in-progress scan's
+	// activity keeps appearing while the pane is open.
+	if m.showDebug {
+		switch msg := msg.(type) {
+		case tea.KeyMsg:
+			switch msg.String() {
+			case "esc", ui.KeyDebug, "q":
+				m.showDebug = false
+				return m, nil
+			case "up", "k", "[":
+				m.debugViewport.SetContent(m.debugBody())
+				m.debugViewport.LineUp(3)
+				return m, nil
+			case "down", "j", "]":
+				m.debugViewport.SetContent(m.debugBody())
+				m.debugViewport.LineDown(3)
+				return m, nil
+			case "g":
+				m.debugViewport.SetContent(m.debugBody())
+				m.debugViewport.GotoTop()
+				return m, nil
+			case "G":
+				m.debugViewport.SetContent(m.debugBody())
+				m.debugViewport.GotoBottom()
+				return m, nil
+			}
+		case tea.MouseMsg:
+			switch msg.Button {
+			case tea.MouseButtonWheelUp:
+				m.debugViewport.SetContent(m.debugBody())
+				m.debugViewport.LineUp(3)
+			case tea.MouseButtonWheelDown:
+				m.debugViewport.SetContent(m.debugBody())
+				m.debugViewport.LineDown(3)
 			}
 		}
 		return m, nil
@@ -781,6 +828,10 @@ func (m tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if len(m.errors) > 0 {
 				m.openErrorsOverlay()
 			}
+			return m, tea.Batch(cmds...)
+
+		case ui.KeyDebug:
+			m.openDebugOverlay()
 			return m, tea.Batch(cmds...)
 
 		case "w":
@@ -1947,6 +1998,7 @@ func (m tuiModel) helpView() string {
 		"Utility",
 		"  P                  Switch AWS profile / region and rescan",
 		"  e                  View access / scan errors",
+		"  ~                  Debug: live view of what the tool is doing",
 		"  S                  Settings (theme & colors)",
 		"  ?                  Toggle this help",
 		"  q, Ctrl+C          Quit",
@@ -1965,6 +2017,14 @@ func (m tuiModel) View() string {
 	var output string
 
 	if m.loading && len(m.sorted) == 0 {
+		// The initial scan is exactly when the user is most likely to wonder
+		// what the tool is doing, so honour the debug overlay here too rather
+		// than only showing the bare spinner.
+		if m.showDebug {
+			loading := fmt.Sprintf("\n  %s  Loading AWS resources…\n", m.spinner.View())
+			output = ui.OverlayCenter(loading, m.debugOverlay(), m.width, m.height)
+			return m.zones.Scan(output)
+		}
 		output = fmt.Sprintf("\n  %s  Loading AWS resources…\n", m.spinner.View())
 		return m.zones.Scan(output)
 	}
@@ -1982,6 +2042,9 @@ func (m tuiModel) View() string {
 		output = lipgloss.JoinVertical(lipgloss.Left, header, centered, status)
 	} else if m.showErrors {
 		centered := lipgloss.Place(m.width, m.height-4, lipgloss.Center, lipgloss.Center, m.errorsOverlay())
+		output = lipgloss.JoinVertical(lipgloss.Left, header, centered, status)
+	} else if m.showDebug {
+		centered := lipgloss.Place(m.width, m.height-4, lipgloss.Center, lipgloss.Center, m.debugOverlay())
 		output = lipgloss.JoinVertical(lipgloss.Left, header, centered, status)
 	} else if m.showAcctDiff {
 		centered := lipgloss.Place(m.width, m.height-4, lipgloss.Center, lipgloss.Center, m.acctDiffOverlay())
@@ -2273,6 +2336,8 @@ func (m tuiModel) statusHints() []ui.KeyHint {
 		return []ui.KeyHint{ui.H("?/Esc", "close help")}
 	case m.showErrors:
 		return []ui.KeyHint{ui.H("↑/↓", "scroll"), ui.H("Esc/e", "close")}
+	case m.showDebug:
+		return []ui.KeyHint{ui.H("↑/↓", "scroll"), ui.H("g/G", "top/bottom"), ui.H("Esc/~", "close")}
 	case m.showAcctDiff:
 		return []ui.KeyHint{ui.H("↑/↓", "scroll"), ui.H("b", "re-baseline"), ui.H("Esc/D", "close")}
 	case m.showFilter, m.showSwitcher:
@@ -2330,6 +2395,7 @@ func (m tuiModel) statusHints() []ui.KeyHint {
 		if len(m.errors) > 0 {
 			hints = append(hints, ui.H("e", fmt.Sprintf("errors (%d)", len(m.errors))))
 		}
+		hints = append(hints, ui.H("~", "debug"))
 		return append(hints,
 			ui.H("P", "profile"),
 			ui.H("Tab", "panel"),
@@ -2633,6 +2699,49 @@ func (m *tuiModel) openErrorsOverlay() {
 	m.errorsViewport = viewport.New(w, h)
 	m.errorsViewport.SetContent(m.errorsBody())
 	m.showErrors = true
+}
+
+// ── Debug activity overlay ("~") ───────────────────────────────────────────────
+
+// openDebugOverlay (re)builds the scrollable debug overlay from the captured
+// scan activity log and scrolls it to the latest line, so the most recent
+// activity is visible the moment it opens.
+func (m *tuiModel) openDebugOverlay() {
+	w := m.width - 8
+	if w > 120 {
+		w = 120
+	}
+	if w < 40 {
+		w = 40
+	}
+	h := m.height - 8
+	if h < 6 {
+		h = 6
+	}
+	m.debugViewport = viewport.New(w, h)
+	m.debugViewport.SetContent(m.debugBody())
+	m.debugViewport.GotoBottom()
+	m.showDebug = true
+}
+
+// debugBody renders the captured activity log for the overlay viewport.
+func (m tuiModel) debugBody() string {
+	return ui.DebugBody(debuglog.Default.Entries(), debuglog.Default.Dropped())
+}
+
+// debugOverlay renders the debug activity overlay (title + scrollable body)
+// inside a themed modal frame.
+func (m tuiModel) debugOverlay() string {
+	title := lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color(ui.ColorHeading())).
+		Render(fmt.Sprintf("DEBUG · TOOL ACTIVITY (%d lines)", debuglog.Default.Len()))
+	hint := lipgloss.NewStyle().Foreground(lipgloss.Color(ui.ColorMuted())).
+		Render("↑/↓ scroll · g/G top/bottom · Esc/~ close")
+	body := lipgloss.JoinVertical(lipgloss.Left, title, "", m.debugViewport.View(), "", hint)
+	return lipgloss.NewStyle().
+		Border(lipgloss.RoundedBorder()).
+		BorderForeground(lipgloss.Color(ui.ColorBorderFocus())).
+		Padding(0, 1).
+		Render(body)
 }
 
 // ── Account snapshot diff ("d") ───────────────────────────────────────────────

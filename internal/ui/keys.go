@@ -13,6 +13,9 @@ const (
 	KeyHelp = "?"
 	// KeyQuit exits the application.
 	KeyQuit = "q"
+	// KeyDebug toggles the debug activity overlay, which shows the live stream
+	// of what the tool is doing (regions, services, API calls and errors).
+	KeyDebug = "~"
 )
 
 // HelpView renders a bordered, themed help overlay from a title and a block of
