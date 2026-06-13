@@ -10,8 +10,12 @@ import (
 	"github.com/ryandam9/aws_explorer/internal/ui"
 )
 
-// headerLines + the panel border/padding rows the table doesn't get.
-const chromeHeight = 2 /* header */ + 2 /* panel border */ + 1 /* scroll hint */ + 1 /* status bar */
+// chromeHeight is the height of everything below the header: the table panel's
+// top and bottom borders, the column-scroll hint, and the status bar. The
+// header's height is measured separately (it varies — title, PAID badge/state,
+// totals — and ui.HeaderStyle adds a bottom margin), because under-counting it
+// makes the frame too tall and ClipToSize trims the status bar off the bottom.
+const chromeHeight = 2 /* panel border */ + 1 /* scroll hint */ + 1 /* status bar */
 
 // layoutTable resizes the bill table to the current terminal.
 func (m *Model) layoutTable() {
@@ -19,7 +23,7 @@ func (m *Model) layoutTable() {
 		return
 	}
 	m.tbl.SetWidth(m.width - 4) // panel border + padding
-	h := m.height - chromeHeight
+	h := m.height - lipgloss.Height(m.headerView()) - chromeHeight
 	if h < 3 {
 		h = 3
 	}
@@ -65,7 +69,10 @@ func (m Model) headerView() string {
 	case !m.updated.IsZero():
 		state = ui.MutedStyle().Render("updated " + m.updated.Format("15:04:05"))
 	}
-	line1 := title + "  " + paid + "  " + state
+	// JoinHorizontal (not string concat) so the badge and state sit on the
+	// title's first row; ui.HeaderStyle's bottom margin would otherwise push
+	// them onto the blank second row.
+	line1 := lipgloss.JoinHorizontal(lipgloss.Top, title, "  ", paid, "  ", state)
 
 	var parts []string
 	if m.bill != nil {
