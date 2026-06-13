@@ -19,6 +19,7 @@ import (
 	"github.com/ryandam9/aws_explorer/internal/audit"
 	"github.com/ryandam9/aws_explorer/internal/costs"
 	"github.com/ryandam9/aws_explorer/internal/csvexport"
+	"github.com/ryandam9/aws_explorer/internal/debugpane"
 	"github.com/ryandam9/aws_explorer/internal/findings"
 	"github.com/ryandam9/aws_explorer/internal/model"
 	"github.com/ryandam9/aws_explorer/internal/table"
@@ -86,6 +87,8 @@ type Model struct {
 	spin   spinner.Model
 	status string // transient message in the status bar (copy/export results)
 
+	debug debugpane.Model // "~" live activity overlay
+
 	width, height int
 }
 
@@ -131,6 +134,14 @@ func (m Model) Init() tea.Cmd {
 }
 
 func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+	// While the debug overlay is open, it consumes key/mouse input; every other
+	// message falls through so the scan keeps streaming findings underneath.
+	if m.debug.Visible() {
+		if m.debug.HandleInput(msg) {
+			return m, nil
+		}
+	}
+
 	switch msg := msg.(type) {
 	case tea.WindowSizeMsg:
 		m.width, m.height = msg.Width, msg.Height
@@ -138,6 +149,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case spinner.TickMsg:
+		m.debug.Refresh()
 		if !m.scanning {
 			return m, nil
 		}
@@ -250,6 +262,8 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 	case "?":
 		m.overlay = overlayHelp
+	case ui.KeyDebug:
+		m.debug.Open(m.width, m.height)
 	default:
 		var cmd tea.Cmd
 		m.tbl, cmd = m.tbl.Update(msg)

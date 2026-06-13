@@ -3,6 +3,7 @@ package s3tui
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"sort"
@@ -21,6 +22,7 @@ import (
 	"github.com/ryandam9/aws_explorer/internal/config"
 	"github.com/ryandam9/aws_explorer/internal/consolelink"
 	"github.com/ryandam9/aws_explorer/internal/csvexport"
+	"github.com/ryandam9/aws_explorer/internal/debugpane"
 	"github.com/ryandam9/aws_explorer/internal/display"
 	"github.com/ryandam9/aws_explorer/internal/table"
 	"github.com/ryandam9/aws_explorer/internal/ui"
@@ -255,6 +257,8 @@ type Model struct {
 	settings     ui.SettingsModel
 	configPath   string
 	cfg          *config.Config
+
+	debug debugpane.Model // "~" live activity overlay
 }
 
 // authDisplayInfo returns a short human-readable label for the active auth method.
@@ -590,7 +594,9 @@ func (m *Model) loadBuckets() tea.Cmd {
 	awsCfg := m.awsCfg
 	ctx := m.client.ctx
 	return func() tea.Msg {
+		slog.Info("Discovering AWS regions for S3 scan")
 		regions := ListRegions(ctx, awsCfg)
+		slog.Info("Scanning regions for S3 buckets", "regions", len(regions))
 		return regionsDiscoveredMsg{regions: regions}
 	}
 }
@@ -648,6 +654,7 @@ func (m *Model) loadObjects() tea.Cmd {
 	bucket := m.bucket
 	client := m.client
 	return func() tea.Msg {
+		slog.Info("Listing S3 objects", "bucket", bucket, "prefix", prefix, "flat", flat)
 		return fetchObjectWindow(client, bucket, prefix, flat, nil, false)
 	}
 }
@@ -929,8 +936,17 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, scmd
 	}
 
+	// While the debug overlay is open, it consumes key/mouse input; every other
+	// message falls through so loads keep streaming underneath.
+	if m.debug.Visible() {
+		if m.debug.HandleInput(msg) {
+			return m, nil
+		}
+	}
+
 	switch msg := msg.(type) {
 	case spinner.TickMsg:
+		m.debug.Refresh()
 		if m.isWaiting() {
 			m.spinner, cmd = m.spinner.Update(msg)
 			if cmd != nil {
@@ -1028,6 +1044,9 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			case ui.KeySettings:
 				m.settings = ui.NewSettingsModel(m.width, m.height, m.configPath, m.cfg)
 				m.showSettings = true
+				return m, nil
+			case ui.KeyDebug:
+				m.debug.Open(m.width, m.height)
 				return m, nil
 			}
 		}
@@ -1427,7 +1446,13 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		for _, region := range msg.regions {
 			r := region
 			scanCmds = append(scanCmds, func() tea.Msg {
+				slog.Info("Listing S3 buckets", "region", r)
 				buckets, err := ListBucketsInRegion(ctx, awsCfg, r, endpointURL)
+				if err != nil {
+					slog.Warn("Listing S3 buckets failed", "region", r, "error", err.Error())
+				} else {
+					slog.Info("Listed S3 buckets", "region", r, "count", len(buckets))
+				}
 				return regionScannedMsg{region: r, buckets: buckets, err: err}
 			})
 		}
@@ -1694,7 +1719,8 @@ func (m *Model) View() string {
 
 	// Bucket detail full-screen view
 	if m.state == stateBucketDetail {
-		return ui.AppStyle().Render(m.bucketDetailView())
+		out := ui.AppStyle().Render(m.bucketDetailView())
+		return m.debug.Overlay(out, m.width, m.height)
 	}
 
 	var content string
@@ -1790,6 +1816,13 @@ func (m *Model) View() string {
 	if m.showSettings {
 		// HUD-style: float the fixed-size console over the live app.
 		out = ui.OverlayCenter(out, m.settings.View(), m.width, m.height)
+		if m.width > 0 && m.height > 0 {
+			out = ui.ClipToSize(out, m.width, m.height)
+		}
+	}
+	if m.debug.Visible() {
+		// Float the debug pane over the live app, above any other overlay.
+		out = m.debug.Overlay(out, m.width, m.height)
 		if m.width > 0 && m.height > 0 {
 			out = ui.ClipToSize(out, m.width, m.height)
 		}
@@ -1894,7 +1927,7 @@ func (m *Model) statusHints() []ui.KeyHint {
 			ui.H("/", "search"),
 		}
 		hints = append(hints, colScrollHints(&m.bucketTable)...)
-		return append(hints, ui.H("r", "refresh"), ui.H("S", "theme"), ui.H("q", "quit"), ui.H("?", "help"))
+		return append(hints, ui.H("r", "refresh"), ui.H("S", "theme"), ui.H("~", "debug"), ui.H("q", "quit"), ui.H("?", "help"))
 	case stateObjectList:
 		hints := []ui.KeyHint{
 			ui.H("↑/↓", "navigate"),
@@ -1922,7 +1955,7 @@ func (m *Model) statusHints() []ui.KeyHint {
 			ui.H("r", "refresh"),
 			ui.H("Esc", "back"),
 		)
-		return append(hints, ui.H("?", "help"))
+		return append(hints, ui.H("~", "debug"), ui.H("?", "help"))
 	}
 	return []ui.KeyHint{ui.H("q", "quit")}
 }
@@ -2419,6 +2452,7 @@ func (m *Model) helpView() string {
 		"",
 		"Utility",
 		"  S                  Settings (theme & colors)",
+		"  ~                  Debug: live view of what the tool is doing",
 		"  ?                  Toggle this help",
 		"  q, Ctrl+C          Quit",
 	)

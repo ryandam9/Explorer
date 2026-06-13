@@ -3,6 +3,7 @@ package vpctui
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"sort"
 	"strings"
 	"sync"
@@ -17,6 +18,7 @@ import (
 	"github.com/charmbracelet/x/ansi"
 	"github.com/ryandam9/aws_explorer/internal/config"
 	"github.com/ryandam9/aws_explorer/internal/consolelink"
+	"github.com/ryandam9/aws_explorer/internal/debugpane"
 	"github.com/ryandam9/aws_explorer/internal/display"
 	"github.com/ryandam9/aws_explorer/internal/table"
 	"github.com/ryandam9/aws_explorer/internal/trail"
@@ -291,6 +293,8 @@ type Model struct {
 	configPath   string
 	cfg          *config.Config
 	themeIdx     int
+
+	debug debugpane.Model // "~" live activity overlay
 }
 
 // ---------------------------------------------------------------------------
@@ -538,9 +542,12 @@ func (m *Model) loadVPCs() tea.Cmd {
 	return func() tea.Msg {
 		ctx := context.Background()
 		if scanAll || region == "" {
+			slog.Info("Discovering AWS regions for VPC scan")
 			regions := ListRegions(ctx, awsCfg)
+			slog.Info("Scanning regions for VPCs", "regions", len(regions))
 			return regionsDiscoveredMsg{regions: regions}
 		}
+		slog.Info("Scanning region for VPCs", "region", region)
 		return regionsDiscoveredMsg{regions: []string{region}}
 	}
 }
@@ -559,7 +566,11 @@ func (m *Model) loadResources(rt resourceType) tea.Cmd {
 	m.resourceView = nil
 	client := m.client
 	return func() tea.Msg {
+		slog.Info("Loading VPC resources", "type", rtLabel(rt), "vpc", vpcID)
 		maps, err := fetchResourceMaps(client, rt, vpcID)
+		if err != nil {
+			slog.Warn("Loading VPC resources failed", "type", rtLabel(rt), "vpc", vpcID, "error", err.Error())
+		}
 		return resourcesLoadedMsg{vpcID: vpcID, rt: rt, maps: maps, err: err}
 	}
 }
@@ -943,6 +954,14 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, tea.Batch(cmds...)
 	}
 
+	// While the debug overlay is open, it consumes key/mouse input; every other
+	// message falls through so the region scan keeps progressing underneath.
+	if m.debug.Visible() {
+		if m.debug.HandleInput(msg) {
+			return m, nil
+		}
+	}
+
 	switch msg := msg.(type) {
 
 	case tea.WindowSizeMsg:
@@ -952,6 +971,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.updateTableSizes()
 
 	case spinner.TickMsg:
+		m.debug.Refresh()
 		var cmd tea.Cmd
 		m.spinner, cmd = m.spinner.Update(msg)
 		cmds = append(cmds, cmd)
@@ -964,7 +984,13 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		for _, region := range msg.regions {
 			r := region
 			scanCmds = append(scanCmds, func() tea.Msg {
+				slog.Info("Listing VPCs", "region", r)
 				vpcs, err := ListVPCsInRegion(context.Background(), awsCfg, r)
+				if err != nil {
+					slog.Warn("Listing VPCs failed", "region", r, "error", err.Error())
+				} else {
+					slog.Info("Listed VPCs", "region", r, "count", len(vpcs))
+				}
 				return regionScannedMsg{region: r, vpcs: vpcs, err: err}
 			})
 		}
@@ -1334,6 +1360,9 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, nil
 	case ui.KeySettings:
 		m.showSettings = true
+		return m, nil
+	case ui.KeyDebug:
+		m.debug.Open(m.width, m.height)
 		return m, nil
 	case "F":
 		// Run the VPC findings linter (resource browser only).
@@ -1817,6 +1846,13 @@ func (m *Model) View() string {
 		content = m.viewVPCListState()
 	case stateResourceBrowser:
 		content = m.viewResourceBrowserState()
+	}
+
+	if m.debug.Visible() {
+		// The debug pane is opened only from the global-key path (no other
+		// overlay capturing input), so it floats over the base content.
+		base := ui.ClipToSize(content, m.width, m.height)
+		return ui.ClipToSize(m.debug.Overlay(base, m.width, m.height), m.width, m.height)
 	}
 
 	if m.showSettings {
@@ -2600,6 +2636,7 @@ func (m *Model) statusHints() []ui.KeyHint {
 		return append(hints,
 			ui.H("r", "refresh"),
 			ui.H("S", "theme"),
+			ui.H("~", "debug"),
 			ui.H("q", "quit"),
 			ui.H("?", "help"),
 		)
@@ -2698,6 +2735,7 @@ func (m *Model) helpText() string {
 		"",
 		lipgloss.NewStyle().Foreground(lipgloss.Color(ui.ColorMuted())).Render("Global"),
 		"  S        Settings (theme & colors)",
+		"  ~        Debug: live view of what the tool is doing",
 		"  ?        Toggle help",
 		"  q        Quit",
 	}
