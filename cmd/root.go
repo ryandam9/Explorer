@@ -87,7 +87,10 @@ Run "aws_explorer config init" to write a starter file.`,
   # Scan every available region
   aws_explorer --all-regions`,
 	PersistentPreRunE: func(cmd *cobra.Command, args []string) error {
-		return output.ValidateFormat(outputFormat)
+		if err := output.ValidateFormat(outputFormat); err != nil {
+			return err
+		}
+		return preflightAuth(cmd)
 	},
 	Run: func(cmd *cobra.Command, args []string) {
 		applyGlobalAWSOverrides()
