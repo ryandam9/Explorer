@@ -70,12 +70,19 @@ func New(resources []model.Resource, accountID string, regions []string) Snapsho
 }
 
 // entryKey identifies a resource across scans: the ARN when present,
-// otherwise a composite that cannot collide across types or regions.
+// otherwise a composite of the stable identifying fields. When the resource
+// has no ID either (e.g. tag-sweep rows), Name is folded in so two distinct
+// ARN-less, ID-less resources don't collapse to the same "type|region|" key
+// and silently hide each other in the diff.
 func entryKey(r model.Resource) string {
 	if r.ARN != "" {
 		return r.ARN
 	}
-	return typeLabel(r) + "|" + r.Region + "|" + r.ID
+	key := typeLabel(r) + "|" + r.Region + "|" + r.ID
+	if r.ID == "" {
+		key += "|" + r.Name
+	}
+	return key
 }
 
 func typeLabel(r model.Resource) string {

@@ -46,7 +46,65 @@ func (c *Collector) Collect(ctx context.Context, input services.CollectInput) ([
 		resources = input.EmitOrAppend(resources, batch)
 	}
 
+	// 2. Collect DB Clusters (Aurora / Serverless v2). A cluster with no
+	// provisioned instances is invisible in the instance listing above, so it
+	// must be collected separately.
+	clusterPaginator := rds.NewDescribeDBClustersPaginator(client, &rds.DescribeDBClustersInput{})
+	for clusterPaginator.HasMorePages() {
+		page, err := clusterPaginator.NextPage(ctx)
+		if err != nil {
+			return resources, fmt.Errorf("failed to describe RDS clusters: %w", err)
+		}
+
+		batch := make([]model.Resource, 0, len(page.DBClusters))
+		for _, cluster := range page.DBClusters {
+			batch = append(batch, c.mapCluster(input.Region, cluster, input.DetailLevel))
+		}
+		resources = input.EmitOrAppend(resources, batch)
+	}
+
 	return resources, nil
+}
+
+func (c *Collector) mapCluster(region string, cluster types.DBCluster, detail services.DetailLevel) model.Resource {
+	id := aws.ToString(cluster.DBClusterIdentifier)
+
+	var tags map[string]string
+	if len(cluster.TagList) > 0 {
+		tags = make(map[string]string, len(cluster.TagList))
+		for _, t := range cluster.TagList {
+			tags[aws.ToString(t.Key)] = aws.ToString(t.Value)
+		}
+	}
+
+	res := model.Resource{
+		Service: "rds",
+		Type:    "cluster",
+		Region:  region,
+		ID:      id,
+		Name:    id,
+		ARN:     aws.ToString(cluster.DBClusterArn),
+		State:   aws.ToString(cluster.Status),
+		Tags:    tags,
+		Summary: map[string]string{
+			"engine":        aws.ToString(cluster.Engine),
+			"engineVersion": aws.ToString(cluster.EngineVersion),
+			"engineMode":    aws.ToString(cluster.EngineMode),
+		},
+	}
+
+	if cluster.ClusterCreateTime != nil {
+		res.CreatedAt = cluster.ClusterCreateTime
+	}
+
+	if detail == services.DetailLevelDetailed || detail == services.DetailLevelRaw {
+		res.Details = map[string]any{
+			"multiAZ":     aws.ToBool(cluster.MultiAZ),
+			"memberCount": len(cluster.DBClusterMembers),
+		}
+	}
+
+	return res
 }
 
 func (c *Collector) mapInstance(region string, instance types.DBInstance, detail services.DetailLevel) model.Resource {

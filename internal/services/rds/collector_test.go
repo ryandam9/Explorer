@@ -19,6 +19,48 @@ func TestCollector_Metadata(t *testing.T) {
 	}
 }
 
+func TestMapCluster_BasicFields(t *testing.T) {
+	c := NewCollector()
+	created := time.Date(2024, 5, 1, 0, 0, 0, 0, time.UTC)
+	cluster := types.DBCluster{
+		DBClusterIdentifier: aws.String("aurora-prod"),
+		DBClusterArn:        aws.String("arn:aws:rds:us-east-1:123:cluster:aurora-prod"),
+		Status:              aws.String("available"),
+		Engine:              aws.String("aurora-postgresql"),
+		EngineVersion:       aws.String("15.4"),
+		EngineMode:          aws.String("provisioned"),
+		ClusterCreateTime:   &created,
+		TagList:             []types.Tag{{Key: aws.String("env"), Value: aws.String("prod")}},
+	}
+
+	res := c.mapCluster("us-east-1", cluster, services.DetailLevelDetailed)
+
+	if res.Type != "cluster" {
+		t.Errorf("Type = %q, want cluster", res.Type)
+	}
+	if res.ID != "aurora-prod" || res.Name != "aurora-prod" {
+		t.Errorf("ID/Name = %q/%q, want aurora-prod", res.ID, res.Name)
+	}
+	if res.ARN != "arn:aws:rds:us-east-1:123:cluster:aurora-prod" {
+		t.Errorf("ARN = %q", res.ARN)
+	}
+	if res.State != "available" {
+		t.Errorf("State = %q, want available", res.State)
+	}
+	if res.Summary["engine"] != "aurora-postgresql" || res.Summary["engineMode"] != "provisioned" {
+		t.Errorf("Summary engine/mode = %q/%q", res.Summary["engine"], res.Summary["engineMode"])
+	}
+	if res.Tags["env"] != "prod" {
+		t.Errorf("Tags[env] = %q, want prod", res.Tags["env"])
+	}
+	if res.CreatedAt == nil || !res.CreatedAt.Equal(created) {
+		t.Errorf("CreatedAt = %v, want %v", res.CreatedAt, created)
+	}
+	if res.Details["memberCount"] != 0 {
+		t.Errorf("Details[memberCount] = %v, want 0", res.Details["memberCount"])
+	}
+}
+
 func TestMapInstance_Tags(t *testing.T) {
 	c := NewCollector()
 	instance := types.DBInstance{
