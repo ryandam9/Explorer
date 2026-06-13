@@ -189,6 +189,7 @@ what you see in the bar is always what works right now.
 | `D` | **What changed**: first press saves an account baseline snapshot, later presses diff the live inventory against it (`b` inside the overlay re-baselines) |
 | `P` | Switch AWS profile and/or region scope, then rescan — no restart needed |
 | `e` | Open the scan-errors overlay (services with errors also carry a `⚠n` badge in the sidebar) |
+| `~` | **Debug activity overlay**: a live, scrollable view of what the tool is doing — regions, services, API calls and access errors — so you can see progress instead of a blank screen (available during the initial scan too) |
 | `S` | Settings panel (themes & colors) |
 | `?` | Help overlay |
 | `Esc` | Close detail panel / overlay |
