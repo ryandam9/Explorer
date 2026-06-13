@@ -1,0 +1,181 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>aws_explorer config init · aws_explorer documentation</title>
+<style>
+:root { --bg:#0d1117; --panel:#161b22; --border:#30363d; --text:#c9d1d9; --muted:#8b949e; --link:#58a6ff; --accent:#3fb950; --code:#1f2630; }
+* { box-sizing: border-box; }
+body { margin:0; font:16px/1.6 -apple-system,BlinkMacSystemFont,"Segoe UI",Helvetica,Arial,sans-serif; color:var(--text); background:var(--bg); }
+.layout { display:flex; align-items:flex-start; max-width:1200px; margin:0 auto; }
+nav.sidebar { position:sticky; top:0; width:270px; flex:0 0 270px; height:100vh; overflow-y:auto; padding:1.5rem 1rem; border-right:1px solid var(--border); background:var(--panel); }
+nav.sidebar .site { font-weight:700; font-size:1.05rem; margin:0 0 1rem; color:var(--text); text-decoration:none; display:block; }
+nav.sidebar h3 { text-transform:uppercase; font-size:.72rem; letter-spacing:.06em; color:var(--muted); margin:1.2rem 0 .4rem; }
+nav.sidebar a { display:block; padding:.18rem .5rem; color:var(--muted); text-decoration:none; border-radius:5px; font-size:.92rem; }
+nav.sidebar a:hover { color:var(--text); background:rgba(110,118,129,.12); }
+nav.sidebar a.active { color:var(--text); background:rgba(88,166,255,.15); font-weight:600; }
+nav.sidebar code { font-size:.85rem; }
+main { flex:1 1 auto; min-width:0; padding:2rem 2.5rem 4rem; }
+main h1 { margin-top:0; border-bottom:1px solid var(--border); padding-bottom:.4rem; }
+main h2 { margin-top:2rem; border-bottom:1px solid var(--border); padding-bottom:.3rem; }
+a { color:var(--link); }
+code { background:var(--code); padding:.12em .35em; border-radius:5px; font-size:.88em; font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace; }
+pre { background:var(--code); padding:1rem; border-radius:8px; overflow-x:auto; border:1px solid var(--border); }
+pre code { background:none; padding:0; }
+table { border-collapse:collapse; width:100%; margin:1rem 0; display:block; overflow-x:auto; }
+th, td { border:1px solid var(--border); padding:.5rem .7rem; text-align:left; vertical-align:top; }
+th { background:rgba(110,118,129,.1); }
+blockquote { margin:1rem 0; padding:.4rem 1rem; border-left:4px solid var(--accent); background:rgba(63,185,80,.08); color:var(--text); }
+hr { border:none; border-top:1px solid var(--border); margin:2rem 0; }
+@media (max-width:800px){ .layout{display:block;} nav.sidebar{position:static;width:auto;height:auto;border-right:none;border-bottom:1px solid var(--border);} main{padding:1.5rem;} }
+</style>
+</head>
+<body>
+<div class="layout">
+<nav class="sidebar">
+<a class="site" href="index.html">aws_explorer documentation</a>
+<h3>Home</h3>
+<a href="index.html">aws_explorer documentation</a>
+<h3>Guides</h3>
+<a href="guide-getting-started.html">Getting started</a>
+<a href="guide-authentication.html">Authentication</a>
+<a href="guide-configuration.html">Configuration</a>
+<a href="guide-summary.html">The summary TUI</a>
+<a href="guide-vpc.html">VPC explorer TUI</a>
+<a href="guide-s3.html">S3 browser TUI</a>
+<a href="guide-cloudwatch.html">CloudWatch Logs TUI</a>
+<a href="guide-reports.html">Audit &amp; Bill TUIs</a>
+<a href="guide-shortcuts.html">Keyboard shortcut cheat sheet</a>
+<h3>Command reference</h3>
+<a href="cli.html">aws_explorer</a>
+<a href="audit.html">aws_explorer audit</a>
+<a href="bill.html">aws_explorer bill</a>
+<a href="config.html">aws_explorer config</a>
+<a href="config_init.html" class="active" aria-current="page">aws_explorer config init</a>
+<a href="config_path.html">aws_explorer config path</a>
+<a href="cw.html">aws_explorer cw</a>
+<a href="expiring.html">aws_explorer expiring</a>
+<a href="find.html">aws_explorer find</a>
+<a href="iam.html">aws_explorer iam</a>
+<a href="iam_can.html">aws_explorer iam can</a>
+<a href="iam_decode.html">aws_explorer iam decode</a>
+<a href="s3.html">aws_explorer s3</a>
+<a href="summary.html">aws_explorer summary</a>
+<a href="trail.html">aws_explorer trail</a>
+<a href="tui.html">aws_explorer tui</a>
+<a href="vpc.html">aws_explorer vpc</a>
+</nav>
+<main>
+<p>Write a starter config.yaml with the built-in defaults</p>
+
+<h2 id="usage">Usage</h2>
+
+<pre><code>aws_explorer config init [flags]
+</code></pre>
+
+<h2 id="examples">Examples</h2>
+
+<pre><code class="language-bash"># Scaffold ./config.yaml in the current directory
+aws_explorer config init
+
+# Scaffold the per-user config used from any directory
+aws_explorer config init --path ~/.config/aws_explorer/config.yaml
+</code></pre>
+
+<h2 id="flags">Flags</h2>
+
+<table>
+<thead>
+<tr>
+<th>Flag</th>
+<th>Default</th>
+<th>Description</th>
+</tr>
+</thead>
+
+<tbody>
+<tr>
+<td><code>--force</code></td>
+<td>—</td>
+<td>overwrite an existing file</td>
+</tr>
+
+<tr>
+<td><code>--path</code></td>
+<td>—</td>
+<td>where to write the config file (default ./config.yaml)</td>
+</tr>
+</tbody>
+</table>
+
+<h2 id="global-flags">Global flags</h2>
+
+<table>
+<thead>
+<tr>
+<th>Flag</th>
+<th>Default</th>
+<th>Description</th>
+</tr>
+</thead>
+
+<tbody>
+<tr>
+<td><code>--all-regions</code></td>
+<td>—</td>
+<td>scan all available AWS regions</td>
+</tr>
+
+<tr>
+<td><code>--auth-method</code></td>
+<td>—</td>
+<td>auth method: auto, profile, env, static, sts (overrides aws.authMethod in config)</td>
+</tr>
+
+<tr>
+<td><code>--config</code></td>
+<td>—</td>
+<td>config file (default: ./config.yaml, then the user config dir, then built-in defaults)</td>
+</tr>
+
+<tr>
+<td><code>--no-header</code></td>
+<td>—</td>
+<td>omit the header row in table and csv output</td>
+</tr>
+
+<tr>
+<td><code>--output</code> / <code>-o</code></td>
+<td>table</td>
+<td>output format: table, json, ndjson, csv</td>
+</tr>
+
+<tr>
+<td><code>--profile</code></td>
+<td>—</td>
+<td>AWS named profile (overrides aws.profile in config)</td>
+</tr>
+
+<tr>
+<td><code>--region</code> / <code>-r</code></td>
+<td>—</td>
+<td>scan only this region (overrides aws.regions, &ndash;all-regions and region filters)</td>
+</tr>
+
+<tr>
+<td><code>--role-arn</code></td>
+<td>—</td>
+<td>IAM role ARN to assume via STS (sets auth method to sts)</td>
+</tr>
+</tbody>
+</table>
+
+<hr />
+
+<p>_Part of <a href="cli.html"><code>aws_explorer</code></a>._</p>
+
+</main>
+</div>
+</body>
+</html>

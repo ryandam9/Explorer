@@ -1,0 +1,113 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>aws_explorer documentation · aws_explorer documentation</title>
+<style>
+:root { --bg:#0d1117; --panel:#161b22; --border:#30363d; --text:#c9d1d9; --muted:#8b949e; --link:#58a6ff; --accent:#3fb950; --code:#1f2630; }
+* { box-sizing: border-box; }
+body { margin:0; font:16px/1.6 -apple-system,BlinkMacSystemFont,"Segoe UI",Helvetica,Arial,sans-serif; color:var(--text); background:var(--bg); }
+.layout { display:flex; align-items:flex-start; max-width:1200px; margin:0 auto; }
+nav.sidebar { position:sticky; top:0; width:270px; flex:0 0 270px; height:100vh; overflow-y:auto; padding:1.5rem 1rem; border-right:1px solid var(--border); background:var(--panel); }
+nav.sidebar .site { font-weight:700; font-size:1.05rem; margin:0 0 1rem; color:var(--text); text-decoration:none; display:block; }
+nav.sidebar h3 { text-transform:uppercase; font-size:.72rem; letter-spacing:.06em; color:var(--muted); margin:1.2rem 0 .4rem; }
+nav.sidebar a { display:block; padding:.18rem .5rem; color:var(--muted); text-decoration:none; border-radius:5px; font-size:.92rem; }
+nav.sidebar a:hover { color:var(--text); background:rgba(110,118,129,.12); }
+nav.sidebar a.active { color:var(--text); background:rgba(88,166,255,.15); font-weight:600; }
+nav.sidebar code { font-size:.85rem; }
+main { flex:1 1 auto; min-width:0; padding:2rem 2.5rem 4rem; }
+main h1 { margin-top:0; border-bottom:1px solid var(--border); padding-bottom:.4rem; }
+main h2 { margin-top:2rem; border-bottom:1px solid var(--border); padding-bottom:.3rem; }
+a { color:var(--link); }
+code { background:var(--code); padding:.12em .35em; border-radius:5px; font-size:.88em; font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace; }
+pre { background:var(--code); padding:1rem; border-radius:8px; overflow-x:auto; border:1px solid var(--border); }
+pre code { background:none; padding:0; }
+table { border-collapse:collapse; width:100%; margin:1rem 0; display:block; overflow-x:auto; }
+th, td { border:1px solid var(--border); padding:.5rem .7rem; text-align:left; vertical-align:top; }
+th { background:rgba(110,118,129,.1); }
+blockquote { margin:1rem 0; padding:.4rem 1rem; border-left:4px solid var(--accent); background:rgba(63,185,80,.08); color:var(--text); }
+hr { border:none; border-top:1px solid var(--border); margin:2rem 0; }
+@media (max-width:800px){ .layout{display:block;} nav.sidebar{position:static;width:auto;height:auto;border-right:none;border-bottom:1px solid var(--border);} main{padding:1.5rem;} }
+</style>
+</head>
+<body>
+<div class="layout">
+<nav class="sidebar">
+<a class="site" href="index.html">aws_explorer documentation</a>
+<h3>Home</h3>
+<a href="index.html" class="active" aria-current="page">aws_explorer documentation</a>
+<h3>Guides</h3>
+<a href="guide-getting-started.html">Getting started</a>
+<a href="guide-authentication.html">Authentication</a>
+<a href="guide-configuration.html">Configuration</a>
+<a href="guide-summary.html">The summary TUI</a>
+<a href="guide-vpc.html">VPC explorer TUI</a>
+<a href="guide-s3.html">S3 browser TUI</a>
+<a href="guide-cloudwatch.html">CloudWatch Logs TUI</a>
+<a href="guide-reports.html">Audit &amp; Bill TUIs</a>
+<a href="guide-shortcuts.html">Keyboard shortcut cheat sheet</a>
+<h3>Command reference</h3>
+<a href="cli.html">aws_explorer</a>
+<a href="audit.html">aws_explorer audit</a>
+<a href="bill.html">aws_explorer bill</a>
+<a href="config.html">aws_explorer config</a>
+<a href="config_init.html">aws_explorer config init</a>
+<a href="config_path.html">aws_explorer config path</a>
+<a href="cw.html">aws_explorer cw</a>
+<a href="expiring.html">aws_explorer expiring</a>
+<a href="find.html">aws_explorer find</a>
+<a href="iam.html">aws_explorer iam</a>
+<a href="iam_can.html">aws_explorer iam can</a>
+<a href="iam_decode.html">aws_explorer iam decode</a>
+<a href="s3.html">aws_explorer s3</a>
+<a href="summary.html">aws_explorer summary</a>
+<a href="trail.html">aws_explorer trail</a>
+<a href="tui.html">aws_explorer tui</a>
+<a href="vpc.html">aws_explorer vpc</a>
+</nav>
+<main>
+<p>Discover and list AWS resources across accounts and regions</p>
+
+<p>This documentation is generated from the tool itself — the command reference below is built from the live command tree, so it always matches the binary you are running. New in this release: regenerate it any time with <code>aws_explorer docs --format html</code> (or <code>markdown</code>).</p>
+
+<h2 id="guides">Guides</h2>
+
+<ul>
+<li><a href="guide-getting-started.html">Getting started</a> — AWS Explorer discovers, monitors and lists AWS resources — EC2, S3, RDS,.</li>
+<li><a href="guide-authentication.html">Authentication</a> — AWS Explorer never stores credentials of its own — it uses the AWS SDK&rsquo;s.</li>
+<li><a href="guide-configuration.html">Configuration</a> — Configuration is <strong>optional</strong>.</li>
+<li><a href="guide-summary.html">The summary TUI</a> — Start it with <code>aws_explorer tui</code> (or <code>aws_explorer summary --tui</code> for the same.</li>
+<li><a href="guide-vpc.html">VPC explorer TUI</a> — and attached resources: pick a VPC on the left, a resource category in the.</li>
+<li><a href="guide-s3.html">S3 browser TUI</a> — navigation, metadata and version viewing, preview, download, presigned URLs,.</li>
+<li><a href="guide-cloudwatch.html">CloudWatch Logs TUI</a> — streams and events, with filtering, search and live tailing.</li>
+<li><a href="guide-reports.html">Audit &amp; Bill TUIs</a> — Two report commands have a <code>--tui</code> mode that turns a one-shot report into an.</li>
+<li><a href="guide-shortcuts.html">Keyboard shortcut cheat sheet</a> — Every TUI shares the same interaction language: a context-aware status bar.</li>
+</ul>
+
+<h2 id="command-reference">Command reference</h2>
+
+<ul>
+<li><a href="cli.html"><code>aws_explorer</code></a> — Discover and list AWS resources across accounts and regions.</li>
+<li><a href="audit.html"><code>aws_explorer audit</code></a> — Scan the account for cost waste and security risks (findings linter).</li>
+<li><a href="bill.html"><code>aws_explorer bill</code></a> — Show the account&rsquo;s bill from Cost Explorer (live &ndash;tui).</li>
+<li><a href="config.html"><code>aws_explorer config</code></a> — Manage the configuration file.</li>
+<li><a href="config_init.html"><code>aws_explorer config init</code></a> — Write a starter config.yaml with the built-in defaults.</li>
+<li><a href="config_path.html"><code>aws_explorer config path</code></a> — Print the path of the active configuration file.</li>
+<li><a href="cw.html"><code>aws_explorer cw</code></a> — Start the CloudWatch Logs Explorer TUI.</li>
+<li><a href="expiring.html"><code>aws_explorer expiring</code></a> — List everything that breaks on a calendar date.</li>
+<li><a href="find.html"><code>aws_explorer find</code></a> — Fuzzy-find any resource by name, ID, ARN or type.</li>
+<li><a href="iam.html"><code>aws_explorer iam</code></a> — IAM / access debugging helpers.</li>
+<li><a href="iam_can.html"><code>aws_explorer iam can</code></a> — Simulate IAM policy: &ldquo;can X do Y on Z?&rdquo;.</li>
+<li><a href="iam_decode.html"><code>aws_explorer iam decode</code></a> — Decode an &ldquo;Encoded authorization failure message&rdquo;.</li>
+<li><a href="s3.html"><code>aws_explorer s3</code></a> — Start the S3 Explorer TUI.</li>
+<li><a href="summary.html"><code>aws_explorer summary</code></a> — List every AWS resource across all regions.</li>
+<li><a href="trail.html"><code>aws_explorer trail</code></a> — CloudTrail &ldquo;who changed this&rdquo; — recent events for a resource.</li>
+<li><a href="tui.html"><code>aws_explorer tui</code></a> — Start the interactive TUI mode.</li>
+<li><a href="vpc.html"><code>aws_explorer vpc</code></a> — Start the VPC Explorer TUI.</li>
+</ul>
+
+</main>
+</div>
+</body>
+</html>

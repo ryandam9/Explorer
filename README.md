@@ -1289,9 +1289,33 @@ make vet             # Run go vet
 make lint            # Run golangci-lint (skipped if not installed)
 make tidy            # Tidy go modules
 make clean           # Remove binary
+make docs            # Generate Markdown + HTML docs into docs/site
+make man             # Generate man pages into ./man
 make all             # fmt + vet + test + build
 make help            # Show available targets
 ```
+
+## Documentation site
+
+This README is the hand-written tour. There is also a **generated documentation
+site** under [`docs/site/`](docs/site/) — start at
+[`docs/site/README.md`](docs/site/README.md), or open `docs/site/index.html` in
+a browser for the same content with a navigation sidebar.
+
+It is produced by the tool itself, so it never drifts from the binary:
+
+```bash
+aws_explorer docs --format html --dir docs/site       # browsable HTML site
+aws_explorer docs --format markdown --dir docs/site   # Markdown (renders on GitHub)
+aws_explorer docs --format man --dir man              # troff man pages
+make docs                                             # Markdown + HTML in one step
+```
+
+The site has two parts: a **command reference** generated from the live command
+tree (every command, flag and example, regenerated as features land) and
+hand-written **guides** for the interactive TUIs — their screens and complete
+keyboard-shortcut tables, which a command tree can't describe. Regenerate it
+whenever commands change.
 
 ## Configuration
 

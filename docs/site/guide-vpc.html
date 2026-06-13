@@ -1,0 +1,260 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>VPC explorer TUI · aws_explorer documentation</title>
+<style>
+:root { --bg:#0d1117; --panel:#161b22; --border:#30363d; --text:#c9d1d9; --muted:#8b949e; --link:#58a6ff; --accent:#3fb950; --code:#1f2630; }
+* { box-sizing: border-box; }
+body { margin:0; font:16px/1.6 -apple-system,BlinkMacSystemFont,"Segoe UI",Helvetica,Arial,sans-serif; color:var(--text); background:var(--bg); }
+.layout { display:flex; align-items:flex-start; max-width:1200px; margin:0 auto; }
+nav.sidebar { position:sticky; top:0; width:270px; flex:0 0 270px; height:100vh; overflow-y:auto; padding:1.5rem 1rem; border-right:1px solid var(--border); background:var(--panel); }
+nav.sidebar .site { font-weight:700; font-size:1.05rem; margin:0 0 1rem; color:var(--text); text-decoration:none; display:block; }
+nav.sidebar h3 { text-transform:uppercase; font-size:.72rem; letter-spacing:.06em; color:var(--muted); margin:1.2rem 0 .4rem; }
+nav.sidebar a { display:block; padding:.18rem .5rem; color:var(--muted); text-decoration:none; border-radius:5px; font-size:.92rem; }
+nav.sidebar a:hover { color:var(--text); background:rgba(110,118,129,.12); }
+nav.sidebar a.active { color:var(--text); background:rgba(88,166,255,.15); font-weight:600; }
+nav.sidebar code { font-size:.85rem; }
+main { flex:1 1 auto; min-width:0; padding:2rem 2.5rem 4rem; }
+main h1 { margin-top:0; border-bottom:1px solid var(--border); padding-bottom:.4rem; }
+main h2 { margin-top:2rem; border-bottom:1px solid var(--border); padding-bottom:.3rem; }
+a { color:var(--link); }
+code { background:var(--code); padding:.12em .35em; border-radius:5px; font-size:.88em; font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace; }
+pre { background:var(--code); padding:1rem; border-radius:8px; overflow-x:auto; border:1px solid var(--border); }
+pre code { background:none; padding:0; }
+table { border-collapse:collapse; width:100%; margin:1rem 0; display:block; overflow-x:auto; }
+th, td { border:1px solid var(--border); padding:.5rem .7rem; text-align:left; vertical-align:top; }
+th { background:rgba(110,118,129,.1); }
+blockquote { margin:1rem 0; padding:.4rem 1rem; border-left:4px solid var(--accent); background:rgba(63,185,80,.08); color:var(--text); }
+hr { border:none; border-top:1px solid var(--border); margin:2rem 0; }
+@media (max-width:800px){ .layout{display:block;} nav.sidebar{position:static;width:auto;height:auto;border-right:none;border-bottom:1px solid var(--border);} main{padding:1.5rem;} }
+</style>
+</head>
+<body>
+<div class="layout">
+<nav class="sidebar">
+<a class="site" href="index.html">aws_explorer documentation</a>
+<h3>Home</h3>
+<a href="index.html">aws_explorer documentation</a>
+<h3>Guides</h3>
+<a href="guide-getting-started.html">Getting started</a>
+<a href="guide-authentication.html">Authentication</a>
+<a href="guide-configuration.html">Configuration</a>
+<a href="guide-summary.html">The summary TUI</a>
+<a href="guide-vpc.html" class="active" aria-current="page">VPC explorer TUI</a>
+<a href="guide-s3.html">S3 browser TUI</a>
+<a href="guide-cloudwatch.html">CloudWatch Logs TUI</a>
+<a href="guide-reports.html">Audit &amp; Bill TUIs</a>
+<a href="guide-shortcuts.html">Keyboard shortcut cheat sheet</a>
+<h3>Command reference</h3>
+<a href="cli.html">aws_explorer</a>
+<a href="audit.html">aws_explorer audit</a>
+<a href="bill.html">aws_explorer bill</a>
+<a href="config.html">aws_explorer config</a>
+<a href="config_init.html">aws_explorer config init</a>
+<a href="config_path.html">aws_explorer config path</a>
+<a href="cw.html">aws_explorer cw</a>
+<a href="expiring.html">aws_explorer expiring</a>
+<a href="find.html">aws_explorer find</a>
+<a href="iam.html">aws_explorer iam</a>
+<a href="iam_can.html">aws_explorer iam can</a>
+<a href="iam_decode.html">aws_explorer iam decode</a>
+<a href="s3.html">aws_explorer s3</a>
+<a href="summary.html">aws_explorer summary</a>
+<a href="trail.html">aws_explorer trail</a>
+<a href="tui.html">aws_explorer tui</a>
+<a href="vpc.html">aws_explorer vpc</a>
+</nav>
+<main>
+<p><code>aws_explorer vpc</code> opens a three-pane explorer for a single VPC&rsquo;s networking
+and attached resources: pick a VPC on the left, a resource category in the
+middle, and browse the matching resources on the right. With no <code>--region</code>,
+all regions are scanned for VPCs.</p>
+
+<h2 id="layout">Layout</h2>
+
+<pre><code>┌─ VPCs ──────┬─ Resources ─────┬─ Subnets ─────────────────────────────┐
+│ vpc-0a1b... │ ▸ NETWORK       │  #  Name   CIDR          AZ    Public  │
+│ vpc-2c3d... │   Subnets       │  1  -      172.31.0.0/20 ...   Yes     │
+│ my-vpc      │   Security Grps │  2  -      172.31.16.0/20 ...  Yes     │
+│ default     │   Route Tables  │                                       │
+│             │ ▸ COMPUTE       │                                       │
+│             │   EC2 Instances │                                       │
+│             │ ▸ SERVICES      │                                       │
+└─────────────┴─────────────────┴───────────────────────────────────────┘
+</code></pre>
+
+<h2 id="resource-categories">Resource categories</h2>
+
+<p>The middle pane groups the resource types a VPC contains. Select one with
+<code>Enter</code> to load it into the right-hand table; <code>Enter</code> on a row opens a detail
+overlay with the full attribute set.</p>
+
+<ul>
+<li><strong>NETWORK</strong> — Subnets, Security Groups, Network Interfaces (ENIs), Route Tables, Internet Gateways, NAT Gateways, VPC Endpoints, Network ACLs, Peering, Flow Logs</li>
+<li><strong>COMPUTE</strong> — EC2 Instances, Lambda Functions</li>
+<li><strong>SERVICES</strong> — RDS Instances, Load Balancers</li>
+</ul>
+
+<h2 id="navigation-shortcuts">Navigation shortcuts</h2>
+
+<table>
+<thead>
+<tr>
+<th>Key</th>
+<th>Action</th>
+</tr>
+</thead>
+
+<tbody>
+<tr>
+<td><code>↑</code> / <code>↓</code> / <code>j</code> / <code>k</code></td>
+<td>Move within the VPC list, category sidebar, or resource table</td>
+</tr>
+
+<tr>
+<td><code>Enter</code></td>
+<td>Open a VPC · load a category · open the selected row&rsquo;s detail overlay</td>
+</tr>
+
+<tr>
+<td><code>Tab</code></td>
+<td>Switch focus between the category sidebar and the resource table</td>
+</tr>
+
+<tr>
+<td><code>&lt;</code> / <code>&gt;</code> (or <code>,</code> / <code>.</code>)</td>
+<td>Scroll table columns when wider than the panel</td>
+</tr>
+
+<tr>
+<td><code>/</code></td>
+<td>Filter the VPC list, or quick-filter the resource table (live <code>matched/total</code>)</td>
+</tr>
+
+<tr>
+<td><code>s</code> / <code>R</code></td>
+<td>Sort the resource table by the next column / reverse</td>
+</tr>
+
+<tr>
+<td><code>c</code> / <code>y</code></td>
+<td>Copy the selected resource&rsquo;s ID</td>
+</tr>
+
+<tr>
+<td><code>o</code></td>
+<td>Open the selected resource in the AWS console</td>
+</tr>
+
+<tr>
+<td><code>C</code></td>
+<td>Export the current resource table to CSV</td>
+</tr>
+
+<tr>
+<td><code>r</code></td>
+<td>Refresh the VPC list or the current resource list</td>
+</tr>
+
+<tr>
+<td><code>Esc</code></td>
+<td>Go back one level (overlay → table → sidebar → VPC list)</td>
+</tr>
+
+<tr>
+<td><code>S</code></td>
+<td>Settings panel (themes &amp; colors)</td>
+</tr>
+
+<tr>
+<td><code>?</code></td>
+<td>Toggle the help overlay</td>
+</tr>
+
+<tr>
+<td><code>q</code> / <code>Ctrl+C</code></td>
+<td>Quit</td>
+</tr>
+</tbody>
+</table>
+
+<h2 id="debugging-toolkit">Debugging toolkit</h2>
+
+<p>Available in the resource browser — a deterministic (no-AI) toolkit for
+answering &ldquo;why can&rsquo;t this connect?&rdquo; and &ldquo;what&rsquo;s exposed?&rdquo;:</p>
+
+<table>
+<thead>
+<tr>
+<th>Key</th>
+<th>Action</th>
+<th>Cost</th>
+</tr>
+</thead>
+
+<tbody>
+<tr>
+<td><code>F</code></td>
+<td><strong>Findings</strong> — run the VPC linter and list ranked issues</td>
+<td>free</td>
+</tr>
+
+<tr>
+<td><code>t</code></td>
+<td><strong>Trace</strong> — connectivity path tracer from the selected ENI</td>
+<td>free</td>
+</tr>
+
+<tr>
+<td><code>x</code></td>
+<td><strong>Where used</strong> — cross-reference the selected resource</td>
+<td>free</td>
+</tr>
+
+<tr>
+<td><code>e</code></td>
+<td><strong>Effective rules</strong> — merged security-group rules for the selected ENI</td>
+<td>free</td>
+</tr>
+
+<tr>
+<td><code>D</code></td>
+<td><strong>DNS</strong> — the VPC&rsquo;s DNS resolution / hostnames / DHCP options</td>
+<td>free</td>
+</tr>
+
+<tr>
+<td><code>P</code></td>
+<td><strong>Public exposure</strong> — everything reachable from the internet</td>
+<td>free</td>
+</tr>
+
+<tr>
+<td><code>w</code></td>
+<td><strong>What changed</strong> — baseline the VPC, then diff against it later</td>
+<td>free</td>
+</tr>
+
+<tr>
+<td><code>E</code></td>
+<td><strong>Export</strong> — write a Markdown report of resources + findings</td>
+<td>free</td>
+</tr>
+
+<tr>
+<td><code>A</code></td>
+<td><strong>Reachability Analyzer</strong> — list AWS Network Insights analyses; create new ones</td>
+<td>listing free; creating ~$0.10/analysis</td>
+</tr>
+</tbody>
+</table>
+<p>Inside any overlay, <code>↑</code> / <code>↓</code> scroll and <code>Esc</code> (or the same trigger key) closes
+it. Wide tables (Security Groups carry ~100 columns) scroll horizontally with
+<code>&lt;</code> / <code>&gt;</code> rather than truncating.</p>
+
+</main>
+</div>
+</body>
+</html>
