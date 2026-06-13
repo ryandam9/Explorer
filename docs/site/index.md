@@ -9,7 +9,7 @@ This documentation is generated from the tool itself — the command reference b
 - [Getting started](guide-getting-started.md) — AWS Explorer discovers, monitors and lists AWS resources — EC2, S3, RDS,.
 - [Authentication](guide-authentication.md) — AWS Explorer never stores credentials of its own — it uses the AWS SDK's.
 - [Configuration](guide-configuration.md) — Configuration is **optional**.
-- [The summary TUI](guide-summary.md) — Start it with `aws_explorer tui` (or `aws_explorer summary --tui` for the same.
+- [The summary TUI](guide-summary.md) — Start it with `aws_explorer summary --tui`.
 - [VPC explorer TUI](guide-vpc.md) — and attached resources: pick a VPC on the left, a resource category in the.
 - [S3 browser TUI](guide-s3.md) — navigation, metadata and version viewing, preview, download, presigned URLs,.
 - [CloudWatch Logs TUI](guide-cloudwatch.md) — streams and events, with filtering, search and live tailing.
@@ -31,7 +31,7 @@ This documentation is generated from the tool itself — the command reference b
 - [`aws_explorer iam can`](iam_can.md) — Simulate IAM policy: "can X do Y on Z?".
 - [`aws_explorer iam decode`](iam_decode.md) — Decode an "Encoded authorization failure message".
 - [`aws_explorer s3`](s3.md) — Start the S3 Explorer TUI.
+- [`aws_explorer snapshot-diff`](snapshot-diff.md) — Browse a saved inventory snapshot, or diff two snapshots, offline.
 - [`aws_explorer summary`](summary.md) — List every AWS resource across all regions.
 - [`aws_explorer trail`](trail.md) — CloudTrail "who changed this" — recent events for a resource.
-- [`aws_explorer tui`](tui.md) — Start the interactive TUI mode.
 - [`aws_explorer vpc`](vpc.md) — Start the VPC Explorer TUI.

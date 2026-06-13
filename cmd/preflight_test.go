@@ -70,23 +70,25 @@ func TestSkipPreflight(t *testing.T) {
 	}
 }
 
-func TestSkipPreflight_OfflineTUI(t *testing.T) {
-	tui := &cobra.Command{Use: "tui"}
+func TestSkipPreflight_SnapshotDiff(t *testing.T) {
+	// snapshot-diff is always offline (saved JSON only), so it never needs an
+	// auth check regardless of which flag is set.
+	sd := &cobra.Command{Use: "snapshot-diff"}
 
 	snapshotPath, diffPaths = "", nil
-	if skipPreflight(tui) {
-		t.Fatal("live tui should be auth-checked")
+	if !skipPreflight(sd) {
+		t.Error("snapshot-diff should skip the auth check (always offline)")
 	}
 
 	snapshotPath = "snap.json"
-	if !skipPreflight(tui) {
-		t.Error("tui --snapshot should skip the auth check (offline)")
+	if !skipPreflight(sd) {
+		t.Error("snapshot-diff --snapshot should skip the auth check (offline)")
 	}
 
 	snapshotPath = ""
 	diffPaths = []string{"a.json", "b.json"}
-	if !skipPreflight(tui) {
-		t.Error("tui --diff should skip the auth check (offline)")
+	if !skipPreflight(sd) {
+		t.Error("snapshot-diff --diff should skip the auth check (offline)")
 	}
 	diffPaths = nil
 }

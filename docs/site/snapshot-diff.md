@@ -1,30 +1,32 @@
 [← Documentation index](index.md)
 
-# aws_explorer tui
+# aws_explorer snapshot-diff
 
-Start the interactive TUI mode
+Browse a saved inventory snapshot, or diff two snapshots, offline
 
-Start the Text User Interface (TUI) for interactive exploration of AWS
-resources, with live scanning, filtering, sorting, detail views, CSV export
-and snapshot diffing.
+snapshot-diff opens the interactive TUI over saved inventory snapshots —
+no AWS credentials, STS calls or region discovery needed.
+
+Pass --snapshot to browse a single saved snapshot, or --diff to compare two
+snapshots and explore what was added, removed or modified between them.
+Snapshots are the JSON written by 'summary -o json'.
+
+To explore live AWS resources interactively, use 'summary --tui' instead.
 
 ## Usage
 
 ```
-aws_explorer tui [flags]
+aws_explorer snapshot-diff [flags]
 ```
 
 ## Examples
 
 ```bash
-# Explore live AWS resources
-aws_explorer tui --profile prod
-
 # Browse a saved snapshot offline (no credentials needed)
-aws_explorer tui --snapshot inventory.json
+aws_explorer snapshot-diff --snapshot inventory.json
 
 # Diff two snapshots
-aws_explorer tui --diff before.json,after.json
+aws_explorer snapshot-diff --diff before.json,after.json
 ```
 
 ## Flags

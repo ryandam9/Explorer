@@ -24,7 +24,8 @@ make build          # produces bin/aws_explorer
 | Mode | How to start | What it is |
 |------|--------------|------------|
 | **CLI** | `aws_explorer` (and most subcommands) | Streams a table / JSON / NDJSON / CSV to stdout — scriptable, no UI |
-| **Summary TUI** | `aws_explorer tui` | One interactive, filterable inventory of every resource — see [The summary TUI](guide-summary.md) |
+| **Summary TUI** | `aws_explorer summary --tui` | One interactive, filterable inventory of every resource — see [The summary TUI](guide-summary.md) |
+| **Offline snapshot** | `aws_explorer snapshot-diff --snapshot f.json` | Browse a saved snapshot, or diff two, with no credentials |
 | **Focused TUIs** | `aws_explorer vpc` · `s3` · `cw` | Dedicated explorers for a VPC's networking, S3, and CloudWatch Logs |
 | **Report TUIs** | `aws_explorer audit --tui` · `bill --tui` | Live, explorable cost/security findings and the account bill |
 
@@ -35,7 +36,7 @@ make build          # produces bin/aws_explorer
 aws_explorer
 
 # The same inventory, but interactive
-aws_explorer tui
+aws_explorer summary --tui
 
 # Scan every region and write the inventory to CSV
 aws_explorer summary --all-regions -o csv > inventory.csv
