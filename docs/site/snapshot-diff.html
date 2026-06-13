@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>aws_explorer tui · aws_explorer documentation</title>
+<title>aws_explorer snapshot-diff · aws_explorer documentation</title>
 <style>
 :root { --bg:#0d1117; --panel:#161b22; --border:#30363d; --text:#c9d1d9; --muted:#8b949e; --link:#58a6ff; --accent:#3fb950; --code:#1f2630; }
 * { box-sizing: border-box; }
@@ -61,33 +61,35 @@ hr { border:none; border-top:1px solid var(--border); margin:2rem 0; }
 <a href="iam_can.html">aws_explorer iam can</a>
 <a href="iam_decode.html">aws_explorer iam decode</a>
 <a href="s3.html">aws_explorer s3</a>
+<a href="snapshot-diff.html" class="active" aria-current="page">aws_explorer snapshot-diff</a>
 <a href="summary.html">aws_explorer summary</a>
 <a href="trail.html">aws_explorer trail</a>
-<a href="tui.html" class="active" aria-current="page">aws_explorer tui</a>
 <a href="vpc.html">aws_explorer vpc</a>
 </nav>
 <main>
-<p>Start the interactive TUI mode</p>
+<p>Browse a saved inventory snapshot, or diff two snapshots, offline</p>
 
-<p>Start the Text User Interface (TUI) for interactive exploration of AWS
-resources, with live scanning, filtering, sorting, detail views, CSV export
-and snapshot diffing.</p>
+<p>snapshot-diff opens the interactive TUI over saved inventory snapshots —
+no AWS credentials, STS calls or region discovery needed.</p>
+
+<p>Pass &ndash;snapshot to browse a single saved snapshot, or &ndash;diff to compare two
+snapshots and explore what was added, removed or modified between them.
+Snapshots are the JSON written by &lsquo;summary -o json&rsquo;.</p>
+
+<p>To explore live AWS resources interactively, use &lsquo;summary &ndash;tui&rsquo; instead.</p>
 
 <h2 id="usage">Usage</h2>
 
-<pre><code>aws_explorer tui [flags]
+<pre><code>aws_explorer snapshot-diff [flags]
 </code></pre>
 
 <h2 id="examples">Examples</h2>
 
-<pre><code class="language-bash"># Explore live AWS resources
-aws_explorer tui --profile prod
-
-# Browse a saved snapshot offline (no credentials needed)
-aws_explorer tui --snapshot inventory.json
+<pre><code class="language-bash"># Browse a saved snapshot offline (no credentials needed)
+aws_explorer snapshot-diff --snapshot inventory.json
 
 # Diff two snapshots
-aws_explorer tui --diff before.json,after.json
+aws_explorer snapshot-diff --diff before.json,after.json
 </code></pre>
 
 <h2 id="flags">Flags</h2>

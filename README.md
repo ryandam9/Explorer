@@ -47,8 +47,8 @@ make build          # produces bin/aws_explorer with version info embedded
 # Run CLI (streams table to stdout; works from any directory, no config needed)
 ./bin/aws_explorer
 
-# Run interactive TUI
-./bin/aws_explorer tui
+# Explore resources interactively
+./bin/aws_explorer summary --tui
 
 # List every resource across all regions (SNO, Name, Type, ARN, Region/AZ)
 ./bin/aws_explorer summary --all-regions
@@ -155,14 +155,16 @@ terminal (disable with [`NO_COLOR`](https://no-color.org/) or by piping).
 
 ## TUI Usage
 
-Interactive terminal UI with sidebar navigation, resource table, and detail panel.
+Interactive terminal UI with sidebar navigation, resource table, and detail
+panel. Launch it over your **live** AWS resources with `summary --tui`:
 
 ```bash
-./bin/aws_explorer tui [flags]
+./bin/aws_explorer summary --tui [flags]
 ```
 
 Accepts the same global flags as the CLI command (`--config`, `--profile`,
-`--auth-method`, `--role-arn`, `--region`, `--all-regions`).
+`--auth-method`, `--role-arn`, `--region`, `--all-regions`). To browse a saved
+snapshot offline instead, see [Offline snapshot browsing](#offline-snapshot-browsing-snapshot-diff).
 
 ### TUI Keyboard Shortcuts
 
@@ -199,6 +201,23 @@ While a scan is running, the header shows real progress (`scanning 23/60` with
 the last pending `service@region` tasks named) instead of a generic spinner,
 and collection errors are surfaced inline: a red `⚠ n errors` badge in the
 header plus per-service warning badges in the sidebar.
+
+### Offline snapshot browsing (`snapshot-diff`)
+
+`snapshot-diff` opens the same interactive TUI over **saved** inventory
+snapshots — no AWS credentials, STS calls or region discovery needed. Snapshots
+are just the JSON written by `summary -o json`.
+
+```bash
+# Browse a single saved snapshot offline
+./bin/aws_explorer snapshot-diff --snapshot inventory.json
+
+# Diff two snapshots and explore what was added / removed / modified
+./bin/aws_explorer snapshot-diff --diff before.json,after.json
+```
+
+It needs one of `--snapshot` or `--diff` (they are mutually exclusive); to
+explore **live** resources interactively, use `summary --tui` instead.
 
 ## Summary Usage
 
@@ -1689,7 +1708,7 @@ Adding a new AWS service requires only a new package under `internal/services/` 
 aws_explorer/
 ├── cmd/
 │   ├── root.go          # Default CLI command (streaming output)
-│   ├── tui.go           # Interactive TUI launcher
+│   ├── snapshotdiff.go  # Offline snapshot browser / diff launcher
 │   ├── vpc.go           # VPC Explorer TUI launcher
 │   └── s3.go            # S3 browser TUI launcher
 ├── internal/

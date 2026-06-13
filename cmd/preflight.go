@@ -72,9 +72,9 @@ func skipPreflight(cmd *cobra.Command) bool {
 			return true
 		}
 	}
-	// `tui --snapshot` / `--diff` browse saved JSON offline with no credentials,
-	// STS calls or region discovery; checking auth would block that on purpose.
-	if cmd.Name() == "tui" && (snapshotPath != "" || len(diffPaths) > 0) {
+	// `snapshot-diff` only ever browses saved JSON offline — no credentials, STS
+	// calls or region discovery — so checking auth would block it on purpose.
+	if cmd.Name() == "snapshot-diff" {
 		return true
 	}
 	return false

@@ -61,7 +61,7 @@ aws_explorer --all-regions
 - [`aws_explorer find`](find.md) — Fuzzy-find any resource by name, ID, ARN or type
 - [`aws_explorer iam`](iam.md) — IAM / access debugging helpers
 - [`aws_explorer s3`](s3.md) — Start the S3 Explorer TUI
+- [`aws_explorer snapshot-diff`](snapshot-diff.md) — Browse a saved inventory snapshot, or diff two snapshots, offline
 - [`aws_explorer summary`](summary.md) — List every AWS resource across all regions
 - [`aws_explorer trail`](trail.md) — CloudTrail "who changed this" — recent events for a resource
-- [`aws_explorer tui`](tui.md) — Start the interactive TUI mode
 - [`aws_explorer vpc`](vpc.md) — Start the VPC Explorer TUI

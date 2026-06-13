@@ -1,5 +1,5 @@
-Start it with `aws_explorer tui` (or `aws_explorer summary --tui` for the same
-inventory). It is one interactive, filterable table of **every** discovered
+Start it with `aws_explorer summary --tui`. It is one interactive, filterable
+table of **every** discovered
 resource across all configured regions and services, with a service sidebar on
 the left and a detail panel on the right.
 
