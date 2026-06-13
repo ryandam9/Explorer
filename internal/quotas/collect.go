@@ -28,19 +28,19 @@ type quotaRef struct {
 // Service Quotas quota codes. An unknown/removed code degrades to a skipped
 // quota (best-effort), never a crash.
 var registry = []quotaRef{
-	{service: "ec2", code: "L-1216C47A"}, // Running On-Demand Standard (A,C,D,H,I,M,R,T,Z) instances — vCPUs
-	{service: "ec2", code: "L-34B43A08"}, // Running On-Demand G and VT instances — vCPUs
-	{service: "ec2", code: "L-0263D0A3"}, // EC2-VPC Elastic IPs
-	{service: "vpc", code: "L-F678F1CE"}, // VPCs per Region
-	{service: "vpc", code: "L-DF5E4CA3"}, // Network interfaces per Region
-	{service: "vpc", code: "L-A4707A72"}, // Internet gateways per Region
-	{service: "vpc", code: "L-FE5A380F"}, // NAT gateways per Availability Zone
-	{service: "vpc", code: "L-E79EC296"}, // VPC security groups per Region
-	{service: "lambda", code: "L-B99A9384"}, // Concurrent executions
-	{service: "rds", code: "L-7B6409FD"},    // DB instances
-	{service: "rds", code: "L-7ADDB58A"},    // Total storage for all DB instances
-	{service: "ebs", code: "L-D18FCD1D"},    // Storage for General Purpose SSD (gp3) volumes
-	{service: "ebs", code: "L-309BACF6"},    // Storage for General Purpose SSD (gp2) volumes
+	{service: "ec2", code: "L-1216C47A"},                  // Running On-Demand Standard (A,C,D,H,I,M,R,T,Z) instances — vCPUs
+	{service: "ec2", code: "L-34B43A08"},                  // Running On-Demand G and VT instances — vCPUs
+	{service: "ec2", code: "L-0263D0A3"},                  // EC2-VPC Elastic IPs
+	{service: "vpc", code: "L-F678F1CE"},                  // VPCs per Region
+	{service: "vpc", code: "L-DF5E4CA3"},                  // Network interfaces per Region
+	{service: "vpc", code: "L-A4707A72"},                  // Internet gateways per Region
+	{service: "vpc", code: "L-FE5A380F"},                  // NAT gateways per Availability Zone
+	{service: "vpc", code: "L-E79EC296"},                  // VPC security groups per Region
+	{service: "lambda", code: "L-B99A9384"},               // Concurrent executions
+	{service: "rds", code: "L-7B6409FD"},                  // DB instances
+	{service: "rds", code: "L-7ADDB58A"},                  // Total storage for all DB instances
+	{service: "ebs", code: "L-D18FCD1D"},                  // Storage for General Purpose SSD (gp3) volumes
+	{service: "ebs", code: "L-309BACF6"},                  // Storage for General Purpose SSD (gp2) volumes
 	{service: "elasticloadbalancing", code: "L-53DA6B97"}, // Application Load Balancers per Region
 	{service: "elasticloadbalancing", code: "L-69A177A2"}, // Network Load Balancers per Region
 	{service: "eks", code: "L-1194D53C"},                  // Clusters
