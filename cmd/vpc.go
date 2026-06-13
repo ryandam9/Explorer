@@ -59,6 +59,7 @@ toolkit (findings linter, path tracer, exposure audit, snapshot diff).`,
 
 func init() {
 	vpcCmd.Flags().StringVar(&vpcTheme, "theme", defaultThemeName, "Color theme ("+strings.Join(ui.ThemeNames(), ", ")+")")
+	registerAlwaysTUIFlag(vpcCmd)
 	registerThemeCompletion(vpcCmd, ui.ThemeNames())
 	rootCmd.AddCommand(vpcCmd)
 }

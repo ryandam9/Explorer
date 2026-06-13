@@ -39,3 +39,14 @@ func registerThemeCompletion(cmd *cobra.Command, themeNames []string) {
 	_ = cmd.RegisterFlagCompletionFunc("theme",
 		cobra.FixedCompletions(themeNames, cobra.ShellCompDirectiveNoFileComp))
 }
+
+// registerAlwaysTUIFlag adds a --tui flag to a command that is always
+// interactive (vpc, s3, cw). These have no table/CLI mode, but accepting --tui
+// keeps invocation uniform with the commands that toggle a TUI off a CLI
+// default (summary, audit, bill): "<cmd> --tui" then works everywhere, while
+// the bare "<cmd>" form keeps working. The flag value is not read — the
+// command is interactive either way.
+func registerAlwaysTUIFlag(cmd *cobra.Command) {
+	cmd.Flags().Bool("tui", true,
+		"open the interactive explorer (always on for this command; accepted for consistency)")
+}

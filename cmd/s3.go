@@ -67,6 +67,7 @@ func init() {
 	s3Cmd.Flags().StringVar(&s3Theme, "theme", defaultThemeName, "Color theme ("+strings.Join(ui.ThemeNames(), ", ")+")")
 	s3Cmd.Flags().BoolVar(&s3AllowDelete, "allow-delete", false, "Enable delete operations (guarded by confirmation)")
 	s3Cmd.Flags().StringVar(&s3EndpointURL, "endpoint-url", "", "Custom endpoint URL (for LocalStack/MinIO)")
+	registerAlwaysTUIFlag(s3Cmd)
 	registerThemeCompletion(s3Cmd, ui.ThemeNames())
 	rootCmd.AddCommand(s3Cmd)
 }

@@ -86,6 +86,7 @@ func init() {
 	cwCmd.Flags().StringVarP(&cwStream, "stream", "s", "", "Initial CloudWatch log stream filter")
 	cwCmd.Flags().StringVarP(&cwFilter, "filter", "f", "", "Initial query pattern for log events")
 	cwCmd.Flags().StringVar(&cwTheme, "theme", defaultThemeName, "Color theme ("+strings.Join(ui.ThemeNames(), ", ")+")")
+	registerAlwaysTUIFlag(cwCmd)
 	registerThemeCompletion(cwCmd, ui.ThemeNames())
 	rootCmd.AddCommand(cwCmd)
 }
