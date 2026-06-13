@@ -1,6 +1,6 @@
 # AWS Explorer — Enhancement Roadmap & Design Specification
 
-Status: **In progress** — shipped so far: AXE-004 & the `internal/findings` platform (#79), AXE-023 (#80), AXE-001 & AXE-022 (#81), AXE-013 (#82), AXE-007 (#83), AXE-005 (#84, #86), AXE-006 (#85), AXE-012 (#87), AXE-002 (#88), AXE-008 (#89), AXE-003 · Tracking issue: #76
+Status: **In progress** — shipped so far: AXE-004 & the `internal/findings` platform (#79), AXE-023 (#80), AXE-001 & AXE-022 (#81), AXE-013 (#82), AXE-007 (#83), AXE-005 (#84, #86), AXE-006 (#85), AXE-012 (#87), AXE-002 (#88), AXE-008 (#89), AXE-003 (#90), AXE-018 · Tracking issue: #76
 
 This document specifies 24 proposed enhancements, grouped into nine themes.
 Each enhancement carries a stable ID (`AXE-NNN`) used in the tracking issue,
@@ -44,7 +44,7 @@ The proposals follow the tool's established design principles:
 | [AXE-015](#axe-015) | ECS stopped-task triage | G — Service-specific triage | P2 |
 | [AXE-016](#axe-016) | Lambda triage view | G — Service-specific triage | P2 |
 | [AXE-017](#axe-017) | Service-quota dashboard | G — Service-specific triage | P2 |
-| [AXE-018](#axe-018) | SQS/SNS plumbing checks | G — Service-specific triage | P3 |
+| [AXE-018](#axe-018) | SQS/SNS plumbing checks | G — Service-specific triage | ✅ shipped |
 | [AXE-019](#axe-019) | Path tracer: IPv6 evaluation | H — Tracer completeness | P2 |
 | [AXE-020](#axe-020) | Path tracer: managed prefix-list expansion | H — Tracer completeness | P2 |
 | [AXE-021](#axe-021) | Multi-account scanning | I — Multi-account & automation | P2 |
@@ -680,6 +680,8 @@ VPCs, ENIs, Lambda concurrent executions, RDS instances, EBS storage)
 rather than dumping thousands.
 
 ### AXE-018 — SQS/SNS plumbing checks {#axe-018}
+
+> **Status: ✅ shipped** — `messaging` category in `aws_explorer audit` (5 `MSG-*` checks in `internal/findings/messaging.go`, collection in `internal/audit/messaging_collect.go`). Note: the SNS API does not expose pending-subscription age, so the ">24h" qualifier became a caveat in the finding text instead.
 
 **Problem.** Broken async plumbing is silent: producers fill a queue nobody
 consumes; redrive points at a deleted DLQ; SNS subscriptions stuck pending.

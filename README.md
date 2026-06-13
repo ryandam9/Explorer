@@ -304,10 +304,11 @@ Changes since baseline 2026-06-11 09:00 UTC — 2 added, 1 removed, 1 modified
 
 ## Audit Usage
 
-`audit` scans the configured regions for findings in three categories —
-**cost/waste**, **security**, and **IAM hygiene** (all run by default;
-`--only cost,security,iam` narrows) — and prints them as a ranked table,
-with an estimated monthly cost per cost finding and a total at the bottom. Like everything else in the tool, the audit
+`audit` scans the configured regions for findings in four categories —
+**cost/waste**, **security**, **IAM hygiene**, and **messaging plumbing**
+(all run by default; `--only cost,security,iam,messaging` narrows) — and
+prints them as a ranked table, with an estimated monthly cost per cost
+finding and a total at the bottom. Like everything else in the tool, the audit
 is **deterministic, read-only and best-effort**: a denied API call skips the
 affected checks (reported on stderr) and never aborts the run.
 
@@ -406,6 +407,29 @@ IAM-category notes:
   fire nothing.
 - Extra IAM needed: `iam:{GenerateCredentialReport,GetCredentialReport,
   ListRoles,GetRole,ListPolicies,GetPolicyVersion,ListEntitiesForPolicy}`.
+
+**Messaging category** (`--only messaging`; check IDs `MSG-*`) — broken
+async plumbing is silent until something downstream pages:
+
+| ID | Finding | Severity |
+|----|---------|----------|
+| `MSG-SQS-001` | Queue accumulating messages with nothing in flight and zero receive calls in 24h ‡ | 🟡 warning |
+| `MSG-SQS-002` | Redrive policy whose dead-letter target queue doesn't exist (poisoned messages are dropped) | 🔴 critical |
+| `MSG-SQS-003` | Dead-letter queue with failed messages waiting (names the queues redriving to it) | 🟡 warning |
+| `MSG-SNS-001` | Topic with subscriptions stuck in `PendingConfirmation` (endpoint receives nothing) | 🟡 warning |
+| `MSG-SNS-002` | Topic with zero subscriptions — everything published is discarded | 🔵 info |
+
+Messaging-category notes:
+
+- ‡ The no-consumers check needs `cloudwatch:GetMetricData` for the 24h
+  receive-activity lookback (queried only for queues that already look
+  suspicious); without it the check is skipped, never guessed.
+- The dangling-redrive check only fires from a **complete** queue listing —
+  a truncated or failed listing produces no `MSG-SQS-002` findings.
+- The API does not report how long a subscription has been pending, so
+  `MSG-SNS-001` notes that a just-created subscription can be ignored.
+- Uses `sqs:{ListQueues,GetQueueAttributes}`, `sns:{ListTopics,GetTopicAttributes}` —
+  the same calls as the security category.
 
 † Traffic-based checks use CloudWatch metrics over a 14-day window and need
 `cloudwatch:GetMetricData`; without it they are skipped (with a note) while
