@@ -159,7 +159,7 @@ cloudwatch:GetMetricData and are skipped without it.`,
 			ui.InitFromConfig(AppConfig.UI)
 			ch := make(chan audit.CostChunk, 8)
 			go audit.Stream(ctx, eng.AWSConfig, regions, categories, AppConfig.App.MaxConcurrency, timeout, ch)
-			m := audittui.New(regions, dropIgnored(ch, ignore))
+			m := audittui.New(regions, AppConfig.AWS.AllRegions, dropIgnored(ch, ignore))
 			p := tea.NewProgram(ui.WithWindowTitle(m), tea.WithAltScreen(), tea.WithContext(ctx))
 			if _, err := p.Run(); err != nil {
 				fmt.Fprintf(os.Stderr, "Error running audit TUI: %v\n", err)

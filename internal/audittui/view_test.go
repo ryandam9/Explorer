@@ -13,7 +13,7 @@ import (
 // shared the same header-height miscount, which clipped the status bar off the
 // bottom whenever the findings table was wider than the terminal.
 func TestStatusBarSurvivesClip(t *testing.T) {
-	m := New([]string{"us-east-1"}, nil)
+	m := New([]string{"us-east-1"}, false, nil)
 	m.scanning = false
 	m.all = []findings.Finding{{ID: "COST-EBS-001", Resource: "vol-1", Region: "us-east-1", Title: "unattached"}}
 

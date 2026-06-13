@@ -2215,6 +2215,14 @@ func (m tuiModel) renderHeader() string {
 
 	title := fmt.Sprintf("  AWS Explorer › %s  ·  %s  ·  %d resources%s",
 		m.currentService(), status, len(m.sorted), filterInfo)
+	// Spotlight the active region scope when not in all-regions mode, so a
+	// single-region scan can never be mistaken for the whole account. Offline
+	// snapshot views (no engine) have no live region scope, so skip them.
+	if m.engine != nil {
+		if badge := ui.RegionBadge(m.engine.EffectiveRegions(), m.cfg.AWS.AllRegions); badge != "" {
+			title += "  " + badge
+		}
+	}
 	// The error badge goes last (in error color) so a failed scan is
 	// impossible to miss; nothing follows it, so the embedded color reset
 	// cannot bleed into other header text.

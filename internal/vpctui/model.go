@@ -1921,6 +1921,9 @@ func (m *Model) viewVPCListState() string {
 		Render("VPC Explorer")
 
 	header := lipgloss.JoinHorizontal(lipgloss.Center, title, "  ", m.viewScanStatus())
+	if badge := ui.RegionBadge([]string{m.region}, m.allRegions); badge != "" {
+		header = lipgloss.JoinHorizontal(lipgloss.Center, header, "  ", badge)
+	}
 	if ind := ui.TableScrollIndicator(&m.vpcTable); ind != "" {
 		header = lipgloss.JoinHorizontal(lipgloss.Center, header, "  ", ind)
 	}

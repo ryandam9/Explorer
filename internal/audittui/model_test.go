@@ -31,7 +31,7 @@ func testFindings() []findings.Finding {
 func newTestModel(t *testing.T) Model {
 	t.Helper()
 	ch := make(chan audit.CostChunk, 2)
-	m := New([]string{"us-east-1", "eu-west-1"}, ch)
+	m := New([]string{"us-east-1", "eu-west-1"}, false, ch)
 
 	mm, _ := m.Update(tea.WindowSizeMsg{Width: 120, Height: 40})
 	m = mm.(Model)
@@ -98,7 +98,7 @@ func TestViewRenders(t *testing.T) {
 
 func TestViewEmptyState(t *testing.T) {
 	ch := make(chan audit.CostChunk)
-	m := New([]string{"us-east-1"}, ch)
+	m := New([]string{"us-east-1"}, false, ch)
 	mm, _ := m.Update(tea.WindowSizeMsg{Width: 100, Height: 30})
 	m = mm.(Model)
 	mm, _ = m.Update(chunkMsg{ok: false})
@@ -263,7 +263,7 @@ func hasHint(hs []ui.KeyHint, k string) bool {
 }
 
 func TestPageTitle(t *testing.T) {
-	m := New(nil, nil)
+	m := New(nil, false, nil)
 	if m.PageTitle() != "Audit › Cost" {
 		t.Errorf("PageTitle = %q", m.PageTitle())
 	}
