@@ -304,9 +304,10 @@ Changes since baseline 2026-06-11 09:00 UTC — 2 added, 1 removed, 1 modified
 
 ## Audit Usage
 
-`audit` scans the configured regions for findings — currently the **cost/waste**
-category — and prints them as a ranked table with an estimated monthly cost per
-finding and a total at the bottom. Like everything else in the tool, the audit
+`audit` scans the configured regions for findings in two categories —
+**cost/waste** and **security** (both run by default; `--only cost` /
+`--only security` narrows) — and prints them as a ranked table, with an
+estimated monthly cost per cost finding and a total at the bottom. Like everything else in the tool, the audit
 is **deterministic, read-only and best-effort**: a denied API call skips the
 affected checks (reported on stderr) and never aborts the run.
 
@@ -343,6 +344,42 @@ runbooks and scripts):
 | `COST-SNAP-001` | Snapshot >180 days old, not referenced by any AMI in the account | 🔵 info |
 | `COST-AMI-001` | AMI >180 days old that no instance uses (backing snapshots still bill) | 🔵 info |
 | `COST-DDB-001` | Provisioned DynamoDB table consuming <10% of its capacity † | 🟡 warning |
+
+**Security category** (`--only security`; check IDs `SEC-*`):
+
+| ID | Finding | Severity |
+|----|---------|----------|
+| `SEC-S3-001` | S3 bucket whose policy status reports it as public | 🔴 critical |
+| `SEC-S3-002` | S3 bucket without all four Public Access Block settings on | 🔴 critical |
+| `SEC-S3-003` | S3 bucket with no default encryption configuration | 🟡 warning |
+| `SEC-EBS-001` | EBS volume not encrypted | 🟡 warning |
+| `SEC-EBS-002` | Region with EBS encryption-by-default disabled | 🟡 warning |
+| `SEC-SNAP-001` | EBS snapshot restorable by **any** AWS account | 🔴 critical |
+| `SEC-RDS-001` | RDS instance with `PubliclyAccessible` on | 🔴 critical |
+| `SEC-RDS-002` | RDS instance without storage encryption | 🟡 warning |
+| `SEC-RDS-003` | RDS manual snapshot restorable by **any** AWS account | 🔴 critical |
+| `SEC-EC2-001` | EC2 instance allowing IMDSv1 (`HttpTokens` ≠ `required`) | 🟡 warning |
+| `SEC-SG-001` | Security group opening a sensitive port (SSH, RDP, MySQL, PostgreSQL, SQL Server, MongoDB, Redis, Elasticsearch, memcached) to `0.0.0.0/0` or `::/0` | 🔴 critical |
+| `SEC-LAMBDA-001` | Lambda function URL with `AuthType: NONE` | 🔴 critical |
+| `SEC-SQS-001` | SQS queue policy with an unconditioned `Allow` for `Principal: "*"` | 🔴 critical |
+| `SEC-SNS-001` | SNS topic policy with an unconditioned `Allow` for `Principal: "*"` | 🔴 critical |
+| `SEC-CW-001` | CloudWatch alarm in `INSUFFICIENT_DATA` for >7 days (broken monitoring) | 🔵 info |
+
+Security-category notes:
+
+- **Under-warn, never mis-warn**: posture facts the audit could not determine
+  (a denied `GetBucketPolicyStatus`, for example) simply don't fire checks —
+  the denial appears in the errors summary instead.
+- S3 is account-global, so the bucket sweep runs once (in the first scanned
+  region); each bucket's posture calls go to the bucket's own region.
+- Per-resource sweeps (bucket posture, RDS snapshot attributes, function
+  URLs, queue/topic policies) are capped (100–200 each) so huge accounts
+  audit in bounded time; hitting a cap is reported as a `Truncated` note.
+- Extra IAM needed beyond the cost category:
+  `s3:{ListAllMyBuckets,GetBucketLocation,GetBucketPolicyStatus,GetBucketPublicAccessBlock,GetEncryptionConfiguration}`,
+  `ec2:{GetEbsEncryptionByDefault}`, `rds:{DescribeDBSnapshots,DescribeDBSnapshotAttributes}`,
+  `lambda:{ListFunctions,ListFunctionUrlConfigs}`, `sqs:{ListQueues,GetQueueAttributes}`,
+  `sns:{ListTopics,GetTopicAttributes}`, `cloudwatch:DescribeAlarms`.
 
 † Traffic-based checks use CloudWatch metrics over a 14-day window and need
 `cloudwatch:GetMetricData`; without it they are skipped (with a note) while
