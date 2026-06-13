@@ -49,7 +49,10 @@ func (c *Collector) Collect(ctx context.Context, input services.CollectInput) ([
 func (c *Collector) mapCluster(region string, cluster types.ClusterSummary, detail services.DetailLevel) model.Resource {
 	id := aws.ToString(cluster.Id)
 	name := aws.ToString(cluster.Name)
-	state := string(cluster.Status.State)
+	state := ""
+	if cluster.Status != nil {
+		state = string(cluster.Status.State)
+	}
 
 	res := model.Resource{
 		Service: "emr",
@@ -64,7 +67,7 @@ func (c *Collector) mapCluster(region string, cluster types.ClusterSummary, deta
 		},
 	}
 
-	if cluster.Status.Timeline != nil && cluster.Status.Timeline.CreationDateTime != nil {
+	if cluster.Status != nil && cluster.Status.Timeline != nil && cluster.Status.Timeline.CreationDateTime != nil {
 		res.CreatedAt = cluster.Status.Timeline.CreationDateTime
 	}
 

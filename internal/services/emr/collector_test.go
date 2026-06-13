@@ -93,6 +93,26 @@ func TestMapCluster_WithoutTimeline(t *testing.T) {
 	}
 }
 
+func TestMapCluster_NilStatus(t *testing.T) {
+	c := NewCollector()
+	// ClusterSummary.Status is a pointer; AWS can leave it nil. The mapper must
+	// not panic and should fall back to an empty state.
+	cluster := types.ClusterSummary{
+		Id:   aws.String("j-NILSTATUS"),
+		Name: aws.String("nil-status"),
+		// Status is nil
+	}
+
+	res := c.mapCluster("us-east-1", cluster, services.DetailLevelSummary)
+
+	if res.State != "" {
+		t.Errorf("State = %q, want empty when Status is nil", res.State)
+	}
+	if res.CreatedAt != nil {
+		t.Errorf("CreatedAt = %v, want nil when Status is nil", res.CreatedAt)
+	}
+}
+
 func TestMapCluster_NilNormalizedHours(t *testing.T) {
 	c := NewCollector()
 	cluster := types.ClusterSummary{

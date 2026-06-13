@@ -18,6 +18,27 @@ func TestCollector_Metadata(t *testing.T) {
 	}
 }
 
+func TestMapZone_NilConfig(t *testing.T) {
+	c := NewCollector()
+	// AWS omits the Config element for zones with no config set; the mapper
+	// must not panic and should default privateZone to false.
+	zone := types.HostedZone{
+		Id:                     aws.String("/hostedzone/ZNOCONFIG"),
+		Name:                   aws.String("no-config.example."),
+		ResourceRecordSetCount: aws.Int64(3),
+		// Config is nil
+	}
+
+	res := c.mapZone(zone, services.DetailLevelSummary)
+
+	if res.Summary["privateZone"] != "false" {
+		t.Errorf("Summary[privateZone] = %q, want %q when Config is nil", res.Summary["privateZone"], "false")
+	}
+	if _, ok := res.Summary["comment"]; ok {
+		t.Error("Summary[comment] should be absent when Config is nil")
+	}
+}
+
 func TestMapZone_BasicFields(t *testing.T) {
 	c := NewCollector()
 	zone := types.HostedZone{

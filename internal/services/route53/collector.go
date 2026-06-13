@@ -59,6 +59,12 @@ func (c *Collector) mapZone(zone types.HostedZone, detail services.DetailLevel) 
 	id := aws.ToString(zone.Id)
 	name := aws.ToString(zone.Name)
 
+	// AWS omits the Config element when a zone has no config set, so guard it.
+	privateZone := false
+	if zone.Config != nil {
+		privateZone = zone.Config.PrivateZone
+	}
+
 	res := model.Resource{
 		Service: "route53",
 		Type:    "hostedZone",
@@ -67,12 +73,12 @@ func (c *Collector) mapZone(zone types.HostedZone, detail services.DetailLevel) 
 		Name:    name,
 		ARN:     awsutil.Route53ZoneARN(id),
 		Summary: map[string]string{
-			"privateZone": fmt.Sprintf("%t", zone.Config.PrivateZone),
+			"privateZone": fmt.Sprintf("%t", privateZone),
 			"recordCount": fmt.Sprintf("%d", aws.ToInt64(zone.ResourceRecordSetCount)),
 		},
 	}
 
-	if zone.Config.Comment != nil {
+	if zone.Config != nil && zone.Config.Comment != nil {
 		res.Summary["comment"] = aws.ToString(zone.Config.Comment)
 	}
 

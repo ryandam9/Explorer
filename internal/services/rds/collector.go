@@ -55,6 +55,16 @@ func (c *Collector) mapInstance(region string, instance types.DBInstance, detail
 	iClass := aws.ToString(instance.DBInstanceClass)
 	engine := aws.ToString(instance.Engine)
 
+	// DescribeDBInstances already returns the instance's tags inline (TagList),
+	// so populate them here without an extra ListTagsForResource call.
+	var tags map[string]string
+	if len(instance.TagList) > 0 {
+		tags = make(map[string]string, len(instance.TagList))
+		for _, t := range instance.TagList {
+			tags[aws.ToString(t.Key)] = aws.ToString(t.Value)
+		}
+	}
+
 	res := model.Resource{
 		Service: "rds",
 		Type:    "instance",
@@ -64,6 +74,7 @@ func (c *Collector) mapInstance(region string, instance types.DBInstance, detail
 		Name:    id,
 		ARN:     aws.ToString(instance.DBInstanceArn),
 		State:   state,
+		Tags:    tags,
 		Summary: map[string]string{
 			"instanceClass": iClass,
 			"engine":        engine,

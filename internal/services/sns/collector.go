@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/service/sns"
 	"github.com/ryandam9/aws_explorer/internal/model"
 	"github.com/ryandam9/aws_explorer/internal/services"
@@ -37,7 +38,9 @@ func (c *Collector) Collect(ctx context.Context, input services.CollectInput) ([
 
 		batch := make([]model.Resource, 0, len(page.Topics))
 		for _, topic := range page.Topics {
-			batch = append(batch, c.mapTopic(topic.TopicArn))
+			res := c.mapTopic(topic.TopicArn)
+			res.Region = input.Region // SNS topics are regional
+			batch = append(batch, res)
 		}
 		resources = input.EmitOrAppend(resources, batch)
 	}
@@ -46,7 +49,7 @@ func (c *Collector) Collect(ctx context.Context, input services.CollectInput) ([
 }
 
 func (c *Collector) mapTopic(topicArn *string) model.Resource {
-	arn := *topicArn
+	arn := aws.ToString(topicArn)
 	// Extract topic name from ARN (last segment after :)
 	name := arn
 	if i := strings.LastIndexByte(arn, ':'); i >= 0 {

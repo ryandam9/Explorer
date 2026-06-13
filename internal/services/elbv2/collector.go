@@ -49,7 +49,10 @@ func (c *Collector) Collect(ctx context.Context, input services.CollectInput) ([
 func (c *Collector) mapLoadBalancer(region string, lb types.LoadBalancer, detail services.DetailLevel) model.Resource {
 	id := aws.ToString(lb.LoadBalancerArn)
 	name := aws.ToString(lb.LoadBalancerName)
-	state := string(lb.State.Code)
+	state := ""
+	if lb.State != nil {
+		state = string(lb.State.Code)
+	}
 
 	tags := make(map[string]string)
 

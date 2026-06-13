@@ -19,6 +19,22 @@ func TestCollector_Metadata(t *testing.T) {
 	}
 }
 
+func TestMapLoadBalancer_NilState(t *testing.T) {
+	c := NewCollector()
+	// LoadBalancer.State is a pointer; the mapper must not panic when it is nil.
+	lb := types.LoadBalancer{
+		LoadBalancerArn:  aws.String("arn:aws:elasticloadbalancing:us-east-1:123456789012:loadbalancer/app/no-state/abc"),
+		LoadBalancerName: aws.String("no-state"),
+		// State is nil
+	}
+
+	res := c.mapLoadBalancer("us-east-1", lb, services.DetailLevelSummary)
+
+	if res.State != "" {
+		t.Errorf("State = %q, want empty when State is nil", res.State)
+	}
+}
+
 func TestMapLoadBalancer_BasicFields(t *testing.T) {
 	c := NewCollector()
 	created := time.Date(2024, 4, 5, 10, 0, 0, 0, time.UTC)
