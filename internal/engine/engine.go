@@ -420,16 +420,23 @@ func (e *Engine) StreamRun(ctx context.Context, chunks chan<- model.ResultChunk)
 					// the last. emitted counts streamed resources (post-filter)
 					// so the error path below can still flag partial results;
 					// collectors call Emit from this goroutine, so no locking.
-					// In multi-account mode stamp every resource with the sweep
-					// name so the Account column is consistent (collectors set
-					// the raw account ID, which would mix names and IDs) and
-					// AWSConfigFor lookups resolve from a resource's AccountID.
+					// Stamp every resource with its owning account: the sweep
+					// name in multi-account mode (so the Account column shows
+					// names, not a mix of names and IDs) and the resolved
+					// account ID otherwise. Collectors set AccountID
+					// inconsistently (only EC2 does), so stamping here
+					// guarantees it for every service, and lets AWSConfigFor
+					// lookups resolve from a resource's AccountID.
 					multiAcct := len(e.Config.Accounts) > 0
+					acct := sw.AccountID
+					if multiAcct {
+						acct = sw.Name
+					}
 					emitted := 0
 					input.Emit = func(batch []model.Resource) {
-						if multiAcct {
+						if acct != "" {
 							for i := range batch {
-								batch[i].AccountID = sw.Name
+								batch[i].AccountID = acct
 							}
 						}
 						filtered := filterResources(batch, input.Filters)
@@ -440,9 +447,9 @@ func (e *Engine) StreamRun(ctx context.Context, chunks chan<- model.ResultChunk)
 					}
 
 					res, err := s.Collect(collectCtx, input)
-					if multiAcct {
+					if acct != "" {
 						for i := range res {
-							res[i].AccountID = sw.Name
+							res[i].AccountID = acct
 						}
 					}
 					filteredRes := filterResources(res, input.Filters)

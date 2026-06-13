@@ -19,6 +19,27 @@ func TestCollector_Metadata(t *testing.T) {
 	}
 }
 
+func TestMapInstance_Tags(t *testing.T) {
+	c := NewCollector()
+	instance := types.DBInstance{
+		DBInstanceIdentifier: aws.String("tagged-db"),
+		DBInstanceStatus:     aws.String("available"),
+		TagList: []types.Tag{
+			{Key: aws.String("env"), Value: aws.String("prod")},
+			{Key: aws.String("team"), Value: aws.String("payments")},
+		},
+	}
+
+	res := c.mapInstance("us-east-1", instance, services.DetailLevelSummary)
+
+	if res.Tags["env"] != "prod" {
+		t.Errorf("Tags[env] = %q, want %q", res.Tags["env"], "prod")
+	}
+	if res.Tags["team"] != "payments" {
+		t.Errorf("Tags[team] = %q, want %q", res.Tags["team"], "payments")
+	}
+}
+
 func TestMapInstance_BasicFields(t *testing.T) {
 	c := NewCollector()
 	created := time.Date(2024, 3, 10, 8, 0, 0, 0, time.UTC)

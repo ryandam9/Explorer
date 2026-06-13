@@ -62,6 +62,16 @@ func TestMapTopic_ARNWithNoColon(t *testing.T) {
 	}
 }
 
+func TestMapTopic_NilARN(t *testing.T) {
+	c := NewCollector()
+	// Defensive: a nil TopicArn must not panic (aws.ToString handles nil).
+	res := c.mapTopic(nil)
+
+	if res.ARN != "" {
+		t.Errorf("ARN = %q, want empty for nil TopicArn", res.ARN)
+	}
+}
+
 func TestMapTopic_MultipleColons(t *testing.T) {
 	c := NewCollector()
 	// The function picks the LAST colon, so only the final segment matters
