@@ -2,6 +2,7 @@ package quotas
 
 import (
 	"context"
+	"fmt"
 	"time"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
@@ -130,6 +131,7 @@ func collectQuotas(ctx context.Context, baseCfg aws.Config, region string, refs 
 
 	var quotas []Quota
 	var errs []model.ExploreError
+	var pending []pendingUsage
 	for _, ref := range refs {
 		sq, fromDefault, err := getQuota(ctx, sqClient, ref)
 		if err != nil {
@@ -144,13 +146,22 @@ func collectQuotas(ctx context.Context, baseCfg aws.Config, region string, refs 
 			Unit:        normalizeUnit(aws.ToString(sq.Unit)),
 			FromDefault: fromDefault,
 		}
-		if used, ok := fetchUsage(ctx, cwClient, sq.UsageMetric); ok {
-			q.Used = used
-			q.UsageKnown = true
+		if m := sq.UsageMetric; m != nil && aws.ToString(m.MetricName) != "" && aws.ToString(m.MetricNamespace) != "" {
+			pending = append(pending, pendingUsage{idx: len(quotas), metric: m})
 		}
 		quotas = append(quotas, q)
 	}
+	// Fetch every quota's usage in one batched GetMetricData sweep rather than
+	// a GetMetricStatistics round-trip per quota.
+	fetchUsageBatch(ctx, cwClient, quotas, pending)
 	return quotas, errs
+}
+
+// pendingUsage links a resolved quota (by index into the quotas slice) to the
+// CloudWatch usage metric whose value still needs fetching.
+type pendingUsage struct {
+	idx    int
+	metric *sqtypes.MetricInfo
 }
 
 // getQuota returns the applied quota value, falling back to the AWS default
@@ -184,75 +195,77 @@ func getQuota(ctx context.Context, client *awssq.Client, ref quotaRef) (*sqtypes
 // recent datapoint in the window is the one used.
 const usageLookback = 48 * time.Hour
 
-// fetchUsage reads the latest value of a quota's CloudWatch usage metric using
-// the statistic AWS recommends. Returns ok=false when there is no usage metric
-// or no datapoint.
-func fetchUsage(ctx context.Context, client *awscw.Client, m *sqtypes.MetricInfo) (float64, bool) {
-	if m == nil || aws.ToString(m.MetricName) == "" || aws.ToString(m.MetricNamespace) == "" {
-		return 0, false
-	}
-	stat := aws.ToString(m.MetricStatisticRecommendation)
-	if stat == "" {
-		stat = "Maximum"
-	}
-	dims := make([]cwtypes.Dimension, 0, len(m.MetricDimensions))
-	for k, v := range m.MetricDimensions {
-		dims = append(dims, cwtypes.Dimension{Name: aws.String(k), Value: aws.String(v)})
-	}
-	end := time.Now()
-	out, err := client.GetMetricStatistics(ctx, &awscw.GetMetricStatisticsInput{
-		Namespace:  m.MetricNamespace,
-		MetricName: m.MetricName,
-		Dimensions: dims,
-		// Look back far enough to catch infrequently-published usage metrics.
-		// Several AWS/Usage metrics emit only hourly (or less); a short 3h
-		// window would miss them and report a real, possibly near-limit quota
-		// as "no usage metric". We still take the most-recent datapoint below,
-		// so a wider window only adds resilience, not staleness.
-		StartTime:  aws.Time(end.Add(-usageLookback)),
-		EndTime:    aws.Time(end),
-		Period:     aws.Int32(300),
-		Statistics: []cwtypes.Statistic{cwtypes.Statistic(stat)},
-	})
-	if err != nil || len(out.Datapoints) == 0 {
-		return 0, false
-	}
-	// Take the most recent datapoint's value for the requested statistic.
-	latest := out.Datapoints[0]
-	for _, dp := range out.Datapoints[1:] {
-		if dp.Timestamp != nil && latest.Timestamp != nil && dp.Timestamp.After(*latest.Timestamp) {
-			latest = dp
-		}
-	}
-	return statValue(latest, stat)
-}
+// maxMetricQueries is the GetMetricData limit on MetricDataQueries per call.
+const maxMetricQueries = 500
 
-func statValue(dp cwtypes.Datapoint, stat string) (float64, bool) {
-	switch stat {
-	case "Maximum":
-		if dp.Maximum != nil {
-			return *dp.Maximum, true
+// fetchUsageBatch fills Used/UsageKnown for the pending quotas with one batched
+// GetMetricData sweep (chunked at the API's query limit), instead of a separate
+// GetMetricStatistics call per quota. Best-effort: on error the affected
+// quotas are simply left with usage unknown. Each query uses the quota's
+// AWS-recommended statistic; GetMetricData computes it server-side, so the
+// returned Values are the statistic directly (newest first via a descending
+// scan), and the first value seen for an id is the most recent.
+func fetchUsageBatch(ctx context.Context, client *awscw.Client, quotas []Quota, pending []pendingUsage) {
+	if len(pending) == 0 {
+		return
+	}
+	queries := make([]cwtypes.MetricDataQuery, 0, len(pending))
+	for n, p := range pending {
+		m := p.metric
+		stat := aws.ToString(m.MetricStatisticRecommendation)
+		if stat == "" {
+			stat = "Maximum"
 		}
-	case "Minimum":
-		if dp.Minimum != nil {
-			return *dp.Minimum, true
+		dims := make([]cwtypes.Dimension, 0, len(m.MetricDimensions))
+		for k, v := range m.MetricDimensions {
+			dims = append(dims, cwtypes.Dimension{Name: aws.String(k), Value: aws.String(v)})
 		}
-	case "Sum":
-		if dp.Sum != nil {
-			return *dp.Sum, true
-		}
-	case "Average":
-		if dp.Average != nil {
-			return *dp.Average, true
+		queries = append(queries, cwtypes.MetricDataQuery{
+			Id: aws.String(fmt.Sprintf("u%d", n)),
+			MetricStat: &cwtypes.MetricStat{
+				Metric: &cwtypes.Metric{
+					Namespace:  m.MetricNamespace,
+					MetricName: m.MetricName,
+					Dimensions: dims,
+				},
+				Period: aws.Int32(300),
+				Stat:   aws.String(stat),
+			},
+		})
+	}
+
+	end := time.Now()
+	start := end.Add(-usageLookback)
+	latest := make(map[string]float64, len(queries))
+	for offset := 0; offset < len(queries); offset += maxMetricQueries {
+		chunk := queries[offset:min(offset+maxMetricQueries, len(queries))]
+		pager := awscw.NewGetMetricDataPaginator(client, &awscw.GetMetricDataInput{
+			MetricDataQueries: chunk,
+			StartTime:         aws.Time(start),
+			EndTime:           aws.Time(end),
+			ScanBy:            cwtypes.ScanByTimestampDescending,
+		})
+		for pager.HasMorePages() {
+			page, err := pager.NextPage(ctx)
+			if err != nil {
+				return // best-effort: leave usage unknown for this region
+			}
+			for _, r := range page.MetricDataResults {
+				id := aws.ToString(r.Id)
+				if _, seen := latest[id]; seen || len(r.Values) == 0 {
+					continue // keep the first (most-recent) value for an id
+				}
+				latest[id] = r.Values[0]
+			}
 		}
 	}
-	// Fall back to whichever statistic is populated.
-	for _, v := range []*float64{dp.Maximum, dp.Average, dp.Sum, dp.Minimum} {
-		if v != nil {
-			return *v, true
+
+	for n, p := range pending {
+		if v, ok := latest[fmt.Sprintf("u%d", n)]; ok {
+			quotas[p.idx].Used = v
+			quotas[p.idx].UsageKnown = true
 		}
 	}
-	return 0, false
 }
 
 // normalizeUnit hides Service Quotas' "None" placeholder unit.

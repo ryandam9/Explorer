@@ -456,16 +456,37 @@ func isEphemeralReturnRange(portRange string) bool {
 	return ok && from <= 1024 && to >= 65535
 }
 
-// naclAllowsEphemeral reports whether TCP ephemeral return traffic
-// (represented by port 32768) can pass the NACL in the given direction. Rules
-// are evaluated in ascending rule-number order with first-match-wins, the way
-// AWS does: an early matching deny that covers every source (0.0.0.0/0 or
-// ::/0) blocks the return path even if a later rule would allow it, while a
-// narrower deny may still leave room for later allows, so evaluation continues
-// past it.
+// ephemeralProbePorts samples the ephemeral return range. Return traffic can
+// land anywhere in the OS ephemeral range (Linux 32768-60999, Windows up to
+// 65535), so a NACL that covers only part of it would still drop some return
+// packets. Probing both ends and the middle catches partial-range allows like
+// "1024-49151" that a single probe at 32768 would miss.
+var ephemeralProbePorts = []int{32768, 60999, 65535}
+
+// naclAllowsEphemeral reports whether TCP ephemeral return traffic can pass the
+// NACL in the given direction.
+//
+// This is a heuristic, not a precise stateless evaluation: it probes the
+// representative ports in ephemeralProbePorts and requires every one to be
+// allowed, since return traffic may use any of them. Without a concrete
+// return-peer IP it cannot model AWS's per-source first-match-wins exactly, so
+// per probe it errs toward "open": an early matching allow passes, an early
+// deny covering every source (0.0.0.0/0 or ::/0) blocks, and a narrower deny is
+// stepped over because it only matches its own CIDR.
 func naclAllowsEphemeral(nacl NACLInfo, dir string) bool {
+	for _, port := range ephemeralProbePorts {
+		if !naclAllowsPort(nacl, dir, port) {
+			return false
+		}
+	}
+	return true
+}
+
+// naclAllowsPort applies the per-probe heuristic described on
+// naclAllowsEphemeral for a single TCP port.
+func naclAllowsPort(nacl NACLInfo, dir string, port int) bool {
 	for _, r := range rulesForDir(&nacl, dir) {
-		if !protoMatch(r.Protocol, "tcp") || !portMatch(r.PortRange, 32768) {
+		if !protoMatch(r.Protocol, "tcp") || !portMatch(r.PortRange, port) {
 			continue
 		}
 		if strings.EqualFold(r.Action, "allow") {
