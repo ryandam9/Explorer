@@ -131,6 +131,41 @@ func TestFilterAttribute(t *testing.T) {
 	}
 }
 
+func TestLookupAttributes(t *testing.T) {
+	cases := []struct {
+		name    string
+		filter  Filter
+		opts    Options
+		wantKey string
+		wantVal string
+		wantNil bool
+	}{
+		{"account-wide excludes reads server-side", Filter{}, Options{}, "ReadOnly", "false", false},
+		{"account-wide with reads has no attribute", Filter{}, Options{IncludeReadOnly: true}, "", "", true},
+		// A pivot wins over the implicit ReadOnly filter (only one attribute is
+		// allowed), and it returns the pivot regardless of IncludeReadOnly.
+		{"source pivot", Filter{EventSource: "ec2.amazonaws.com"}, Options{}, "EventSource", "ec2.amazonaws.com", false},
+		{"event pivot keeps reads off the attribute", Filter{EventName: "RunInstances"}, Options{}, "EventName", "RunInstances", false},
+		{"resource pivot with reads", Filter{ResourceName: "i-0abc"}, Options{IncludeReadOnly: true}, "ResourceName", "i-0abc", false},
+	}
+	for _, c := range cases {
+		got := lookupAttributes(c.filter, c.opts)
+		if c.wantNil {
+			if got != nil {
+				t.Errorf("%s: want no attribute, got %v", c.name, got)
+			}
+			continue
+		}
+		if len(got) != 1 {
+			t.Fatalf("%s: want one attribute, got %d", c.name, len(got))
+		}
+		if string(got[0].AttributeKey) != c.wantKey || *got[0].AttributeValue != c.wantVal {
+			t.Errorf("%s: attribute = %s/%s, want %s/%s",
+				c.name, got[0].AttributeKey, *got[0].AttributeValue, c.wantKey, c.wantVal)
+		}
+	}
+}
+
 func TestSummarize_AssumedRole(t *testing.T) {
 	ev := summarize("deploy-session", "false", assumedRoleEvent)
 	if ev.Principal != "role/deploy-pipeline" {

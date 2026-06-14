@@ -89,20 +89,21 @@ events with no trail or S3 bucket setup required. Events are newest first.</p>
   • &ndash;source <service> every event from one service (e.g. ec2.amazonaws.com),
   • nothing            the account-wide activity feed.</p>
 
-<p>By default only mutating events are shown; &ndash;read-events includes the
-Describe<em>/List</em>/Get* noise too. &ndash;errors-only keeps just failed/denied calls
-(a burst of these is a recon or misconfiguration signal).</p>
+<p>By default only mutating events are shown. For the account-wide feed this is a
+server-side filter (CloudTrail ReadOnly=false), so the scan reaches real
+changes instead of paging through Describe<em>/List</em>/Get* noise; &ndash;read-events
+drops the filter and includes the reads. &ndash;errors-only keeps just failed/denied
+calls (a burst of these is a recon or misconfiguration signal).</p>
 
 <p>The &ndash;tui feed streams events in per region (it doesn&rsquo;t wait for the slowest
-region) and keeps the newest trail.maxEvents (default 200) that survive the
-hide-list below — raise it with &ndash;limit.</p>
+region) and keeps the newest trail.maxEvents (default 200) — raise it with
+&ndash;limit.</p>
 
-<p>Noisy events are filtered out server-side via trail.hideEvents in the config
-file, so they never eat into that cap. The shipped default hides every
-read-only call (Get<em>/Describe</em>/List<em>); add your own (e.g. ConsoleLogin,
-AssumeRole) or clear the list to see everything. Matching is case-insensitive
-and a trailing &ldquo;</em>&rdquo; is a prefix wildcard. An explicit &ndash;event lookup is never
-hidden.</p>
+<p>To suppress specific events on top of the read-only filter (e.g. noisy
+mutations like AssumeRole or ConsoleLogin), list them under trail.hideEvents in
+the config file; they are dropped server-side so they never eat into the cap.
+Matching is case-insensitive and a trailing &ldquo;*&rdquo; is a prefix wildcard. An
+explicit &ndash;event lookup is never hidden.</p>
 
 <p>CloudTrail records events in the region where the activity happened (global
 services such as IAM record in us-east-1) — use -r to pick the region.</p>
