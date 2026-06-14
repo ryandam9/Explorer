@@ -20,16 +20,21 @@ type Config struct {
 //
 //	trail:
 //	  hideEvents:
-//	    - AssumeRole
-//	    - ConsoleLogin
+//	    - Get*
 //	    - Describe*
+//	    - List*
+//	  maxEvents: 200
 type TrailConfig struct {
 	// HideEvents lists CloudTrail event names to suppress from the feed so the
-	// signal isn't drowned out by routine calls. Matching is case-insensitive;
-	// a trailing "*" is a prefix wildcard, so "Describe*" hides every describe
-	// call. Hidden events are dropped from the CLI output; in the TUI they are
-	// hidden by default and can be revealed with the "h" key.
+	// signal isn't drowned out by routine calls (read-only Get*/Describe*/List*
+	// calls, ConsoleLogin, AssumeRole, …). Matching is case-insensitive; a
+	// trailing "*" is a prefix wildcard, so "Describe*" hides every describe
+	// call. The filter is applied server-side, so a hidden event never counts
+	// against MaxEvents. An explicit `--event <Name>` lookup is never hidden.
 	HideEvents []string `mapstructure:"hideEvents"`
+	// MaxEvents caps how many events the `--tui` feed keeps after HideEvents is
+	// applied. 0 uses the built-in default (200). `--limit` overrides it.
+	MaxEvents int `mapstructure:"maxEvents"`
 }
 
 // AccountConfig represents configuration for a specific AWS account sweep.

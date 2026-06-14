@@ -54,15 +54,16 @@ By default only mutating events are shown; --read-events includes the
 Describe*/List*/Get* noise too. --errors-only keeps just failed/denied calls
 (a burst of these is a recon or misconfiguration signal).
 
-The --tui feed shows every event (read-only included) and lets you toggle
-read-only events (o) and the failed-only view (x) live, so nothing is dropped
-behind your back.
+The --tui feed streams events in per region (it doesn't wait for the slowest
+region) and keeps the newest trail.maxEvents (default 200) that survive the
+hide-list below — raise it with --limit.
 
-To permanently suppress noisy events (e.g. AssumeRole, ConsoleLogin) without
-re-passing flags, list them under trail.hideEvents in the config file —
-matching is case-insensitive and a trailing "*" is a prefix wildcard
-("Describe*"). Hidden events are dropped from this CLI output; in the TUI they
-are hidden by default and revealed with the "h" key.
+Noisy events are filtered out server-side via trail.hideEvents in the config
+file, so they never eat into that cap. The shipped default hides every
+read-only call (Get*/Describe*/List*); add your own (e.g. ConsoleLogin,
+AssumeRole) or clear the list to see everything. Matching is case-insensitive
+and a trailing "*" is a prefix wildcard. An explicit --event lookup is never
+hidden.
 
 CloudTrail records events in the region where the activity happened (global
 services such as IAM record in us-east-1) — use -r to pick the region.
@@ -122,19 +123,27 @@ This is the CLI twin of the summary TUI's 't' CloudTrail timeline.`,
 		}
 
 		if trailTUI {
-			// An interactive feed is more useful with more history than the CLI
-			// default; widen it unless the user pinned --limit explicitly.
-			if !cmd.Flags().Changed("limit") {
-				opts.Limit = 200
-			}
-			// The TUI shows every event and applies the read-only and
-			// config-hidden filters client-side (both toggleable in the UI), so
-			// the fetch must pull everything: include read-only events and keep
-			// the hidden ones rather than dropping them server-side.
+			// The feed's cap counts events that survive the trail.hideEvents
+			// filter, so include read-only events in the fetch and let the
+			// (server-side) hide list drop the noise — that way the limit is
+			// spent on events the user actually sees. --limit wins; otherwise
+			// use config trail.maxEvents, falling back to the built-in default.
 			opts.IncludeReadOnly = true
-			opts.HideEvents = nil
+			if !cmd.Flags().Changed("limit") {
+				opts.Limit = AppConfig.Trail.MaxEvents
+				if opts.Limit <= 0 {
+					opts.Limit = 200
+				}
+			}
+			// With reads filtered server-side, the account-wide feed must page
+			// deeper to collect `limit` mutations past the read-only noise.
+			// Pivoted lookups (resource/principal/event/source) already match
+			// few events, so leave their shallow cap alone.
+			if filter == (trail.Filter{}) {
+				opts.MaxPages = trail.DeepFeedPageCap
+			}
 			SilenceScanLogs()
-			m := trailtui.New(ctx, awscfg, regions, filter, opts, scope, AppConfig.Trail.HideEvents)
+			m := trailtui.New(ctx, awscfg, regions, filter, opts, scope)
 			p := tea.NewProgram(ui.WithWindowTitle(m), tea.WithAltScreen(), tea.WithContext(ctx))
 			if _, err := p.Run(); err != nil {
 				return fmt.Errorf("error running trail TUI: %w", err)

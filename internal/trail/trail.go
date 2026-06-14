@@ -146,6 +146,14 @@ const (
 	feedPageCap  = 20 // ~1000 events for the account-wide feed
 )
 
+// DeepFeedPageCap is a deeper page cap for the interactive feed. When read-only
+// events are filtered out server-side (trail.hideEvents), each page yields far
+// fewer countable events, so the account-wide scan must page further to fill
+// the limit past the read-only noise. Set it via Options.MaxPages. ~2500
+// events; at the 2 TPS limit this is a worst case of ~30s per region, but the
+// scan stops as soon as the limit is reached.
+const DeepFeedPageCap = 50
+
 // pageCapFor returns the page cap for a lookup. Options.MaxPages overrides it
 // (the TUI scans deeper); otherwise the account-wide feed gets the deeper cap.
 func pageCapFor(f Filter, opts Options) int {
@@ -215,6 +223,12 @@ func LookupFiltered(ctx context.Context, cfg aws.Config, region string, f Filter
 	}
 
 	hidden := HideMatcher(opts.HideEvents)
+	// An explicit single-event lookup means the caller is asking for exactly
+	// that event, so never hide it even if a pattern would match (e.g. looking
+	// up DescribeInstances while "Describe*" is in trail.hideEvents).
+	if f.EventName != "" {
+		hidden = func(string) bool { return false }
+	}
 
 	maxPages := pageCapFor(f, opts)
 	for page := 0; page < maxPages; page++ {
