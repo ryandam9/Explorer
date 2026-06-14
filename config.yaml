@@ -31,6 +31,9 @@ aws:
         # "standard" (default) or "adaptive" (adds client-side rate limiting).
         mode: ""
 services:
+    cloudfront:
+        enabled: true
+        resources: {}
     cloudwatch:
         enabled: true
         resources: {}
