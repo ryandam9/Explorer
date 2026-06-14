@@ -1550,7 +1550,7 @@ func (m *tuiModel) onResultsChanged() {
 	// Refresh the cached coverage count so the banner reflects what has streamed
 	// in so far (cheap to recompute here, vs. once per render frame).
 	if m.coverageAdvisory && m.engine != nil {
-		m.coverageMissing = len(summary.NotShown(summary.Coverage(m.sorted, m.engine.TypedServices())))
+		m.coverageMissing = len(summary.NotShown(summary.Coverage(m.sorted, m.engine.TypedServices(), m.coverageExtra())))
 	}
 
 	m.invalidateRows()
@@ -1848,6 +1848,15 @@ func (m tuiModel) tableHeight() int {
 // cheap predicate used for layout budgeting, without building the styled string.
 func (m tuiModel) hasCoverageBanner() bool {
 	return m.coverageAdvisory && m.coverageMissing > 0
+}
+
+// coverageExtra returns the user-configured additions to the coverage catalog
+// (summary.commonServices), or nil when there is no config.
+func (m tuiModel) coverageExtra() map[string]string {
+	if m.cfg == nil {
+		return nil
+	}
+	return m.cfg.Summary.CommonServices
 }
 
 // coverageBanner renders the one-line advisory shown above the table in the
@@ -3293,7 +3302,7 @@ func (m tuiModel) coverageBody(width int) string {
 	var b strings.Builder
 	b.WriteString(intro + "\n\n")
 	if m.engine != nil {
-		for _, c := range summary.NotShown(summary.Coverage(m.sorted, m.engine.TypedServices())) {
+		for _, c := range summary.NotShown(summary.Coverage(m.sorted, m.engine.TypedServices(), m.coverageExtra())) {
 			b.WriteString("  • " + c.Label + "\n")
 		}
 	}

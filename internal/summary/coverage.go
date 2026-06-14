@@ -72,11 +72,51 @@ type ServiceCoverage struct {
 	Shown bool // at least one resource of this service is in the inventory
 }
 
+// catalogWith returns the effective catalog: the built-in commonServices with
+// the user-configured extras (summary.commonServices) merged on top. An extra
+// whose key matches a built-in one overrides that label; a new key is appended.
+// A blank label falls back to the key so a misconfigured entry is still usable.
+func catalogWith(extra map[string]string) []catalogService {
+	if len(extra) == 0 {
+		return commonServices
+	}
+	out := make([]catalogService, len(commonServices))
+	copy(out, commonServices)
+
+	idx := make(map[string]int, len(out))
+	for i, c := range out {
+		idx[c.Key] = i
+	}
+
+	var added []string
+	for key, label := range extra {
+		if strings.TrimSpace(label) == "" {
+			label = key
+		}
+		if i, ok := idx[key]; ok {
+			out[i].Label = label
+		} else {
+			added = append(added, key)
+		}
+	}
+	// Append new keys in a stable order so output doesn't depend on map ranging.
+	sort.Strings(added)
+	for _, key := range added {
+		label := extra[key]
+		if strings.TrimSpace(label) == "" {
+			label = key
+		}
+		out = append(out, catalogService{Key: key, Label: label})
+	}
+	return out
+}
+
 // Coverage compares the curated catalog against the collected inventory.
 // typedServices is the set of services that have a typed collector (pass the
 // engine's registered collector names); every other catalog service is reached
-// only through the tag-based discovery sweep.
-func Coverage(resources []model.Resource, typedServices []string) []ServiceCoverage {
+// only through the tag-based discovery sweep. extra is the user-configured
+// addition to the catalog (summary.commonServices); pass nil for none.
+func Coverage(resources []model.Resource, typedServices []string, extra map[string]string) []ServiceCoverage {
 	typed := make(map[string]bool, len(typedServices))
 	for _, s := range typedServices {
 		typed[s] = true
@@ -88,8 +128,9 @@ func Coverage(resources []model.Resource, typedServices []string) []ServiceCover
 		}
 	}
 
-	out := make([]ServiceCoverage, 0, len(commonServices))
-	for _, c := range commonServices {
+	catalog := catalogWith(extra)
+	out := make([]ServiceCoverage, 0, len(catalog))
+	for _, c := range catalog {
 		out = append(out, ServiceCoverage{
 			Key:   c.Key,
 			Label: c.Label,
