@@ -31,6 +31,9 @@ aws:
         # "standard" (default) or "adaptive" (adds client-side rate limiting).
         mode: ""
 services:
+    apigateway:
+        enabled: true
+        resources: {}
     cloudfront:
         enabled: true
         resources: {}
@@ -55,6 +58,9 @@ services:
     emr:
         enabled: true
         resources: {}
+    eventbridge:
+        enabled: true
+        resources: {}
     iam:
         enabled: true
         resources: {}
@@ -77,6 +83,9 @@ services:
         enabled: true
         resources: {}
     sqs:
+        enabled: true
+        resources: {}
+    stepfunctions:
         enabled: true
         resources: {}
 filters:

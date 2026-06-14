@@ -35,6 +35,9 @@ var servicePermissions = map[string][]string{
 	"cloudwatch":     {"cloudwatch:DescribeAlarms"},
 	"cloudfront":     {"cloudfront:ListDistributions"},
 	"route53":        {"route53:ListHostedZones"},
+	"apigateway":     {"apigateway:GET"},
+	"stepfunctions":  {"states:ListStateMachines"},
+	"eventbridge":    {"events:ListEventBuses", "events:ListRules"},
 	"resourcegroups": {"tag:GetResources"},
 }
 
