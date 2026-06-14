@@ -88,7 +88,8 @@ unchanged account diffs clean.`,
 				fmt.Fprintln(os.Stderr, "Discovering resources across all services…")
 				seed, _ = discovery.Discover(ctx, eng.AWSConfig, eng.EffectiveRegions(), AppConfig.App.MaxConcurrency)
 			}
-			m := tui.NewModelWithSeed(ctx, eng, configFilePath(), AppConfig, seed)
+			m := tui.NewModelWithSeed(ctx, eng, configFilePath(), AppConfig, seed,
+				tui.WithCoverageAdvisory(!summaryTypedOnly))
 			p := tea.NewProgram(ui.WithWindowTitle(m), tea.WithAltScreen(), tea.WithMouseCellMotion(), tea.WithContext(ctx))
 			if _, err := p.Run(); err != nil {
 				fmt.Fprintf(os.Stderr, "Error running summary TUI: %v\n", err)

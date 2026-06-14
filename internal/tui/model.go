@@ -155,6 +155,15 @@ type tuiModel struct {
 	switcherForm *huh.Form
 	switching    bool
 
+	// Coverage advisory (summary --tui): warn that tag-discovered services may
+	// hide untagged resources. coverageAdvisory turns the banner on;
+	// coverageTagSweep records whether the all-services sweep actually ran
+	// (false under --typed-only); coverageMissing is the cached count of common
+	// services with nothing shown, refreshed as results stream in.
+	coverageAdvisory bool
+	coverageTagSweep bool
+	coverageMissing  int
+
 	// Terminal size
 	width  int
 	height int
@@ -268,10 +277,24 @@ func NewModel(ctx context.Context, eng *engine.Engine, configPath string, cfg *c
 	return NewModelWithSeed(ctx, eng, configPath, cfg, nil)
 }
 
+// Option customizes a model at construction time.
+type Option func(*tuiModel)
+
+// WithCoverageAdvisory enables the summary coverage banner, which warns that
+// tag-discovered services may hide untagged resources and counts the common
+// services with nothing shown. tagSweep is false under --typed-only (the
+// all-services sweep was skipped).
+func WithCoverageAdvisory(tagSweep bool) Option {
+	return func(m *tuiModel) {
+		m.coverageAdvisory = true
+		m.coverageTagSweep = tagSweep
+	}
+}
+
 // NewModelWithSeed is like NewModel but pre-populates the table with seed
 // resources (e.g. the all-services Tagging API sweep) which are merged and
 // deduplicated with the resources streamed from the engine's typed collectors.
-func NewModelWithSeed(ctx context.Context, eng *engine.Engine, configPath string, cfg *config.Config, seed []model.Resource) tea.Model {
+func NewModelWithSeed(ctx context.Context, eng *engine.Engine, configPath string, cfg *config.Config, seed []model.Resource, opts ...Option) tea.Model {
 	chunks := make(chan model.ResultChunk, 64)
 	sp := spinner.New()
 	sp.Spinner = spinner.MiniDot
@@ -330,6 +353,10 @@ func NewModelWithSeed(ctx context.Context, eng *engine.Engine, configPath string
 	// Mark every visible row with a mouse zone so clicks can select it.
 	m.table.MarkRow = func(i int, rendered string) string {
 		return zoneM.Mark(fmt.Sprintf("%s%d", zoneRow, i), rendered)
+	}
+
+	for _, opt := range opts {
+		opt(&m)
 	}
 
 	// Surface seed resources immediately; typed results stream in and merge.
@@ -1481,6 +1508,12 @@ func (m *tuiModel) onResultsChanged() {
 		m.activeService = 0
 	}
 
+	// Refresh the cached coverage count so the banner reflects what has streamed
+	// in so far (cheap to recompute here, vs. once per render frame).
+	if m.coverageAdvisory && m.engine != nil {
+		m.coverageMissing = len(summary.NotShown(summary.Coverage(m.sorted, m.engine.TypedServices())))
+	}
+
 	m.invalidateRows()
 }
 
@@ -1763,10 +1796,57 @@ func (m tuiModel) tableHeight() int {
 	// status bar(1) = 7. Anything less tall than the terminal and Bubble Tea
 	// trims the frame from the top, hiding the header.
 	h := m.height - 7
+	if m.hasCoverageBanner() {
+		h-- // the banner takes one line above the body
+	}
 	if h < 8 {
 		return 8
 	}
 	return h
+}
+
+// hasCoverageBanner reports whether the coverage advisory line is showing — the
+// cheap predicate used for layout budgeting, without building the styled string.
+func (m tuiModel) hasCoverageBanner() bool {
+	return m.coverageAdvisory && m.coverageMissing > 0
+}
+
+// coverageBanner renders the one-line advisory shown above the table in the
+// summary view: tag-discovered services may hide untagged resources. Returns ""
+// unless the advisory is enabled and at least one common service shows nothing,
+// so the banner appears exactly when it has something to warn about.
+func (m tuiModel) coverageBanner() string {
+	if !m.hasCoverageBanner() {
+		return ""
+	}
+	var msg string
+	if m.coverageTagSweep {
+		msg = fmt.Sprintf("⚠ Coverage: %d common service(s) show nothing — tag-discovered ones may have untagged resources hidden. Full list: `summary` on the CLI.",
+			m.coverageMissing)
+	} else {
+		msg = fmt.Sprintf("⚠ Coverage: typed collectors only (--typed-only) — %d common service(s) not collected. Full list: `summary` on the CLI.",
+			m.coverageMissing)
+	}
+	w := m.width - 2
+	if w < 10 {
+		w = 10
+	}
+	msg = ansi.Truncate(msg, w, "…")
+	return lipgloss.NewStyle().
+		Width(w).
+		Foreground(lipgloss.Color(ui.ColorWarning())).
+		Bold(true).
+		Render(msg)
+}
+
+// frameWithBanner stacks header, the coverage banner (when present), the body
+// and the status bar. The banner's one line is accounted for in tableHeight, so
+// the body still fits the terminal exactly.
+func (m tuiModel) frameWithBanner(header, body, status string) string {
+	if banner := m.coverageBanner(); banner != "" {
+		return lipgloss.JoinVertical(lipgloss.Left, header, banner, body, status)
+	}
+	return lipgloss.JoinVertical(lipgloss.Left, header, body, status)
 }
 
 // syncTableLayout resizes the table to the current terminal dimensions.
@@ -1863,15 +1943,30 @@ func (m tuiModel) buildSwitcherForm() *huh.Form {
 		regionOpts = append(regionOpts, huh.NewOption(r, r))
 	}
 
+	// Bound each list to a scrolling window so a long region list (all-regions
+	// offers ~30) stays inside the modal instead of overflowing it with no way
+	// to scroll. The region list gets the lion's share of the height and is
+	// filterable so a region can be typed to rather than scrolled to.
+	regionRows := m.height - 16
+	if regionRows < 5 {
+		regionRows = 5
+	}
+	if regionRows > 18 {
+		regionRows = 18
+	}
+
 	return huh.NewForm(
 		huh.NewGroup(
 			huh.NewSelect[string]().
 				Key("profile").
 				Title("AWS profile").
+				Height(4).
 				Options(profileOpts...),
 			huh.NewSelect[string]().
 				Key("region").
-				Title("Region scope").
+				Title("Region scope (type to filter)").
+				Height(regionRows).
+				Filtering(true).
 				Options(regionOpts...),
 		),
 	)
@@ -2187,7 +2282,7 @@ func (m tuiModel) View() string {
 		// settings panel) instead of replacing the body, so the table and the
 		// header's scanning progress stay visible and refresh in the
 		// background while the user watches the activity log.
-		base := lipgloss.JoinVertical(lipgloss.Left, header, m.renderBody(), status)
+		base := m.frameWithBanner(header, m.renderBody(), status)
 		output = ui.OverlayCenter(base, m.debugOverlay(), m.width, m.height)
 	} else if m.showAcctDiff {
 		centered := lipgloss.Place(m.width, m.height-4, lipgloss.Center, lipgloss.Center, m.acctDiffOverlay())
@@ -2196,7 +2291,7 @@ func (m tuiModel) View() string {
 		// The console floats over the live app (HUD-style): render the normal
 		// frame and composite the fixed-size panel into its center, so the
 		// theme changes are visible on the real UI around it.
-		base := lipgloss.JoinVertical(lipgloss.Left, header, m.renderBody(), status)
+		base := m.frameWithBanner(header, m.renderBody(), status)
 		output = ui.OverlayCenter(base, m.settings.View(), m.width, m.height)
 	} else if m.showFilter && m.filterForm != nil {
 		formW := 52
@@ -2206,7 +2301,16 @@ func (m tuiModel) View() string {
 		output = lipgloss.JoinVertical(lipgloss.Left, header, modal, status)
 	} else if m.showSwitcher && m.switcherForm != nil {
 		formW := 56
-		formH := 16
+		// Grow the modal with the terminal so the scrolling region list has room;
+		// the form sizes its own lists (see buildSwitcherForm), this just keeps
+		// the surrounding box from clipping them.
+		formH := m.height - 6
+		if formH < 12 {
+			formH = 12
+		}
+		if formH > 28 {
+			formH = 28
+		}
 		formView := ui.ModalStyle(formW, formH).Render(m.switcherForm.View())
 		modal := lipgloss.Place(m.width, m.height-4, lipgloss.Center, lipgloss.Center, formView)
 		output = lipgloss.JoinVertical(lipgloss.Left, header, modal, status)
@@ -2215,7 +2319,7 @@ func (m tuiModel) View() string {
 		output = lipgloss.JoinVertical(lipgloss.Left, header, modal, status)
 	} else {
 		body := m.renderBody()
-		output = lipgloss.JoinVertical(lipgloss.Left, header, body, status)
+		output = m.frameWithBanner(header, body, status)
 	}
 
 	// Overlay the toast at top-right if active.
