@@ -77,3 +77,53 @@ func TestBuildSwitcherFormBuilds(t *testing.T) {
 		}
 	}
 }
+
+func TestCoverageOverlayOpensAndCloses(t *testing.T) {
+	m := newTestModel(t, 140, 40)
+	m.coverageAdvisory = true
+	m.coverageMissing = 3
+
+	m = update(m, key("c"))
+	if !m.showCoverage {
+		t.Fatal("c should open the coverage overlay")
+	}
+	m = update(m, key("c"))
+	if m.showCoverage {
+		t.Error("c should close the coverage overlay")
+	}
+
+	// Esc also closes it.
+	m = update(m, key("c"))
+	m = update(m, key("esc"))
+	if m.showCoverage {
+		t.Error("esc should close the coverage overlay")
+	}
+}
+
+func TestCoverageOverlayNoopWithoutAdvisory(t *testing.T) {
+	m := newTestModel(t, 140, 40) // advisory off by default
+	m = update(m, key("c"))
+	if m.showCoverage {
+		t.Error("c should do nothing when the coverage advisory is inactive")
+	}
+}
+
+func TestHelpBodyListsCoverageOnlyInSummary(t *testing.T) {
+	const marker = "List common services with nothing shown"
+	plain := newTestModel(t, 140, 40)
+	if strings.Contains(plain.helpBody(), marker) {
+		t.Error("plain TUI help should not advertise the coverage shortcut")
+	}
+	sum := newTestModel(t, 140, 40)
+	sum.coverageAdvisory = true
+	if !strings.Contains(sum.helpBody(), marker) {
+		t.Error("summary help should list the coverage shortcut")
+	}
+}
+
+func TestCoverageBodyHasPlainExplanation(t *testing.T) {
+	m := newTestModel(t, 140, 40)
+	if body := m.coverageBody(70); !strings.Contains(body, "no tags") {
+		t.Errorf("coverage body should carry the plain explanation:\n%s", body)
+	}
+}
