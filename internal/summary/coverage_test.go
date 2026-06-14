@@ -29,15 +29,15 @@ func TestCoverage_TypedFlagFromRegistry(t *testing.T) {
 	if c := coverageFor(t, "cloudfront"); !c.Typed {
 		t.Error("cloudfront should be typed (it has a collector)")
 	}
-	if c := coverageFor(t, "states"); c.Typed {
-		t.Error("states (Step Functions) should be tag-discovered, not typed")
+	if c := coverageFor(t, "elasticache"); c.Typed {
+		t.Error("elasticache should be tag-discovered, not typed (no collector in this set)")
 	}
 }
 
 func TestCoverage_ShownReflectsResources(t *testing.T) {
 	resources := []model.Resource{
 		{Service: "ec2", ID: "i-1"},
-		{Service: "states", ID: "sm-1"}, // a tagged Step Functions machine
+		{Service: "elasticache", ID: "cc-1"}, // a tagged ElastiCache cluster
 	}
 	cov := Coverage(resources, typedServices)
 	byKey := map[string]ServiceCoverage{}
@@ -47,8 +47,8 @@ func TestCoverage_ShownReflectsResources(t *testing.T) {
 	if !byKey["ec2"].Shown {
 		t.Error("ec2 should be shown")
 	}
-	if !byKey["states"].Shown {
-		t.Error("states should be shown when a resource carries that service")
+	if !byKey["elasticache"].Shown {
+		t.Error("elasticache should be shown when a resource carries that service")
 	}
 	if byKey["lambda"].Shown {
 		t.Error("lambda should not be shown when no lambda resources exist")

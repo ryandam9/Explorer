@@ -27,7 +27,7 @@ type catalogService struct {
 // tag-discovered ones) it has resources that are untagged and therefore hidden.
 //
 // Keys for typed services equal the collector name; keys for tag-discovered
-// services equal the ARN service namespace (e.g. Step Functions is "states").
+// services equal the ARN service namespace (e.g. EFS is "elasticfilesystem").
 var commonServices = []catalogService{
 	// Typed collectors — full coverage regardless of tags.
 	{"ec2", "EC2"},
@@ -46,10 +46,10 @@ var commonServices = []catalogService{
 	{"cloudwatch", "CloudWatch"},
 	{"cloudfront", "CloudFront"},
 	{"route53", "Route 53"},
-	// Tag-discovered only — untagged resources here can be missing.
 	{"apigateway", "API Gateway"},
-	{"states", "Step Functions"},
-	{"events", "EventBridge"},
+	{"stepfunctions", "Step Functions"},
+	{"eventbridge", "EventBridge"},
+	// Tag-discovered only — untagged resources here can be missing.
 	{"elasticache", "ElastiCache"},
 	{"elasticfilesystem", "EFS"},
 	{"kinesis", "Kinesis"},

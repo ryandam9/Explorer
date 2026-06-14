@@ -21,9 +21,11 @@ import (
 	"github.com/ryandam9/aws_explorer/internal/config"
 	"github.com/ryandam9/aws_explorer/internal/model"
 	"github.com/ryandam9/aws_explorer/internal/services"
+	"github.com/ryandam9/aws_explorer/internal/services/apigateway"
 	"github.com/ryandam9/aws_explorer/internal/services/cloudfront"
 	"github.com/ryandam9/aws_explorer/internal/services/cloudwatch"
 	"github.com/ryandam9/aws_explorer/internal/services/dynamodb"
+	"github.com/ryandam9/aws_explorer/internal/services/eventbridge"
 	"github.com/ryandam9/aws_explorer/internal/services/ec2"
 	"github.com/ryandam9/aws_explorer/internal/services/ecs"
 	"github.com/ryandam9/aws_explorer/internal/services/eks"
@@ -37,6 +39,7 @@ import (
 	"github.com/ryandam9/aws_explorer/internal/services/secretsmanager"
 	"github.com/ryandam9/aws_explorer/internal/services/sns"
 	"github.com/ryandam9/aws_explorer/internal/services/sqs"
+	"github.com/ryandam9/aws_explorer/internal/services/stepfunctions"
 )
 
 // Engine is responsible for orchestrating the scans.
@@ -121,6 +124,9 @@ func NewEngine(ctx context.Context, cfg *config.Config) (*Engine, error) {
 	registry.Register(cloudwatch.NewCollector())
 	registry.Register(cloudfront.NewCollector())
 	registry.Register(route53.NewCollector())
+	registry.Register(apigateway.NewCollector())
+	registry.Register(stepfunctions.NewCollector())
+	registry.Register(eventbridge.NewCollector())
 
 	return &Engine{
 		Config:          cfg,
