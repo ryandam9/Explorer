@@ -10,6 +10,26 @@ type Config struct {
 	Output   OutputConfig             `mapstructure:"output"`
 	UI       UIConfig                 `mapstructure:"ui"`
 	Display  DisplayConfig            `mapstructure:"display"`
+	Trail    TrailConfig              `mapstructure:"trail"`
+}
+
+// TrailConfig configures the CloudTrail activity feed (the `trail` command and
+// its `--tui`).
+//
+// Example config.yaml:
+//
+//	trail:
+//	  hideEvents:
+//	    - AssumeRole
+//	    - ConsoleLogin
+//	    - Describe*
+type TrailConfig struct {
+	// HideEvents lists CloudTrail event names to suppress from the feed so the
+	// signal isn't drowned out by routine calls. Matching is case-insensitive;
+	// a trailing "*" is a prefix wildcard, so "Describe*" hides every describe
+	// call. Hidden events are dropped from the CLI output; in the TUI they are
+	// hidden by default and can be revealed with the "h" key.
+	HideEvents []string `mapstructure:"hideEvents"`
 }
 
 // AccountConfig represents configuration for a specific AWS account sweep.

@@ -93,6 +93,16 @@ events with no trail or S3 bucket setup required. Events are newest first.</p>
 Describe<em>/List</em>/Get* noise too. &ndash;errors-only keeps just failed/denied calls
 (a burst of these is a recon or misconfiguration signal).</p>
 
+<p>The &ndash;tui feed shows every event (read-only included) and lets you toggle
+read-only events (o) and the failed-only view (x) live, so nothing is dropped
+behind your back.</p>
+
+<p>To permanently suppress noisy events (e.g. AssumeRole, ConsoleLogin) without
+re-passing flags, list them under trail.hideEvents in the config file —
+matching is case-insensitive and a trailing &ldquo;<em>&rdquo; is a prefix wildcard
+(&ldquo;Describe</em>&rdquo;). Hidden events are dropped from this CLI output; in the TUI they
+are hidden by default and revealed with the &ldquo;h&rdquo; key.</p>
+
 <p>CloudTrail records events in the region where the activity happened (global
 services such as IAM record in us-east-1) — use -r to pick the region.</p>
 

@@ -311,6 +311,39 @@ func TestRender_CSV(t *testing.T) {
 	}
 }
 
+func TestHideMatcher(t *testing.T) {
+	hide := HideMatcher([]string{"AssumeRole", "Describe*", "  ConsoleLogin  ", ""})
+	cases := []struct {
+		name string
+		want bool
+	}{
+		{"AssumeRole", true},          // exact
+		{"assumerole", true},          // case-insensitive
+		{"DescribeInstances", true},   // prefix wildcard
+		{"describevolumes", true},     // prefix wildcard, case-insensitive
+		{"ConsoleLogin", true},        // trimmed pattern
+		{"RunInstances", false},       // no match
+		{"Describe", true},            // prefix matches the empty remainder
+		{"AssumeRoleWithSAML", false}, // exact pattern is not a prefix
+	}
+	for _, c := range cases {
+		if got := hide(c.name); got != c.want {
+			t.Errorf("hide(%q) = %v, want %v", c.name, got, c.want)
+		}
+	}
+}
+
+func TestHideMatcher_EmptyHidesNothing(t *testing.T) {
+	hide := HideMatcher(nil)
+	if hide("AnyEvent") {
+		t.Error("nil patterns should hide nothing")
+	}
+	hide = HideMatcher([]string{"", "   "})
+	if hide("AnyEvent") {
+		t.Error("blank-only patterns should hide nothing")
+	}
+}
+
 func TestPageCapFor(t *testing.T) {
 	if got := pageCapFor(Filter{}, Options{}); got != feedPageCap {
 		t.Errorf("account-wide cap = %d, want feedPageCap %d", got, feedPageCap)

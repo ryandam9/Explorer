@@ -24,7 +24,7 @@ func testEvents() []trail.Event {
 // newTestModel builds a sized model with the sample events loaded.
 func newTestModel(t *testing.T) Model {
 	t.Helper()
-	m := New(context.Background(), aws.Config{}, []string{"us-east-1"}, trail.Filter{}, trail.Options{}, "account-wide activity")
+	m := New(context.Background(), aws.Config{}, []string{"us-east-1"}, trail.Filter{}, trail.Options{}, "account-wide activity", nil)
 	mm, _ := m.Update(tea.WindowSizeMsg{Width: 120, Height: 40})
 	m = mm.(Model)
 	mm, _ = m.Update(loadedMsg{events: testEvents()})
@@ -100,7 +100,7 @@ func TestResetClearsFilterSortAndToggle(t *testing.T) {
 }
 
 func TestLoadErrorShownInBody(t *testing.T) {
-	m := New(context.Background(), aws.Config{}, []string{"us-east-1"}, trail.Filter{}, trail.Options{}, "account-wide activity")
+	m := New(context.Background(), aws.Config{}, []string{"us-east-1"}, trail.Filter{}, trail.Options{}, "account-wide activity", nil)
 	mm, _ := m.Update(tea.WindowSizeMsg{Width: 100, Height: 30})
 	m = mm.(Model)
 	mm, _ = m.Update(loadedMsg{err: errTest("not authorized")})
@@ -122,6 +122,63 @@ func TestDetailOverlayOpens(t *testing.T) {
 	m = update(m, key("esc"))
 	if m.overlay != overlayNone {
 		t.Error("esc should close the overlay")
+	}
+}
+
+func TestReadOnlyToggleHidesReadEvents(t *testing.T) {
+	m := New(context.Background(), aws.Config{}, []string{"us-east-1"}, trail.Filter{}, trail.Options{}, "account-wide activity", nil)
+	mm, _ := m.Update(tea.WindowSizeMsg{Width: 120, Height: 40})
+	m = mm.(Model)
+	evs := append(testEvents(), trail.Event{
+		Time: time.Now(), EventName: "DescribeInstances", Principal: "user/alice", SourceIP: "198.51.100.2", ReadOnly: true,
+	})
+	mm, _ = m.Update(loadedMsg{events: evs})
+	m = mm.(Model)
+
+	if len(m.visible) != 4 {
+		t.Fatalf("read-only events should be visible by default, got %d/4", len(m.visible))
+	}
+	m = update(m, key("o"))
+	if !m.hideReadOnly || len(m.visible) != 3 {
+		t.Fatalf("o should hide the read-only event, got hideReadOnly=%v visible=%d", m.hideReadOnly, len(m.visible))
+	}
+	m = update(m, key("o"))
+	if m.hideReadOnly || len(m.visible) != 4 {
+		t.Errorf("o again should restore read-only events, got %d", len(m.visible))
+	}
+}
+
+func TestHiddenEventsToggle(t *testing.T) {
+	m := New(context.Background(), aws.Config{}, []string{"us-east-1"}, trail.Filter{}, trail.Options{}, "account-wide activity", []string{"DeleteBucket"})
+	mm, _ := m.Update(tea.WindowSizeMsg{Width: 120, Height: 40})
+	m = mm.(Model)
+	mm, _ = m.Update(loadedMsg{events: testEvents()})
+	m = mm.(Model)
+
+	// DeleteBucket is configured-hidden, so only the other two events show.
+	if len(m.visible) != 2 {
+		t.Fatalf("configured-hidden event should be suppressed by default, got %d/2", len(m.visible))
+	}
+	for _, ev := range m.visible {
+		if ev.EventName == "DeleteBucket" {
+			t.Fatal("DeleteBucket should be hidden by default")
+		}
+	}
+	m = update(m, key("h"))
+	if !m.revealHidden || len(m.visible) != 3 {
+		t.Fatalf("h should reveal the hidden event, got revealHidden=%v visible=%d", m.revealHidden, len(m.visible))
+	}
+	m = update(m, key("h"))
+	if m.revealHidden || len(m.visible) != 2 {
+		t.Errorf("h again should re-hide, got %d", len(m.visible))
+	}
+}
+
+func TestHiddenToggleNoopWithoutConfig(t *testing.T) {
+	m := newTestModel(t) // no hide patterns
+	m = update(m, key("h"))
+	if m.revealHidden {
+		t.Error("h should be a no-op when nothing is configured to hide")
 	}
 }
 
