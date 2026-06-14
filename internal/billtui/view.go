@@ -176,38 +176,64 @@ func (m Model) overlayStyle() lipgloss.Style {
 		Padding(1, 2)
 }
 
+// detailRows returns the (label, value) pairs shown in the line detail overlay
+// — the single source shared by the rendered overlay and the plain-text
+// clipboard copy. The Change row only appears when there's a delta to show.
+func (m Model) detailRows(l *billing.Line) [][2]string {
+	currency := ""
+	if m.bill != nil {
+		currency = m.bill.Currency
+	}
+	rows := [][2]string{
+		{"Usage type", l.UsageType},
+		{"Usage", billing.FormatQty(l.Quantity) + " " + l.Unit},
+		{"Cost", fmt.Sprintf("%s (%.6f %s)", billing.FormatAmount(l.Amount, currency), l.Amount, currency)},
+	}
+	if d := m.deltas[l.Key()]; d != 0 {
+		rows = append(rows, [2]string{"Change", formatDelta(d, currency)})
+	}
+	rows = append(rows, [2]string{"Period", m.start.Format("2006-01-02") + " → " + m.end.Format("2006-01-02")})
+	return rows
+}
+
 func (m Model) detailOverlay() string {
 	l := m.selected()
 	if l == nil {
 		return ""
-	}
-	currency := ""
-	if m.bill != nil {
-		currency = m.bill.Currency
 	}
 	style := m.overlayStyle()
 	w := style.GetWidth() - style.GetHorizontalPadding()
 
 	label := lipgloss.NewStyle().Foreground(lipgloss.Color(ui.ColorMuted())).Width(12)
 	value := lipgloss.NewStyle().Foreground(lipgloss.Color(ui.ColorText())).Width(w - 12)
-	row := func(name, v string) string {
-		if v == "" {
-			v = "-"
-		}
-		return lipgloss.JoinHorizontal(lipgloss.Top, label.Render(name), value.Render(v))
-	}
 
 	var b strings.Builder
 	b.WriteString(ui.HeaderStyle().Render(l.Service) + "\n\n")
-	b.WriteString(row("Usage type", l.UsageType) + "\n")
-	b.WriteString(row("Usage", billing.FormatQty(l.Quantity)+" "+l.Unit) + "\n")
-	b.WriteString(row("Cost", fmt.Sprintf("%s (%.6f %s)", billing.FormatAmount(l.Amount, currency), l.Amount, currency)) + "\n")
-	if d := m.deltas[l.Key()]; d != 0 {
-		b.WriteString(row("Change", formatDelta(d, currency)) + "\n")
+	for _, r := range m.detailRows(l) {
+		v := r[1]
+		if v == "" {
+			v = "-"
+		}
+		b.WriteString(lipgloss.JoinHorizontal(lipgloss.Top, label.Render(r[0]), value.Render(v)) + "\n")
 	}
-	b.WriteString(row("Period", m.start.Format("2006-01-02")+" → "+m.end.Format("2006-01-02")) + "\n\n")
-	b.WriteString(ui.MutedStyle().Render("x lists this service's resources · y copies the line · Esc closes"))
+	b.WriteString("\n" + ui.MutedStyle().Render("x lists this service's resources · y copies this line · Esc closes"))
 	return style.Render(b.String())
+}
+
+// detailText renders the selected line as plain, unstyled text for the
+// clipboard, so the overlay can be pasted without ANSI escapes or the rest of
+// the table coming along.
+func (m Model) detailText(l *billing.Line) string {
+	var b strings.Builder
+	b.WriteString(l.Service + "\n\n")
+	for _, r := range m.detailRows(l) {
+		v := r[1]
+		if v == "" {
+			v = "-"
+		}
+		b.WriteString(r[0] + ": " + v + "\n")
+	}
+	return strings.TrimRight(b.String(), "\n")
 }
 
 func (m Model) resourcesOverlay() string {
@@ -271,7 +297,7 @@ func (m Model) helpOverlay() string {
 		{"s / R", "Sort by the next column / reverse the direction"},
 		{"r", "Reset filter and sort"},
 		{"</> or ,/.", "Scroll columns when the table is wider than the screen"},
-		{"y", "Copy the selected service and usage type"},
+		{"y", "Copy the selected service and usage type (or the whole detail panel when it's open)"},
 		{"C", "Export the current view to CSV under ~/.aws_explorer/exports/"},
 		{"~", "Debug: live view of what the tool is doing"},
 		{"?", "Toggle this help"},

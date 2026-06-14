@@ -1,7 +1,11 @@
 package billtui
 
 import (
+	"strings"
 	"testing"
+	"time"
+
+	tea "github.com/charmbracelet/bubbletea"
 
 	"github.com/ryandam9/aws_explorer/internal/billing"
 	"github.com/ryandam9/aws_explorer/internal/table"
@@ -9,6 +13,80 @@ import (
 
 func line(service, usage string, amount float64) billing.Line {
 	return billing.Line{Service: service, UsageType: usage, Amount: amount}
+}
+
+func key(s string) tea.KeyMsg {
+	switch s {
+	case "enter":
+		return tea.KeyMsg{Type: tea.KeyEnter}
+	case "esc":
+		return tea.KeyMsg{Type: tea.KeyEsc}
+	}
+	return tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune(s)}
+}
+
+// captureClipboard redirects the clipboard sink to a buffer for the duration of
+// a test, since the real clipboard is unavailable in headless CI.
+func captureClipboard(t *testing.T) *string {
+	t.Helper()
+	var got string
+	prev := clipboardWrite
+	clipboardWrite = func(s string) error { got = s; return nil }
+	t.Cleanup(func() { clipboardWrite = prev })
+	return &got
+}
+
+// billModel builds a sized, populated model ready for key input.
+func billModel(t *testing.T, lines ...billing.Line) Model {
+	t.Helper()
+	start := time.Date(2026, 6, 1, 0, 0, 0, 0, time.UTC)
+	end := time.Date(2026, 6, 14, 0, 0, 0, 0, time.UTC)
+	m := New(nil, nil, start, end, "June 2026", 5*time.Minute, "default")
+	m.bill = &billing.Bill{Currency: "USD", Lines: lines}
+	mm, _ := m.Update(tea.WindowSizeMsg{Width: 120, Height: 40})
+	m = mm.(Model)
+	m.rebuild()
+	return m
+}
+
+func TestCopyDetailOverlayCopiesPanel(t *testing.T) {
+	got := captureClipboard(t)
+	m := billModel(t, billing.Line{
+		Service: "Amazon EC2", UsageType: "BoxUsage:t3.micro",
+		Quantity: 10, Unit: "Hrs", Amount: 12.50,
+	})
+	mm, _ := m.Update(key("enter"))
+	m = mm.(Model)
+	if m.overlay != overlayDetail {
+		t.Fatal("enter should open the detail overlay")
+	}
+	mm, _ = m.Update(key("y"))
+	m = mm.(Model)
+
+	if !strings.Contains(m.status, "Amazon EC2 line") {
+		t.Errorf("copying with the overlay open should report the line copy, got %q", m.status)
+	}
+	// The whole panel is copied — labelled fields — not just the usage type.
+	for _, want := range []string{
+		"Amazon EC2", "Usage type: BoxUsage:t3.micro", "Cost:", "Period:",
+	} {
+		if !strings.Contains(*got, want) {
+			t.Errorf("clipboard missing %q:\n%s", want, *got)
+		}
+	}
+}
+
+func TestCopyLineWithoutOverlay(t *testing.T) {
+	got := captureClipboard(t)
+	m := billModel(t, billing.Line{
+		Service: "Amazon S3", UsageType: "TimedStorage", Quantity: 1, Unit: "GB-Mo", Amount: 2,
+	})
+	mm, _ := m.Update(key("y"))
+	m = mm.(Model)
+
+	if *got != "Amazon S3 TimedStorage" {
+		t.Errorf("copying without the overlay should copy service + usage type, got %q", *got)
+	}
 }
 
 func TestDiffBills(t *testing.T) {

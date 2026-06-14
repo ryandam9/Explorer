@@ -296,6 +296,14 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		case "esc", "q", "enter", "?", "x":
 			m.overlay = overlayNone
 			m.resService = ""
+		case "y":
+			// Copy the whole detail panel so it can be shared as-is, without the
+			// table behind the overlay coming along.
+			if m.overlay == overlayDetail {
+				if l := m.selected(); l != nil {
+					m.copyToClipboard(m.detailText(l), l.Service+" line")
+				}
+			}
 		}
 		return m, nil
 	}
@@ -351,7 +359,8 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.tbl.ScrollRight()
 	case "y":
 		if l := m.selected(); l != nil {
-			m.copyToClipboard(l.Service + " " + l.UsageType)
+			s := l.Service + " " + l.UsageType
+			m.copyToClipboard(s, s)
 		}
 	case "C":
 		m.exportCSV()
@@ -376,15 +385,23 @@ func (m *Model) selected() *billing.Line {
 	return &m.visible[i]
 }
 
-func (m *Model) copyToClipboard(s string) {
-	if s == "" {
+// clipboardWrite is the clipboard sink, indirected through a variable so tests
+// can capture copies without a real clipboard (which is unavailable in headless
+// CI, where clipboard.WriteAll always errors).
+var clipboardWrite = clipboard.WriteAll
+
+// copyToClipboard writes content to the system clipboard and reports the
+// outcome on the status bar using label (kept short, since content may be a
+// multi-line detail panel).
+func (m *Model) copyToClipboard(content, label string) {
+	if content == "" {
 		return
 	}
-	if err := clipboard.WriteAll(s); err != nil {
+	if err := clipboardWrite(content); err != nil {
 		m.status = "copy failed: clipboard unavailable"
 		return
 	}
-	m.status = "copied " + s
+	m.status = "copied " + label
 }
 
 func (m *Model) exportCSV() {
