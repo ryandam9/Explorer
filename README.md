@@ -11,7 +11,7 @@ Discover, monitor, and display AWS resources across accounts and regions via CLI
 - **Cost/waste audit**: `aws_explorer audit` scans for the classic sources of silent spend — unattached EBS volumes, idle Elastic IPs and NAT gateways, load balancers with no healthy targets or no traffic, gp2→gp3 candidates, forgotten snapshots/AMIs, over-provisioned DynamoDB tables — each finding with a stable check ID and an estimated monthly cost, printable or explored in an interactive TUI (`--tui`) — see [Audit Usage](#audit-usage)
 - **Live bill**: `aws_explorer bill` shows the actual bill from the Cost Explorer API — every service and usage type with its usage quantity, price and a grand total (the Billing console's numbers, not list-price estimates); `--tui` is a live screen that re-fetches on an interval, flags what moved since the last refresh, and drills into per-resource costs (resource ID/ARN) for a service — see [Bill Usage](#bill-usage)
 - **IAM debugging**: `aws_explorer iam decode` turns an "Encoded authorization failure message" into a readable verdict, and `aws_explorer iam can <principal> <action> [resource]` simulates IAM policy ("can X do Y on Z?") with the matched statements named and the simulator's blind spots stated — see [IAM Tools](#iam-tools)
-- **CloudTrail "who changed this"**: `aws_explorer trail <resource-id-or-arn>` lists recent CloudTrail management events for a resource — when, which API call, which principal, from which IP — using the zero-setup 90-day LookupEvents window; the summary TUI's `t` timeline is the interactive twin — see [Trail Usage](#trail-usage)
+- **CloudTrail activity feed**: `aws_explorer trail [resource]` lists recent CloudTrail management events — when, which API call, which principal, from which IP, and whether it failed — scoped to a resource, a principal (`--by`), an API (`--event`), a service (`--source`), or the whole account, with `--errors-only` for failed/denied calls; uses the zero-setup 90-day LookupEvents window; the summary TUI's `t` timeline is the interactive twin — see [Trail Usage](#trail-usage)
 - **Account snapshot diff**: `summary --baseline` / `summary --diff` answers "what changed in this account since yesterday?" — added/removed/modified resources across the whole merged-by-ARN inventory, deterministic and volatile-field-free; `D` in the summary TUI is the interactive twin — see [Account snapshot diff](#account-snapshot-diff--what-changed-since-yesterday)
 - **Open in AWS console**: `o` in every TUI (summary, VPC explorer, S3, CloudWatch logs) copies a console deep link for the selection — ARN-aware coverage for all 15 services and every VPC resource type, with an ARN-search fallback for the long tail — and opens it in your browser when the session is local
 - **Global fuzzy finder**: `Ctrl+P` in the summary TUI jumps to any resource by name/ID/ARN fragment ("I have `eni-0abc` from an error — what is it?"); `aws_explorer find <fragment>` is the CLI twin — see [Find Usage](#find-usage)
@@ -855,21 +855,33 @@ the real resource.
 
 ## Trail Usage
 
-`trail` answers the most useful question in an incident: *who changed this
-resource, and when?* It looks up recent CloudTrail management events that
-reference the resource and prints when, which API call, which principal
-(short form — `role/deploy-pipeline`, `user/alice`, `root`), and from which
-source IP. Events are newest first.
+`trail` is a CloudTrail activity feed. It answers both *who changed this
+resource, and when?* and *what has been happening in this account?* For each
+event it prints when, which API call, which principal (short form —
+`role/deploy-pipeline`, `user/alice`, `root`), from which source IP, and
+whether the call failed. Events are newest first.
+
+Scope is **one** filter at a time (LookupEvents accepts a single lookup
+attribute): a resource, `--by`, `--event`, `--source`, or nothing for the
+account-wide feed.
 
 ```bash
-# Who touched this security group?
+# Who touched this security group?  (resource-scoped)
 aws_explorer trail sg-0abc123
 
-# Changes to an instance in the last 7 days, in a specific region
-aws_explorer trail i-0abc12345 --since 7d -r eu-west-1
+# What has been happening in the account in the last 2 hours?  (account feed)
+aws_explorer trail --since 2h
 
-# ARNs work too — they're reduced to the resource name CloudTrail records.
-# Global services (IAM, …) record their events in us-east-1.
+# Everything a principal did
+aws_explorer trail --by alice
+
+# Every instance-termination call, in a specific region
+aws_explorer trail --event TerminateInstances -r eu-west-1
+
+# Failed / denied calls only — recon & misconfiguration triage
+aws_explorer trail --errors-only --since 24h
+
+# ARNs work too — reduced to the resource name CloudTrail records.
 aws_explorer trail arn:aws:iam::123456789012:role/app -r us-east-1
 
 # Machine-readable
@@ -877,13 +889,17 @@ aws_explorer trail my-bucket -o json | jq '.[0]'
 ```
 
 ```
-SNO  TIME                 EVENT                          PRINCIPAL             SOURCE IP
-1    2026-06-11 14:02:11  AuthorizeSecurityGroupIngress  role/deploy-pipeline  203.0.113.7
-2    2026-06-09 09:15:42  ModifySecurityGroupRules       user/alice            198.51.100.2
+SNO  TIME                 EVENT                          PRINCIPAL             SOURCE IP     OUTCOME
+1    2026-06-11 14:02:11  AuthorizeSecurityGroupIngress  role/deploy-pipeline  203.0.113.7   ok
+2    2026-06-09 09:15:42  RunInstances                   user/alice            198.51.100.2  AccessDenied
 ```
 
 | Flag | Default | Description |
 |------|---------|-------------|
+| `--by` | — | Only events by this principal (IAM user or role session name) |
+| `--event` | — | Only this API call (e.g. `TerminateInstances`) |
+| `--source` | — | Only events from this service (e.g. `ec2.amazonaws.com`) |
+| `--errors-only` | off | Only failed/denied calls (events carrying an `errorCode`) |
 | `--since` | full window | Only events after this long ago (`7d`, `36h`, or a plain day count) |
 | `--limit` | `50` | Maximum number of events to print |
 | `--read-events` | off | Include read-only (`Describe*`/`List*`/`Get*`) events, marked `(read)` in the table |
@@ -892,16 +908,20 @@ Notes:
 
 - Uses `cloudtrail:LookupEvents`, which covers the **last 90 days** of
   management events with **no trail or S3 bucket setup required** — that one
-  permission is all it needs.
-- CloudTrail records events in the region where the resource lives; pick it
+  permission is all it needs. (Distinct from the `audit --only cloudtrail`
+  category, which inspects trail *configuration*.)
+- A resource, `--by`, `--event` and `--source` are **mutually exclusive** —
+  the API matches a single attribute per query.
+- CloudTrail records events in the region where the activity happened; pick it
   with `-r` (default: the first configured region).
 - By default only **mutating** events are shown — the `Describe*` noise would
   drown out the changes you're looking for.
 - The API is rate-limited (2 TPS); pages are fetched serially and capped, so
-  very chatty resources return the most recent events rather than everything.
+  busy scopes return the most recent events rather than everything.
 
-The same view lives in the summary TUI: press **`t`** on a resource's detail
-panel for its CloudTrail timeline.
+The resource-scoped view also lives in the summary TUI: press **`t`** on a
+resource's detail panel for its CloudTrail timeline (failed calls flagged in
+red).
 
 ## Find Usage
 

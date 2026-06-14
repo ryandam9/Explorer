@@ -71,28 +71,35 @@ hr { border:none; border-top:1px solid var(--border); margin:2rem 0; }
 <a href="whereused.html">aws_explorer whereused</a>
 </nav>
 <main>
-<p>CloudTrail &ldquo;who changed this&rdquo; — recent events for a resource</p>
+<p>CloudTrail activity feed — who did what, and who changed this</p>
 
-<p>Trail lists recent CloudTrail management events that reference a resource:
-when, which API call, which principal, from which source IP — the &ldquo;who
-changed this and when&rdquo; of an incident.</p>
+<p>Trail lists recent CloudTrail management events: when, which API call, which
+principal, from which source IP, and whether the call failed. It answers both
+&ldquo;who changed this resource&rdquo; and &ldquo;what has been happening in this account&rdquo;.</p>
 
 <p>It uses cloudtrail:LookupEvents, which covers the last 90 days of management
-events with no trail or S3 bucket setup required. Pass a bare resource ID
-(i-0abc…, sg-0abc…, a bucket or function name) or a full ARN — ARNs are
-reduced to the resource name CloudTrail records.</p>
+events with no trail or S3 bucket setup required. Events are newest first.</p>
+
+<p>Scope (at most one — LookupEvents accepts a single filter):
+  • a resource (bare ID like i-0abc…, sg-0abc…, a name, or a full ARN — ARNs
+    are reduced to the resource name CloudTrail records),
+  • &ndash;by <principal>   every event by an IAM user / role session name,
+  • &ndash;event <name>     every call of one API (e.g. TerminateInstances),
+  • &ndash;source <service> every event from one service (e.g. ec2.amazonaws.com),
+  • nothing            the account-wide activity feed.</p>
 
 <p>By default only mutating events are shown; &ndash;read-events includes the
-Describe<em>/List</em>/Get* noise too. Events are newest first.</p>
+Describe<em>/List</em>/Get* noise too. &ndash;errors-only keeps just failed/denied calls
+(a burst of these is a recon or misconfiguration signal).</p>
 
-<p>CloudTrail records events in the region where the resource lives (global
+<p>CloudTrail records events in the region where the activity happened (global
 services such as IAM record in us-east-1) — use -r to pick the region.</p>
 
 <p>This is the CLI twin of the summary TUI&rsquo;s &rsquo;t&rsquo; CloudTrail timeline.</p>
 
 <h2 id="usage">Usage</h2>
 
-<pre><code>aws_explorer trail &lt;resource-id-or-arn&gt; [flags]
+<pre><code>aws_explorer trail [resource-id-or-arn] [flags]
 </code></pre>
 
 <h2 id="examples">Examples</h2>
@@ -100,11 +107,17 @@ services such as IAM record in us-east-1) — use -r to pick the region.</p>
 <pre><code class="language-bash"># Who touched this security group?
 aws_explorer trail sg-0abc123
 
-# Changes to an instance in the last 7 days, in a specific region
-aws_explorer trail i-0abc12345 --since 7d -r eu-west-1
+# What has been happening in the account in the last 2 hours?
+aws_explorer trail --since 2h
 
-# ARNs work too; IAM events live in us-east-1
-aws_explorer trail arn:aws:iam::123456789012:role/app -r us-east-1
+# Everything a principal did
+aws_explorer trail --by alice
+
+# Every instance-termination call, in a specific region
+aws_explorer trail --event TerminateInstances -r eu-west-1
+
+# Failed / denied calls only (recon &amp; misconfig triage)
+aws_explorer trail --errors-only --since 24h
 
 # Machine-readable
 aws_explorer trail my-bucket -o json | jq '.[0]'
@@ -123,6 +136,24 @@ aws_explorer trail my-bucket -o json | jq '.[0]'
 
 <tbody>
 <tr>
+<td><code>--by</code></td>
+<td>—</td>
+<td>only events by this principal (IAM user or role session name)</td>
+</tr>
+
+<tr>
+<td><code>--errors-only</code></td>
+<td>—</td>
+<td>only failed/denied calls (events carrying an errorCode)</td>
+</tr>
+
+<tr>
+<td><code>--event</code></td>
+<td>—</td>
+<td>only this API call (e.g. TerminateInstances)</td>
+</tr>
+
+<tr>
 <td><code>--limit</code></td>
 <td>50</td>
 <td>maximum number of events to print</td>
@@ -138,6 +169,12 @@ aws_explorer trail my-bucket -o json | jq '.[0]'
 <td><code>--since</code></td>
 <td>—</td>
 <td>only events after this long ago (e.g. 7d, 36h; default: full 90-day window)</td>
+</tr>
+
+<tr>
+<td><code>--source</code></td>
+<td>—</td>
+<td>only events from this service (e.g. ec2.amazonaws.com)</td>
 </tr>
 </tbody>
 </table>

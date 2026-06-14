@@ -74,6 +74,63 @@ const readOnlyEvent = `{
   }
 }`
 
+const deniedEvent = `{
+  "eventName": "RunInstances",
+  "readOnly": false,
+  "sourceIPAddress": "198.51.100.2",
+  "errorCode": "Client.UnauthorizedOperation",
+  "userIdentity": {
+    "type": "IAMUser",
+    "arn": "arn:aws:iam::123456789012:user/alice"
+  }
+}`
+
+func TestSummarize_ExtractsErrorCode(t *testing.T) {
+	ev := summarize("alice", "false", deniedEvent)
+	if ev.ErrorCode != "Client.UnauthorizedOperation" {
+		t.Errorf("ErrorCode = %q, want Client.UnauthorizedOperation", ev.ErrorCode)
+	}
+	// A successful call carries no errorCode.
+	if ev := summarize("alice", "false", iamUserEvent); ev.ErrorCode != "" {
+		t.Errorf("ErrorCode = %q, want empty for a successful call", ev.ErrorCode)
+	}
+}
+
+func TestFilterAttribute(t *testing.T) {
+	cases := []struct {
+		name     string
+		filter   Filter
+		wantKey  string
+		wantVal  string
+		wantNone bool
+	}{
+		{"empty is account-wide", Filter{}, "", "", true},
+		{"resource", Filter{ResourceName: "i-0abc"}, "ResourceName", "i-0abc", false},
+		{"principal", Filter{Principal: "alice"}, "Username", "alice", false},
+		{"event name", Filter{EventName: "RunInstances"}, "EventName", "RunInstances", false},
+		{"event source", Filter{EventSource: "ec2.amazonaws.com"}, "EventSource", "ec2.amazonaws.com", false},
+		// ResourceName wins when several are set (callers should set only one).
+		{"resource precedence", Filter{ResourceName: "i-0abc", Principal: "alice"}, "ResourceName", "i-0abc", false},
+	}
+	for _, c := range cases {
+		attr, ok := c.filter.attribute()
+		if c.wantNone {
+			if ok {
+				t.Errorf("%s: expected no attribute, got %v", c.name, attr)
+			}
+			continue
+		}
+		if !ok {
+			t.Errorf("%s: expected an attribute, got none", c.name)
+			continue
+		}
+		if string(attr.AttributeKey) != c.wantKey || *attr.AttributeValue != c.wantVal {
+			t.Errorf("%s: attribute = %s/%s, want %s/%s",
+				c.name, attr.AttributeKey, *attr.AttributeValue, c.wantKey, c.wantVal)
+		}
+	}
+}
+
 func TestSummarize_AssumedRole(t *testing.T) {
 	ev := summarize("deploy-session", "false", assumedRoleEvent)
 	if ev.Principal != "role/deploy-pipeline" {
@@ -195,12 +252,29 @@ func TestRender_Table(t *testing.T) {
 	}
 	out := buf.String()
 	for _, want := range []string{
-		"SNO", "TIME", "AuthorizeSecurityGroupIngress", "role/deploy-pipeline",
-		"203.0.113.7", "DescribeSecurityGroups (read)",
+		"SNO", "TIME", "OUTCOME", "AuthorizeSecurityGroupIngress", "role/deploy-pipeline",
+		"203.0.113.7", "DescribeSecurityGroups (read)", "ok",
 	} {
 		if !strings.Contains(out, want) {
 			t.Errorf("table output missing %q:\n%s", want, out)
 		}
+	}
+}
+
+func TestRender_TableShowsErrorCode(t *testing.T) {
+	events := []Event{{
+		Time:      time.Date(2026, 6, 11, 14, 2, 0, 0, time.UTC),
+		EventName: "RunInstances",
+		Principal: "user/alice",
+		SourceIP:  "198.51.100.2",
+		ErrorCode: "AccessDenied",
+	}}
+	var buf bytes.Buffer
+	if err := Render(&buf, events, "table", false); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(buf.String(), "AccessDenied") {
+		t.Errorf("table should show the errorCode in OUTCOME:\n%s", buf.String())
 	}
 }
 
@@ -229,7 +303,7 @@ func TestRender_CSV(t *testing.T) {
 	if len(lines) != 2 {
 		t.Fatalf("csv lines = %d, want 2:\n%s", len(lines), buf.String())
 	}
-	if lines[0] != "Time,Event,Principal,SourceIP,ReadOnly" {
+	if lines[0] != "Time,Event,Principal,SourceIP,ReadOnly,ErrorCode" {
 		t.Errorf("csv header = %q", lines[0])
 	}
 	if !strings.Contains(lines[1], "2026-06-11T14:02:05Z"[:11]) {

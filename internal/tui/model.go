@@ -2770,6 +2770,11 @@ func (m tuiModel) renderDetail(r model.Resource, width int) string {
 				timeStr := ev.Time.Format("2006-01-02 15:04:05")
 				head := lipgloss.NewStyle().Foreground(lipgloss.Color(ui.ColorMuted())).Render(timeStr) +
 					" · " + lipgloss.NewStyle().Foreground(lipgloss.Color(ui.ColorAccent())).Bold(true).Render(ev.EventName)
+				// A failed/denied call is the most interesting line in an
+				// incident, so flag it inline in the error color.
+				if ev.ErrorCode != "" {
+					head += " · " + lipgloss.NewStyle().Foreground(lipgloss.Color(ui.ColorError())).Render("✗ "+ev.ErrorCode)
+				}
 				b.WriteString(wrapDetail(head, width, 2) + "\n")
 				by := fmt.Sprintf("%s %s · %s", dKey.Render("by"), ev.Principal, ev.SourceIP)
 				b.WriteString(wrapDetail(by, width, 4) + "\n\n")
