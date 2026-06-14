@@ -144,9 +144,27 @@ func (m Model) overlayStyle() lipgloss.Style {
 		Padding(1, 2)
 }
 
-func (m Model) detailOverlay() string {
+// detailRows returns the (column, value) pairs for the selected row — the
+// single source shared by the rendered overlay and the plain-text clipboard
+// copy. Empty cells fall back to "-".
+func (m Model) detailRows() [][2]string {
 	row := m.selected()
 	if row == nil {
+		return nil
+	}
+	rows := make([][2]string, len(m.result.Columns))
+	for i, name := range m.result.Columns {
+		v := "-"
+		if i < len(*row) && (*row)[i] != "" {
+			v = (*row)[i]
+		}
+		rows[i] = [2]string{name, v}
+	}
+	return rows
+}
+
+func (m Model) detailOverlay() string {
+	if m.selected() == nil {
 		return ""
 	}
 	style := m.overlayStyle()
@@ -157,15 +175,27 @@ func (m Model) detailOverlay() string {
 
 	var b strings.Builder
 	b.WriteString(ui.HeaderStyle().Render("Row detail") + "\n\n")
-	for i, name := range m.result.Columns {
-		v := "-"
-		if i < len(*row) && (*row)[i] != "" {
-			v = (*row)[i]
-		}
-		b.WriteString(lipgloss.JoinHorizontal(lipgloss.Top, label.Render(name), value.Render(v)) + "\n")
+	for _, r := range m.detailRows() {
+		b.WriteString(lipgloss.JoinHorizontal(lipgloss.Top, label.Render(r[0]), value.Render(r[1])) + "\n")
 	}
-	b.WriteString("\n" + ui.MutedStyle().Render("y copies the row · Esc closes"))
+	b.WriteString("\n" + ui.MutedStyle().Render("y copies this row · Esc closes"))
 	return style.Render(b.String())
+}
+
+// detailText renders the selected row as plain, unstyled "column: value" lines
+// for the clipboard, so the overlay can be pasted without ANSI escapes or the
+// rest of the table coming along.
+func (m Model) detailText() string {
+	rows := m.detailRows()
+	if rows == nil {
+		return ""
+	}
+	var b strings.Builder
+	b.WriteString("Row detail\n\n")
+	for _, r := range rows {
+		b.WriteString(r[0] + ": " + r[1] + "\n")
+	}
+	return strings.TrimRight(b.String(), "\n")
 }
 
 func (m Model) helpOverlay() string {
@@ -177,7 +207,7 @@ func (m Model) helpOverlay() string {
 		{"s / R", "Sort by the next column / reverse (numeric-aware)"},
 		{"r", "Reset filter and sort"},
 		{"</> or ,/.", "Scroll columns when the table is wider than the screen"},
-		{"y", "Copy the selected row (tab-separated)"},
+		{"y", "Copy the selected row (tab-separated, or the labelled detail panel when it's open)"},
 		{"C", "Export the current view to CSV under ~/.aws_explorer/exports/"},
 		{"~", "Debug: live view of what the tool is doing"},
 		{"?", "Toggle this help"},

@@ -101,6 +101,50 @@ func TestDetailOverlayShowsColumns(t *testing.T) {
 	}
 }
 
+// captureClipboard redirects the clipboard sink to a buffer for the duration of
+// a test, since the real clipboard is unavailable in headless CI.
+func captureClipboard(t *testing.T) *string {
+	t.Helper()
+	var got string
+	prev := clipboardWrite
+	clipboardWrite = func(s string) error { got = s; return nil }
+	t.Cleanup(func() { clipboardWrite = prev })
+	return &got
+}
+
+func TestCopyDetailOverlayCopiesPanel(t *testing.T) {
+	got := captureClipboard(t)
+	m := newTestModel(t)
+	m = update(m, key("enter")) // open detail for the first row (RunInstances)
+	m = update(m, key("y"))
+
+	if m.status != "copied row detail" {
+		t.Errorf("copying with the overlay open should report the detail copy, got %q", m.status)
+	}
+	// The labelled panel carries each column name and value, one per line.
+	for _, want := range []string{"eventName: RunInstances", "events: 9"} {
+		if !strings.Contains(*got, want) {
+			t.Errorf("clipboard missing %q:\n%s", want, *got)
+		}
+	}
+	if strings.Contains(*got, "\t") {
+		t.Errorf("overlay copy should be labelled lines, not tab-separated:\n%s", *got)
+	}
+}
+
+func TestCopyRowWithoutOverlay(t *testing.T) {
+	got := captureClipboard(t)
+	m := newTestModel(t)
+	m = update(m, key("y"))
+
+	if m.status != "copied row" {
+		t.Errorf("copying without the overlay should copy the raw row, got %q", m.status)
+	}
+	if *got != "RunInstances\t9" {
+		t.Errorf("row copy should be tab-separated, got %q", *got)
+	}
+}
+
 func TestLoadErrorBody(t *testing.T) {
 	m := New(context.Background(), aws.Config{}, "SELECT …", traillake.QueryOptions{}, "recent", "store", "us-east-1")
 	mm, _ := m.Update(tea.WindowSizeMsg{Width: 100, Height: 30})

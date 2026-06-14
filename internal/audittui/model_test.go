@@ -201,6 +201,57 @@ func TestDetailOverlay(t *testing.T) {
 	}
 }
 
+// captureClipboard redirects the clipboard sink to a buffer for the duration of
+// a test, since the real clipboard is unavailable in headless CI.
+func captureClipboard(t *testing.T) *string {
+	t.Helper()
+	var got string
+	prev := clipboardWrite
+	clipboardWrite = func(s string) error { got = s; return nil }
+	t.Cleanup(func() { clipboardWrite = prev })
+	return &got
+}
+
+func TestCopyDetailOverlayCopiesPanel(t *testing.T) {
+	got := captureClipboard(t)
+	m := newTestModel(t)
+	mm, _ := m.Update(key("enter")) // most expensive finding (COST-EBS-001)
+	m = mm.(Model)
+	mm, _ = m.Update(key("y"))
+	m = mm.(Model)
+
+	if !strings.Contains(m.status, "COST-EBS-001 finding") {
+		t.Errorf("copying with the overlay open should report the detail copy, got %q", m.status)
+	}
+	// The whole panel is copied — title plus the labelled fields — not just the
+	// resource ID, and none of the table behind the overlay comes along.
+	for _, want := range []string{
+		"COST-EBS-001", "Unattached EBS volume", "Resource: vol-0abc",
+		"Why: still bills", "Fix: delete it", "Est/month: $102.40",
+	} {
+		if !strings.Contains(*got, want) {
+			t.Errorf("clipboard missing %q:\n%s", want, *got)
+		}
+	}
+	if strings.Contains(*got, "vol-0def") {
+		t.Errorf("clipboard should hold only the overlay, not other findings:\n%s", *got)
+	}
+}
+
+func TestCopyResourceWithoutOverlay(t *testing.T) {
+	got := captureClipboard(t)
+	m := newTestModel(t)
+	mm, _ := m.Update(key("y"))
+	m = mm.(Model)
+
+	if m.status != "copied vol-0abc" {
+		t.Errorf("copying without the overlay should copy the resource ID, got %q", m.status)
+	}
+	if *got != "vol-0abc" {
+		t.Errorf("resource copy should be the bare ID, got %q", *got)
+	}
+}
+
 func TestErrorsOverlay(t *testing.T) {
 	m := newTestModel(t)
 	mm, _ := m.Update(key("e"))

@@ -171,6 +171,31 @@ func (m Model) overlayStyle() lipgloss.Style {
 		Padding(1, 2)
 }
 
+// detailRows returns the labelled (name, value) pairs shown below the finding's
+// title — the single source shared by the rendered overlay and the plain-text
+// clipboard copy. The ARN row only appears when the finding carries one.
+func detailRows(f *findings.Finding) [][2]string {
+	rows := [][2]string{
+		{"Resource", f.Resource},
+		{"Region", f.Region},
+		{"Service", f.Service},
+	}
+	if f.ARN != "" {
+		rows = append(rows, [2]string{"ARN", f.ARN})
+	}
+	return append(rows,
+		[2]string{"Est/month", costs.Dollars(f.EstMonthlyUSD)},
+		[2]string{"Why", f.Detail},
+		[2]string{"Fix", f.Fix},
+	)
+}
+
+// blockRow names the rows of remediation prose that get a trailing blank line,
+// setting them apart from the finding's identity.
+func blockRow(name string) bool {
+	return name == "Est/month" || name == "Why" || name == "Fix"
+}
+
 func (m Model) detailOverlay() string {
 	f := m.selected()
 	if f == nil {
@@ -181,27 +206,42 @@ func (m Model) detailOverlay() string {
 
 	label := lipgloss.NewStyle().Foreground(lipgloss.Color(ui.ColorMuted())).Width(10)
 	value := lipgloss.NewStyle().Foreground(lipgloss.Color(ui.ColorText())).Width(w - 10)
-	row := func(name, v string) string {
-		if v == "" {
-			v = "-"
-		}
-		return lipgloss.JoinHorizontal(lipgloss.Top, label.Render(name), value.Render(v))
-	}
 
 	var b strings.Builder
 	b.WriteString(ui.HeaderStyle().Render(f.Severity.Badge()+"  "+f.ID) + "\n\n")
 	b.WriteString(lipgloss.NewStyle().Bold(true).Width(w).Render(f.Title) + "\n\n")
-	b.WriteString(row("Resource", f.Resource) + "\n")
-	b.WriteString(row("Region", f.Region) + "\n")
-	b.WriteString(row("Service", f.Service) + "\n")
-	if f.ARN != "" {
-		b.WriteString(row("ARN", f.ARN) + "\n")
+	for _, r := range detailRows(f) {
+		v := r[1]
+		if v == "" {
+			v = "-"
+		}
+		b.WriteString(lipgloss.JoinHorizontal(lipgloss.Top, label.Render(r[0]), value.Render(v)) + "\n")
+		if blockRow(r[0]) {
+			b.WriteString("\n")
+		}
 	}
-	b.WriteString(row("Est/month", costs.Dollars(f.EstMonthlyUSD)) + "\n\n")
-	b.WriteString(row("Why", f.Detail) + "\n\n")
-	b.WriteString(row("Fix", f.Fix) + "\n\n")
-	b.WriteString(ui.MutedStyle().Render("y copies the ARN/resource · Esc closes"))
+	b.WriteString(ui.MutedStyle().Render("y copies these details · Esc closes"))
 	return style.Render(b.String())
+}
+
+// detailText renders the finding as plain, unstyled text for the clipboard, so
+// the overlay can be pasted into a ticket or message without ANSI escapes or
+// the rest of the table coming along.
+func detailText(f *findings.Finding) string {
+	var b strings.Builder
+	b.WriteString(f.Severity.String() + "  " + f.ID + "\n")
+	b.WriteString(f.Title + "\n\n")
+	for _, r := range detailRows(f) {
+		v := r[1]
+		if v == "" {
+			v = "-"
+		}
+		b.WriteString(r[0] + ": " + v + "\n")
+		if blockRow(r[0]) {
+			b.WriteString("\n")
+		}
+	}
+	return strings.TrimRight(b.String(), "\n")
 }
 
 func (m Model) errorsOverlay() string {
@@ -244,7 +284,7 @@ func (m Model) helpOverlay() string {
 		{"s / R", "Sort by the next column / reverse the direction"},
 		{"r", "Reset filter and sort"},
 		{"</> or ,/.", "Scroll columns when the table is wider than the screen"},
-		{"y", "Copy the selected finding's ARN (or resource ID)"},
+		{"y", "Copy the finding's ARN/resource ID (or the whole detail panel when it's open)"},
 		{"C", "Export the current view to CSV under ~/.aws_explorer/exports/"},
 		{"e", "Show collection errors"},
 		{"~", "Debug: live view of what the tool is doing"},
