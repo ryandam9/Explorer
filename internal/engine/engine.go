@@ -21,6 +21,7 @@ import (
 	"github.com/ryandam9/aws_explorer/internal/config"
 	"github.com/ryandam9/aws_explorer/internal/model"
 	"github.com/ryandam9/aws_explorer/internal/services"
+	"github.com/ryandam9/aws_explorer/internal/services/cloudfront"
 	"github.com/ryandam9/aws_explorer/internal/services/cloudwatch"
 	"github.com/ryandam9/aws_explorer/internal/services/dynamodb"
 	"github.com/ryandam9/aws_explorer/internal/services/ec2"
@@ -118,6 +119,7 @@ func NewEngine(ctx context.Context, cfg *config.Config) (*Engine, error) {
 	registry.Register(sqs.NewCollector())
 	registry.Register(sns.NewCollector())
 	registry.Register(cloudwatch.NewCollector())
+	registry.Register(cloudfront.NewCollector())
 	registry.Register(route53.NewCollector())
 
 	return &Engine{
