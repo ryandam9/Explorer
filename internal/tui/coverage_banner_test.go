@@ -12,7 +12,7 @@ func TestCoverageBanner(t *testing.T) {
 	base := tuiModel{width: 200, coverageAdvisory: true, coverageTagSweep: true, coverageMissing: 3}
 
 	b := base.coverageBanner()
-	if !strings.Contains(b, "does not have a tag") || !strings.Contains(b, "3") {
+	if !strings.Contains(b, "does not have tags") || !strings.Contains(b, "3") {
 		t.Errorf("banner should explain the tag cause in plain language with the count, got %q", b)
 	}
 	if !strings.Contains(b, "Press c") {
@@ -126,7 +126,15 @@ func TestHelpBodyListsCoverageOnlyInSummary(t *testing.T) {
 
 func TestCoverageBodyHasPlainExplanation(t *testing.T) {
 	m := newTestModel(t, 140, 40)
-	if body := m.coverageBody(70); !strings.Contains(body, "no tags") {
+	body := m.coverageBody(70)
+	if !strings.Contains(body, "no tags") {
 		t.Errorf("coverage body should carry the plain explanation:\n%s", body)
+	}
+	// The overlay should also teach how resources are discovered, name the
+	// typed collector concept, and say why a resource may be hidden.
+	for _, want := range []string{"typed collector", "tag", "may not appear"} {
+		if !strings.Contains(strings.ToLower(body), strings.ToLower(want)) {
+			t.Errorf("coverage body should mention %q:\n%s", want, body)
+		}
 	}
 }
