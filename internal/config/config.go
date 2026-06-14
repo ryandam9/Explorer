@@ -11,6 +11,18 @@ type Config struct {
 	UI       UIConfig                 `mapstructure:"ui"`
 	Display  DisplayConfig            `mapstructure:"display"`
 	Trail    TrailConfig              `mapstructure:"trail"`
+	Summary  SummaryConfig            `mapstructure:"summary"`
+}
+
+// SummaryConfig configures the `summary` command.
+type SummaryConfig struct {
+	// CommonServices extends the built-in list of services that the coverage
+	// advisory checks for (the "services with nothing shown" list). The map key
+	// is the AWS service as it appears in ARNs / collector names (e.g.
+	// "route53", "apprunner"), and the value is the friendly label shown to the
+	// user (e.g. "Route 53", "App Runner"). Entries are merged on top of the
+	// built-in catalog; an empty map leaves the defaults unchanged.
+	CommonServices map[string]string `mapstructure:"commonServices"`
 }
 
 // TrailConfig configures the CloudTrail activity feed (the `trail` command and

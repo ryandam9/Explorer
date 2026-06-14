@@ -249,6 +249,19 @@ When both sources describe the same ARN, the richer typed entry wins. Use
 > literally 100% of every service. The sweep needs the `tag:GetResources` IAM
 > permission; if it's denied, the typed-collector results are still shown.
 
+Under the table (and behind `c` in the `--tui`), summary lists the common
+services that produced nothing, as a reminder that an untagged — or simply
+absent — resource can be missing. That list is configurable: add your own
+services under `summary.commonservices` in `config.yaml` (merged on top of the
+built-in list), keyed by the AWS service name with a friendly label:
+
+```yaml
+summary:
+  commonservices:
+    apprunner: App Runner
+    sagemaker: SageMaker
+```
+
 [Resource Groups Tagging API]: https://docs.aws.amazon.com/resourcegroupstagging/latest/APIReference/API_GetResources.html
 
 Each row carries five columns:

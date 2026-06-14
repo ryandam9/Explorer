@@ -126,6 +126,18 @@ output:
     format: table
     includedetails: false
     fields: []
+# `summary` command options.
+summary:
+    # commonServices extends the coverage advisory — the "services with nothing
+    # shown" list under the summary table (press c in --tui). The key is the AWS
+    # service as it appears in ARNs / collector names (lower-case, e.g.
+    # "route53"), the value is the friendly label shown to you. Entries are
+    # merged on top of the built-in catalog, so this only adds services; an
+    # empty map (the default) leaves the built-in list unchanged. Example:
+    #   commonServices:
+    #     apprunner: App Runner
+    #     sagemaker: SageMaker
+    commonservices: {}
 # CloudTrail activity feed (`aws_explorer trail` / `trail --tui`).
 trail:
     # The account-wide feed already excludes read-only calls server-side
