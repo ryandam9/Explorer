@@ -135,6 +135,13 @@ This is the CLI twin of the summary TUI's 't' CloudTrail timeline.`,
 					opts.Limit = 200
 				}
 			}
+			// With reads filtered server-side, the account-wide feed must page
+			// deeper to collect `limit` mutations past the read-only noise.
+			// Pivoted lookups (resource/principal/event/source) already match
+			// few events, so leave their shallow cap alone.
+			if filter == (trail.Filter{}) {
+				opts.MaxPages = trail.DeepFeedPageCap
+			}
 			SilenceScanLogs()
 			m := trailtui.New(ctx, awscfg, regions, filter, opts, scope)
 			p := tea.NewProgram(ui.WithWindowTitle(m), tea.WithAltScreen(), tea.WithContext(ctx))
