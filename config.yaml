@@ -96,7 +96,16 @@ trail:
     #   hideevents:
     #     - AssumeRole
     #     - ConsoleLogin
-    hideevents: []
+    hideevents: 
+      - CreateInvalidation
+      - PasswordRecoveryRequested
+      - ConsoleLogin
+      - GetSessionToken
+      - DeactivateMFADevice
+      - UpdateAccessKey
+      - DeactivateMFADevice
+      - DeleteVirtualMFADevice
+      - RotateKey
     # Maximum number of events the `--tui` feed keeps. 0 uses the built-in
     # default (200). `--limit` overrides it.
     maxevents: 200
