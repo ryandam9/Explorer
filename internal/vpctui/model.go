@@ -1745,8 +1745,9 @@ func (m *Model) updateTableSizes() {
 	// table uses this to decide how many columns fit before scrolling kicks in.
 	m.resourceTable.SetWidth(rightWidth - 2)
 
-	// Resize detail viewport.
-	dvW := m.width - 8
+	// Resize detail viewport. Two columns are reserved for the scrollbar gutter
+	// drawn alongside the content (see vpWithScrollbar).
+	dvW := m.width - 10
 	dvH := m.height - 8
 	if dvW < 20 {
 		dvW = 20
@@ -2183,6 +2184,14 @@ func (m *Model) overlayFrame(title, body, hint string) string {
 	return overlay
 }
 
+// vpWithScrollbar pairs a viewport's content with a vertical scrollbar gutter,
+// so every scrollable overlay shows at a glance how much is above/below the
+// fold. The gutter is blank when the content fits, keeping the box stable.
+func vpWithScrollbar(vp *viewport.Model) string {
+	bar := ui.VScrollbar(vp.Height, vp.TotalLineCount(), vp.VisibleLineCount(), vp.YOffset)
+	return lipgloss.JoinHorizontal(lipgloss.Top, vp.View(), " ", bar)
+}
+
 // overlayBody picks the spinner, error, or viewport content for an overlay.
 func (m *Model) overlayBody(loading bool, loadingText string, err error, vp *viewport.Model) string {
 	switch {
@@ -2192,12 +2201,12 @@ func (m *Model) overlayBody(loading bool, loadingText string, err error, vp *vie
 		return lipgloss.NewStyle().Foreground(lipgloss.Color(ui.ColorError())).
 			Render("Error: " + err.Error())
 	default:
-		return vp.View()
+		return vpWithScrollbar(vp)
 	}
 }
 
 func (m *Model) viewDetailOverlay(bg string) string {
-	return m.overlayFrame(m.detailTitle, m.detailViewport.View(), "↑/↓ scroll  •  Esc close")
+	return m.overlayFrame(m.detailTitle, vpWithScrollbar(&m.detailViewport), "↑/↓ scroll  •  Esc close")
 }
 
 func (m *Model) viewFindingsOverlay(bg string) string {
@@ -2534,7 +2543,7 @@ func (m *Model) viewAnalyzerOverlay(bg string) string {
 		body = lipgloss.NewStyle().Foreground(lipgloss.Color(ui.ColorError())).Render("Error: " + m.analyzerErr.Error())
 		hint = "n new analysis  •  Esc close"
 	default:
-		body = m.analyzerVP.View()
+		body = vpWithScrollbar(&m.analyzerVP)
 		hint = "↑/↓ scroll  •  n new analysis (paid)  •  Esc/A close"
 	}
 

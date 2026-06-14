@@ -1594,7 +1594,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			// Initialise the scrollable viewport for this preview.
 			panelW := min(100, max(40, m.width-12))
 			panelH := min(28, max(10, m.height-10))
-			vpW := panelW - 6 // subtract border + padding
+			vpW := panelW - 8 // subtract border + padding + scrollbar gutter
 			vpH := panelH - 8 // subtract title, blank lines, help text, border
 			if vpW < 10 {
 				vpW = 10
@@ -2484,7 +2484,13 @@ func (m *Model) previewView() string {
 	} else if m.previewContent == "" {
 		body = "Object is empty."
 	} else {
-		body = m.previewViewport.View()
+		bar := ui.VScrollbar(
+			m.previewViewport.Height,
+			m.previewViewport.TotalLineCount(),
+			m.previewViewport.VisibleLineCount(),
+			m.previewViewport.YOffset,
+		)
+		body = lipgloss.JoinHorizontal(lipgloss.Top, m.previewViewport.View(), " ", bar)
 	}
 
 	width := min(100, max(40, m.width-12))

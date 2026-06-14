@@ -126,7 +126,9 @@ func (m Model) view() string {
 		Render(fmt.Sprintf("DEBUG · TOOL ACTIVITY (%d lines)", debuglog.Default.Len()))
 	hint := lipgloss.NewStyle().Foreground(lipgloss.Color(ui.ColorMuted())).
 		Render("↑/↓ scroll · g/G top/bottom · Esc/~ close")
-	inner := lipgloss.JoinVertical(lipgloss.Left, title, "", m.vp.View(), "", hint)
+	bar := ui.VScrollbar(m.vp.Height, m.vp.TotalLineCount(), m.vp.VisibleLineCount(), m.vp.YOffset)
+	body := lipgloss.JoinHorizontal(lipgloss.Top, m.vp.View(), " ", bar)
+	inner := lipgloss.JoinVertical(lipgloss.Left, title, "", body, "", hint)
 	return lipgloss.NewStyle().
 		Border(lipgloss.RoundedBorder()).
 		BorderForeground(lipgloss.Color(ui.ColorBorderFocus())).
