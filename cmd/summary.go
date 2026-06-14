@@ -132,13 +132,33 @@ unchanged account diffs clean.`,
 		rows := summary.BuildRows(resources)
 		if len(rows) == 0 {
 			fmt.Println("No resources found.")
-			return
-		}
-		if err := summary.Render(os.Stdout, rows, outputFormat, noHeader); err != nil {
+		} else if err := summary.Render(os.Stdout, rows, outputFormat, noHeader); err != nil {
 			fmt.Fprintf(os.Stderr, "Error rendering summary: %v\n", err)
 			os.Exit(1)
 		}
+
+		// Coverage advisory: only for the human table view (json/csv/ndjson must
+		// stay machine-clean). It tells the user which common services showed
+		// nothing and warns that tag-discovered services can hide untagged
+		// resources — the reason an inventory can look short.
+		if isTableFormat(outputFormat) {
+			cov := summary.Coverage(resources, eng.TypedServices())
+			if note := summary.CoverageNote(cov, len(eng.TypedServices()), !summaryTypedOnly); note != "" {
+				fmt.Fprintln(os.Stdout, "\n"+note)
+			}
+		}
 	},
+}
+
+// isTableFormat reports whether fmt is the human table view — i.e. not one of
+// the machine-readable formats, which must stay free of advisory text.
+func isTableFormat(format string) bool {
+	switch strings.ToLower(format) {
+	case "json", "ndjson", "csv":
+		return false
+	default:
+		return true
+	}
 }
 
 // runBaselineOrDiff saves the scan as the account baseline, or diffs the scan

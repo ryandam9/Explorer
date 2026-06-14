@@ -241,6 +241,19 @@ func (e *Engine) PlannedTaskKeys() []string {
 
 // EffectiveRegions returns the regions to scan: the resolved region list
 // narrowed by any filters.regions configured. It always returns at least one
+// TypedServices returns the names of the registered typed collectors — the
+// services whose inventory is complete regardless of tags, as opposed to those
+// reached only through the tag-based discovery sweep. Enabled-state is ignored;
+// this reflects what the tool can collect with a dedicated collector.
+func (e *Engine) TypedServices() []string {
+	all := e.registry.GetAll()
+	names := make([]string, 0, len(all))
+	for _, c := range all {
+		names = append(names, c.Name())
+	}
+	return names
+}
+
 // region.
 func (e *Engine) EffectiveRegions() []string {
 	regions := e.ResolvedRegions
