@@ -231,6 +231,79 @@ func TestDetailOverlayShowsRichFields(t *testing.T) {
 	}
 }
 
+func TestDetailTextIsPlainAndSelfContained(t *testing.T) {
+	ev := testEvents()[0] // denied RunInstances with the full field set
+	out := detailText(&ev)
+
+	if strings.ContainsRune(out, '\x1b') {
+		t.Errorf("detail text should carry no ANSI escapes:\n%q", out)
+	}
+	// The copied panel should stand alone: event name plus every recorded field,
+	// and none of the surrounding table or overlay chrome.
+	for _, want := range []string{
+		"RunInstances", "Time:", "Principal:", "Source IP:", "198.51.100.2",
+		"User agent:", "aws-cli/2.15.0", "Access key:", "AKIAEXAMPLE",
+		"Outcome:", "✗ Client.UnauthorizedOperation", "Error:", "Event ID:", "evt-1",
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("detail text missing %q:\n%s", want, out)
+		}
+	}
+	// Optional fields CloudTrail didn't record are dropped entirely.
+	ev2 := testEvents()[2] // DeleteBucket: no user agent, error, or resources
+	out2 := detailText(&ev2)
+	for _, absent := range []string{"User agent:", "Error:", "Resources:", "Event ID:"} {
+		if strings.Contains(out2, absent) {
+			t.Errorf("detail text should omit empty optional field %q:\n%s", absent, out2)
+		}
+	}
+}
+
+// captureClipboard redirects the clipboard sink to a buffer for the duration of
+// a test, since the real clipboard is unavailable in headless CI.
+func captureClipboard(t *testing.T) *string {
+	t.Helper()
+	var got string
+	prev := clipboardWrite
+	clipboardWrite = func(s string) error { got = s; return nil }
+	t.Cleanup(func() { clipboardWrite = prev })
+	return &got
+}
+
+func TestCopyDetailOverlayCopiesPanel(t *testing.T) {
+	got := captureClipboard(t)
+	m := newTestModel(t)
+	m = update(m, key("enter")) // open detail for the newest event
+	m = update(m, key("y"))
+
+	if !strings.Contains(m.status, "RunInstances details") {
+		t.Errorf("copying with the overlay open should report the detail copy, got %q", m.status)
+	}
+	// The whole panel is copied — multiple labelled fields — not just the name,
+	// and none of the table behind the overlay comes along.
+	for _, want := range []string{"RunInstances", "Source IP:", "198.51.100.2", "Event ID:"} {
+		if !strings.Contains(*got, want) {
+			t.Errorf("clipboard missing %q:\n%s", want, *got)
+		}
+	}
+	if strings.Contains(*got, "DeleteBucket") {
+		t.Errorf("clipboard should hold only the overlay, not other table rows:\n%s", *got)
+	}
+}
+
+func TestCopyEventNameWithoutOverlay(t *testing.T) {
+	got := captureClipboard(t)
+	m := newTestModel(t)
+	m = update(m, key("y"))
+
+	if m.status != "copied RunInstances" {
+		t.Errorf("copying without the overlay should copy the event name, got %q", m.status)
+	}
+	if *got != "RunInstances" {
+		t.Errorf("clipboard should hold just the event name, got %q", *got)
+	}
+}
+
 func TestFilterMatchesServiceAndUserAgent(t *testing.T) {
 	m := newTestModel(t)
 	m = update(m, key("/"))

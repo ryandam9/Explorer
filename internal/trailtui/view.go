@@ -6,6 +6,7 @@ import (
 
 	"github.com/charmbracelet/lipgloss"
 
+	"github.com/ryandam9/aws_explorer/internal/trail"
 	"github.com/ryandam9/aws_explorer/internal/ui"
 )
 
@@ -184,6 +185,68 @@ func (m Model) overlayStyle() lipgloss.Style {
 		Padding(1, 2)
 }
 
+// detailField is one label/value pair shown in the detail overlay.
+type detailField struct {
+	name string
+	val  string
+	// isError marks the outcome of a failed call so the rendered overlay can
+	// colour it; the plain-text copy ignores the flag.
+	isError bool
+}
+
+// detailFields is the single source of truth for the per-event detail panel,
+// shared by the rendered overlay and the plain-text clipboard copy. Optional
+// fields CloudTrail didn't record are dropped so both forms stay compact;
+// required fields fall back to "-".
+func detailFields(ev *trail.Event) []detailField {
+	agent := ev.UserAgent
+	if ev.FromConsole {
+		agent = strings.TrimSpace(agent + " (console)")
+	}
+	outcome := "ok"
+	if ev.ErrorCode != "" {
+		outcome = "✗ " + ev.ErrorCode
+	}
+
+	// opt marks fields hidden when empty; the rest fall back to "-".
+	type spec struct {
+		name, val string
+		opt       bool
+	}
+	specs := []spec{
+		{"Time", ev.Time.UTC().Format("2006-01-02 15:04:05 UTC"), false},
+		{"Service", ev.EventSource, true},
+		{"Region", ev.Region, true},
+		{"Principal", ev.Principal, false},
+		{"Access key", ev.AccessKeyID, true},
+		{"Source IP", ev.SourceIP, false},
+		{"User agent", agent, true},
+		{"MFA", fmt.Sprintf("%t", ev.MFA), false},
+		{"Read-only", fmt.Sprintf("%t", ev.ReadOnly), false},
+		{"Outcome", outcome, false},
+		{"Error", ev.ErrorMessage, true},
+		{"Resources", resourcesText(ev.Resources), true},
+		{"Event ID", ev.EventID, true},
+	}
+
+	var fields []detailField
+	for _, s := range specs {
+		v := s.val
+		if v == "" {
+			if s.opt {
+				continue
+			}
+			v = "-"
+		}
+		fields = append(fields, detailField{
+			name:    s.name,
+			val:     v,
+			isError: s.name == "Outcome" && ev.ErrorCode != "",
+		})
+	}
+	return fields
+}
+
 func (m Model) detailOverlay() string {
 	ev := m.selected()
 	if ev == nil {
@@ -194,48 +257,31 @@ func (m Model) detailOverlay() string {
 
 	label := lipgloss.NewStyle().Foreground(lipgloss.Color(ui.ColorMuted())).Width(14)
 	value := lipgloss.NewStyle().Foreground(lipgloss.Color(ui.ColorText())).Width(w - 14)
-	row := func(name, v string) string {
-		if v == "" {
-			v = "-"
-		}
-		return lipgloss.JoinHorizontal(lipgloss.Top, label.Render(name), value.Render(v))
-	}
-	// optRow renders a row only when it carries a value, to keep the overlay
-	// compact when CloudTrail didn't record the field.
-	optRow := func(name, v string) string {
-		if v == "" {
-			return ""
-		}
-		return row(name, v) + "\n"
-	}
-
-	outcome := "ok"
-	if ev.ErrorCode != "" {
-		outcome = lipgloss.NewStyle().Foreground(lipgloss.Color(ui.ColorError())).Render("✗ " + ev.ErrorCode)
-	}
-
-	agent := ev.UserAgent
-	if ev.FromConsole {
-		agent = strings.TrimSpace(agent + " (console)")
-	}
+	errValue := value.Foreground(lipgloss.Color(ui.ColorError()))
 
 	var b strings.Builder
 	b.WriteString(ui.HeaderStyle().Render(ev.EventName) + "\n\n")
-	b.WriteString(row("Time", ev.Time.UTC().Format("2006-01-02 15:04:05 UTC")) + "\n")
-	b.WriteString(optRow("Service", ev.EventSource))
-	b.WriteString(optRow("Region", ev.Region))
-	b.WriteString(row("Principal", ev.Principal) + "\n")
-	b.WriteString(optRow("Access key", ev.AccessKeyID))
-	b.WriteString(row("Source IP", ev.SourceIP) + "\n")
-	b.WriteString(optRow("User agent", agent))
-	b.WriteString(row("MFA", fmt.Sprintf("%t", ev.MFA)) + "\n")
-	b.WriteString(row("Read-only", fmt.Sprintf("%t", ev.ReadOnly)) + "\n")
-	b.WriteString(row("Outcome", outcome) + "\n")
-	b.WriteString(optRow("Error", ev.ErrorMessage))
-	b.WriteString(optRow("Resources", resourcesText(ev.Resources)))
-	b.WriteString(optRow("Event ID", ev.EventID))
-	b.WriteString("\n" + ui.MutedStyle().Render("y copies the event name · Esc closes"))
+	for _, f := range detailFields(ev) {
+		val := value
+		if f.isError {
+			val = errValue
+		}
+		b.WriteString(lipgloss.JoinHorizontal(lipgloss.Top, label.Render(f.name), val.Render(f.val)) + "\n")
+	}
+	b.WriteString("\n" + ui.MutedStyle().Render("y copies these details · Esc closes"))
 	return style.Render(b.String())
+}
+
+// detailText renders the event detail as plain, unstyled text for the
+// clipboard, so the copied panel can be pasted into a message or ticket
+// without ANSI escapes or the surrounding table.
+func detailText(ev *trail.Event) string {
+	var b strings.Builder
+	b.WriteString(ev.EventName + "\n\n")
+	for _, f := range detailFields(ev) {
+		b.WriteString(fmt.Sprintf("%-11s %s\n", f.name+":", f.val))
+	}
+	return strings.TrimRight(b.String(), "\n")
 }
 
 func (m Model) helpOverlay() string {
@@ -248,7 +294,7 @@ func (m Model) helpOverlay() string {
 		{"s / R", "Sort by the next column / reverse the direction"},
 		{"r", "Reset filter, sort, and the failed-only toggle"},
 		{"</> or ,/.", "Scroll columns when the table is wider than the screen"},
-		{"y", "Copy the selected event's name"},
+		{"y", "Copy the event name (or the whole detail panel when it's open)"},
 		{"C", "Export the current view to CSV under ~/.aws_explorer/exports/"},
 		{"~", "Debug: live view of what the tool is doing"},
 		{"?", "Toggle this help"},
