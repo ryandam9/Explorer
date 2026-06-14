@@ -86,19 +86,19 @@ output:
     fields: []
 # CloudTrail activity feed (`aws_explorer trail` / `trail --tui`).
 trail:
-    # Event names to suppress from the feed so routine calls don't drown out the
-    # signal. Matching is case-insensitive; a trailing "*" is a prefix wildcard
-    # (e.g. "Describe*" hides every describe call). The filter is applied
-    # server-side, so hidden events never count against maxevents below. An
-    # explicit `--event <Name>` lookup is never hidden. By default every
-    # read-only call (Get*/Describe*/List*) is hidden; add your own noisy events
-    # (ConsoleLogin, AssumeRole, …) or clear the list to see everything.
-    hideevents:
-        - Get*
-        - Describe*
-        - List*
-    # Maximum number of events the `--tui` feed keeps after the hideevents
-    # filter above. 0 uses the built-in default (200). `--limit` overrides it.
+    # The account-wide feed already excludes read-only calls server-side
+    # (Describe*/List*/Get* etc.) unless you pass --read-events, so you don't
+    # need to list those here. Use hideevents to suppress noisy *mutations* on
+    # top of that — e.g. ConsoleLogin, AssumeRole. Matching is case-insensitive;
+    # a trailing "*" is a prefix wildcard. The filter is applied server-side, so
+    # hidden events never count against maxevents. An explicit `--event <Name>`
+    # lookup is never hidden. Example:
+    #   hideevents:
+    #     - AssumeRole
+    #     - ConsoleLogin
+    hideevents: []
+    # Maximum number of events the `--tui` feed keeps. 0 uses the built-in
+    # default (200). `--limit` overrides it.
     maxevents: 200
 ui:
     theme: princess-parrot
