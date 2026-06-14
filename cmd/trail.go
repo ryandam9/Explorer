@@ -10,10 +10,12 @@ import (
 	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/lipgloss"
 	"github.com/spf13/cobra"
 
 	"github.com/ryandam9/aws_explorer/internal/auth"
 	"github.com/ryandam9/aws_explorer/internal/awserr"
+	"github.com/ryandam9/aws_explorer/internal/awsutil"
 	"github.com/ryandam9/aws_explorer/internal/trail"
 	"github.com/ryandam9/aws_explorer/internal/trailtui"
 	"github.com/ryandam9/aws_explorer/internal/ui"
@@ -89,15 +91,11 @@ This is the CLI twin of the summary TUI's 't' CloudTrail timeline.`,
 		}
 
 		applyGlobalAWSOverrides()
+		ui.InitFromConfig(AppConfig.UI) // theme the status messages
 		ctx := context.Background()
 
-		region := "us-east-1"
-		if awsRegion != "" {
-			region = awsRegion
-		} else if len(AppConfig.AWS.Regions) > 0 {
-			region = AppConfig.AWS.Regions[0]
-		}
-		awscfg, err := auth.BuildAWSConfig(ctx, &AppConfig.AWS, region)
+		regions := trailRegions()
+		awscfg, err := auth.BuildAWSConfig(ctx, &AppConfig.AWS, regions[0])
 		if err != nil {
 			if hint, ok := awserr.LoginHint(err, AppConfig.AWS.Profile); ok {
 				return errors.New(hint)
@@ -118,9 +116,8 @@ This is the CLI twin of the summary TUI's 't' CloudTrail timeline.`,
 			if !cmd.Flags().Changed("limit") {
 				opts.Limit = 200
 			}
-			ui.InitFromConfig(AppConfig.UI)
 			SilenceScanLogs()
-			m := trailtui.New(ctx, awscfg, region, filter, opts, scope)
+			m := trailtui.New(ctx, awscfg, regions, filter, opts, scope)
 			p := tea.NewProgram(ui.WithWindowTitle(m), tea.WithAltScreen(), tea.WithContext(ctx))
 			if _, err := p.Run(); err != nil {
 				return fmt.Errorf("error running trail TUI: %w", err)
@@ -128,10 +125,11 @@ This is the CLI twin of the summary TUI's 't' CloudTrail timeline.`,
 			return nil
 		}
 
-		fmt.Fprintf(os.Stderr, "Looking up CloudTrail events for %s in %s (last 90 days max)…\n",
-			scope, region)
+		fmt.Fprintln(os.Stderr, ui.InfoStyle().Render(
+			fmt.Sprintf("Looking up CloudTrail events for %s across %s (last 90 days max)…",
+				scope, trailRegionScope(regions))))
 
-		events, truncated, err := trail.LookupFiltered(ctx, awscfg, region, filter, opts)
+		events, truncated, err := trail.LookupFilteredRegions(ctx, awscfg, regions, filter, opts)
 		if err != nil {
 			switch {
 			case awserr.IsExpiredCreds(err):
@@ -144,21 +142,80 @@ This is the CLI twin of the summary TUI's 't' CloudTrail timeline.`,
 			}
 		}
 
-		if len(events) == 0 && strings.EqualFold(outputFormat, "table") {
-			fmt.Printf("No management events recorded for %s in %s in the lookup window.\n",
-				scope, region)
+		table := strings.EqualFold(outputFormat, "table")
+		if len(events) == 0 {
+			if table {
+				printNoTrailEvents(scope, trailRegionScope(regions), truncated)
+			}
 			return nil
 		}
 		if err := trail.Render(os.Stdout, events, outputFormat, noHeader); err != nil {
 			return err
 		}
-		if truncated && strings.EqualFold(outputFormat, "table") {
-			fmt.Fprintf(os.Stderr,
-				"\nNote: results truncated at the %d-event scan cap — older events exist. "+
-					"Narrow the window with --since to see them.\n", len(events))
+		if truncated && table {
+			fmt.Fprintln(os.Stderr, warnStyle().Render(
+				"Note: results truncated at the scan cap — older events exist. "+
+					"Narrow with --since, pivot with --event/--source/--by, or use `lake` for full history."))
 		}
 		return nil
 	},
+}
+
+// trailRegions resolves the regions to query. -r pins a single region;
+// otherwise --all-regions (or an "all" entry / multiple entries in
+// aws.regions) fans out, defaulting to one region.
+func trailRegions() []string {
+	if awsRegion != "" {
+		return []string{awsRegion}
+	}
+	if AppConfig.AWS.AllRegions {
+		return awsutil.FallbackRegions
+	}
+	var rs []string
+	for _, r := range AppConfig.AWS.Regions {
+		if strings.EqualFold(r, "all") {
+			return awsutil.FallbackRegions
+		}
+		rs = append(rs, r)
+	}
+	if len(rs) > 0 {
+		return rs
+	}
+	return []string{"us-east-1"}
+}
+
+// trailRegionScope describes the region set for status messages.
+func trailRegionScope(regions []string) string {
+	if len(regions) == 1 {
+		return regions[0]
+	}
+	return fmt.Sprintf("%d regions", len(regions))
+}
+
+func warnStyle() lipgloss.Style {
+	return lipgloss.NewStyle().Foreground(lipgloss.Color(ui.ColorWarning()))
+}
+
+// printNoTrailEvents explains an empty result and points at the levers that
+// usually surface the missing events, in color.
+func printNoTrailEvents(scope, regionScope string, truncated bool) {
+	fmt.Println(warnStyle().Render(
+		fmt.Sprintf("No matching CloudTrail events for %s across %s in the scan window.", scope, regionScope)))
+	if truncated {
+		fmt.Println(warnStyle().Render(
+			"The feed scans the most recent events newest-first and stopped at the scan cap — " +
+				"in a busy account these can be entirely read-only, hiding older mutations."))
+	}
+	fmt.Println(ui.MutedStyle().Render("Try one of:"))
+	for _, hint := range []string{
+		"--event <Name> / --source <svc> / --by <principal>  pivot so the API filters server-side",
+		"--read-events                                        include Describe*/List*/Get* calls",
+		"--since 7d                                            bound the window",
+		"-r <region> / --all-regions                          widen or pin the region",
+		"lake --since 90d                                      query CloudTrail Lake for older history",
+	} {
+		fmt.Println(ui.MutedStyle().Render("  • " + hint))
+	}
 }
 
 // buildTrailFilter turns the positional resource arg and the --by/--event/

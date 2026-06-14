@@ -63,7 +63,7 @@ func (m Model) headerView() string {
 		status = ui.MutedStyle().Render(m.scope)
 	}
 	line1 := lipgloss.JoinHorizontal(lipgloss.Top, title, "  ", status)
-	if badge := ui.RegionBadge([]string{m.region}, false); badge != "" {
+	if badge := regionBadge(m.regions); badge != "" {
 		line1 = lipgloss.JoinHorizontal(lipgloss.Top, line1, "  ", badge)
 	}
 
@@ -84,6 +84,18 @@ func (m Model) headerView() string {
 			ui.MutedStyle().Render(fmt.Sprintf(" %d/%d", len(m.visible), len(m.all)))
 	}
 	return line1 + "\n" + line2
+}
+
+// regionBadge spotlights a single scanned region, or names the count when the
+// feed spans several (RegionBadge would list them all, which is too long).
+func regionBadge(regions []string) string {
+	if len(regions) == 1 {
+		return ui.RegionBadge(regions, false)
+	}
+	if len(regions) > 1 {
+		return ui.RegionBadgeStyle().Render("◉ " + regionLabel(regions))
+	}
+	return ""
 }
 
 func (m Model) bodyView() string {

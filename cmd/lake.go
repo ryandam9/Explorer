@@ -76,6 +76,7 @@ the trail command for the zero-setup 90-day feed.`,
 	Args: cobra.NoArgs,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		applyGlobalAWSOverrides()
+		ui.InitFromConfig(AppConfig.UI) // theme the status messages
 		ctx := context.Background()
 
 		region := "us-east-1"
@@ -100,9 +101,10 @@ the trail command for the zero-setup 90-day feed.`,
 			return fmt.Errorf("listing CloudTrail Lake event data stores failed: %w", err)
 		}
 		if len(stores) == 0 {
-			fmt.Printf("No CloudTrail Lake event data store found in %s.\n"+
-				"Create one (aws cloudtrail create-event-data-store …) or use `aws_explorer trail` "+
-				"for the zero-setup 90-day LookupEvents feed.\n", region)
+			fmt.Println(warnStyle().Render(fmt.Sprintf("No CloudTrail Lake event data store found in %s.", region)))
+			fmt.Println(ui.MutedStyle().Render(
+				"Create one (aws cloudtrail create-event-data-store …), or use `aws_explorer trail` " +
+					"for the zero-setup 90-day LookupEvents feed."))
 			return nil
 		}
 		if lakeListStores {
@@ -142,7 +144,8 @@ the trail command for the zero-setup 90-day feed.`,
 			return nil
 		}
 
-		fmt.Fprintf(os.Stderr, "Running CloudTrail Lake query (%s) on %s in %s…\n", title, store.Name, region)
+		fmt.Fprintln(os.Stderr, ui.InfoStyle().Render(
+			fmt.Sprintf("Running CloudTrail Lake query (%s) on %s in %s…", title, store.Name, region)))
 		res, err := traillake.RunQuery(ctx, awscfg, sql, opts)
 		if err != nil {
 			if awserr.IsAuthError(err) {
@@ -151,7 +154,7 @@ the trail command for the zero-setup 90-day feed.`,
 			return fmt.Errorf("CloudTrail Lake query failed: %w", err)
 		}
 		if len(res.Rows) == 0 && strings.EqualFold(outputFormat, "table") {
-			fmt.Println("The query returned no rows.")
+			fmt.Println(warnStyle().Render("The query returned no rows."))
 			return nil
 		}
 		return renderLakeResult(os.Stdout, res, outputFormat, noHeader)

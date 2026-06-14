@@ -915,11 +915,17 @@ Notes:
 - A resource, `--by`, `--event` and `--source` are **mutually exclusive** —
   the API matches a single attribute per query.
 - CloudTrail records events in the region where the activity happened; pick it
-  with `-r` (default: the first configured region).
+  with `-r` (default: the first configured region). **`--all-regions`** fans the
+  lookup out across regions (queried in parallel) and merges them newest-first.
+  Global services such as IAM and CloudFront record in `us-east-1`.
 - By default only **mutating** events are shown — the `Describe*` noise would
   drown out the changes you're looking for.
-- The API is rate-limited (2 TPS); pages are fetched serially and capped, so
-  busy scopes return the most recent events rather than everything.
+- The API is rate-limited (2 TPS); pages are fetched serially and capped. The
+  account-wide feed scans deeper than a pivoted lookup, but on a busy account
+  its newest events can still be all read-only — if you see nothing, **pivot**
+  (`--event`/`--source`/`--by`) so CloudTrail filters server-side, add
+  `--read-events`, narrow with `--since`, or use **`lake`** for older history.
+  The tool says when a result was truncated and suggests these levers.
 
 Add `--tui` to explore the feed interactively: quick filter, column sort, a
 **failed-only toggle** (`x`), and a per-event detail overlay — the same

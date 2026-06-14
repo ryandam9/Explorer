@@ -310,3 +310,15 @@ func TestRender_CSV(t *testing.T) {
 		t.Errorf("csv row = %q", lines[1])
 	}
 }
+
+func TestPageCapFor(t *testing.T) {
+	if got := pageCapFor(Filter{}, Options{}); got != feedPageCap {
+		t.Errorf("account-wide cap = %d, want feedPageCap %d", got, feedPageCap)
+	}
+	if got := pageCapFor(Filter{ResourceName: "i-0abc"}, Options{}); got != pivotPageCap {
+		t.Errorf("pivot cap = %d, want pivotPageCap %d", got, pivotPageCap)
+	}
+	if got := pageCapFor(Filter{}, Options{MaxPages: 3}); got != 3 {
+		t.Errorf("MaxPages override = %d, want 3", got)
+	}
+}
