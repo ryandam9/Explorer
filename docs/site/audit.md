@@ -33,8 +33,13 @@ redrive policies pointing at queues that no longer exist, dead-letter
 queues with messages waiting, SNS subscriptions stuck unconfirmed, and
 topics with zero subscriptions.
 
+cloudtrail — account-global audit-trail posture: no multi-region trail
+actively logging, trails without log file validation, logs not encrypted
+with a customer KMS key, trails not delivering to CloudWatch Logs, and
+trails that don't record all management events.
+
 Every finding carries a stable check ID (e.g. COST-EBS-001, SEC-S3-001,
-IAM-KEY-001, MSG-SQS-001).
+IAM-KEY-001, MSG-SQS-001, CT-TRAIL-001).
 
 For CI pipelines, --fail-on <severity> exits 2 when findings at or above the
 threshold exist (0 below it, 1 on operational errors), --ignore suppresses
@@ -86,7 +91,7 @@ aws_explorer audit -o sarif > audit.sarif
 |------|---------|-------------|
 | `--fail-on` | — | exit with code 2 if findings at or above this severity exist: critical, warning, info |
 | `--ignore` | — | suppress findings by check ID (e.g. COST-EBS-002) |
-| `--only` | — | restrict to these finding categories (available: cost, security, iam, messaging) |
+| `--only` | — | restrict to these finding categories (available: cost, security, iam, messaging, cloudtrail) |
 | `--tui` | — | explore the findings interactively instead of printing |
 
 ## Global flags

@@ -95,6 +95,18 @@ var checkRegistry = []CheckMeta{
 		"SNS subscription stuck in PendingConfirmation, delivering nothing", SevWarning},
 	{CheckTopicNoSubs, "TopicZeroSubscriptions",
 		"SNS topic with no subscriptions — published messages are discarded", SevInfo},
+
+	// CloudTrail configuration category (AXE-019).
+	{CheckTrailNotLogging, "NoMultiRegionTrailLogging",
+		"no multi-region CloudTrail is actively logging — the account has no audit trail", SevCritical},
+	{CheckTrailLogValidationOff, "TrailLogValidationDisabled",
+		"trail without log file validation — delivered logs could be tampered with undetected", SevWarning},
+	{CheckTrailNotKMSEncrypted, "TrailLogsNotKMSEncrypted",
+		"trail logs encrypted with SSE-S3 only, not a customer-managed KMS key", SevWarning},
+	{CheckTrailNoCloudWatchLogs, "TrailNoCloudWatchLogs",
+		"trail not delivering to CloudWatch Logs — no metric filters or alarms on its events", SevInfo},
+	{CheckTrailMgmtEventsPartial, "TrailManagementEventsIncomplete",
+		"trail not recording all management read/write events, leaving gaps in the audit record", SevWarning},
 }
 
 // Checks returns the registry of every known check, in declaration order.
