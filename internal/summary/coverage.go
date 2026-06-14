@@ -73,13 +73,16 @@ type ServiceCoverage struct {
 }
 
 // catalogWith returns the effective catalog: the built-in commonServices with
-// the user-configured extras (summary.commonServices) merged on top. An extra
-// whose key matches a built-in one overrides that label; a new key is appended.
-// A blank label falls back to the key so a misconfigured entry is still usable.
-func catalogWith(extra map[string]string) []catalogService {
-	if len(extra) == 0 {
+// the user-configured extras (summary.commonServices) merged on top, then the
+// hidden keys (summary.hideServices) removed. An extra whose key matches a
+// built-in one overrides that label; a new key is appended; a blank label falls
+// back to the key so a misconfigured entry is still usable. Unknown hide keys
+// are ignored.
+func catalogWith(extra map[string]string, hide []string) []catalogService {
+	if len(extra) == 0 && len(hide) == 0 {
 		return commonServices
 	}
+
 	out := make([]catalogService, len(commonServices))
 	copy(out, commonServices)
 
@@ -108,15 +111,30 @@ func catalogWith(extra map[string]string) []catalogService {
 		}
 		out = append(out, catalogService{Key: key, Label: label})
 	}
-	return out
+
+	if len(hide) == 0 {
+		return out
+	}
+	hidden := make(map[string]bool, len(hide))
+	for _, k := range hide {
+		hidden[k] = true
+	}
+	kept := out[:0]
+	for _, c := range out {
+		if !hidden[c.Key] {
+			kept = append(kept, c)
+		}
+	}
+	return kept
 }
 
 // Coverage compares the curated catalog against the collected inventory.
 // typedServices is the set of services that have a typed collector (pass the
 // engine's registered collector names); every other catalog service is reached
-// only through the tag-based discovery sweep. extra is the user-configured
-// addition to the catalog (summary.commonServices); pass nil for none.
-func Coverage(resources []model.Resource, typedServices []string, extra map[string]string) []ServiceCoverage {
+// only through the tag-based discovery sweep. extra and hide are the
+// user-configured additions and removals (summary.commonServices /
+// summary.hideServices); pass nil for none.
+func Coverage(resources []model.Resource, typedServices []string, extra map[string]string, hide []string) []ServiceCoverage {
 	typed := make(map[string]bool, len(typedServices))
 	for _, s := range typedServices {
 		typed[s] = true
@@ -128,7 +146,7 @@ func Coverage(resources []model.Resource, typedServices []string, extra map[stri
 		}
 	}
 
-	catalog := catalogWith(extra)
+	catalog := catalogWith(extra, hide)
 	out := make([]ServiceCoverage, 0, len(catalog))
 	for _, c := range catalog {
 		out = append(out, ServiceCoverage{

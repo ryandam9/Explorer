@@ -23,6 +23,11 @@ type SummaryConfig struct {
 	// user (e.g. "Route 53", "App Runner"). Entries are merged on top of the
 	// built-in catalog; an empty map leaves the defaults unchanged.
 	CommonServices map[string]string `mapstructure:"commonServices"`
+
+	// HideServices removes services from the coverage list by key, so a
+	// built-in entry (or an added one) can be suppressed when it is just noise
+	// for your account. Unknown keys are ignored.
+	HideServices []string `mapstructure:"hideServices"`
 }
 
 // TrailConfig configures the CloudTrail activity feed (the `trail` command and
