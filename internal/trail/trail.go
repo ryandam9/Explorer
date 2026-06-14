@@ -78,9 +78,58 @@ type Options struct {
 	// ErrorsOnly keeps only events that carry an errorCode (failed or denied
 	// calls) — the security-triage view of the feed.
 	ErrorsOnly bool
+	// HideEvents lists event-name patterns to drop from the results, sourced
+	// from the config file's `trail.hideEvents`. Matching is case-insensitive;
+	// a trailing "*" makes the pattern a prefix match ("Describe*" hides every
+	// describe call). Empty hides nothing. See HideMatcher.
+	HideEvents []string
 	// MaxPages overrides the page-scan cap (0 = the default for the lookup
 	// kind). Each page is up to 50 events; deeper scans cost ~600ms per page.
 	MaxPages int
+}
+
+// HideMatcher compiles a list of event-name patterns into a predicate that
+// reports whether an event name should be hidden from the feed. It backs the
+// config file's `trail.hideEvents` so users can permanently suppress noisy
+// events (e.g. AssumeRole, ConsoleLogin) without re-passing CLI flags.
+//
+// Matching is case-insensitive. A trailing "*" turns the pattern into a prefix
+// match, so "Describe*" hides DescribeInstances, DescribeVolumes, and so on; a
+// pattern without "*" must equal the event name exactly. A nil or empty pattern
+// list hides nothing.
+func HideMatcher(patterns []string) func(name string) bool {
+	type rule struct {
+		text   string
+		prefix bool
+	}
+	rules := make([]rule, 0, len(patterns))
+	for _, p := range patterns {
+		p = strings.ToLower(strings.TrimSpace(p))
+		if p == "" {
+			continue
+		}
+		if strings.HasSuffix(p, "*") {
+			rules = append(rules, rule{text: strings.TrimSuffix(p, "*"), prefix: true})
+		} else {
+			rules = append(rules, rule{text: p})
+		}
+	}
+	if len(rules) == 0 {
+		return func(string) bool { return false }
+	}
+	return func(name string) bool {
+		n := strings.ToLower(name)
+		for _, r := range rules {
+			if r.prefix {
+				if strings.HasPrefix(n, r.text) {
+					return true
+				}
+			} else if n == r.text {
+				return true
+			}
+		}
+		return false
+	}
 }
 
 // DefaultLimit is the event cap when Options.Limit is unset.
@@ -165,6 +214,8 @@ func LookupFiltered(ctx context.Context, cfg aws.Config, region string, f Filter
 		input.StartTime = aws.Time(opts.Since)
 	}
 
+	hidden := HideMatcher(opts.HideEvents)
+
 	maxPages := pageCapFor(f, opts)
 	for page := 0; page < maxPages; page++ {
 		if page > 0 {
@@ -186,6 +237,9 @@ func LookupFiltered(ctx context.Context, cfg aws.Config, region string, f Filter
 				continue
 			}
 			if opts.ErrorsOnly && ev.ErrorCode == "" {
+				continue
+			}
+			if hidden(ev.EventName) {
 				continue
 			}
 			events = append(events, ev)

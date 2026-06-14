@@ -70,10 +70,19 @@ type Model struct {
 	all     []trail.Event // every fetched event, newest first
 	visible []trail.Event // filter + errors-only + sort applied; row i = visible[i]
 
-	tbl        table.Model
-	filtering  bool
-	filterIn   textinput.Model
-	errorsOnly bool // "failed calls only" toggle (client-side)
+	tbl          table.Model
+	filtering    bool
+	filterIn     textinput.Model
+	errorsOnly   bool // "failed calls only" toggle (client-side)
+	hideReadOnly bool // "mutations only" toggle — drop read-only events (client-side)
+
+	// hidePatterns are the config's trail.hideEvents; hideMatch is the
+	// compiled predicate. Matching events are hidden by default and revealed
+	// when revealHidden is toggled on, so the suppression never silently loses
+	// an event the user goes looking for.
+	hidePatterns []string
+	hideMatch    func(string) bool
+	revealHidden bool
 
 	// sortCol -1 is the natural newest-first order from the API.
 	sortCol int
@@ -91,9 +100,12 @@ type Model struct {
 
 // New builds the CloudTrail feed TUI. The lookup runs in Init. opts.ErrorsOnly
 // is honored as the initial state of the in-TUI "failed only" toggle but the
-// fetch itself pulls everything, so the toggle can be flipped without another
-// (rate-limited) API round trip.
-func New(ctx context.Context, cfg aws.Config, regions []string, filter trail.Filter, opts trail.Options, scope string) Model {
+// fetch itself pulls everything (including read-only and config-hidden events),
+// so every toggle can be flipped without another (rate-limited) API round trip.
+//
+// hideEvents are the config's trail.hideEvents patterns: matching events are
+// hidden by default and revealed with the "h" key.
+func New(ctx context.Context, cfg aws.Config, regions []string, filter trail.Filter, opts trail.Options, scope string, hideEvents []string) Model {
 	sp := spinner.New()
 	sp.Spinner = spinner.MiniDot
 	sp.Style = lipgloss.NewStyle().Foreground(lipgloss.Color(ui.ColorAccent()))
@@ -118,18 +130,20 @@ func New(ctx context.Context, cfg aws.Config, regions []string, filter trail.Fil
 	opts.ErrorsOnly = false // fetch everything; the toggle filters client-side
 
 	return Model{
-		ctx:        ctx,
-		cfg:        cfg,
-		regions:    regions,
-		filter:     filter,
-		opts:       opts,
-		scope:      scope,
-		loading:    true,
-		errorsOnly: errorsOnly,
-		tbl:        tbl,
-		filterIn:   fi,
-		sortCol:    -1,
-		spin:       sp,
+		ctx:          ctx,
+		cfg:          cfg,
+		regions:      regions,
+		filter:       filter,
+		opts:         opts,
+		scope:        scope,
+		loading:      true,
+		errorsOnly:   errorsOnly,
+		hidePatterns: hideEvents,
+		hideMatch:    trail.HideMatcher(hideEvents),
+		tbl:          tbl,
+		filterIn:     fi,
+		sortCol:      -1,
+		spin:         sp,
 	}
 }
 
@@ -242,6 +256,17 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		// Toggle "failed calls only" — the security-triage view.
 		m.errorsOnly = !m.errorsOnly
 		m.rebuild()
+	case "o":
+		// Toggle read-only (Describe*/List*/Get*) events on/off.
+		m.hideReadOnly = !m.hideReadOnly
+		m.rebuild()
+	case "h":
+		// Reveal / re-hide the events suppressed by config trail.hideEvents.
+		// No-op when nothing is configured to hide.
+		if len(m.hidePatterns) > 0 {
+			m.revealHidden = !m.revealHidden
+			m.rebuild()
+		}
 	case "s":
 		// Cycle: natural order (-1) → each data column → back. The "#" column
 		// (index 0) is positional, so it is skipped.
@@ -262,6 +287,8 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.filterIn.SetValue("")
 		m.sortCol = -1
 		m.errorsOnly = false
+		m.hideReadOnly = false
+		m.revealHidden = false
 		m.rebuild()
 	case "<", ",":
 		m.tbl.ScrollLeft()
@@ -334,7 +361,11 @@ func (m *Model) exportCSV() {
 // rebuild recomputes the visible events (filter + errors-only + sort) and the
 // table rows.
 func (m *Model) rebuild() {
-	m.visible = filterEvents(m.all, m.filterIn.Value(), m.errorsOnly)
+	hide := m.hideMatch
+	if m.revealHidden {
+		hide = nil // reveal toggle on: show the suppressed events too
+	}
+	m.visible = filterEvents(m.all, m.filterIn.Value(), m.errorsOnly, m.hideReadOnly, hide)
 	sortEvents(m.visible, m.sortCol, m.sortAsc)
 
 	cols := append([]table.Column(nil), columns...)
@@ -383,12 +414,21 @@ func outcomeLabel(ev trail.Event) string {
 }
 
 // filterEvents keeps events matching the query (case-insensitive substring over
-// the displayed fields) and, when errorsOnly is set, only failed/denied calls.
-func filterEvents(evs []trail.Event, query string, errorsOnly bool) []trail.Event {
+// the displayed fields). When errorsOnly is set, only failed/denied calls are
+// kept; when hideReadOnly is set, read-only events are dropped; and when hide
+// is non-nil, events whose name it matches (the config trail.hideEvents) are
+// dropped too.
+func filterEvents(evs []trail.Event, query string, errorsOnly, hideReadOnly bool, hide func(string) bool) []trail.Event {
 	q := strings.ToLower(strings.TrimSpace(query))
 	out := make([]trail.Event, 0, len(evs))
 	for _, ev := range evs {
 		if errorsOnly && ev.ErrorCode == "" {
+			continue
+		}
+		if hideReadOnly && ev.ReadOnly {
+			continue
+		}
+		if hide != nil && hide(ev.EventName) {
 			continue
 		}
 		if q == "" || matchesEvent(ev, q) {

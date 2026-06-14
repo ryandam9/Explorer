@@ -69,11 +69,20 @@ func (m Model) headerView() string {
 
 	var parts []string
 	parts = append(parts, fmt.Sprintf("%d event(s)", len(m.all)))
+	if len(m.visible) != len(m.all) {
+		parts = append(parts, fmt.Sprintf("%d shown", len(m.visible)))
+	}
 	if failed := countFailed(m.all); failed > 0 {
 		parts = append(parts, fmt.Sprintf("%d failed", failed))
 	}
 	if m.errorsOnly {
 		parts = append(parts, "failed only")
+	}
+	if m.hideReadOnly {
+		parts = append(parts, "mutations only")
+	}
+	if m.revealHidden {
+		parts = append(parts, "hidden revealed")
 	}
 	if m.truncated {
 		parts = append(parts, "scan cap reached — narrow with --since")
@@ -110,8 +119,11 @@ func (m Model) bodyView() string {
 	}
 	if !m.loading && len(m.visible) == 0 {
 		hint := "No events match the current filter."
-		if m.errorsOnly {
+		switch {
+		case m.errorsOnly:
 			hint = "No failed/denied calls in this feed. Press x to show all events."
+		case m.hideReadOnly:
+			hint = "No mutating events in this feed. Press o to include read-only events."
 		}
 		return lipgloss.NewStyle().Padding(1, 2).Render(ui.MutedStyle().Render(hint))
 	}
@@ -141,7 +153,11 @@ func (m Model) keyHints() []ui.KeyHint {
 		ui.H("Enter", "detail"),
 		ui.H("/", "filter"),
 		ui.H("x", "failed only"),
+		ui.H("o", "read-only"),
 		ui.H("s", "sort"),
+	}
+	if len(m.hidePatterns) > 0 {
+		hints = append(hints, ui.H("h", "hidden"))
 	}
 	if m.sortCol > 0 {
 		hints = append(hints, ui.H("R", "reverse"))
@@ -215,8 +231,10 @@ func (m Model) helpOverlay() string {
 		{"Enter", "Open the detail overlay for the selected event"},
 		{"/", "Quick filter (matches any field, live matched/total count)"},
 		{"x", "Toggle failed/denied calls only"},
+		{"o", "Toggle read-only (Describe/List/Get) events on/off"},
+		{"h", "Reveal events hidden by config trail.hideEvents"},
 		{"s / R", "Sort by the next column / reverse the direction"},
-		{"r", "Reset filter, sort, and the failed-only toggle"},
+		{"r", "Reset filter, sort, and all toggles"},
 		{"</> or ,/.", "Scroll columns when the table is wider than the screen"},
 		{"y", "Copy the selected event's name"},
 		{"C", "Export the current view to CSV under ~/.aws_explorer/exports/"},

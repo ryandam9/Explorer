@@ -54,6 +54,16 @@ By default only mutating events are shown; --read-events includes the
 Describe*/List*/Get* noise too. --errors-only keeps just failed/denied calls
 (a burst of these is a recon or misconfiguration signal).
 
+The --tui feed shows every event (read-only included) and lets you toggle
+read-only events (o) and the failed-only view (x) live, so nothing is dropped
+behind your back.
+
+To permanently suppress noisy events (e.g. AssumeRole, ConsoleLogin) without
+re-passing flags, list them under trail.hideEvents in the config file —
+matching is case-insensitive and a trailing "*" is a prefix wildcard
+("Describe*"). Hidden events are dropped from this CLI output; in the TUI they
+are hidden by default and revealed with the "h" key.
+
 CloudTrail records events in the region where the activity happened (global
 services such as IAM record in us-east-1) — use -r to pick the region.
 
@@ -108,6 +118,7 @@ This is the CLI twin of the summary TUI's 't' CloudTrail timeline.`,
 			Limit:           trailLimit,
 			IncludeReadOnly: trailIncludeRead,
 			ErrorsOnly:      trailErrorsOnly,
+			HideEvents:      AppConfig.Trail.HideEvents,
 		}
 
 		if trailTUI {
@@ -116,8 +127,14 @@ This is the CLI twin of the summary TUI's 't' CloudTrail timeline.`,
 			if !cmd.Flags().Changed("limit") {
 				opts.Limit = 200
 			}
+			// The TUI shows every event and applies the read-only and
+			// config-hidden filters client-side (both toggleable in the UI), so
+			// the fetch must pull everything: include read-only events and keep
+			// the hidden ones rather than dropping them server-side.
+			opts.IncludeReadOnly = true
+			opts.HideEvents = nil
 			SilenceScanLogs()
-			m := trailtui.New(ctx, awscfg, regions, filter, opts, scope)
+			m := trailtui.New(ctx, awscfg, regions, filter, opts, scope, AppConfig.Trail.HideEvents)
 			p := tea.NewProgram(ui.WithWindowTitle(m), tea.WithAltScreen(), tea.WithContext(ctx))
 			if _, err := p.Run(); err != nil {
 				return fmt.Errorf("error running trail TUI: %w", err)

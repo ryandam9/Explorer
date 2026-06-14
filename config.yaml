@@ -84,6 +84,18 @@ output:
     format: table
     includedetails: false
     fields: []
+# CloudTrail activity feed (`aws_explorer trail` / `trail --tui`).
+trail:
+    # Event names to suppress from the feed so routine calls don't drown out the
+    # signal. Matching is case-insensitive; a trailing "*" is a prefix wildcard
+    # (e.g. "Describe*" hides every describe call). Hidden events are dropped
+    # from the CLI output; in the TUI they are hidden by default and can be
+    # revealed with the "h" key. Example:
+    #   hideevents:
+    #     - AssumeRole
+    #     - ConsoleLogin
+    #     - Describe*
+    hideevents: []
 ui:
     theme: princess-parrot
     themes:
