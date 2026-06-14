@@ -122,6 +122,17 @@ This is the CLI twin of the summary TUI's 't' CloudTrail timeline.`,
 			HideEvents:      AppConfig.Trail.HideEvents,
 		}
 
+		// The account-wide feed has no server-side attribute filter, so
+		// CloudTrail returns everything newest-first and the read-only/hidden
+		// noise is dropped only after each page is fetched — i.e. it still
+		// consumes the page-scan budget. Page much deeper for the unfiltered
+		// feed so real mutations buried under that noise are actually reached.
+		// Pivoted lookups (resource/principal/event/source) match few events,
+		// so they keep their shallow cap.
+		if filter == (trail.Filter{}) {
+			opts.MaxPages = trail.DeepFeedPageCap
+		}
+
 		if trailTUI {
 			// The feed's cap counts events that survive the trail.hideEvents
 			// filter, so include read-only events in the fetch and let the
@@ -134,13 +145,6 @@ This is the CLI twin of the summary TUI's 't' CloudTrail timeline.`,
 				if opts.Limit <= 0 {
 					opts.Limit = 200
 				}
-			}
-			// With reads filtered server-side, the account-wide feed must page
-			// deeper to collect `limit` mutations past the read-only noise.
-			// Pivoted lookups (resource/principal/event/source) already match
-			// few events, so leave their shallow cap alone.
-			if filter == (trail.Filter{}) {
-				opts.MaxPages = trail.DeepFeedPageCap
 			}
 			SilenceScanLogs()
 			m := trailtui.New(ctx, awscfg, regions, filter, opts, scope)
