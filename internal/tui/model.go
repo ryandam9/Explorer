@@ -51,9 +51,10 @@ const (
 // ── Layout constants ─────────────────────────────────────────────────────────
 
 const (
-	sidebarInner  = 18 // inner content width of the sidebar panel
-	detailInner   = 34 // inner content width of the detail panel
-	minTableInner = 40 // table panel keeps at least this much content width
+	sidebarInner   = 18 // inner content width of the sidebar panel
+	detailInner    = 34 // minimum inner content width of the detail panel
+	detailInnerMax = 72 // cap so the detail panel never dominates a wide terminal
+	minTableInner  = 40 // table panel keeps at least this much content width
 	// tablePanelHPad is the table panel's horizontal padding (Padding(0,1) =>
 	// 1 left + 1 right). The table content must be sized this much narrower than
 	// the panel's Width, or lipgloss wraps the last columns onto a new line.
@@ -1724,6 +1725,23 @@ func (m tuiModel) detailInline() bool {
 	return m.width >= (sidebarInner+4)+(minTableInner+6)+(detailInner+4)
 }
 
+// detailWidth is the detail panel's inner content width. It starts at the
+// minimum and grows into the terminal's spare horizontal space — after the
+// sidebar, a comfortable table, and the panels' own frames are accounted for —
+// up to detailInnerMax, so resource fields and the support panes have room to
+// breathe instead of being clipped on wide screens (issue #148).
+func (m tuiModel) detailWidth() int {
+	w := detailInner
+	spare := m.width - (sidebarInner + 4) - (minTableInner + 6) - (detailInner + 4)
+	if spare > 0 {
+		w += spare
+	}
+	if w > detailInnerMax {
+		w = detailInnerMax
+	}
+	return w
+}
+
 // tableInnerWidth is the content width inside the table panel: terminal width
 // minus the sidebar panel, the table panel's own border + padding, and the
 // detail panel when shown inline.
@@ -1731,7 +1749,7 @@ func (m tuiModel) tableInnerWidth() int {
 	sidebarOuter := sidebarInner + 4
 	w := m.width - sidebarOuter - 2 - 4
 	if m.showDetail && m.detailInline() {
-		w -= detailInner + 4
+		w -= m.detailWidth() + 4
 	}
 	if w < minTableInner {
 		return minTableInner
@@ -2008,7 +2026,7 @@ func (m *tuiModel) syncDetailViewport() {
 	if m.detail == nil || m.width == 0 {
 		return
 	}
-	vpWidth := detailInner - 2
+	vpWidth := m.detailWidth() - 2
 	if vpWidth < 10 {
 		vpWidth = 10
 	}
@@ -2401,7 +2419,7 @@ func (m tuiModel) renderDetailPanel() string {
 		scrollHint = fmt.Sprintf("\n─ %d%% ─", int(pct*100))
 	}
 	content := m.detailViewport.View() + scrollHint
-	return style.Width(detailInner).Height(h).Render(content)
+	return style.Width(m.detailWidth()).Height(h).Render(content)
 }
 
 // ── Status bar ────────────────────────────────────────────────────────────────
@@ -2664,36 +2682,37 @@ func (m tuiModel) renderDetail(r model.Resource, width int) string {
 	// ── Cloud Support Toggleable Panes (Appended sections) ──
 
 	if m.showTimeline {
-		b.WriteString("\n" + dSec.Render("CLOUDTRAIL TIMELINE (LAST 90 DAYS)") + "\n\n")
+		b.WriteString("\n" + sectionHeader("CLOUDTRAIL TIMELINE (LAST 90 DAYS)", width) + "\n\n")
 		if m.timelineLoading {
 			b.WriteString("  Loading events…\n")
 		} else if m.timelineErr != nil {
-			b.WriteString("  Error: " + m.timelineErr.Error() + "\n")
+			b.WriteString(wrapDetail("Error: "+m.timelineErr.Error(), width, 2) + "\n")
 		} else if len(m.timelineEvents) == 0 {
 			b.WriteString("  No recent CloudTrail mutations found.\n")
 		} else {
 			for _, ev := range m.timelineEvents {
 				timeStr := ev.Time.Format("2006-01-02 15:04:05")
-				b.WriteString(fmt.Sprintf("  %s · %s\n",
-					lipgloss.NewStyle().Foreground(lipgloss.Color(ui.ColorMuted())).Render(timeStr),
-					lipgloss.NewStyle().Foreground(lipgloss.Color(ui.ColorAccent())).Bold(true).Render(ev.EventName)))
-				b.WriteString(fmt.Sprintf("    %s %s · %s\n\n",
-					dKey.Render("by"), ev.Principal, ev.SourceIP))
+				head := lipgloss.NewStyle().Foreground(lipgloss.Color(ui.ColorMuted())).Render(timeStr) +
+					" · " + lipgloss.NewStyle().Foreground(lipgloss.Color(ui.ColorAccent())).Bold(true).Render(ev.EventName)
+				b.WriteString(wrapDetail(head, width, 2) + "\n")
+				by := fmt.Sprintf("%s %s · %s", dKey.Render("by"), ev.Principal, ev.SourceIP)
+				b.WriteString(wrapDetail(by, width, 4) + "\n\n")
 			}
 		}
 	}
 
 	if m.showLogs {
-		b.WriteString("\n" + dSec.Render("CLOUDWATCH RECENT ERROR LOGS") + "\n\n")
+		b.WriteString("\n" + sectionHeader("CLOUDWATCH RECENT ERROR LOGS", width) + "\n\n")
 		if m.logsLoading {
 			b.WriteString("  Loading logs…\n")
 		} else if m.logsErr != nil {
-			b.WriteString("  Error: " + m.logsErr.Error() + "\n")
+			b.WriteString(wrapDetail("Error: "+m.logsErr.Error(), width, 2) + "\n")
 		} else if len(m.logsLines) == 0 {
 			b.WriteString("  No recent error logs found.\n")
 		} else {
+			errStyle := lipgloss.NewStyle().Foreground(lipgloss.Color(ui.ColorError()))
 			for _, line := range m.logsLines {
-				b.WriteString("  " + lipgloss.NewStyle().Foreground(lipgloss.Color(ui.ColorError())).Render(line) + "\n")
+				b.WriteString(wrapDetail(errStyle.Render(line), width, 2) + "\n")
 			}
 		}
 	}
@@ -2704,35 +2723,37 @@ func (m tuiModel) renderDetail(r model.Resource, width int) string {
 		if hasMetric {
 			header = fmt.Sprintf("METRICS: %s (%s)", name, ns)
 		}
-		b.WriteString("\n" + dSec.Render(header) + "\n\n")
+		b.WriteString("\n" + sectionHeader(header, width) + "\n\n")
 		if m.metricsLoading {
 			b.WriteString("  Loading metric data…\n")
 		} else if m.metricsErr != nil {
-			b.WriteString("  Error: " + m.metricsErr.Error() + "\n")
+			b.WriteString(wrapDetail("Error: "+m.metricsErr.Error(), width, 2) + "\n")
 		} else if m.metricsData == nil || len(m.metricsData.Values) == 0 {
 			b.WriteString("  No datapoints in the last hour.\n")
 		} else {
 			vals := m.metricsData.Values
 			spark := lipgloss.NewStyle().Foreground(lipgloss.Color(ui.ColorAccent())).Render(sparkline.Render(vals))
 			stats, _ := sparkline.Summarize(vals)
-			b.WriteString(fmt.Sprintf("  %s  (1h, 5m avg)\n", spark))
-			b.WriteString(fmt.Sprintf("  now %s · max %s · min %s\n",
+			b.WriteString(wrapDetail(spark+"  (1h, 5m avg)", width, 2) + "\n")
+			stat := fmt.Sprintf("now %s · max %s · min %s",
 				sparkline.FormatValue(stats.Now, unit),
 				sparkline.FormatValue(stats.Max, unit),
-				sparkline.FormatValue(stats.Min, unit)))
+				sparkline.FormatValue(stats.Min, unit))
+			b.WriteString(wrapDetail(stat, width, 2) + "\n")
 		}
 	}
 
 	if m.showXref {
-		b.WriteString("\n" + dSec.Render("CROSS-RESOURCE REFERENCES") + "\n\n")
+		b.WriteString("\n" + sectionHeader("CROSS-RESOURCE REFERENCES", width) + "\n\n")
 		if len(m.xrefResources) == 0 {
 			b.WriteString("  No references found in other resources.\n")
 		} else {
 			for _, xr := range m.xrefResources {
-				b.WriteString(fmt.Sprintf("  - %s %s [%s]\n",
+				line := fmt.Sprintf("- %s %s [%s]",
 					lipgloss.NewStyle().Foreground(lipgloss.Color(ui.ColorAccent())).Render(xr.Service),
 					xr.ID,
-					xr.Type))
+					xr.Type)
+				b.WriteString(wrapDetail(line, width, 2) + "\n")
 			}
 		}
 	}
@@ -2992,6 +3013,47 @@ func waitForChunk(chunks <-chan model.ResultChunk, gen int) tea.Cmd {
 		}
 		return chunkMsg{gen: gen, chunk: chunk}
 	}
+}
+
+// wrapDetail soft-wraps one logical line of detail-pane content to the panel
+// width, indenting the first line and every wrapped continuation by indent
+// columns. The detail viewport clips long lines instead of wrapping them, so
+// without this the support panes (timeline/logs/metrics/xref) lose any text
+// past the panel's right edge (issue #148). lipgloss Width wrapping is
+// ANSI-aware, so styled segments keep their colors and long unbreakable tokens
+// (ARNs, log lines, resource IDs) are hard-broken rather than truncated.
+func wrapDetail(s string, width, indent int) string {
+	avail := width - indent
+	if avail < 1 {
+		avail = 1
+	}
+	wrapped := lipgloss.NewStyle().Width(avail).Render(s)
+	if indent == 0 {
+		return wrapped
+	}
+	pad := strings.Repeat(" ", indent)
+	lines := strings.Split(wrapped, "\n")
+	for i := range lines {
+		lines[i] = pad + lines[i]
+	}
+	return strings.Join(lines, "\n")
+}
+
+// sectionHeader renders a detail-section title, hard-wrapping it to the panel
+// width when it is too long to fit on one line. The viewport clips rather than
+// wraps, so a header wider than the panel (e.g. the CloudTrail timeline title,
+// or a long metric header) would otherwise be cut off (issue #148). Each chunk
+// is styled separately so the underline never bleeds across the full width.
+func sectionHeader(text string, width int) string {
+	style := detailSectionStyle()
+	if width <= 0 || len(text) <= width {
+		return style.Render(text)
+	}
+	chunks := chunkString(text, width)
+	for i, c := range chunks {
+		chunks[i] = style.Render(c)
+	}
+	return strings.Join(chunks, "\n")
 }
 
 func chunkString(s string, n int) []string {
