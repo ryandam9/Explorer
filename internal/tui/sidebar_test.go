@@ -66,3 +66,29 @@ func TestSidebarServiceNamesUniformSingleLine(t *testing.T) {
 		t.Errorf("expected %d single-line service rows, got %d:\n%s", len(m.services), rows, plain)
 	}
 }
+
+// The sidebar shows a live per-service resource count to the right of each
+// name, plus the aggregate next to "All".
+func TestSidebarShowsResourceCounts(t *testing.T) {
+	m := newTestModel(t, 120, 40) // seeds: s3 x1, ec2 x2
+
+	plain := ansi.Strip(m.renderSidebar())
+	lineFor := func(name string) string {
+		for _, ln := range strings.Split(plain, "\n") {
+			if strings.Contains(ln, name) {
+				return ln
+			}
+		}
+		return ""
+	}
+
+	if ln := lineFor("ec2"); !strings.Contains(ln, "2") {
+		t.Errorf("ec2 row should show its count of 2, got %q\n%s", ln, plain)
+	}
+	if ln := lineFor("s3"); !strings.Contains(ln, "1") {
+		t.Errorf("s3 row should show its count of 1, got %q\n%s", ln, plain)
+	}
+	if ln := lineFor("All"); !strings.Contains(ln, "3") {
+		t.Errorf("All row should show the aggregate count of 3, got %q\n%s", ln, plain)
+	}
+}

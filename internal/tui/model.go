@@ -51,7 +51,7 @@ const (
 // ── Layout constants ─────────────────────────────────────────────────────────
 
 const (
-	sidebarInner  = 18 // inner content width of the sidebar panel
+	sidebarInner  = 20 // inner content width of the sidebar panel (name + count)
 	detailInner   = 34 // inner content width of the detail panel
 	minTableInner = 40 // table panel keeps at least this much content width
 	// tablePanelHPad is the table panel's horizontal padding (Padding(0,1) =>
@@ -2008,7 +2008,10 @@ func (m *tuiModel) syncDetailViewport() {
 	if m.detail == nil || m.width == 0 {
 		return
 	}
-	vpWidth := detailInner - 2
+	// Reserve two columns on the right for the scrollbar gutter (a spacer plus
+	// the bar, drawn in renderDetailPanel). Reserved unconditionally so the
+	// content does not reflow the moment the panel becomes scrollable.
+	vpWidth := detailInner - 2 - 2
 	if vpWidth < 10 {
 		vpWidth = 10
 	}
@@ -2106,6 +2109,31 @@ func (m tuiModel) helpView() string {
 	return ui.HelpView("AWS Explorer Help", body, m.helpViewport.Width+4)
 }
 
+// loadingView renders the initial scan screen as a centered card: the app
+// name, a spinner with status text and — once the task plan is known — live
+// collector progress. It replaces the bare one-line spinner so the first thing
+// the user sees reads as a deliberate screen, not an unfinished frame.
+func (m tuiModel) loadingView() string {
+	title := lipgloss.NewStyle().
+		Foreground(lipgloss.Color(ui.ColorHeading())).Bold(true).
+		Render("AWS Explorer")
+	status := m.spinner.View() + "  " +
+		lipgloss.NewStyle().Foreground(lipgloss.Color(ui.ColorText())).
+			Render("Scanning your account…")
+
+	parts := []string{title, "", status}
+	if m.tasksTotal > 0 {
+		parts = append(parts, "",
+			ui.MutedStyle().Render(fmt.Sprintf("%d of %d collectors done", m.tasksDone, m.tasksTotal)))
+	}
+
+	card := ui.LoadingBoxStyle().Render(lipgloss.JoinVertical(lipgloss.Center, parts...))
+	if m.width <= 0 || m.height <= 0 {
+		return card
+	}
+	return lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center, card)
+}
+
 func (m tuiModel) View() string {
 	var output string
 
@@ -2113,13 +2141,12 @@ func (m tuiModel) View() string {
 		// The initial scan is exactly when the user is most likely to wonder
 		// what the tool is doing, so honour the debug overlay here too rather
 		// than only showing the bare spinner.
+		base := m.loadingView()
 		if m.showDebug {
-			loading := fmt.Sprintf("\n  %s  Loading AWS resources…\n", m.spinner.View())
-			output = ui.OverlayCenter(loading, m.debugOverlay(), m.width, m.height)
+			output = ui.OverlayCenter(base, m.debugOverlay(), m.width, m.height)
 			return m.zones.Scan(output)
 		}
-		output = fmt.Sprintf("\n  %s  Loading AWS resources…\n", m.spinner.View())
-		return m.zones.Scan(output)
+		return m.zones.Scan(base)
 	}
 
 	if len(m.errors) > 0 && len(m.sorted) == 0 && m.done {
@@ -2292,25 +2319,20 @@ func (m tuiModel) renderSidebar() string {
 	var b strings.Builder
 	b.WriteString(ui.PanelTitleStyle().Render("Services") + "\n\n")
 
-	// rowW left-aligns every row and pads it to one uniform width.
+	// rowW is the uniform width every row is padded to.
 	rowW := sidebarInner - 2
-	activeStyle := lipgloss.NewStyle().
-		Foreground(lipgloss.Color(ui.ColorHighlightText())).
-		Background(lipgloss.Color(ui.ColorHighlight())).
-		Width(rowW)
-	idleStyle := lipgloss.NewStyle().
-		Foreground(lipgloss.Color(ui.ColorText())).
-		Width(rowW)
 
-	// Services whose collectors reported errors carry a warning badge so a
-	// permission/throttle problem is visible without opening the errors
-	// overlay. "All" aggregates every error.
-	warnStyle := idleStyle.Foreground(lipgloss.Color(ui.ColorWarning()))
+	hiBg := lipgloss.Color(ui.ColorHighlight())
+	hiFg := lipgloss.Color(ui.ColorHighlightText())
+	textFg := lipgloss.Color(ui.ColorText())
+	warnFg := lipgloss.Color(ui.ColorWarning())
+	mutedFg := lipgloss.Color(ui.ColorMuted())
 
 	// Every row is exactly one line: a 2-column marker, the (possibly
-	// truncated) name, then the badge. The name budget is computed in display
-	// columns so a long name can never exceed the row style's Width — one
-	// column over and lipgloss wraps the row, shifting every entry below it.
+	// truncated) name, an optional error badge, then a right-aligned live
+	// resource count. Widths are computed in display columns so a long name
+	// can never overflow rowW — one column over and lipgloss wraps the row,
+	// shifting every entry below it.
 	const markerW = 2 // "▶ " / "  "
 
 	for i, svc := range m.services {
@@ -2323,18 +2345,68 @@ func (m tuiModel) renderSidebar() string {
 		if errCount > 0 {
 			badge = fmt.Sprintf(" ⚠%d", errCount)
 		}
+
+		// Right-aligned resource count (k9s-style), drawn as muted metadata. It
+		// grows live as the scan streams in. Reserve its width plus a single
+		// separating space; the name takes whatever remains.
+		count := ""
+		if n := m.svcTotals[svc]; n > 0 {
+			count = fmt.Sprintf("%d", n)
+		}
+		countW := 0
+		if count != "" {
+			countW = ansi.StringWidth(count) + 1
+		}
+
+		active := i == m.activeService
+		marker := "  "
+		if active {
+			marker = "▶ "
+		}
 		label := svc
-		if avail := rowW - markerW - ansi.StringWidth(badge); ansi.StringWidth(label) > avail {
+		if avail := rowW - markerW - countW - ansi.StringWidth(badge); ansi.StringWidth(label) > avail {
+			if avail < 1 {
+				avail = 1
+			}
 			label = ansi.Truncate(label, avail, "…")
 		}
-		var line string
+
+		left := marker + label + badge
+		gap := rowW - ansi.StringWidth(left) - countW
+		if gap < 0 {
+			gap = 0
+		}
+
+		// Pick the name ink: selected row wins, then an error badge, else body.
+		nameFg := textFg
 		switch {
-		case i == m.activeService:
-			line = activeStyle.Render("▶ " + label + badge)
+		case active:
+			nameFg = hiFg
 		case errCount > 0:
-			line = warnStyle.Render("  " + label + badge)
-		default:
-			line = idleStyle.Render("  " + label)
+			nameFg = warnFg
+		}
+		countFg := mutedFg
+		if active {
+			countFg = hiFg
+		}
+
+		// Compose the row from styled segments so name, badge and count keep
+		// their own ink while a single highlight background (when selected)
+		// spans the full row width.
+		nameStyle := lipgloss.NewStyle().Foreground(nameFg)
+		countStyle := lipgloss.NewStyle().Foreground(countFg)
+		gapStyle := lipgloss.NewStyle()
+		if active {
+			nameStyle = nameStyle.Background(hiBg)
+			countStyle = countStyle.Background(hiBg)
+			gapStyle = gapStyle.Background(hiBg)
+		}
+
+		var line string
+		if count != "" {
+			line = nameStyle.Render(left) + gapStyle.Render(strings.Repeat(" ", gap+1)) + countStyle.Render(count)
+		} else {
+			line = nameStyle.Render(left) + gapStyle.Render(strings.Repeat(" ", gap))
 		}
 		b.WriteString(m.zones.Mark(zID, line) + "\n")
 	}
@@ -2395,12 +2467,15 @@ func (m tuiModel) renderDetailPanel() string {
 	if h < 6 {
 		h = 6
 	}
-	scrollHint := ""
-	if m.detailViewport.TotalLineCount() > m.detailViewport.VisibleLineCount() {
-		pct := m.detailViewport.ScrollPercent()
-		scrollHint = fmt.Sprintf("\n─ %d%% ─", int(pct*100))
-	}
-	content := m.detailViewport.View() + scrollHint
+	// Pair the viewport with a vertical scrollbar gutter so the reader can see
+	// at a glance how much detail is above/below the fold.
+	bar := ui.VScrollbar(
+		m.detailViewport.Height,
+		m.detailViewport.TotalLineCount(),
+		m.detailViewport.VisibleLineCount(),
+		m.detailViewport.YOffset,
+	)
+	content := lipgloss.JoinHorizontal(lipgloss.Top, m.detailViewport.View(), " ", bar)
 	return style.Width(detailInner).Height(h).Render(content)
 }
 
