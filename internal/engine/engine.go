@@ -53,11 +53,6 @@ type Engine struct {
 
 // NewEngine creates a new scanning engine.
 func NewEngine(ctx context.Context, cfg *config.Config) (*Engine, error) {
-	slog.Info("Initializing AWS configuration",
-		"authMethod", cfg.AWS.AuthMethod,
-		"profile", cfg.AWS.Profile,
-	)
-
 	// Resolve regions from config or default
 	regions := cfg.AWS.Regions
 	if len(regions) == 0 {
@@ -74,6 +69,16 @@ func NewEngine(ctx context.Context, cfg *config.Config) (*Engine, error) {
 			break
 		}
 	}
+
+	// Surface the region scope on the init log: it is emitted before the CLI
+	// silences scan logs, so non-TUI commands (find, whereused, …) print the
+	// region(s) they are about to scan — invaluable when a lookup returns
+	// nothing because it ran against the wrong region (issue #149).
+	slog.Info("Initializing AWS configuration",
+		"authMethod", cfg.AWS.AuthMethod,
+		"profile", cfg.AWS.Profile,
+		"region", regionScopeLabel(regions, allRegions),
+	)
 
 	awscfg, err := auth.BuildAWSConfig(ctx, &cfg.AWS, bootstrapRegion)
 	if err != nil {
@@ -122,6 +127,15 @@ func NewEngine(ctx context.Context, cfg *config.Config) (*Engine, error) {
 		ResolvedRegions: resolvedRegions,
 		AccountID:       accountID,
 	}, nil
+}
+
+// regionScopeLabel renders the region scope for the init log: "all" when every
+// region is in play, otherwise the comma-separated configured region list.
+func regionScopeLabel(regions []string, allRegions bool) string {
+	if allRegions {
+		return "all"
+	}
+	return strings.Join(regions, ",")
 }
 
 // resolveAccountID returns the AWS account ID for the active credentials, or ""
