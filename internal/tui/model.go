@@ -225,6 +225,12 @@ type tuiModel struct {
 	showErrors     bool
 	errorsViewport viewport.Model
 
+	// Coverage overlay ("c", summary view): names the common services with
+	// nothing shown, so the banner's count ("N services show nothing") can be
+	// expanded into the actual list. Scrollable when long.
+	showCoverage     bool
+	coverageViewport viewport.Model
+
 	// Debug overlay ("~"): a live view of the captured scan activity log, so
 	// the user can see what the tool is doing — which regions, services and
 	// API calls are in flight — instead of staring at a blank screen.
@@ -525,6 +531,31 @@ func (m tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		// Non-input messages fall through to the normal update path below.
+	}
+
+	// While the coverage overlay is open, allow scrolling and close on Esc/c/q.
+	// Only input is intercepted so a running scan keeps progressing underneath.
+	if m.showCoverage {
+		switch msg := msg.(type) {
+		case tea.KeyMsg:
+			switch msg.String() {
+			case "esc", "c", "q":
+				m.showCoverage = false
+			case "up", "k", "[":
+				m.coverageViewport.LineUp(3)
+			case "down", "j", "]":
+				m.coverageViewport.LineDown(3)
+			}
+			return m, nil
+		case tea.MouseMsg:
+			switch msg.Button {
+			case tea.MouseButtonWheelUp:
+				m.coverageViewport.LineUp(3)
+			case tea.MouseButtonWheelDown:
+				m.coverageViewport.LineDown(3)
+			}
+			return m, nil
+		}
 	}
 
 	// While the account-diff overlay is open: scroll, b to re-baseline,
@@ -884,6 +915,14 @@ func (m tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case "e":
 			if len(m.errors) > 0 {
 				m.openErrorsOverlay()
+			}
+			return m, tea.Batch(cmds...)
+
+		case "c":
+			// Expand the coverage banner's count into the actual list of common
+			// services with nothing shown. Only meaningful in the summary view.
+			if m.hasCoverageBanner() {
+				m.openCoverageOverlay()
 			}
 			return m, tea.Batch(cmds...)
 
@@ -1822,10 +1861,10 @@ func (m tuiModel) coverageBanner() string {
 	}
 	var msg string
 	if m.coverageTagSweep {
-		msg = fmt.Sprintf("⚠ If a resource you expect is missing, it may have no tags, or there simply aren't any — %d common service(s) show nothing here.",
+		msg = fmt.Sprintf("⚠ If a resource you expect is missing, it may have no tags, or there simply aren't any — %d common service(s) show nothing (press c to list them).",
 			m.coverageMissing)
 	} else {
-		msg = fmt.Sprintf("⚠ --typed-only: resources found only by their tags were skipped — %d common service(s) show nothing here.",
+		msg = fmt.Sprintf("⚠ --typed-only: resources found only by their tags were skipped — %d common service(s) show nothing (press c to list them).",
 			m.coverageMissing)
 	}
 	w := m.width - 2
@@ -2150,7 +2189,13 @@ func (m *tuiModel) syncDetailViewport() {
 // taller than most terminals, so it is shown inside a scrollable viewport
 // rather than rendered as one fixed block (which would clip the bottom rows).
 func (m tuiModel) helpBody() string {
-	return lipgloss.JoinVertical(lipgloss.Left,
+	// The coverage shortcut only does something in the summary view, so it is
+	// listed only there to avoid advertising a no-op key in the plain TUI.
+	coverageLine := ""
+	if m.coverageAdvisory {
+		coverageLine = "  c                  List common services with nothing shown (why a resource may be missing)"
+	}
+	lines := []string{
 		"Navigation",
 		"  ↑/↓, [ ]           Move selection / scroll detail",
 		"  < >                Scroll table columns (when more columns than fit)",
@@ -2187,7 +2232,26 @@ func (m tuiModel) helpBody() string {
 		"  S                  Settings (theme & colors)",
 		"  ?                  Toggle this help",
 		"  q, Ctrl+C          Quit",
-	)
+	}
+	if coverageLine != "" {
+		// Slot it under Resources & Audit, right after the CSV export line.
+		lines = insertAfter(lines, "  C                  Export current view to CSV (~/.aws_explorer/exports)", coverageLine)
+	}
+	return lipgloss.JoinVertical(lipgloss.Left, lines...)
+}
+
+// insertAfter returns lines with extra inserted immediately after the first
+// element equal to anchor; if the anchor isn't found, extra is appended.
+func insertAfter(lines []string, anchor, extra string) []string {
+	for i, l := range lines {
+		if l == anchor {
+			out := make([]string, 0, len(lines)+1)
+			out = append(out, lines[:i+1]...)
+			out = append(out, extra)
+			return append(out, lines[i+1:]...)
+		}
+	}
+	return append(lines, extra)
 }
 
 // openHelpOverlay (re)builds the scrollable help overlay sized to the current
@@ -2277,6 +2341,9 @@ func (m tuiModel) View() string {
 		output = lipgloss.JoinVertical(lipgloss.Left, header, centered, status)
 	} else if m.showErrors {
 		centered := lipgloss.Place(m.width, m.height-4, lipgloss.Center, lipgloss.Center, m.errorsOverlay())
+		output = lipgloss.JoinVertical(lipgloss.Left, header, centered, status)
+	} else if m.showCoverage {
+		centered := lipgloss.Place(m.width, m.height-4, lipgloss.Center, lipgloss.Center, m.coverageOverlay())
 		output = lipgloss.JoinVertical(lipgloss.Left, header, centered, status)
 	} else if m.showDebug {
 		// Float the debug pane over the live frame (HUD-style, like the
@@ -2640,6 +2707,8 @@ func (m tuiModel) statusHints() []ui.KeyHint {
 		return []ui.KeyHint{ui.H("↑/↓", "scroll"), ui.H("?/Esc", "close help")}
 	case m.showErrors:
 		return []ui.KeyHint{ui.H("↑/↓", "scroll"), ui.H("Esc/e", "close")}
+	case m.showCoverage:
+		return []ui.KeyHint{ui.H("↑/↓", "scroll"), ui.H("Esc/c", "close")}
 	case m.showDebug:
 		return []ui.KeyHint{ui.H("↑/↓", "scroll"), ui.H("g/G", "top/bottom"), ui.H("Esc/~", "close")}
 	case m.showAcctDiff:
@@ -2698,6 +2767,9 @@ func (m tuiModel) statusHints() []ui.KeyHint {
 		}
 		if len(m.errors) > 0 {
 			hints = append(hints, ui.H("e", fmt.Sprintf("errors (%d)", len(m.errors))))
+		}
+		if m.hasCoverageBanner() {
+			hints = append(hints, ui.H("c", fmt.Sprintf("not shown (%d)", m.coverageMissing)))
 		}
 		hints = append(hints, ui.H("~", "debug"))
 		return append(hints,
@@ -3187,6 +3259,53 @@ func (m tuiModel) errorsOverlay() string {
 	hint := privilegeHintStyle().Render("↑/↓ scroll · Esc/e close")
 	body := lipgloss.JoinVertical(lipgloss.Left, title, "", m.errorsViewport.View(), "", hint)
 	return privilegeErrorStyle().Render(body)
+}
+
+// ── Coverage overlay ("c") ──────────────────────────────────────────────────────
+
+// openCoverageOverlay (re)builds the scrollable list of common services with
+// nothing shown, sized to the current terminal.
+func (m *tuiModel) openCoverageOverlay() {
+	w := m.width - 12
+	if w > 72 {
+		w = 72
+	}
+	if w < 32 {
+		w = 32
+	}
+	h := m.height - 12
+	if h < 6 {
+		h = 6
+	}
+	m.coverageViewport = viewport.New(w, h)
+	m.coverageViewport.SetContent(m.coverageBody(w))
+	m.coverageViewport.GotoTop()
+	m.showCoverage = true
+}
+
+// coverageBody lists, one per line, the common services that produced no rows,
+// under a plain-language explanation wrapped to width.
+func (m tuiModel) coverageBody(width int) string {
+	intro := lipgloss.NewStyle().Width(width).Render(
+		"If a resource you expected isn't here, it may have no tags, or there simply aren't any. " +
+			"These common services produced nothing in this scan:")
+
+	var b strings.Builder
+	b.WriteString(intro + "\n\n")
+	if m.engine != nil {
+		for _, c := range summary.NotShown(summary.Coverage(m.sorted, m.engine.TypedServices())) {
+			b.WriteString("  • " + c.Label + "\n")
+		}
+	}
+	return strings.TrimRight(b.String(), "\n")
+}
+
+// coverageOverlay frames the coverage list in the neutral, help-style modal.
+func (m tuiModel) coverageOverlay() string {
+	hint := lipgloss.NewStyle().Foreground(lipgloss.Color(ui.ColorMuted())).
+		Render("↑/↓ scroll · c/Esc close")
+	body := lipgloss.JoinVertical(lipgloss.Left, m.coverageViewport.View(), "", hint)
+	return ui.HelpView("Services with nothing shown", body, m.coverageViewport.Width+4)
 }
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
