@@ -138,6 +138,13 @@ summary:
     #     apprunner: App Runner
     #     sagemaker: SageMaker
     commonservices: {}
+    # hideservices removes services from that list by key — built-in or added —
+    # when an entry is just noise for your account. Unknown keys are ignored.
+    # Example:
+    #   hideservices:
+    #     - glue
+    #     - athena
+    hideservices: []
 # CloudTrail activity feed (`aws_explorer trail` / `trail --tui`).
 trail:
     # The account-wide feed already excludes read-only calls server-side

@@ -260,6 +260,9 @@ summary:
   commonservices:
     apprunner: App Runner
     sagemaker: SageMaker
+  hideservices:        # drop entries (built-in or added) that are just noise
+    - glue
+    - athena
 ```
 
 [Resource Groups Tagging API]: https://docs.aws.amazon.com/resourcegroupstagging/latest/APIReference/API_GetResources.html
