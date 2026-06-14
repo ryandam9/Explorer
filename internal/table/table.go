@@ -139,6 +139,12 @@ type Styles struct {
 	Header   lipgloss.Style
 	Cell     lipgloss.Style
 	Selected lipgloss.Style
+
+	// ScrollTrack and ScrollThumb style the vertical scrollbar drawn down the
+	// right edge when there are more rows than fit. Zero values render an
+	// uncolored bar, which is still legible; ui.TableStyles themes them.
+	ScrollTrack lipgloss.Style
+	ScrollThumb lipgloss.Style
 }
 
 // DefaultStyles returns a set of default style definitions for this table.
@@ -394,9 +400,110 @@ func (m *Model) Blur() {
 	m.UpdateViewport()
 }
 
+// vScrollGutter is the width reserved on the right for the vertical scrollbar
+// (one spacer column plus the bar) when the table has more rows than fit.
+const vScrollGutter = 2
+
+// vScrollActive reports whether a vertical scrollbar is shown: the table has a
+// constrained width and more rows than the row viewport can display at once.
+func (m Model) vScrollActive() bool {
+	return m.width > 0 && m.viewport.Height > 0 && len(m.rows) > m.viewport.Height
+}
+
+// contentWidth is the width available to columns: the render width minus the
+// scrollbar gutter when one is shown, so the bar never pushes the table past
+// the width the caller sized it to.
+func (m Model) contentWidth() int {
+	if m.vScrollActive() {
+		return m.width - vScrollGutter
+	}
+	return m.width
+}
+
 // View renders the component.
 func (m Model) View() string {
-	return m.headersView() + "\n" + m.viewport.View()
+	header := m.headersView()
+	rows := m.viewport.View()
+	if !m.vScrollActive() {
+		return header + "\n" + rows
+	}
+
+	// Pair the row area with a vertical scrollbar so a full page no longer hides
+	// the fact that there are more rows above/below (issue #155). The bar tracks
+	// the topmost visible row within the full row set.
+	cw := m.contentWidth()
+	top := m.start + m.viewport.YOffset
+	bar := RenderVScrollbar(m.viewport.Height, len(m.rows), m.viewport.Height, top,
+		m.styles.ScrollTrack, m.styles.ScrollThumb)
+	barLines := strings.Split(bar, "\n")
+
+	// Pad each row line to the content width so the bar lands flush at the right
+	// edge regardless of how short the widest row is. MaxWidth trims the trailing
+	// padding the viewport may add, keeping every line exactly cw + gutter wide.
+	pad := lipgloss.NewStyle().Width(cw).MaxWidth(cw)
+	rowLines := strings.Split(rows, "\n")
+	for i := range rowLines {
+		line := pad.Render(rowLines[i])
+		if i < len(barLines) {
+			line += " " + barLines[i]
+		}
+		rowLines[i] = line
+	}
+	return header + "\n" + strings.Join(rowLines, "\n")
+}
+
+// RenderVScrollbar renders a one-column vertical scrollbar of the given height:
+// a thumb sized to the visible fraction of the content, positioned by the
+// scroll offset. When everything fits (total <= visible) it returns a blank
+// gutter of spaces so callers can reserve the column unconditionally. track and
+// thumb style the respective cells. It lives here (rather than in internal/ui)
+// so the table can draw its own scrollbar without importing ui, which imports
+// table; ui.VScrollbar delegates to it.
+//
+// total is the content's line count, visible the number of lines on screen and
+// offset the index of the topmost visible line.
+func RenderVScrollbar(height, total, visible, offset int, track, thumb lipgloss.Style) string {
+	if height < 1 {
+		return ""
+	}
+	blank := strings.TrimRight(strings.Repeat(" \n", height), "\n")
+	if total <= visible || visible < 1 {
+		return blank
+	}
+
+	thumbH := height * visible / total
+	if thumbH < 1 {
+		thumbH = 1
+	}
+	if thumbH > height {
+		thumbH = height
+	}
+
+	maxOffset := total - visible
+	travel := height - thumbH
+	pos := 0
+	if maxOffset > 0 {
+		pos = travel * offset / maxOffset
+	}
+	if pos > travel {
+		pos = travel
+	}
+	if pos < 0 {
+		pos = 0
+	}
+
+	var b strings.Builder
+	for i := 0; i < height; i++ {
+		if i > 0 {
+			b.WriteByte('\n')
+		}
+		if i >= pos && i < pos+thumbH {
+			b.WriteString(thumb.Render("┃"))
+		} else {
+			b.WriteString(track.Render("│"))
+		}
+	}
+	return b.String()
 }
 
 // HelpView is a helper method for rendering the help menu from the keymap.
@@ -521,7 +628,7 @@ func (m *Model) ScrollLeft() {
 func (m Model) ColScrollInfo() (hiddenLeft, hiddenRight int) {
 	pos, frozen := m.layoutCols()
 	scroll := pos[frozen:]
-	if m.width <= 0 || len(scroll) == 0 {
+	if m.contentWidth() <= 0 || len(scroll) == 0 {
 		return 0, 0
 	}
 	hiddenLeft = m.colOffset
@@ -561,7 +668,8 @@ func (m Model) colSpan(i int) int {
 // (starting at colOffset) as fit.
 func (m Model) visibleCols() []int {
 	pos, frozen := m.layoutCols()
-	if m.width <= 0 {
+	cw := m.contentWidth()
+	if cw <= 0 {
 		return pos
 	}
 	res := append([]int{}, pos[:frozen]...)
@@ -576,7 +684,7 @@ func (m Model) visibleCols() []int {
 	}
 	for k := off; k < len(scroll); k++ {
 		span := m.colSpan(scroll[k])
-		if used+span > m.width && len(res) > frozen {
+		if used+span > cw && len(res) > frozen {
 			break
 		}
 		res = append(res, scroll[k])
@@ -590,10 +698,11 @@ func (m Model) visibleCols() []int {
 func (m Model) maxColOffset() int {
 	pos, frozen := m.layoutCols()
 	scroll := pos[frozen:]
-	if m.width <= 0 || len(scroll) == 0 {
+	cw := m.contentWidth()
+	if cw <= 0 || len(scroll) == 0 {
 		return 0
 	}
-	avail := m.width
+	avail := cw
 	for _, i := range pos[:frozen] {
 		avail -= m.colSpan(i)
 	}
@@ -715,15 +824,16 @@ func (m Model) headersView() string {
 // excess onto a new line and corrupts the layout. A width of 0 means
 // unconstrained, so nothing is clipped.
 func (m Model) clipToWidth(s string) string {
-	if m.width <= 0 {
+	w := m.contentWidth()
+	if w <= 0 {
 		return s
 	}
 	if !strings.Contains(s, "\n") {
-		return ansi.Truncate(s, m.width, "")
+		return ansi.Truncate(s, w, "")
 	}
 	lines := strings.Split(s, "\n")
 	for i, ln := range lines {
-		lines[i] = ansi.Truncate(ln, m.width, "")
+		lines[i] = ansi.Truncate(ln, w, "")
 	}
 	return strings.Join(lines, "\n")
 }
