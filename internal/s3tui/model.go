@@ -436,11 +436,22 @@ func (m *Model) buildObjectColumns() []table.Column {
 	fields := m.objectColFields()
 	cols := make([]table.Column, 0, len(fields)+1)
 	cols = append(cols, table.Column{Title: "#", Width: 4})
-	for i, f := range fields {
-		title := sortTitle(f.Title, i, m.sortCol, m.sortAsc)
-		cols = append(cols, table.Column{Title: title, Width: f.Width})
+	for _, f := range fields {
+		cols = append(cols, table.Column{Title: f.Title, Width: f.Width})
 	}
+	applyObjectSortHeader(cols, m.sortCol, m.sortAsc)
 	return cols
+}
+
+// applyObjectSortHeader marks the active sort column (leading "#" at index 0 is
+// not sortable, so the field index maps to display index field+1) and reserves
+// the arrow's width so the table never reflows when the sort moves.
+func applyObjectSortHeader(cols []table.Column, sortCol int, asc bool) {
+	active := -1
+	if sortCol >= 0 {
+		active = sortCol + 1
+	}
+	table.ApplySortHeader(cols, active, asc, func(i int) bool { return i > 0 })
 }
 
 func (m *Model) restyleForTheme() {
@@ -515,13 +526,14 @@ func (m *Model) updateObjectColumns() {
 	nameWidth := max(18, m.tableViewWidth()-fixedW-padding)
 	cols := make([]table.Column, 0, len(fields)+1)
 	cols = append(cols, table.Column{Title: "#", Width: 4})
-	for i, f := range fields {
+	for _, f := range fields {
 		w := f.Width
 		if f.Key == "name" {
 			w = nameWidth
 		}
-		cols = append(cols, table.Column{Title: sortTitle(f.Title, i, m.sortCol, m.sortAsc), Width: w})
+		cols = append(cols, table.Column{Title: f.Title, Width: w})
 	}
+	applyObjectSortHeader(cols, m.sortCol, m.sortAsc)
 	m.objectTable.SetColumns(cols)
 }
 

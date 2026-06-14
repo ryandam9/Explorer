@@ -112,23 +112,9 @@ func (m Model) bodyView() string {
 }
 
 func (m Model) statusBarView() string {
-	left := m.status
-	if left == "" {
-		left = m.sortLabel()
-	}
-	return ui.StatusBar(m.width, left, m.keyHints())
-}
-
-// sortLabel names the active sort for the status bar.
-func (m Model) sortLabel() string {
-	if m.sortCol < 0 {
-		return "sorted by cost"
-	}
-	dir := "↓"
-	if m.sortAsc {
-		dir = "↑"
-	}
-	return "sorted by " + strings.ToLower(columns[m.sortCol].Title) + " " + dir
+	// The active sort is shown by the arrow on the column header (see
+	// rebuild), so the status bar only carries transient messages.
+	return ui.StatusBar(m.width, m.status, m.keyHints())
 }
 
 // keyHints lists only the shortcuts usable right now, per the app-wide

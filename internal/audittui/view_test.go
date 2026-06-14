@@ -23,7 +23,9 @@ func TestStatusBarSurvivesClip(t *testing.T) {
 
 	lines := strings.Split(v.View(), "\n")
 	last := lines[len(lines)-1]
-	if !strings.Contains(last, "sorted by") {
+	// The active sort now shows as a header arrow, not a status-bar label, so
+	// identify the status-bar line by a key hint it always carries.
+	if !strings.Contains(last, "sort") {
 		t.Errorf("status bar should be the last line; got %q", last)
 	}
 	if strings.Contains(last, "more cols") {

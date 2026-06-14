@@ -426,6 +426,13 @@ func (m *Model) rebuild() {
 	m.visible = filterLines(lines, m.filter.Value())
 	m.sortVisible()
 
+	// Re-title columns so the active sort column carries the direction arrow.
+	// Column 0 ("#") is a positional counter and never sorts; widths reserve
+	// the arrow so the table does not reflow when the sort moves.
+	cols := append([]table.Column(nil), columns...)
+	table.ApplySortHeader(cols, m.sortCol, m.sortAsc, func(i int) bool { return i > 0 })
+	m.tbl.SetColumns(cols)
+
 	currency := ""
 	if m.bill != nil {
 		currency = m.bill.Currency

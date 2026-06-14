@@ -246,6 +246,45 @@ func (m Model) colStyle(i int) lipgloss.Style {
 	return lipgloss.NewStyle().Width(m.cols[i].Width).MaxWidth(m.cols[i].Width).Inline(true)
 }
 
+// SortAscArrow and SortDescArrow are the header suffixes marking the active
+// sort column and its direction. Each is two display cells wide (a separating
+// space plus the arrow) so the two directions are interchangeable without
+// changing a header's width.
+const (
+	SortAscArrow  = " ↑"
+	SortDescArrow = " ↓"
+)
+
+// ApplySortHeader marks the active sort column's header with a direction arrow
+// (SortAscArrow / SortDescArrow) and reserves room for that arrow in every
+// sortable column's width. Because the width is reserved whether or not the
+// column currently shows the arrow, the arrow appearing — or moving between
+// columns — never changes a column's width, so the table does not reflow
+// ("flicker"). Inactive sortable headers stay arrow-free for a clean look.
+//
+// active is the index of the current sort column, or -1 for none. sortable
+// reports whether column i participates in sorting, so non-sortable columns
+// (e.g. a positional "#") are left untouched. Call it each render with freshly
+// built, arrow-free columns.
+func ApplySortHeader(cols []Column, active int, asc bool, sortable func(i int) bool) {
+	arrow := SortAscArrow
+	if !asc {
+		arrow = SortDescArrow
+	}
+	arrowW := runewidth.StringWidth(arrow)
+	for i := range cols {
+		if cols[i].Width == 0 || !sortable(i) {
+			continue // width-0 columns are hidden; non-sortable ones never sort
+		}
+		if reserved := runewidth.StringWidth(cols[i].Title) + arrowW; cols[i].Width < reserved {
+			cols[i].Width = reserved
+		}
+		if i == active {
+			cols[i].Title += arrow
+		}
+	}
+}
+
 // WithColumns sets the table columns (headers).
 func WithColumns(cols []Column) Option {
 	return func(m *Model) {
