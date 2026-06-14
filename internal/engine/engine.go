@@ -66,6 +66,45 @@ type Engine struct {
 }
 
 // NewEngine creates a new scanning engine.
+// defaultRegistry builds the registry of typed collectors used by every engine.
+// It is split out from NewEngine (which also does live AWS auth) so the set of
+// registered collectors can be inspected in tests without credentials — this is
+// what guarantees each service surfaces in the Summary screen with complete,
+// tag-independent coverage.
+func defaultRegistry() *services.Registry {
+	registry := services.NewRegistry()
+	registry.Register(ec2.NewCollector())
+	registry.Register(s3.NewCollector())
+	registry.Register(rds.NewCollector())
+	registry.Register(iam.NewCollector())
+	registry.Register(dynamodb.NewCollector())
+	registry.Register(lambda.NewCollector())
+	registry.Register(emr.NewCollector())
+	registry.Register(ecs.NewCollector())
+	registry.Register(eks.NewCollector())
+	registry.Register(elbv2.NewCollector())
+	registry.Register(secretsmanager.NewCollector())
+	registry.Register(sqs.NewCollector())
+	registry.Register(sns.NewCollector())
+	registry.Register(cloudwatch.NewCollector())
+	registry.Register(cloudfront.NewCollector())
+	registry.Register(route53.NewCollector())
+	registry.Register(apigateway.NewCollector())
+	registry.Register(stepfunctions.NewCollector())
+	registry.Register(eventbridge.NewCollector())
+	registry.Register(elasticache.NewCollector())
+	registry.Register(efs.NewCollector())
+	registry.Register(kinesis.NewCollector())
+	registry.Register(redshift.NewCollector())
+	registry.Register(kms.NewCollector())
+	registry.Register(ecr.NewCollector())
+	registry.Register(acm.NewCollector())
+	registry.Register(cloudformation.NewCollector())
+	registry.Register(glue.NewCollector())
+	registry.Register(athena.NewCollector())
+	return registry
+}
+
 func NewEngine(ctx context.Context, cfg *config.Config) (*Engine, error) {
 	// Resolve regions from config or default
 	regions := cfg.AWS.Regions
@@ -117,36 +156,7 @@ func NewEngine(ctx context.Context, cfg *config.Config) (*Engine, error) {
 	// are simply omitted while AWS-provided ARNs still work.
 	accountID := resolveAccountID(ctx, awscfg)
 
-	registry := services.NewRegistry()
-	registry.Register(ec2.NewCollector())
-	registry.Register(s3.NewCollector())
-	registry.Register(rds.NewCollector())
-	registry.Register(iam.NewCollector())
-	registry.Register(dynamodb.NewCollector())
-	registry.Register(lambda.NewCollector())
-	registry.Register(emr.NewCollector())
-	registry.Register(ecs.NewCollector())
-	registry.Register(eks.NewCollector())
-	registry.Register(elbv2.NewCollector())
-	registry.Register(secretsmanager.NewCollector())
-	registry.Register(sqs.NewCollector())
-	registry.Register(sns.NewCollector())
-	registry.Register(cloudwatch.NewCollector())
-	registry.Register(cloudfront.NewCollector())
-	registry.Register(route53.NewCollector())
-	registry.Register(apigateway.NewCollector())
-	registry.Register(stepfunctions.NewCollector())
-	registry.Register(eventbridge.NewCollector())
-	registry.Register(elasticache.NewCollector())
-	registry.Register(efs.NewCollector())
-	registry.Register(kinesis.NewCollector())
-	registry.Register(redshift.NewCollector())
-	registry.Register(kms.NewCollector())
-	registry.Register(ecr.NewCollector())
-	registry.Register(acm.NewCollector())
-	registry.Register(cloudformation.NewCollector())
-	registry.Register(glue.NewCollector())
-	registry.Register(athena.NewCollector())
+	registry := defaultRegistry()
 
 	return &Engine{
 		Config:          cfg,
