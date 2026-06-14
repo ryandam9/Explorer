@@ -333,6 +333,18 @@ func TestHideMatcher(t *testing.T) {
 	}
 }
 
+func TestHideMatcher_PrefixBoundary(t *testing.T) {
+	// "Describe*" hides describe calls but not an unrelated event that merely
+	// starts with the same letters in a different word.
+	hide := HideMatcher([]string{"Describe*"})
+	if !hide("DescribeInstances") {
+		t.Error("Describe* should hide DescribeInstances")
+	}
+	if hide("DeleteBucket") {
+		t.Error("Describe* should not hide DeleteBucket")
+	}
+}
+
 func TestHideMatcher_EmptyHidesNothing(t *testing.T) {
 	hide := HideMatcher(nil)
 	if hide("AnyEvent") {

@@ -215,6 +215,12 @@ func LookupFiltered(ctx context.Context, cfg aws.Config, region string, f Filter
 	}
 
 	hidden := HideMatcher(opts.HideEvents)
+	// An explicit single-event lookup means the caller is asking for exactly
+	// that event, so never hide it even if a pattern would match (e.g. looking
+	// up DescribeInstances while "Describe*" is in trail.hideEvents).
+	if f.EventName != "" {
+		hidden = func(string) bool { return false }
+	}
 
 	maxPages := pageCapFor(f, opts)
 	for page := 0; page < maxPages; page++ {

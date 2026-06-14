@@ -23,15 +23,16 @@ By default only mutating events are shown; --read-events includes the
 Describe*/List*/Get* noise too. --errors-only keeps just failed/denied calls
 (a burst of these is a recon or misconfiguration signal).
 
-The --tui feed shows every event (read-only included) and lets you toggle
-read-only events (o) and the failed-only view (x) live, so nothing is dropped
-behind your back.
+The --tui feed streams events in per region (it doesn't wait for the slowest
+region) and keeps the newest trail.maxEvents (default 200) that survive the
+hide-list below — raise it with --limit.
 
-To permanently suppress noisy events (e.g. AssumeRole, ConsoleLogin) without
-re-passing flags, list them under trail.hideEvents in the config file —
-matching is case-insensitive and a trailing "*" is a prefix wildcard
-("Describe*"). Hidden events are dropped from this CLI output; in the TUI they
-are hidden by default and revealed with the "h" key.
+Noisy events are filtered out server-side via trail.hideEvents in the config
+file, so they never eat into that cap. The shipped default hides every
+read-only call (Get*/Describe*/List*); add your own (e.g. ConsoleLogin,
+AssumeRole) or clear the list to see everything. Matching is case-insensitive
+and a trailing "*" is a prefix wildcard. An explicit --event lookup is never
+hidden.
 
 CloudTrail records events in the region where the activity happened (global
 services such as IAM record in us-east-1) — use -r to pick the region.
