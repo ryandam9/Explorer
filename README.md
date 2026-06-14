@@ -901,8 +901,9 @@ SNO  TIME                 EVENT                          PRINCIPAL             S
 | `--source` | — | Only events from this service (e.g. `ec2.amazonaws.com`) |
 | `--errors-only` | off | Only failed/denied calls (events carrying an `errorCode`) |
 | `--since` | full window | Only events after this long ago (`7d`, `36h`, or a plain day count) |
-| `--limit` | `50` | Maximum number of events to print |
+| `--limit` | `50` | Maximum number of events to print (`--tui` defaults to 200) |
 | `--read-events` | off | Include read-only (`Describe*`/`List*`/`Get*`) events, marked `(read)` in the table |
+| `--tui` | off | Explore the feed interactively (filter, sort, failed-only toggle, per-event detail) |
 
 Notes:
 
@@ -918,6 +919,12 @@ Notes:
   drown out the changes you're looking for.
 - The API is rate-limited (2 TPS); pages are fetched serially and capped, so
   busy scopes return the most recent events rather than everything.
+
+Add `--tui` to explore the feed interactively: quick filter, column sort, a
+**failed-only toggle** (`x`), and a per-event detail overlay — the same
+interaction language as the other TUIs. The scope (resource / `--by` /
+`--event` / `--source` / account-wide) and region are set by the flags above;
+the TUI then makes that feed navigable.
 
 The resource-scoped view also lives in the summary TUI: press **`t`** on a
 resource's detail panel for its CloudTrail timeline (failed calls flagged in

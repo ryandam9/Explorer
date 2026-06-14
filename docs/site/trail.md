@@ -52,6 +52,9 @@ aws_explorer trail --event TerminateInstances -r eu-west-1
 # Failed / denied calls only (recon & misconfig triage)
 aws_explorer trail --errors-only --since 24h
 
+# Explore the feed interactively
+aws_explorer trail --since 24h --tui
+
 # Machine-readable
 aws_explorer trail my-bucket -o json | jq '.[0]'
 ```
@@ -67,6 +70,7 @@ aws_explorer trail my-bucket -o json | jq '.[0]'
 | `--read-events` | — | include read-only (Describe*/List*/Get*) events |
 | `--since` | — | only events after this long ago (e.g. 7d, 36h; default: full 90-day window) |
 | `--source` | — | only events from this service (e.g. ec2.amazonaws.com) |
+| `--tui` | — | explore the feed interactively (filter, sort, failed-only toggle, per-event detail) |
 
 ## Global flags
 

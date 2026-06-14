@@ -9,11 +9,14 @@ import (
 	"strings"
 	"time"
 
+	tea "github.com/charmbracelet/bubbletea"
 	"github.com/spf13/cobra"
 
 	"github.com/ryandam9/aws_explorer/internal/auth"
 	"github.com/ryandam9/aws_explorer/internal/awserr"
 	"github.com/ryandam9/aws_explorer/internal/trail"
+	"github.com/ryandam9/aws_explorer/internal/trailtui"
+	"github.com/ryandam9/aws_explorer/internal/ui"
 )
 
 var (
@@ -24,6 +27,7 @@ var (
 	trailEvent       string
 	trailSource      string
 	trailErrorsOnly  bool
+	trailTUI         bool
 )
 
 var trailCmd = &cobra.Command{
@@ -67,6 +71,9 @@ This is the CLI twin of the summary TUI's 't' CloudTrail timeline.`,
   # Failed / denied calls only (recon & misconfig triage)
   aws_explorer trail --errors-only --since 24h
 
+  # Explore the feed interactively
+  aws_explorer trail --since 24h --tui
+
   # Machine-readable
   aws_explorer trail my-bucket -o json | jq '.[0]'`,
 	Args: cobra.MaximumNArgs(1),
@@ -98,15 +105,33 @@ This is the CLI twin of the summary TUI's 't' CloudTrail timeline.`,
 			return fmt.Errorf("unable to load AWS config: %w", err)
 		}
 
-		fmt.Fprintf(os.Stderr, "Looking up CloudTrail events for %s in %s (last 90 days max)…\n",
-			scope, region)
-
-		events, truncated, err := trail.LookupFiltered(ctx, awscfg, region, filter, trail.Options{
+		opts := trail.Options{
 			Since:           since,
 			Limit:           trailLimit,
 			IncludeReadOnly: trailIncludeRead,
 			ErrorsOnly:      trailErrorsOnly,
-		})
+		}
+
+		if trailTUI {
+			// An interactive feed is more useful with more history than the CLI
+			// default; widen it unless the user pinned --limit explicitly.
+			if !cmd.Flags().Changed("limit") {
+				opts.Limit = 200
+			}
+			ui.InitFromConfig(AppConfig.UI)
+			SilenceScanLogs()
+			m := trailtui.New(ctx, awscfg, region, filter, opts, scope)
+			p := tea.NewProgram(ui.WithWindowTitle(m), tea.WithAltScreen(), tea.WithContext(ctx))
+			if _, err := p.Run(); err != nil {
+				return fmt.Errorf("error running trail TUI: %w", err)
+			}
+			return nil
+		}
+
+		fmt.Fprintf(os.Stderr, "Looking up CloudTrail events for %s in %s (last 90 days max)…\n",
+			scope, region)
+
+		events, truncated, err := trail.LookupFiltered(ctx, awscfg, region, filter, opts)
 		if err != nil {
 			switch {
 			case awserr.IsExpiredCreds(err):
@@ -217,5 +242,7 @@ func init() {
 		"only events from this service (e.g. ec2.amazonaws.com)")
 	trailCmd.Flags().BoolVar(&trailErrorsOnly, "errors-only", false,
 		"only failed/denied calls (events carrying an errorCode)")
+	trailCmd.Flags().BoolVar(&trailTUI, "tui", false,
+		"explore the feed interactively (filter, sort, failed-only toggle, per-event detail)")
 	rootCmd.AddCommand(trailCmd)
 }
