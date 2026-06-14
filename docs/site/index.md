@@ -32,6 +32,7 @@ This documentation is generated from the tool itself — the command reference b
 - [`aws_explorer iam`](iam.md) — IAM / access debugging helpers.
 - [`aws_explorer iam can`](iam_can.md) — Simulate IAM policy: "can X do Y on Z?".
 - [`aws_explorer iam decode`](iam_decode.md) — Decode an "Encoded authorization failure message".
+- [`aws_explorer lake`](lake.md) — Query CloudTrail Lake — years of history, data events, aggregation (SQL).
 - [`aws_explorer quotas`](quotas.md) — Service-quota dashboard — limits closest to exhaustion.
 - [`aws_explorer s3`](s3.md) — Start the S3 Explorer TUI.
 - [`aws_explorer snapshot-diff`](snapshot-diff.md) — Browse a saved inventory snapshot, or diff two snapshots, offline.

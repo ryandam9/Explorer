@@ -12,6 +12,7 @@ Discover, monitor, and display AWS resources across accounts and regions via CLI
 - **Live bill**: `aws_explorer bill` shows the actual bill from the Cost Explorer API — every service and usage type with its usage quantity, price and a grand total (the Billing console's numbers, not list-price estimates); `--tui` is a live screen that re-fetches on an interval, flags what moved since the last refresh, and drills into per-resource costs (resource ID/ARN) for a service — see [Bill Usage](#bill-usage)
 - **IAM debugging**: `aws_explorer iam decode` turns an "Encoded authorization failure message" into a readable verdict, and `aws_explorer iam can <principal> <action> [resource]` simulates IAM policy ("can X do Y on Z?") with the matched statements named and the simulator's blind spots stated — see [IAM Tools](#iam-tools)
 - **CloudTrail activity feed**: `aws_explorer trail [resource]` lists recent CloudTrail management events — when, which API call, which principal, from which IP, and whether it failed — scoped to a resource, a principal (`--by`), an API (`--event`), a service (`--source`), or the whole account, with `--errors-only` for failed/denied calls; uses the zero-setup 90-day LookupEvents window; the summary TUI's `t` timeline is the interactive twin — see [Trail Usage](#trail-usage)
+- **CloudTrail Lake (SQL)**: `aws_explorer lake` queries a CloudTrail Lake event data store for years of history, data events and aggregations — built-in `--top-principals` / `--top-events` queries or your own `--sql`, with `--tui` to explore results — see [Lake Usage](#lake-usage)
 - **Account snapshot diff**: `summary --baseline` / `summary --diff` answers "what changed in this account since yesterday?" — added/removed/modified resources across the whole merged-by-ARN inventory, deterministic and volatile-field-free; `D` in the summary TUI is the interactive twin — see [Account snapshot diff](#account-snapshot-diff--what-changed-since-yesterday)
 - **Open in AWS console**: `o` in every TUI (summary, VPC explorer, S3, CloudWatch logs) copies a console deep link for the selection — ARN-aware coverage for all 15 services and every VPC resource type, with an ARN-search fallback for the long tail — and opens it in your browser when the session is local
 - **Global fuzzy finder**: `Ctrl+P` in the summary TUI jumps to any resource by name/ID/ARN fragment ("I have `eni-0abc` from an error — what is it?"); `aws_explorer find <fragment>` is the CLI twin — see [Find Usage](#find-usage)
@@ -929,6 +930,60 @@ the TUI then makes that feed navigable.
 The resource-scoped view also lives in the summary TUI: press **`t`** on a
 resource's detail panel for its CloudTrail timeline (failed calls flagged in
 red).
+
+## Lake Usage
+
+`lake` queries a **CloudTrail Lake event data store** with SQL. Where `trail`
+uses `cloudtrail:LookupEvents` (90 days, management events only), a Lake store
+can hold **years** of history and **data events** (S3 object access, Lambda
+invokes, …) and supports **aggregation** — at the cost of having to create a
+store first.
+
+```bash
+# What stores can I query?
+aws_explorer lake --list-stores
+
+# Recent activity in the last 30 days
+aws_explorer lake --since 30d
+
+# Who has been the busiest principal this quarter?
+aws_explorer lake --top-principals --since 90d
+
+# Most frequent API calls, explored interactively
+aws_explorer lake --top-events --tui
+
+# Your own SQL (you supply the FROM clause / event-data-store id)
+aws_explorer lake --sql "SELECT eventName, COUNT(*) c FROM <eds-id> GROUP BY eventName ORDER BY c DESC LIMIT 20"
+```
+
+```
+NAME         ID         ARN
+audit-store  abcd-1234  arn:aws:cloudtrail:us-east-1:123456789012:eventdatastore/abcd-1234
+```
+
+| Flag | Default | Description |
+|------|---------|-------------|
+| `--list-stores` | off | List available event data stores and exit |
+| `--store` | the only store | Event data store to query (id, ARN, or name) |
+| `--top-principals` | off | Built-in query: principals ranked by event count |
+| `--top-events` | off | Built-in query: API calls ranked by frequency |
+| `--sql` | — | Raw CloudTrail Lake SQL (you supply the `FROM`) |
+| `--by` / `--event` / `--source` | — | Narrow the built-in queries (principal substring / API / service) |
+| `--errors-only` | off | Narrow the built-in queries to failed/denied calls |
+| `--since` | full store | Only events after this long ago (`30d`, `12h`) |
+| `--limit` | `50` | Maximum number of rows |
+| `--max-wait` | `60s` | How long to wait for the query to finish |
+| `--tui` | off | Explore the results interactively (filter, numeric-aware sort, detail, CSV) |
+
+Notes:
+
+- Needs `cloudtrail:{ListEventDataStores,StartQuery,GetQueryResults}` (and
+  `DescribeQuery` for failure detail). The query runs server-side; the tool
+  polls `GetQueryResults` until it finishes or `--max-wait` elapses.
+- **If no event data store exists**, the command prints a short note and exits
+  cleanly — use `aws_explorer trail` for the zero-setup 90-day feed.
+- CloudTrail Lake is regional; a multi-region store is queried from its home
+  region. Pick the region with `-r`.
 
 ## Find Usage
 
