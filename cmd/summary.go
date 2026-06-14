@@ -143,7 +143,8 @@ unchanged account diffs clean.`,
 		// and reminds the user, in plain terms, that an untagged resource can be
 		// missing — the usual reason an inventory looks short.
 		if isTableFormat(outputFormat) {
-			cov := summary.Coverage(resources, eng.TypedServices(), AppConfig.Summary.CommonServices)
+			cov := summary.Coverage(resources, eng.TypedServices(),
+				AppConfig.Summary.CommonServices, AppConfig.Summary.HideServices)
 			if note := summary.CoverageNote(cov, !summaryTypedOnly); note != "" {
 				fmt.Fprintln(os.Stdout, "\n"+note)
 			}

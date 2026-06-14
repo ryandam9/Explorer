@@ -14,7 +14,7 @@ var typedServices = []string{
 
 func coverageFor(t *testing.T, key string) ServiceCoverage {
 	t.Helper()
-	cov := Coverage(nil, typedServices, nil)
+	cov := Coverage(nil, typedServices, nil, nil)
 	for _, c := range cov {
 		if c.Key == key {
 			return c
@@ -39,7 +39,7 @@ func TestCoverage_ShownReflectsResources(t *testing.T) {
 		{Service: "ec2", ID: "i-1"},
 		{Service: "elasticache", ID: "cc-1"}, // a tagged ElastiCache cluster
 	}
-	cov := Coverage(resources, typedServices, nil)
+	cov := Coverage(resources, typedServices, nil, nil)
 	byKey := map[string]ServiceCoverage{}
 	for _, c := range cov {
 		byKey[c.Key] = c
@@ -64,7 +64,7 @@ func TestNotShown_SortedAlphabetically(t *testing.T) {
 		}
 		resources = append(resources, model.Resource{Service: c.Key, ID: "x"})
 	}
-	missing := NotShown(Coverage(resources, typedServices, nil))
+	missing := NotShown(Coverage(resources, typedServices, nil, nil))
 	if len(missing) != 2 {
 		t.Fatalf("expected 2 missing services, got %d: %+v", len(missing), missing)
 	}
@@ -79,7 +79,7 @@ func TestCoverageNote_Empty_WhenAllShown(t *testing.T) {
 	for _, c := range commonServices {
 		resources = append(resources, model.Resource{Service: c.Key, ID: "x"})
 	}
-	if note := CoverageNote(Coverage(resources, typedServices, nil), true); note != "" {
+	if note := CoverageNote(Coverage(resources, typedServices, nil, nil), true); note != "" {
 		t.Errorf("note should be empty when every catalog service is present, got:\n%s", note)
 	}
 }
@@ -88,7 +88,7 @@ func TestCoverageNote_PlainLanguage(t *testing.T) {
 	// Only ec2 present; the note names the missing services and explains the
 	// likely cause in plain terms — no internal jargon.
 	resources := []model.Resource{{Service: "ec2", ID: "i-1"}}
-	note := CoverageNote(Coverage(resources, typedServices, nil), true)
+	note := CoverageNote(Coverage(resources, typedServices, nil, nil), true)
 
 	if !strings.Contains(note, "no tags") {
 		t.Errorf("note should explain the tag cause in plain language:\n%s", note)
@@ -108,7 +108,7 @@ func TestCoverageNote_PlainLanguage(t *testing.T) {
 
 func TestCoverageNote_TypedOnlyMode(t *testing.T) {
 	resources := []model.Resource{{Service: "ec2", ID: "i-1"}}
-	note := CoverageNote(Coverage(resources, typedServices, nil), false)
+	note := CoverageNote(Coverage(resources, typedServices, nil, nil), false)
 
 	if !strings.Contains(note, "--typed-only") {
 		t.Errorf("typed-only note should mention the flag:\n%s", note)
@@ -118,7 +118,7 @@ func TestCoverageNote_TypedOnlyMode(t *testing.T) {
 func TestCatalogWith_MergesExtras(t *testing.T) {
 	// A brand-new service is added; a tagged resource for it counts as shown.
 	resources := []model.Resource{{Service: "apprunner", ID: "svc-1"}}
-	cov := Coverage(resources, typedServices, map[string]string{"apprunner": "App Runner"})
+	cov := Coverage(resources, typedServices, map[string]string{"apprunner": "App Runner"}, nil)
 
 	var found ServiceCoverage
 	for _, c := range cov {
@@ -142,7 +142,7 @@ func TestCatalogWith_OverridesLabelAndDefaultsBlank(t *testing.T) {
 	cov := Coverage(nil, typedServices, map[string]string{
 		"ec2":       "Compute (EC2)", // override a built-in label
 		"apprunner": "",              // blank label falls back to the key
-	})
+	}, nil)
 	byKey := map[string]string{}
 	for _, c := range cov {
 		byKey[c.Key] = c.Label
@@ -162,5 +162,31 @@ func TestCatalogWith_OverridesLabelAndDefaultsBlank(t *testing.T) {
 	}
 	if count != 1 {
 		t.Errorf("ec2 appears %d times, want 1", count)
+	}
+}
+
+func TestCatalogWith_HideRemovesServices(t *testing.T) {
+	// Hide a built-in (athena) and an unknown key (ignored). The hidden one is
+	// gone; everything else remains.
+	cov := Coverage(nil, typedServices, nil, []string{"athena", "does-not-exist"})
+	for _, c := range cov {
+		if c.Key == "athena" {
+			t.Fatalf("athena should be hidden, but it is present: %+v", c)
+		}
+	}
+	if len(cov) != len(commonServices)-1 {
+		t.Errorf("catalog size = %d, want defaults-1 (%d)", len(cov), len(commonServices)-1)
+	}
+}
+
+func TestCatalogWith_HideAppliesAfterExtras(t *testing.T) {
+	// An added service can also be hidden in the same config.
+	cov := Coverage(nil, typedServices,
+		map[string]string{"apprunner": "App Runner"},
+		[]string{"apprunner"})
+	for _, c := range cov {
+		if c.Key == "apprunner" {
+			t.Fatalf("apprunner was added then hidden; it should not appear: %+v", c)
+		}
 	}
 }
