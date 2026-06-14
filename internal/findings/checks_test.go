@@ -21,6 +21,8 @@ func TestEveryCheckIDIsRegistered(t *testing.T) {
 		CheckUserAttachedPolicy, CheckOpenTrustPolicy,
 		CheckQueueNoConsumers, CheckRedriveDangling, CheckDLQNotEmpty,
 		CheckSubPending, CheckTopicNoSubs,
+		CheckTrailNotLogging, CheckTrailLogValidationOff, CheckTrailNotKMSEncrypted,
+		CheckTrailNoCloudWatchLogs, CheckTrailMgmtEventsPartial,
 	}
 	if len(Checks()) != len(ids) {
 		t.Errorf("registry has %d checks, constants list %d", len(Checks()), len(ids))

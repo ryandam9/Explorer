@@ -45,7 +45,7 @@ func Stream(ctx context.Context, baseCfg aws.Config, regions []string, categorie
 	if len(regions) == 0 {
 		regions = []string{"us-east-1"}
 	}
-	wantCost, wantSecurity, wantIAM, wantMessaging := false, false, false, false
+	wantCost, wantSecurity, wantIAM, wantMessaging, wantCloudTrail := false, false, false, false, false
 	for _, c := range categories {
 		switch c {
 		case "cost":
@@ -56,6 +56,8 @@ func Stream(ctx context.Context, baseCfg aws.Config, regions []string, categorie
 			wantIAM = true
 		case "messaging":
 			wantMessaging = true
+		case "cloudtrail":
+			wantCloudTrail = true
 		}
 	}
 
@@ -90,6 +92,13 @@ func Stream(ctx context.Context, baseCfg aws.Config, regions []string, categorie
 			if wantIAM && s3Region {
 				snap, e := collectIAMAccount(gctx, baseCfg, perCallTimeout)
 				fs = append(fs, findings.AnalyzeIAM(snap)...)
+				errs = append(errs, e...)
+			}
+			// CloudTrail configuration is account-global too: trails (including
+			// multi-region ones) are enumerated once from the first region.
+			if wantCloudTrail && s3Region {
+				snap, e := collectCloudTrailAccount(gctx, baseCfg, region, perCallTimeout)
+				fs = append(fs, findings.AnalyzeCloudTrail(snap)...)
 				errs = append(errs, e...)
 			}
 			findings.Sort(fs)

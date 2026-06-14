@@ -457,6 +457,29 @@ Messaging-category notes:
 - Uses `sqs:{ListQueues,GetQueueAttributes}`, `sns:{ListTopics,GetTopicAttributes}` —
   the same calls as the security category.
 
+**CloudTrail category** (`--only cloudtrail`; check IDs `CT-*`; account-global —
+trails are enumerated once and reported with region `global`) — audits the
+audit trail itself, so an incident always has a record to investigate:
+
+| ID | Finding | Severity |
+|----|---------|----------|
+| `CT-TRAIL-001` | No multi-region trail is actively logging with global service events (the account has no usable audit trail) | 🔴 critical |
+| `CT-TRAIL-002` | Trail without log file validation — delivered logs could be tampered with undetected | 🟡 warning |
+| `CT-TRAIL-003` | Trail logs encrypted with SSE-S3 only, not a customer-managed KMS key | 🟡 warning |
+| `CT-TRAIL-004` | Trail not delivering to CloudWatch Logs — no metric filters or alarms on its events | 🔵 info |
+| `CT-TRAIL-005` | Trail not recording all management read/write events, leaving gaps in the record | 🟡 warning |
+
+CloudTrail-category notes:
+
+- **Under-warn, never mis-warn**: `CT-TRAIL-001` fires only from a successful
+  `DescribeTrails`; a denied listing leaves coverage unknown and fires nothing.
+  Per-trail status and event-selector checks likewise stay silent when their
+  `GetTrailStatus` / `GetEventSelectors` call is denied.
+- A multi-region trail is enumerated once (it surfaces from any region as a
+  shadow entry), so duplicate findings across regions are avoided.
+- Uses `cloudtrail:{DescribeTrails,GetTrailStatus,GetEventSelectors}` — distinct
+  from the `cloudtrail:LookupEvents` permission the `trail` command uses.
+
 † Traffic-based checks use CloudWatch metrics over a 14-day window and need
 `cloudwatch:GetMetricData`; without it they are skipped (with a note) while
 the rest of the audit runs. Resources younger than 14 days are never flagged

@@ -20,7 +20,7 @@ import (
 
 // auditCategories lists the implemented finding categories. More join as the
 // roadmap lands (security, messaging, …); --only validates against this.
-var auditCategories = []string{"cost", "security", "iam", "messaging"}
+var auditCategories = []string{"cost", "security", "iam", "messaging", "cloudtrail"}
 
 // auditExitFindings is the exit code when --fail-on is set and findings at or
 // above the threshold exist (operational errors exit 1, clean runs 0), so CI
@@ -66,8 +66,13 @@ redrive policies pointing at queues that no longer exist, dead-letter
 queues with messages waiting, SNS subscriptions stuck unconfirmed, and
 topics with zero subscriptions.
 
+cloudtrail — account-global audit-trail posture: no multi-region trail
+actively logging, trails without log file validation, logs not encrypted
+with a customer KMS key, trails not delivering to CloudWatch Logs, and
+trails that don't record all management events.
+
 Every finding carries a stable check ID (e.g. COST-EBS-001, SEC-S3-001,
-IAM-KEY-001, MSG-SQS-001).
+IAM-KEY-001, MSG-SQS-001, CT-TRAIL-001).
 
 For CI pipelines, --fail-on <severity> exits 2 when findings at or above the
 threshold exist (0 below it, 1 on operational errors), --ignore suppresses
