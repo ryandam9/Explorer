@@ -137,7 +137,152 @@ summary:
     #   commonServices:
     #     apprunner: App Runner
     #     sagemaker: SageMaker
-    commonservices: {}
+    #
+    # The list below covers the AWS services that have NO typed collector, so
+    # their resources are only discovered through the tag sweep. Keys are the ARN
+    # service namespace the sweep reports (e.g. "es" for OpenSearch). Services
+    # whose ARN namespace is already typed are intentionally omitted — VPC, EBS,
+    # Transit Gateway report as "ec2"; Aurora, Neptune, DocumentDB report as
+    # "rds" — so they are already covered and would otherwise show as permanently
+    # missing. Remove any of these via `hideservices` if they are just noise.
+    commonservices:
+        # Compute
+        batch: AWS Batch
+        elasticbeanstalk: AWS Elastic Beanstalk
+        lightsail: Amazon Lightsail
+        apprunner: AWS App Runner
+        outposts: AWS Outposts
+        imagebuilder: EC2 Image Builder
+        # Storage
+        fsx: Amazon FSx
+        glacier: Amazon S3 Glacier
+        storagegateway: AWS Storage Gateway
+        backup: AWS Backup
+        snowball: AWS Snow Family
+        # Database
+        cassandra: Amazon Keyspaces
+        timestream: Amazon Timestream
+        memorydb: Amazon MemoryDB
+        qldb: Amazon QLDB
+        # Networking & Content Delivery
+        directconnect: AWS Direct Connect
+        globalaccelerator: AWS Global Accelerator
+        network-firewall: AWS Network Firewall
+        servicediscovery: AWS Cloud Map
+        vpc-lattice: Amazon VPC Lattice
+        appmesh: AWS App Mesh
+        # Application Integration
+        appflow: Amazon AppFlow
+        mq: Amazon MQ
+        appsync: AWS AppSync
+        swf: Amazon SWF
+        airflow: Amazon MWAA
+        # Analytics
+        es: Amazon OpenSearch Service
+        quicksight: Amazon QuickSight
+        lakeformation: AWS Lake Formation
+        kafka: Amazon MSK
+        dataexchange: AWS Data Exchange
+        datazone: Amazon DataZone
+        cleanrooms: AWS Clean Rooms
+        # Security, Identity & Compliance
+        sso: IAM Identity Center
+        cognito-idp: Amazon Cognito
+        guardduty: Amazon GuardDuty
+        inspector2: Amazon Inspector
+        macie2: Amazon Macie
+        detective: Amazon Detective
+        securityhub: AWS Security Hub
+        wafv2: AWS WAF
+        shield: AWS Shield
+        fms: AWS Firewall Manager
+        cloudhsm: AWS CloudHSM
+        ds: AWS Directory Service
+        ram: AWS Resource Access Manager
+        auditmanager: AWS Audit Manager
+        acm-pca: AWS Private CA
+        # Management & Governance
+        cloudtrail: AWS CloudTrail
+        config: AWS Config
+        ssm: AWS Systems Manager
+        organizations: AWS Organizations
+        controltower: AWS Control Tower
+        servicecatalog: AWS Service Catalog
+        trustedadvisor: AWS Trusted Advisor
+        license-manager: AWS License Manager
+        compute-optimizer: AWS Compute Optimizer
+        resource-groups: AWS Resource Groups
+        opsworks: AWS OpsWorks
+        proton: AWS Proton
+        # Developer Tools
+        codecommit: AWS CodeCommit
+        codebuild: AWS CodeBuild
+        codedeploy: AWS CodeDeploy
+        codepipeline: AWS CodePipeline
+        codeartifact: AWS CodeArtifact
+        codeguru-reviewer: Amazon CodeGuru
+        xray: AWS X-Ray
+        codecatalyst: Amazon CodeCatalyst
+        cloud9: AWS Cloud9
+        # Machine Learning / AI
+        sagemaker: Amazon SageMaker
+        bedrock: Amazon Bedrock
+        comprehend: Amazon Comprehend
+        rekognition: Amazon Rekognition
+        lex: Amazon Lex
+        polly: Amazon Polly
+        transcribe: Amazon Transcribe
+        translate: Amazon Translate
+        textract: Amazon Textract
+        kendra: Amazon Kendra
+        personalize: Amazon Personalize
+        forecast: Amazon Forecast
+        qbusiness: Amazon Q
+        frauddetector: Amazon Fraud Detector
+        # Front-End / Mobile
+        amplify: AWS Amplify
+        devicefarm: AWS Device Farm
+        geo: Amazon Location Service
+        mobiletargeting: Amazon Pinpoint
+        # Media Services
+        mediaconvert: AWS Elemental MediaConvert
+        medialive: AWS Elemental MediaLive
+        mediapackage: AWS Elemental MediaPackage
+        mediastore: AWS Elemental MediaStore
+        mediatailor: AWS Elemental MediaTailor
+        ivs: Amazon IVS
+        elastictranscoder: Amazon Elastic Transcoder
+        # Migration & Transfer
+        dms: AWS Database Migration Service
+        datasync: AWS DataSync
+        transfer: AWS Transfer Family
+        mgn: AWS Application Migration Service
+        mgh: AWS Migration Hub
+        # IoT
+        iot: AWS IoT Core
+        greengrass: AWS IoT Greengrass
+        iotanalytics: AWS IoT Analytics
+        iotsitewise: AWS IoT SiteWise
+        iottwinmaker: AWS IoT TwinMaker
+        # Business Applications / End-User Computing
+        ses: Amazon SES
+        connect: Amazon Connect
+        workspaces: Amazon WorkSpaces
+        appstream: Amazon AppStream 2.0
+        chime: Amazon Chime
+        workdocs: Amazon WorkDocs
+        workmail: Amazon WorkMail
+        # Cost Management
+        ce: AWS Cost Explorer
+        budgets: AWS Budgets
+        cur: AWS Cost and Usage Report
+        savingsplans: AWS Savings Plans
+        # Game / Quantum / Blockchain / Satellite / Robotics
+        gamelift: Amazon GameLift
+        braket: Amazon Braket
+        managedblockchain: Amazon Managed Blockchain
+        groundstation: AWS Ground Station
+        robomaker: AWS RoboMaker
     # hideservices removes services from that list by key — built-in or added —
     # when an entry is just noise for your account. Unknown keys are ignored.
     # Example:
