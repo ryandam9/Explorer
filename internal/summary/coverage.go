@@ -133,7 +133,7 @@ func CoverageNote(cov []ServiceCoverage, tagSweep bool) string {
 	muted := ui.MutedStyle()
 
 	var b strings.Builder
-	b.WriteString(warn.Render("⚠ If a resource you expected isn't listed, it may be because it has no tags.") + "\n")
+	b.WriteString(warn.Render("⚠ If a resource you expected isn't listed, it may have no tags, or there simply aren't any.") + "\n")
 	if !tagSweep {
 		b.WriteString(muted.Render("Run without --typed-only to also search for resources by their tags.") + "\n")
 	}
