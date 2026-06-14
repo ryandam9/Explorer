@@ -29,17 +29,26 @@ func Render(w io.Writer, events []Event, format string, noHeader bool) error {
 func renderTable(w io.Writer, events []Event, noHeader bool) error {
 	tw := tabwriter.NewWriter(w, 0, 0, 2, ' ', 0)
 	if !noHeader {
-		fmt.Fprintln(tw, "SNO\tTIME\tEVENT\tPRINCIPAL\tSOURCE IP")
+		fmt.Fprintln(tw, "SNO\tTIME\tEVENT\tPRINCIPAL\tSOURCE IP\tOUTCOME")
 	}
 	for i, ev := range events {
 		name := ev.EventName
 		if ev.ReadOnly {
 			name += " (read)"
 		}
-		fmt.Fprintf(tw, "%d\t%s\t%s\t%s\t%s\n",
-			i+1, ev.Time.UTC().Format("2006-01-02 15:04:05"), name, ev.Principal, ev.SourceIP)
+		fmt.Fprintf(tw, "%d\t%s\t%s\t%s\t%s\t%s\n",
+			i+1, ev.Time.UTC().Format("2006-01-02 15:04:05"), name, ev.Principal, ev.SourceIP, outcome(ev))
 	}
 	return tw.Flush()
+}
+
+// outcome is the event's result shown in the table: "ok" for a successful
+// call, or the failure's errorCode so denied/failed attempts stand out.
+func outcome(ev Event) string {
+	if ev.ErrorCode != "" {
+		return ev.ErrorCode
+	}
+	return "ok"
 }
 
 func renderJSON(w io.Writer, events []Event) error {
@@ -64,14 +73,14 @@ func renderNDJSON(w io.Writer, events []Event) error {
 func renderCSV(w io.Writer, events []Event, noHeader bool) error {
 	cw := csv.NewWriter(w)
 	if !noHeader {
-		if err := cw.Write([]string{"Time", "Event", "Principal", "SourceIP", "ReadOnly"}); err != nil {
+		if err := cw.Write([]string{"Time", "Event", "Principal", "SourceIP", "ReadOnly", "ErrorCode"}); err != nil {
 			return err
 		}
 	}
 	for _, ev := range events {
 		rec := []string{
 			ev.Time.UTC().Format("2006-01-02T15:04:05Z"),
-			ev.EventName, ev.Principal, ev.SourceIP, strconv.FormatBool(ev.ReadOnly),
+			ev.EventName, ev.Principal, ev.SourceIP, strconv.FormatBool(ev.ReadOnly), ev.ErrorCode,
 		}
 		if err := cw.Write(rec); err != nil {
 			return err

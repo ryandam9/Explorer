@@ -2,21 +2,28 @@
 
 # aws_explorer trail
 
-CloudTrail "who changed this" — recent events for a resource
+CloudTrail activity feed — who did what, and who changed this
 
-Trail lists recent CloudTrail management events that reference a resource:
-when, which API call, which principal, from which source IP — the "who
-changed this and when" of an incident.
+Trail lists recent CloudTrail management events: when, which API call, which
+principal, from which source IP, and whether the call failed. It answers both
+"who changed this resource" and "what has been happening in this account".
 
 It uses cloudtrail:LookupEvents, which covers the last 90 days of management
-events with no trail or S3 bucket setup required. Pass a bare resource ID
-(i-0abc…, sg-0abc…, a bucket or function name) or a full ARN — ARNs are
-reduced to the resource name CloudTrail records.
+events with no trail or S3 bucket setup required. Events are newest first.
+
+Scope (at most one — LookupEvents accepts a single filter):
+  • a resource (bare ID like i-0abc…, sg-0abc…, a name, or a full ARN — ARNs
+    are reduced to the resource name CloudTrail records),
+  • --by <principal>   every event by an IAM user / role session name,
+  • --event <name>     every call of one API (e.g. TerminateInstances),
+  • --source <service> every event from one service (e.g. ec2.amazonaws.com),
+  • nothing            the account-wide activity feed.
 
 By default only mutating events are shown; --read-events includes the
-Describe*/List*/Get* noise too. Events are newest first.
+Describe*/List*/Get* noise too. --errors-only keeps just failed/denied calls
+(a burst of these is a recon or misconfiguration signal).
 
-CloudTrail records events in the region where the resource lives (global
+CloudTrail records events in the region where the activity happened (global
 services such as IAM record in us-east-1) — use -r to pick the region.
 
 This is the CLI twin of the summary TUI's 't' CloudTrail timeline.
@@ -24,7 +31,7 @@ This is the CLI twin of the summary TUI's 't' CloudTrail timeline.
 ## Usage
 
 ```
-aws_explorer trail <resource-id-or-arn> [flags]
+aws_explorer trail [resource-id-or-arn] [flags]
 ```
 
 ## Examples
@@ -33,11 +40,17 @@ aws_explorer trail <resource-id-or-arn> [flags]
 # Who touched this security group?
 aws_explorer trail sg-0abc123
 
-# Changes to an instance in the last 7 days, in a specific region
-aws_explorer trail i-0abc12345 --since 7d -r eu-west-1
+# What has been happening in the account in the last 2 hours?
+aws_explorer trail --since 2h
 
-# ARNs work too; IAM events live in us-east-1
-aws_explorer trail arn:aws:iam::123456789012:role/app -r us-east-1
+# Everything a principal did
+aws_explorer trail --by alice
+
+# Every instance-termination call, in a specific region
+aws_explorer trail --event TerminateInstances -r eu-west-1
+
+# Failed / denied calls only (recon & misconfig triage)
+aws_explorer trail --errors-only --since 24h
 
 # Machine-readable
 aws_explorer trail my-bucket -o json | jq '.[0]'
@@ -47,9 +60,13 @@ aws_explorer trail my-bucket -o json | jq '.[0]'
 
 | Flag | Default | Description |
 |------|---------|-------------|
+| `--by` | — | only events by this principal (IAM user or role session name) |
+| `--errors-only` | — | only failed/denied calls (events carrying an errorCode) |
+| `--event` | — | only this API call (e.g. TerminateInstances) |
 | `--limit` | 50 | maximum number of events to print |
 | `--read-events` | — | include read-only (Describe*/List*/Get*) events |
 | `--since` | — | only events after this long ago (e.g. 7d, 36h; default: full 90-day window) |
+| `--source` | — | only events from this service (e.g. ec2.amazonaws.com) |
 
 ## Global flags
 

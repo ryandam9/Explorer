@@ -36,6 +36,6 @@ This documentation is generated from the tool itself — the command reference b
 - [`aws_explorer s3`](s3.md) — Start the S3 Explorer TUI.
 - [`aws_explorer snapshot-diff`](snapshot-diff.md) — Browse a saved inventory snapshot, or diff two snapshots, offline.
 - [`aws_explorer summary`](summary.md) — List every AWS resource across all regions.
-- [`aws_explorer trail`](trail.md) — CloudTrail "who changed this" — recent events for a resource.
+- [`aws_explorer trail`](trail.md) — CloudTrail activity feed — who did what, and who changed this.
 - [`aws_explorer vpc`](vpc.md) — Start the VPC Explorer TUI.
 - [`aws_explorer whereused`](whereused.md) — Where-used / blast radius — "can I delete this?".

@@ -20,43 +20,60 @@ var (
 	trailSince       string
 	trailLimit       int
 	trailIncludeRead bool
+	trailBy          string
+	trailEvent       string
+	trailSource      string
+	trailErrorsOnly  bool
 )
 
 var trailCmd = &cobra.Command{
-	Use:   "trail <resource-id-or-arn>",
-	Short: `CloudTrail "who changed this" — recent events for a resource`,
-	Long: `Trail lists recent CloudTrail management events that reference a resource:
-when, which API call, which principal, from which source IP — the "who
-changed this and when" of an incident.
+	Use:   "trail [resource-id-or-arn]",
+	Short: `CloudTrail activity feed — who did what, and who changed this`,
+	Long: `Trail lists recent CloudTrail management events: when, which API call, which
+principal, from which source IP, and whether the call failed. It answers both
+"who changed this resource" and "what has been happening in this account".
 
 It uses cloudtrail:LookupEvents, which covers the last 90 days of management
-events with no trail or S3 bucket setup required. Pass a bare resource ID
-(i-0abc…, sg-0abc…, a bucket or function name) or a full ARN — ARNs are
-reduced to the resource name CloudTrail records.
+events with no trail or S3 bucket setup required. Events are newest first.
+
+Scope (at most one — LookupEvents accepts a single filter):
+  • a resource (bare ID like i-0abc…, sg-0abc…, a name, or a full ARN — ARNs
+    are reduced to the resource name CloudTrail records),
+  • --by <principal>   every event by an IAM user / role session name,
+  • --event <name>     every call of one API (e.g. TerminateInstances),
+  • --source <service> every event from one service (e.g. ec2.amazonaws.com),
+  • nothing            the account-wide activity feed.
 
 By default only mutating events are shown; --read-events includes the
-Describe*/List*/Get* noise too. Events are newest first.
+Describe*/List*/Get* noise too. --errors-only keeps just failed/denied calls
+(a burst of these is a recon or misconfiguration signal).
 
-CloudTrail records events in the region where the resource lives (global
+CloudTrail records events in the region where the activity happened (global
 services such as IAM record in us-east-1) — use -r to pick the region.
 
 This is the CLI twin of the summary TUI's 't' CloudTrail timeline.`,
 	Example: `  # Who touched this security group?
   aws_explorer trail sg-0abc123
 
-  # Changes to an instance in the last 7 days, in a specific region
-  aws_explorer trail i-0abc12345 --since 7d -r eu-west-1
+  # What has been happening in the account in the last 2 hours?
+  aws_explorer trail --since 2h
 
-  # ARNs work too; IAM events live in us-east-1
-  aws_explorer trail arn:aws:iam::123456789012:role/app -r us-east-1
+  # Everything a principal did
+  aws_explorer trail --by alice
+
+  # Every instance-termination call, in a specific region
+  aws_explorer trail --event TerminateInstances -r eu-west-1
+
+  # Failed / denied calls only (recon & misconfig triage)
+  aws_explorer trail --errors-only --since 24h
 
   # Machine-readable
   aws_explorer trail my-bucket -o json | jq '.[0]'`,
-	Args: cobra.ExactArgs(1),
+	Args: cobra.MaximumNArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
-		resource := trail.LookupValue(args[0])
-		if resource == "" {
-			return fmt.Errorf("the resource ID must not be empty")
+		filter, scope, err := buildTrailFilter(args)
+		if err != nil {
+			return err
 		}
 
 		since, err := parseSince(trailSince)
@@ -82,12 +99,13 @@ This is the CLI twin of the summary TUI's 't' CloudTrail timeline.`,
 		}
 
 		fmt.Fprintf(os.Stderr, "Looking up CloudTrail events for %s in %s (last 90 days max)…\n",
-			resource, region)
+			scope, region)
 
-		events, truncated, err := trail.Lookup(ctx, awscfg, region, resource, trail.Options{
+		events, truncated, err := trail.LookupFiltered(ctx, awscfg, region, filter, trail.Options{
 			Since:           since,
 			Limit:           trailLimit,
 			IncludeReadOnly: trailIncludeRead,
+			ErrorsOnly:      trailErrorsOnly,
 		})
 		if err != nil {
 			switch {
@@ -103,7 +121,7 @@ This is the CLI twin of the summary TUI's 't' CloudTrail timeline.`,
 
 		if len(events) == 0 && strings.EqualFold(outputFormat, "table") {
 			fmt.Printf("No management events recorded for %s in %s in the lookup window.\n",
-				resource, region)
+				scope, region)
 			return nil
 		}
 		if err := trail.Render(os.Stdout, events, outputFormat, noHeader); err != nil {
@@ -116,6 +134,45 @@ This is the CLI twin of the summary TUI's 't' CloudTrail timeline.`,
 		}
 		return nil
 	},
+}
+
+// buildTrailFilter turns the positional resource arg and the --by/--event/
+// --source flags into a single trail.Filter, enforcing that at most one is set
+// (LookupEvents accepts only one lookup attribute). It also returns a
+// human-readable scope description for the progress and empty-result messages.
+func buildTrailFilter(args []string) (trail.Filter, string, error) {
+	var f trail.Filter
+	var scopes []string
+
+	if len(args) == 1 {
+		resource := trail.LookupValue(args[0])
+		if resource == "" {
+			return f, "", fmt.Errorf("the resource ID must not be empty")
+		}
+		f.ResourceName = resource
+		scopes = append(scopes, "resource "+resource)
+	}
+	if trailBy != "" {
+		f.Principal = trailBy
+		scopes = append(scopes, "principal "+trailBy)
+	}
+	if trailEvent != "" {
+		f.EventName = trailEvent
+		scopes = append(scopes, "event "+trailEvent)
+	}
+	if trailSource != "" {
+		f.EventSource = trailSource
+		scopes = append(scopes, "source "+trailSource)
+	}
+
+	if len(scopes) > 1 {
+		return f, "", fmt.Errorf("CloudTrail LookupEvents accepts only one filter at a time — " +
+			"pass just one of: a resource, --by, --event, or --source")
+	}
+	if len(scopes) == 0 {
+		return f, "account-wide activity", nil
+	}
+	return f, scopes[0], nil
 }
 
 // parseSince accepts a day count as "7", "7d", or any Go duration ("36h"),
@@ -152,5 +209,13 @@ func init() {
 		"maximum number of events to print")
 	trailCmd.Flags().BoolVar(&trailIncludeRead, "read-events", false,
 		"include read-only (Describe*/List*/Get*) events")
+	trailCmd.Flags().StringVar(&trailBy, "by", "",
+		"only events by this principal (IAM user or role session name)")
+	trailCmd.Flags().StringVar(&trailEvent, "event", "",
+		"only this API call (e.g. TerminateInstances)")
+	trailCmd.Flags().StringVar(&trailSource, "source", "",
+		"only events from this service (e.g. ec2.amazonaws.com)")
+	trailCmd.Flags().BoolVar(&trailErrorsOnly, "errors-only", false,
+		"only failed/denied calls (events carrying an errorCode)")
 	rootCmd.AddCommand(trailCmd)
 }
