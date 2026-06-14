@@ -2,6 +2,7 @@ package tui
 
 import (
 	"context"
+	"errors"
 	"strings"
 	"testing"
 
@@ -428,6 +429,64 @@ func TestMergeDedupesARNLessResources(t *testing.T) {
 
 	if len(m.sorted) != 1 {
 		t.Fatalf("ARN-less resource duplicated on re-scan: got %d rows, want 1", len(m.sorted))
+	}
+}
+
+// The support panes (t/l/g/x) append long lines — error messages, log lines,
+// resource IDs — to the detail body. The detail viewport clips rather than
+// wraps, so these must be wrapped to the panel width or they get truncated at
+// the right edge (issue #148).
+func TestDetailSupportPanesWrapToWidth(t *testing.T) {
+	m := newTestModel(t, 160, 40)
+	m = update(m, key("enter")) // open detail for the selected resource
+	if !m.showDetail || m.detail == nil {
+		t.Fatal("detail should be open")
+	}
+
+	const longToken = "sg-0123456789abcdef0123456789abcdef0123456789"
+	m.showXref = true
+	m.xrefResources = []model.Resource{
+		{Service: "ec2", Type: "security-group", ID: longToken, Name: "ref"},
+	}
+	m.showLogs = true
+	m.logsLines = []string{"2026-06-14T01:02:03Z ERROR handler failed with a very long descriptive message that overflows the panel"}
+	m.showTimeline = true
+	m.timelineErr = errors.New("AccessDenied: user is not authorized to perform cloudtrail:LookupEvents on this resource")
+
+	const width = 32
+	body := m.renderDetail(*m.detail, width)
+	for _, line := range strings.Split(ansi.Strip(body), "\n") {
+		if w := ansi.StringWidth(line); w > width {
+			t.Errorf("detail line exceeds panel width %d (got %d): %q", width, w, line)
+		}
+	}
+
+	// Wrapping must not drop content: a long unbreakable token is hard-broken
+	// across lines (with line padding between chunks) but every character
+	// survives. Collapse all whitespace before checking it is intact.
+	collapsed := strings.Join(strings.Fields(ansi.Strip(body)), "")
+	if !strings.Contains(collapsed, longToken) {
+		t.Errorf("xref resource ID lost during wrapping:\n%s", ansi.Strip(body))
+	}
+}
+
+// The detail panel grows into spare horizontal space on wide terminals (so
+// messages aren't needlessly truncated) but stays at the minimum when there is
+// none, and never exceeds its cap.
+func TestDetailWidthIsResponsive(t *testing.T) {
+	narrow := newTestModel(t, sidebarInner+4+minTableInner+6+detailInner+4, 40)
+	if got := narrow.detailWidth(); got != detailInner {
+		t.Errorf("at the minimum inline width the detail panel should be %d, got %d", detailInner, got)
+	}
+
+	wide := newTestModel(t, 400, 40)
+	if got := wide.detailWidth(); got != detailInnerMax {
+		t.Errorf("on a very wide terminal the detail panel should cap at %d, got %d", detailInnerMax, got)
+	}
+
+	mid := newTestModel(t, 130, 40)
+	if got := mid.detailWidth(); got <= detailInner || got > detailInnerMax {
+		t.Errorf("on a mid-width terminal the detail panel should grow past the minimum but stay under the cap, got %d", got)
 	}
 }
 
