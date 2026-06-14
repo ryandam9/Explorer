@@ -192,13 +192,21 @@ func (m Model) detailOverlay() string {
 	style := m.overlayStyle()
 	w := style.GetWidth() - style.GetHorizontalPadding()
 
-	label := lipgloss.NewStyle().Foreground(lipgloss.Color(ui.ColorMuted())).Width(12)
-	value := lipgloss.NewStyle().Foreground(lipgloss.Color(ui.ColorText())).Width(w - 12)
+	label := lipgloss.NewStyle().Foreground(lipgloss.Color(ui.ColorMuted())).Width(14)
+	value := lipgloss.NewStyle().Foreground(lipgloss.Color(ui.ColorText())).Width(w - 14)
 	row := func(name, v string) string {
 		if v == "" {
 			v = "-"
 		}
 		return lipgloss.JoinHorizontal(lipgloss.Top, label.Render(name), value.Render(v))
+	}
+	// optRow renders a row only when it carries a value, to keep the overlay
+	// compact when CloudTrail didn't record the field.
+	optRow := func(name, v string) string {
+		if v == "" {
+			return ""
+		}
+		return row(name, v) + "\n"
 	}
 
 	outcome := "ok"
@@ -206,14 +214,27 @@ func (m Model) detailOverlay() string {
 		outcome = lipgloss.NewStyle().Foreground(lipgloss.Color(ui.ColorError())).Render("✗ " + ev.ErrorCode)
 	}
 
+	agent := ev.UserAgent
+	if ev.FromConsole {
+		agent = strings.TrimSpace(agent + " (console)")
+	}
+
 	var b strings.Builder
 	b.WriteString(ui.HeaderStyle().Render(ev.EventName) + "\n\n")
 	b.WriteString(row("Time", ev.Time.UTC().Format("2006-01-02 15:04:05 UTC")) + "\n")
+	b.WriteString(optRow("Service", ev.EventSource))
+	b.WriteString(optRow("Region", ev.Region))
 	b.WriteString(row("Principal", ev.Principal) + "\n")
+	b.WriteString(optRow("Access key", ev.AccessKeyID))
 	b.WriteString(row("Source IP", ev.SourceIP) + "\n")
+	b.WriteString(optRow("User agent", agent))
+	b.WriteString(row("MFA", fmt.Sprintf("%t", ev.MFA)) + "\n")
 	b.WriteString(row("Read-only", fmt.Sprintf("%t", ev.ReadOnly)) + "\n")
-	b.WriteString(row("Outcome", outcome) + "\n\n")
-	b.WriteString(ui.MutedStyle().Render("y copies the event name · Esc closes"))
+	b.WriteString(row("Outcome", outcome) + "\n")
+	b.WriteString(optRow("Error", ev.ErrorMessage))
+	b.WriteString(optRow("Resources", resourcesText(ev.Resources)))
+	b.WriteString(optRow("Event ID", ev.EventID))
+	b.WriteString("\n" + ui.MutedStyle().Render("y copies the event name · Esc closes"))
 	return style.Render(b.String())
 }
 

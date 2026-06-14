@@ -85,6 +85,59 @@ const deniedEvent = `{
   }
 }`
 
+const richEvent = `{
+  "eventName": "RunInstances",
+  "awsRegion": "ap-southeast-2",
+  "readOnly": false,
+  "sourceIPAddress": "198.51.100.2",
+  "userAgent": "aws-cli/2.15.0 Python/3.11",
+  "errorCode": "Client.UnauthorizedOperation",
+  "errorMessage": "You are not authorized to perform this operation",
+  "userIdentity": {
+    "type": "IAMUser",
+    "arn": "arn:aws:iam::123456789012:user/alice",
+    "accessKeyId": "AKIAEXAMPLE",
+    "sessionContext": { "attributes": { "mfaAuthenticated": "true" } }
+  }
+}`
+
+const consoleEvent = `{
+  "eventName": "DeleteBucket",
+  "awsRegion": "us-east-1",
+  "readOnly": false,
+  "sourceIPAddress": "192.0.2.1",
+  "userAgent": "signin.amazonaws.com",
+  "userIdentity": { "type": "Root", "accountId": "123456789012" }
+}`
+
+func TestSummarize_RichFields(t *testing.T) {
+	ev := summarize("alice", "false", richEvent)
+	if ev.Region != "ap-southeast-2" {
+		t.Errorf("Region = %q, want ap-southeast-2", ev.Region)
+	}
+	if ev.UserAgent != "aws-cli/2.15.0 Python/3.11" {
+		t.Errorf("UserAgent = %q", ev.UserAgent)
+	}
+	if ev.AccessKeyID != "AKIAEXAMPLE" {
+		t.Errorf("AccessKeyID = %q", ev.AccessKeyID)
+	}
+	if !ev.MFA {
+		t.Error("MFA = false, want true")
+	}
+	if ev.ErrorMessage != "You are not authorized to perform this operation" {
+		t.Errorf("ErrorMessage = %q", ev.ErrorMessage)
+	}
+	if ev.FromConsole {
+		t.Error("FromConsole = true, want false for an aws-cli call")
+	}
+}
+
+func TestSummarize_FromConsoleViaUserAgent(t *testing.T) {
+	if ev := summarize("root", "false", consoleEvent); !ev.FromConsole {
+		t.Error("FromConsole = false, want true for a signin.amazonaws.com user agent")
+	}
+}
+
 func TestSummarize_ExtractsErrorCode(t *testing.T) {
 	ev := summarize("alice", "false", deniedEvent)
 	if ev.ErrorCode != "Client.UnauthorizedOperation" {
