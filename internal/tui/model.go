@@ -1878,10 +1878,10 @@ func (m tuiModel) coverageBanner() string {
 	}
 	var msg string
 	if m.coverageTagSweep {
-		msg = fmt.Sprintf("⚠ A resource of any of these %d service(s) may not appear on this page if the resource does not have a tag!! Press c to view the services.",
+		msg = fmt.Sprintf("⚠ If you don't see a resource it could be because it does not have tags — %d service(s) affected. Press c for more information.",
 			m.coverageMissing)
 	} else {
-		msg = fmt.Sprintf("⚠ --typed-only: A resource of any of these %d service(s) may not appear on this page if the resource does not have a tag!! Press c to view the services.",
+		msg = fmt.Sprintf("⚠ --typed-only: If you don't see a resource it could be because it does not have tags — %d service(s) affected. Press c for more information.",
 			m.coverageMissing)
 	}
 	w := m.width - 2
@@ -3300,20 +3300,65 @@ func (m *tuiModel) openCoverageOverlay() {
 	m.showCoverage = true
 }
 
-// coverageBody lists, one per line, the common services that produced no rows,
-// under a plain-language explanation wrapped to width.
+// coverageBody explains how the inventory is built — tag-based discovery versus
+// typed collectors — why a resource may be missing, and lists the common
+// services that produced no rows, grouped by how they are collected. All prose
+// is wrapped to width.
 func (m tuiModel) coverageBody(width int) string {
-	intro := lipgloss.NewStyle().Width(width).Render(
-		"If a resource you expected isn't here, it may have no tags, or there simply aren't any. " +
-			"These common services produced nothing in this scan:")
+	head := lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color(ui.ColorHeading()))
+	prose := lipgloss.NewStyle().Width(width)
+	muted := ui.MutedStyle()
 
 	var b strings.Builder
-	b.WriteString(intro + "\n\n")
+
+	// How resources are found: tag-based discovery vs. typed collectors.
+	b.WriteString(head.Render("How resources are found") + "\n")
+	b.WriteString(prose.Render(
+		"aws_explorer finds resources in two ways. A typed collector calls a "+
+			"service's own API and returns every resource it owns, whether or not "+
+			"it is tagged. Every other service is reached only by the tag-based "+
+			"discovery sweep, which lists resources through the Resource Groups "+
+			"Tagging API — so such a resource appears only if it carries at least "+
+			"one tag.") + "\n\n")
+
+	// Why a resource may not appear.
+	b.WriteString(head.Render("Why a resource may not appear") + "\n")
+	b.WriteString(prose.Render(
+		"If a resource you expected isn't on this page, the most common reason "+
+			"is that it has no tags and its service has no typed collector, so the "+
+			"tagging sweep can't see it. It may also be that the service genuinely "+
+			"has no resources in the scanned account and regions.") + "\n\n")
+
+	// Common services with nothing shown, grouped by collection method.
 	if m.engine != nil {
-		for _, c := range summary.NotShown(summary.Coverage(m.sorted, m.engine.TypedServices(), m.coverageExtra(), m.coverageHide())) {
-			b.WriteString("  • " + c.Label + "\n")
+		missing := summary.NotShown(summary.Coverage(m.sorted, m.engine.TypedServices(), m.coverageExtra(), m.coverageHide()))
+		var typed, tagged []string
+		for _, c := range missing {
+			if c.Typed {
+				typed = append(typed, c.Label)
+			} else {
+				tagged = append(tagged, c.Label)
+			}
+		}
+
+		b.WriteString(head.Render(fmt.Sprintf("Common services with nothing shown (%d)", len(missing))) + "\n")
+		if len(tagged) > 0 {
+			b.WriteString(muted.Render("Tag-discovered — may be hidden if untagged:") + "\n")
+			for _, name := range tagged {
+				b.WriteString("  • " + name + "\n")
+			}
+		}
+		if len(typed) > 0 {
+			if len(tagged) > 0 {
+				b.WriteString("\n")
+			}
+			b.WriteString(muted.Render("Typed collector — likely no resources exist:") + "\n")
+			for _, name := range typed {
+				b.WriteString("  • " + name + "\n")
+			}
 		}
 	}
+
 	return strings.TrimRight(b.String(), "\n")
 }
 
