@@ -16,9 +16,15 @@ import (
 func testEvents() []trail.Event {
 	base := time.Date(2026, 6, 14, 12, 0, 0, 0, time.UTC)
 	return []trail.Event{
-		{Time: base, EventName: "RunInstances", Principal: "user/alice", SourceIP: "198.51.100.2", ErrorCode: "Client.UnauthorizedOperation"},
-		{Time: base.Add(-time.Hour), EventName: "AuthorizeSecurityGroupIngress", Principal: "role/deploy", SourceIP: "203.0.113.7"},
-		{Time: base.Add(-2 * time.Hour), EventName: "DeleteBucket", Principal: "root", SourceIP: "192.0.2.1"},
+		{Time: base, EventName: "RunInstances", EventSource: "ec2.amazonaws.com", Region: "us-east-1",
+			Principal: "user/alice", SourceIP: "198.51.100.2", UserAgent: "aws-cli/2.15.0",
+			AccessKeyID: "AKIAEXAMPLE", EventID: "evt-1", MFA: true,
+			ErrorCode: "Client.UnauthorizedOperation", ErrorMessage: "You are not authorized to perform this operation",
+			Resources: []trail.Resource{{Type: "AWS::EC2::Instance", Name: "i-0abc"}}},
+		{Time: base.Add(-time.Hour), EventName: "AuthorizeSecurityGroupIngress", EventSource: "ec2.amazonaws.com",
+			Region: "us-east-1", Principal: "role/deploy", SourceIP: "203.0.113.7", FromConsole: true},
+		{Time: base.Add(-2 * time.Hour), EventName: "DeleteBucket", EventSource: "s3.amazonaws.com",
+			Region: "eu-west-1", Principal: "root", SourceIP: "192.0.2.1"},
 	}
 }
 
@@ -32,7 +38,9 @@ func newTestModel(t *testing.T) Model {
 // newSizedModel builds a model and applies a window size, ready for messages.
 func newSizedModel(regions []string, opts trail.Options) Model {
 	m := New(context.Background(), aws.Config{}, regions, trail.Filter{}, opts, "account-wide activity")
-	mm, _ := m.Update(tea.WindowSizeMsg{Width: 120, Height: 40})
+	// Wide enough that every column is on-screen (no horizontal scroll) so
+	// table-content assertions are stable.
+	mm, _ := m.Update(tea.WindowSizeMsg{Width: 220, Height: 40})
 	return mm.(Model)
 }
 
@@ -196,6 +204,41 @@ func TestDetailOverlayOpens(t *testing.T) {
 	m = update(m, key("esc"))
 	if m.overlay != overlayNone {
 		t.Error("esc should close the overlay")
+	}
+}
+
+func TestServiceAndRegionColumns(t *testing.T) {
+	out := newTestModel(t).View()
+	for _, want := range []string{"SERVICE", "REGION", "ec2", "us-east-1", "eu-west-1"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("table view missing %q:\n%s", want, out)
+		}
+	}
+}
+
+func TestDetailOverlayShowsRichFields(t *testing.T) {
+	m := newTestModel(t)
+	m = update(m, key("enter")) // newest event (RunInstances) is selected
+	out := m.View()
+	// The denied RunInstances event carries the full set of attributes.
+	for _, want := range []string{
+		"User agent", "aws-cli/2.15.0", "MFA", "Access key", "AKIAEXAMPLE",
+		"Error", "not authorized", "Resources", "i-0abc", "Event ID", "evt-1",
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("detail overlay missing %q:\n%s", want, out)
+		}
+	}
+}
+
+func TestFilterMatchesServiceAndUserAgent(t *testing.T) {
+	m := newTestModel(t)
+	m = update(m, key("/"))
+	for _, r := range "aws-cli" {
+		m = update(m, key(string(r)))
+	}
+	if len(m.visible) != 1 || m.visible[0].EventName != "RunInstances" {
+		t.Errorf("filter on user agent should match the one event, got %d: %+v", len(m.visible), m.visible)
 	}
 }
 

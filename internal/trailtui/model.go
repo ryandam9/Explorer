@@ -63,9 +63,11 @@ const (
 var columns = []table.Column{
 	{Title: "#", Width: 5},
 	{Title: "TIME", Width: 20},
-	{Title: "EVENT", Width: 30},
-	{Title: "PRINCIPAL", Width: 26},
-	{Title: "SOURCE IP", Width: 18},
+	{Title: "EVENT", Width: 28},
+	{Title: "SERVICE", Width: 16},
+	{Title: "REGION", Width: 12},
+	{Title: "PRINCIPAL", Width: 24},
+	{Title: "SOURCE IP", Width: 16},
 	{Title: "OUTCOME", Width: 18},
 }
 
@@ -401,13 +403,20 @@ func (m *Model) exportCSV() {
 		for _, ev := range m.visible {
 			rows = append(rows, []string{
 				ev.Time.UTC().Format("2006-01-02T15:04:05Z"),
-				ev.EventName, ev.Principal, ev.SourceIP,
-				strconv.FormatBool(ev.ReadOnly), ev.ErrorCode,
+				ev.Region, ev.EventName, ev.EventSource, ev.Principal,
+				ev.AccessKeyID, ev.SourceIP, ev.UserAgent,
+				strconv.FormatBool(ev.FromConsole), strconv.FormatBool(ev.MFA),
+				strconv.FormatBool(ev.ReadOnly), ev.ErrorCode, ev.ErrorMessage,
+				ev.EventID, resourcesText(ev.Resources),
 			})
 		}
 		var path string
 		path, err = csvexport.Write(dir, "cloudtrail",
-			[]string{"Time", "Event", "Principal", "SourceIP", "ReadOnly", "ErrorCode"}, rows)
+			[]string{
+				"Time", "Region", "Event", "Service", "Principal", "AccessKeyID",
+				"SourceIP", "UserAgent", "FromConsole", "MFA", "ReadOnly",
+				"ErrorCode", "ErrorMessage", "EventID", "Resources",
+			}, rows)
 		if err == nil {
 			m.status = "exported " + path
 			return
@@ -436,7 +445,8 @@ func (m *Model) rebuild() {
 		rows = append(rows, table.Row{
 			strconv.Itoa(i + 1),
 			ev.Time.UTC().Format("2006-01-02 15:04:05"),
-			eventLabel(ev), ev.Principal, ev.SourceIP, outcomeLabel(ev),
+			eventLabel(ev), serviceLabel(ev), orDash(ev.Region),
+			ev.Principal, ev.SourceIP, outcomeLabel(ev),
 		})
 	}
 	m.tbl.SetRows(rows)
@@ -461,6 +471,40 @@ func eventLabel(ev trail.Event) string {
 		return ev.EventName + " (read)"
 	}
 	return ev.EventName
+}
+
+// serviceLabel shortens the event source to the bare service name
+// ("ec2.amazonaws.com" → "ec2"), falling back to a dash when unknown.
+func serviceLabel(ev trail.Event) string {
+	s := strings.TrimSuffix(ev.EventSource, ".amazonaws.com")
+	return orDash(s)
+}
+
+func orDash(s string) string {
+	if s == "" {
+		return "-"
+	}
+	return s
+}
+
+// resourcesText renders the affected resources as "type name" entries joined
+// by "; " for the detail overlay and CSV export.
+func resourcesText(rs []trail.Resource) string {
+	if len(rs) == 0 {
+		return ""
+	}
+	parts := make([]string, 0, len(rs))
+	for _, r := range rs {
+		switch {
+		case r.Type != "" && r.Name != "":
+			parts = append(parts, r.Type+" "+r.Name)
+		case r.Name != "":
+			parts = append(parts, r.Name)
+		case r.Type != "":
+			parts = append(parts, r.Type)
+		}
+	}
+	return strings.Join(parts, "; ")
 }
 
 // outcomeLabel marks failures with a ✗ and the errorCode so they stand out in
@@ -492,14 +536,15 @@ func filterEvents(evs []trail.Event, query string, errorsOnly bool) []trail.Even
 
 func matchesEvent(ev trail.Event, q string) bool {
 	hay := strings.ToLower(strings.Join([]string{
-		ev.EventName, ev.Principal, ev.SourceIP, ev.ErrorCode,
+		ev.EventName, ev.EventSource, ev.Region, ev.Principal, ev.SourceIP,
+		ev.UserAgent, ev.AccessKeyID, ev.ErrorCode, ev.ErrorMessage,
 		ev.Time.UTC().Format("2006-01-02 15:04:05"),
 	}, " "))
 	return strings.Contains(hay, q)
 }
 
 // sortEvents orders by the chosen column; col -1 keeps the API's newest-first
-// order. Column indices match the table header (1=TIME … 5=OUTCOME); column 0
+// order. Column indices match the table header (1=TIME … 7=OUTCOME); column 0
 // ("#") is positional and never a sort target.
 func sortEvents(evs []trail.Event, col int, asc bool) {
 	if col <= 0 {
@@ -512,8 +557,12 @@ func sortEvents(evs []trail.Event, col int, asc bool) {
 		case 2:
 			return a.EventName < b.EventName
 		case 3:
-			return a.Principal < b.Principal
+			return a.EventSource < b.EventSource
 		case 4:
+			return a.Region < b.Region
+		case 5:
+			return a.Principal < b.Principal
+		case 6:
 			return a.SourceIP < b.SourceIP
 		default:
 			return a.ErrorCode < b.ErrorCode

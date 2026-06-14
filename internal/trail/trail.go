@@ -18,18 +18,48 @@ import (
 )
 
 // Event is one CloudTrail management event affecting a resource, reduced to
-// the facts that matter in an incident: when, what, who, from where, and
+// the facts that matter in an incident: when, what, who, from where, how, and
 // whether the call failed.
 type Event struct {
 	Time      time.Time `json:"time"`
 	EventName string    `json:"eventName"`
-	Principal string    `json:"principal"`
-	SourceIP  string    `json:"sourceIp"`
-	ReadOnly  bool      `json:"readOnly"`
+	// EventSource is the AWS service principal the call hit (e.g.
+	// "ec2.amazonaws.com"); useful in the account-wide feed where events span
+	// many services.
+	EventSource string `json:"eventSource,omitempty"`
+	// Region is the AWS region the event was recorded in. Global services
+	// (e.g. IAM) record in us-east-1.
+	Region    string `json:"region,omitempty"`
+	Principal string `json:"principal"`
+	SourceIP  string `json:"sourceIp"`
+	// UserAgent is the client that made the call (CLI, SDK, Terraform, the
+	// console). FromConsole is set when the call originated from the AWS
+	// console session, which the user agent alone doesn't always make obvious.
+	UserAgent   string `json:"userAgent,omitempty"`
+	FromConsole bool   `json:"fromConsole,omitempty"`
+	ReadOnly    bool   `json:"readOnly"`
+	// MFA reports whether the calling session was MFA-authenticated.
+	MFA bool `json:"mfaAuthenticated,omitempty"`
+	// AccessKeyID is the access key the call was signed with, when present.
+	AccessKeyID string `json:"accessKeyId,omitempty"`
+	// EventID is CloudTrail's unique ID for the event — a stable handle for
+	// sharing or cross-referencing.
+	EventID string `json:"eventId,omitempty"`
+	// Resources lists the resources the event acted on, as CloudTrail recorded
+	// them.
+	Resources []Resource `json:"resources,omitempty"`
 	// ErrorCode is the CloudTrail errorCode when the call failed (e.g.
 	// "AccessDenied", "UnauthorizedOperation"); empty when it succeeded. A
 	// burst of these is a strong recon / misconfiguration signal.
 	ErrorCode string `json:"errorCode,omitempty"`
+	// ErrorMessage is the human-readable reason the call failed, when present.
+	ErrorMessage string `json:"errorMessage,omitempty"`
+}
+
+// Resource is one resource a CloudTrail event acted on.
+type Resource struct {
+	Type string `json:"type,omitempty"`
+	Name string `json:"name,omitempty"`
 }
 
 // Filter selects which events LookupEvents returns. LookupEvents accepts at
@@ -265,6 +295,23 @@ func LookupFiltered(ctx context.Context, cfg aws.Config, region string, f Filter
 			ev := summarize(aws.ToString(e.Username), aws.ToString(e.ReadOnly), aws.ToString(e.CloudTrailEvent))
 			ev.Time = aws.ToTime(e.EventTime)
 			ev.EventName = aws.ToString(e.EventName)
+			// Fields the LookupEvents response carries directly, so we don't
+			// have to dig them out of the record JSON. Don't let an empty
+			// response field clobber a value summarize parsed from the record.
+			ev.EventSource = aws.ToString(e.EventSource)
+			ev.EventID = aws.ToString(e.EventId)
+			if k := aws.ToString(e.AccessKeyId); k != "" {
+				ev.AccessKeyID = k
+			}
+			if ev.Region == "" {
+				ev.Region = region // the region this lookup queried
+			}
+			for _, r := range e.Resources {
+				ev.Resources = append(ev.Resources, Resource{
+					Type: aws.ToString(r.ResourceType),
+					Name: aws.ToString(r.ResourceName),
+				})
+			}
 			if ev.ReadOnly && !opts.IncludeReadOnly {
 				continue
 			}
@@ -358,24 +405,37 @@ func LookupFilteredRegions(ctx context.Context, cfg aws.Config, regions []string
 const regionConcurrency = 8
 
 // rawCTEvent is the subset of the CloudTrail event record JSON needed to
-// attribute an event to a principal and source.
+// attribute an event to a principal and source and describe how it was made.
 type rawCTEvent struct {
+	AwsRegion       string `json:"awsRegion"`
 	SourceIPAddress string `json:"sourceIPAddress"`
+	UserAgent       string `json:"userAgent"`
 	ReadOnly        bool   `json:"readOnly"`
 	ErrorCode       string `json:"errorCode"`
-	UserIdentity    struct {
-		Type        string `json:"type"`
-		Arn         string `json:"arn"`
-		PrincipalID string `json:"principalId"`
-		AccountID   string `json:"accountId"`
-		InvokedBy   string `json:"invokedBy"`
+	ErrorMessage    string `json:"errorMessage"`
+	// sessionCredentialFromConsole is recorded as the string "true"/"false".
+	SessionCredentialFromConsole string `json:"sessionCredentialFromConsole"`
+	UserIdentity                 struct {
+		Type           string `json:"type"`
+		Arn            string `json:"arn"`
+		PrincipalID    string `json:"principalId"`
+		AccountID      string `json:"accountId"`
+		InvokedBy      string `json:"invokedBy"`
+		AccessKeyID    string `json:"accessKeyId"`
+		SessionContext struct {
+			Attributes struct {
+				// mfaAuthenticated is recorded as the string "true"/"false".
+				MFAAuthenticated string `json:"mfaAuthenticated"`
+			} `json:"attributes"`
+		} `json:"sessionContext"`
 	} `json:"userIdentity"`
 }
 
-// summarize extracts principal (short form), source IP and read-only flag
-// from a CloudTrail event record. username and readOnly come from the
-// LookupEvents response fields and act as fallbacks when the record JSON is
-// missing or unparsable. Pure: fixture-testable without AWS.
+// summarize extracts principal (short form), source IP, read-only flag, and
+// the how-it-was-made details (user agent, console, MFA, error message) from a
+// CloudTrail event record. username and readOnly come from the LookupEvents
+// response fields and act as fallbacks when the record JSON is missing or
+// unparsable. Pure: fixture-testable without AWS.
 func summarize(username, readOnly, rawJSON string) Event {
 	ev := Event{
 		Principal: username,
@@ -397,7 +457,15 @@ func summarize(username, readOnly, rawJSON string) Event {
 	if readOnly == "" {
 		ev.ReadOnly = raw.ReadOnly
 	}
+	ev.Region = raw.AwsRegion
+	ev.UserAgent = raw.UserAgent
+	ev.AccessKeyID = raw.UserIdentity.AccessKeyID
+	ev.MFA = strings.EqualFold(raw.UserIdentity.SessionContext.Attributes.MFAAuthenticated, "true")
+	ev.FromConsole = strings.EqualFold(raw.SessionCredentialFromConsole, "true") ||
+		strings.Contains(raw.UserAgent, "console.amazonaws.com") ||
+		strings.Contains(raw.UserAgent, "signin.amazonaws.com")
 	ev.ErrorCode = raw.ErrorCode
+	ev.ErrorMessage = raw.ErrorMessage
 
 	switch {
 	case raw.UserIdentity.Type == "Root":
