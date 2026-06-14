@@ -139,12 +139,12 @@ unchanged account diffs clean.`,
 		}
 
 		// Coverage advisory: only for the human table view (json/csv/ndjson must
-		// stay machine-clean). It tells the user which common services showed
-		// nothing and warns that tag-discovered services can hide untagged
-		// resources — the reason an inventory can look short.
+		// stay machine-clean). It lists the common services that showed nothing
+		// and reminds the user, in plain terms, that an untagged resource can be
+		// missing — the usual reason an inventory looks short.
 		if isTableFormat(outputFormat) {
 			cov := summary.Coverage(resources, eng.TypedServices())
-			if note := summary.CoverageNote(cov, len(eng.TypedServices()), !summaryTypedOnly); note != "" {
+			if note := summary.CoverageNote(cov, !summaryTypedOnly); note != "" {
 				fmt.Fprintln(os.Stdout, "\n"+note)
 			}
 		}
