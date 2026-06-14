@@ -88,14 +88,18 @@ output:
 trail:
     # Event names to suppress from the feed so routine calls don't drown out the
     # signal. Matching is case-insensitive; a trailing "*" is a prefix wildcard
-    # (e.g. "Describe*" hides every describe call). Hidden events are dropped
-    # from the CLI output; in the TUI they are hidden by default and can be
-    # revealed with the "h" key. Example:
-    #   hideevents:
-    #     - AssumeRole
-    #     - ConsoleLogin
-    #     - Describe*
-    hideevents: []
+    # (e.g. "Describe*" hides every describe call). The filter is applied
+    # server-side, so hidden events never count against maxevents below. An
+    # explicit `--event <Name>` lookup is never hidden. By default every
+    # read-only call (Get*/Describe*/List*) is hidden; add your own noisy events
+    # (ConsoleLogin, AssumeRole, …) or clear the list to see everything.
+    hideevents:
+        - Get*
+        - Describe*
+        - List*
+    # Maximum number of events the `--tui` feed keeps after the hideevents
+    # filter above. 0 uses the built-in default (200). `--limit` overrides it.
+    maxevents: 200
 ui:
     theme: princess-parrot
     themes:
