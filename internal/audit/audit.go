@@ -90,7 +90,7 @@ func Stream(ctx context.Context, baseCfg aws.Config, regions []string, categorie
 			// IAM is account-global: collected once, in the first region's
 			// pass, with findings labeled Region "global".
 			if wantIAM && s3Region {
-				snap, e := collectIAMAccount(gctx, baseCfg, perCallTimeout)
+				snap, e := collectIAMAccount(gctx, baseCfg, maxConcurrency, perCallTimeout)
 				fs = append(fs, findings.AnalyzeIAM(snap)...)
 				errs = append(errs, e...)
 			}
