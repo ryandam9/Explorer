@@ -32,6 +32,10 @@ func TableStyles() table.Styles {
 		Foreground(lipgloss.Color(ColorTableSelectedText())).
 		Background(lipgloss.Color(ColorTableSelectedBg())).
 		Bold(true)
+	// Vertical scrollbar: dim track in the table's border color, bright thumb in
+	// the accent color, matching the viewport scrollbars elsewhere.
+	s.ScrollTrack = lipgloss.NewStyle().Foreground(lipgloss.Color(ColorTableBorder()))
+	s.ScrollThumb = lipgloss.NewStyle().Foreground(lipgloss.Color(ColorAccent()))
 	return s
 }
 
