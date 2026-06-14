@@ -357,8 +357,9 @@ func (v *logViewer) clampOffsetFor(bodyH int) {
 // ---- model integration -----------------------------------------------------
 
 // viewerWrapWidth is the usable text width inside the viewer's border/padding.
+// Two extra columns are reserved for the scrollbar gutter (see renderViewer).
 func (m *model) viewerWrapWidth() int {
-	return max(20, m.width-6)
+	return max(20, m.width-8)
 }
 
 // viewerBodyHeight is how many log lines fit between the viewer header and the
@@ -653,12 +654,21 @@ func (m *model) renderViewer() string {
 		if v.term != "" && len(v.matches) > 0 {
 			currentMatch = v.matches[v.matchIdx]
 		}
+		// Vertical scrollbar gutter, one column to the right of the log rows.
+		// The body rows are padded to a fixed width so the bar lands flush at
+		// the box's right edge regardless of how short each line is.
+		barLines := strings.Split(ui.VScrollbar(bodyH, len(v.lines), bodyH, v.offset), "\n")
+		rowStyle := lipgloss.NewStyle().Width(max(20, m.width-4)).MaxHeight(1)
 		for i := v.offset; i < end; i++ {
 			marker := "  "
 			if i == currentMatch {
 				marker = lipgloss.NewStyle().Foreground(lipgloss.Color(ui.ColorAccent())).Render("▸ ")
 			}
-			b.WriteString(marker + m.styleViewerLine(v.lines[i], v.term) + "\n")
+			row := rowStyle.Render(marker + m.styleViewerLine(v.lines[i], v.term))
+			if r := i - v.offset; r < len(barLines) {
+				row += " " + barLines[r]
+			}
+			b.WriteString(row + "\n")
 		}
 	}
 
