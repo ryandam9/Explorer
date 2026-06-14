@@ -1878,10 +1878,10 @@ func (m tuiModel) coverageBanner() string {
 	}
 	var msg string
 	if m.coverageTagSweep {
-		msg = fmt.Sprintf("⚠ A resource of any of these %d service(s) may not appear on this page if the resource does not have a tag!! Press c to view the resources.",
+		msg = fmt.Sprintf("⚠ A resource of any of these %d service(s) may not appear on this page if the resource does not have a tag!! Press c to view the services.",
 			m.coverageMissing)
 	} else {
-		msg = fmt.Sprintf("⚠ --typed-only: A resource of any of these %d service(s) may not appear on this page if the resource does not have a tag!! Press c to view the resources.",
+		msg = fmt.Sprintf("⚠ --typed-only: A resource of any of these %d service(s) may not appear on this page if the resource does not have a tag!! Press c to view the services.",
 			m.coverageMissing)
 	}
 	w := m.width - 2
