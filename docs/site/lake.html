@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>aws_explorer snapshot-diff · aws_explorer documentation</title>
+<title>aws_explorer lake · aws_explorer documentation</title>
 <style>
 :root { --bg:#0d1117; --panel:#161b22; --border:#30363d; --text:#c9d1d9; --muted:#8b949e; --link:#58a6ff; --accent:#3fb950; --code:#1f2630; }
 * { box-sizing: border-box; }
@@ -62,39 +62,58 @@ hr { border:none; border-top:1px solid var(--border); margin:2rem 0; }
 <a href="iam.html">aws_explorer iam</a>
 <a href="iam_can.html">aws_explorer iam can</a>
 <a href="iam_decode.html">aws_explorer iam decode</a>
-<a href="lake.html">aws_explorer lake</a>
+<a href="lake.html" class="active" aria-current="page">aws_explorer lake</a>
 <a href="quotas.html">aws_explorer quotas</a>
 <a href="s3.html">aws_explorer s3</a>
-<a href="snapshot-diff.html" class="active" aria-current="page">aws_explorer snapshot-diff</a>
+<a href="snapshot-diff.html">aws_explorer snapshot-diff</a>
 <a href="summary.html">aws_explorer summary</a>
 <a href="trail.html">aws_explorer trail</a>
 <a href="vpc.html">aws_explorer vpc</a>
 <a href="whereused.html">aws_explorer whereused</a>
 </nav>
 <main>
-<p>Browse a saved inventory snapshot, or diff two snapshots, offline</p>
+<p>Query CloudTrail Lake — years of history, data events, aggregation (SQL)</p>
 
-<p>snapshot-diff opens the interactive TUI over saved inventory snapshots —
-no AWS credentials, STS calls or region discovery needed.</p>
+<p>Lake queries a CloudTrail Lake event data store with SQL. Unlike the trail
+command (cloudtrail:LookupEvents — 90 days, management events only), a Lake
+event data store can hold years of history and data events (S3 object access,
+Lambda invokes, …) and supports aggregation — but it must be created first.</p>
 
-<p>Pass &ndash;snapshot to browse a single saved snapshot, or &ndash;diff to compare two
-snapshots and explore what was added, removed or modified between them.
-Snapshots are the JSON written by &lsquo;summary -o json&rsquo;.</p>
+<p>Pick a store with &ndash;store (the only store is used automatically; &ndash;list-stores
+prints what is available). Then either run a built-in query or your own SQL:</p>
 
-<p>To explore live AWS resources interactively, use &lsquo;summary &ndash;tui&rsquo; instead.</p>
+<p>• (default)         recent activity, newest first,
+  • &ndash;top-principals  who is most active (count per principal),
+  • &ndash;top-events      which API calls are most frequent,
+  • &ndash;sql &ldquo;<query>&rdquo;   any CloudTrail Lake SQL (you supply the FROM clause).</p>
+
+<p>The &ndash;by / &ndash;event / &ndash;source / &ndash;errors-only / &ndash;since / &ndash;limit filters shape
+the built-in queries. Add &ndash;tui to explore the results interactively.</p>
+
+<p>If no event data store exists, this prints a short note and exits cleanly — use
+the trail command for the zero-setup 90-day feed.</p>
 
 <h2 id="usage">Usage</h2>
 
-<pre><code>aws_explorer snapshot-diff [flags]
+<pre><code>aws_explorer lake [flags]
 </code></pre>
 
 <h2 id="examples">Examples</h2>
 
-<pre><code class="language-bash"># Browse a saved snapshot offline (no credentials needed)
-aws_explorer snapshot-diff --snapshot inventory.json
+<pre><code class="language-bash"># What stores can I query?
+aws_explorer lake --list-stores
 
-# Diff two snapshots
-aws_explorer snapshot-diff --diff before.json,after.json
+# Recent activity in the last 30 days
+aws_explorer lake --since 30d
+
+# Who has been the busiest principal this quarter?
+aws_explorer lake --top-principals --since 90d
+
+# Most frequent API calls, interactively
+aws_explorer lake --top-events --tui
+
+# Your own SQL
+aws_explorer lake --sql &quot;SELECT eventName, COUNT(*) c FROM &lt;eds-id&gt; GROUP BY eventName ORDER BY c DESC LIMIT 20&quot;
 </code></pre>
 
 <h2 id="flags">Flags</h2>
@@ -110,15 +129,81 @@ aws_explorer snapshot-diff --diff before.json,after.json
 
 <tbody>
 <tr>
-<td><code>--diff</code></td>
+<td><code>--by</code></td>
 <td>—</td>
-<td>Paths to two saved snapshots to diff (comma-separated or multiple flags)</td>
+<td>filter built-in queries to a principal (substring of the ARN)</td>
 </tr>
 
 <tr>
-<td><code>--snapshot</code></td>
+<td><code>--errors-only</code></td>
 <td>—</td>
-<td>Path to a saved inventory snapshot JSON to view offline</td>
+<td>filter built-in queries to failed/denied calls</td>
+</tr>
+
+<tr>
+<td><code>--event</code></td>
+<td>—</td>
+<td>filter built-in queries to one API call</td>
+</tr>
+
+<tr>
+<td><code>--limit</code></td>
+<td>50</td>
+<td>maximum number of rows to return</td>
+</tr>
+
+<tr>
+<td><code>--list-stores</code></td>
+<td>—</td>
+<td>list available event data stores and exit</td>
+</tr>
+
+<tr>
+<td><code>--max-wait</code></td>
+<td>60s</td>
+<td>how long to wait for the query to finish</td>
+</tr>
+
+<tr>
+<td><code>--since</code></td>
+<td>—</td>
+<td>only events after this long ago (e.g. 30d, 12h)</td>
+</tr>
+
+<tr>
+<td><code>--source</code></td>
+<td>—</td>
+<td>filter built-in queries to one service (e.g. s3.amazonaws.com)</td>
+</tr>
+
+<tr>
+<td><code>--sql</code></td>
+<td>—</td>
+<td>raw CloudTrail Lake SQL (you supply the FROM clause)</td>
+</tr>
+
+<tr>
+<td><code>--store</code></td>
+<td>—</td>
+<td>event data store to query (id, ARN, or name; default: the only store)</td>
+</tr>
+
+<tr>
+<td><code>--top-events</code></td>
+<td>—</td>
+<td>built-in query: API calls ranked by frequency</td>
+</tr>
+
+<tr>
+<td><code>--top-principals</code></td>
+<td>—</td>
+<td>built-in query: principals ranked by event count</td>
+</tr>
+
+<tr>
+<td><code>--tui</code></td>
+<td>—</td>
+<td>explore the results interactively</td>
 </tr>
 </tbody>
 </table>
