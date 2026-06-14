@@ -7,9 +7,11 @@ require (
 	github.com/aws/aws-sdk-go-v2 v1.42.0
 	github.com/aws/aws-sdk-go-v2/config v1.32.17
 	github.com/aws/aws-sdk-go-v2/credentials v1.19.16
-	github.com/aws/aws-sdk-go-v2/service/acm v1.39.6
+	github.com/aws/aws-sdk-go-v2/service/acm v1.40.0
 	github.com/aws/aws-sdk-go-v2/service/apigateway v1.40.6
 	github.com/aws/aws-sdk-go-v2/service/apigatewayv2 v1.35.6
+	github.com/aws/aws-sdk-go-v2/service/athena v1.58.4
+	github.com/aws/aws-sdk-go-v2/service/cloudformation v1.72.1
 	github.com/aws/aws-sdk-go-v2/service/cloudfront v1.65.2
 	github.com/aws/aws-sdk-go-v2/service/cloudtrail v1.56.4
 	github.com/aws/aws-sdk-go-v2/service/cloudwatch v1.57.0
@@ -17,14 +19,21 @@ require (
 	github.com/aws/aws-sdk-go-v2/service/costexplorer v1.65.1
 	github.com/aws/aws-sdk-go-v2/service/dynamodb v1.57.3
 	github.com/aws/aws-sdk-go-v2/service/ec2 v1.303.0
+	github.com/aws/aws-sdk-go-v2/service/ecr v1.58.4
 	github.com/aws/aws-sdk-go-v2/service/ecs v1.80.0
+	github.com/aws/aws-sdk-go-v2/service/efs v1.42.1
 	github.com/aws/aws-sdk-go-v2/service/eks v1.83.0
+	github.com/aws/aws-sdk-go-v2/service/elasticache v1.54.3
 	github.com/aws/aws-sdk-go-v2/service/elasticloadbalancingv2 v1.54.12
 	github.com/aws/aws-sdk-go-v2/service/emr v1.59.2
 	github.com/aws/aws-sdk-go-v2/service/eventbridge v1.46.6
+	github.com/aws/aws-sdk-go-v2/service/glue v1.144.0
 	github.com/aws/aws-sdk-go-v2/service/iam v1.53.10
+	github.com/aws/aws-sdk-go-v2/service/kinesis v1.44.2
+	github.com/aws/aws-sdk-go-v2/service/kms v1.53.4
 	github.com/aws/aws-sdk-go-v2/service/lambda v1.90.1
 	github.com/aws/aws-sdk-go-v2/service/rds v1.118.2
+	github.com/aws/aws-sdk-go-v2/service/redshift v1.63.3
 	github.com/aws/aws-sdk-go-v2/service/resourcegroupstaggingapi v1.33.3
 	github.com/aws/aws-sdk-go-v2/service/route53 v1.62.7
 	github.com/aws/aws-sdk-go-v2/service/s3 v1.101.0

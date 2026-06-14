@@ -5,7 +5,7 @@ Discover, monitor, and display AWS resources across accounts and regions via CLI
 ## Features
 
 - **Four modes**: CLI (streaming table/JSON output), TUI (interactive exploration), VPC Explorer TUI (drill into a VPC's networking), S3 TUI (dedicated S3 browser)
-- **19 services**: EC2, S3, RDS, IAM, DynamoDB, Lambda, EMR, ECS, EKS, ELBv2, Secrets Manager, SQS, SNS, CloudWatch, CloudFront, Route53, API Gateway, Step Functions, EventBridge
+- **29 services**: EC2, S3, RDS, IAM, DynamoDB, Lambda, EMR, ECS, EKS, ELBv2, Secrets Manager, SQS, SNS, CloudWatch, CloudFront, Route53, API Gateway, Step Functions, EventBridge, ElastiCache, EFS, Kinesis, Redshift, KMS, ECR, ACM, CloudFormation, Glue, Athena
 - **VPC Explorer**: browse a VPC's subnets, security groups, network interfaces, route tables, gateways, endpoints, NACLs, peering, flow logs, and attached compute/services in a three-pane TUI
 - **VPC debugging toolkit** (no AI, deterministic): a findings linter, a connectivity path tracer, plain-English SG/NACL rule explanations, cross-reference ("where used"), merged effective security rules, DNS diagnostics, a public-exposure audit, snapshot diffing, Markdown export, and AWS Reachability Analyzer integration — see [VPC Debugging Toolkit](#vpc-debugging-toolkit)
 - **Cost/waste audit**: `aws_explorer audit` scans for the classic sources of silent spend — unattached EBS volumes, idle Elastic IPs and NAT gateways, load balancers with no healthy targets or no traffic, gp2→gp3 candidates, forgotten snapshots/AMIs, over-provisioned DynamoDB tables — each finding with a stable check ID and an estimated monthly cost, printable or explored in an interactive TUI (`--tui`) — see [Audit Usage](#audit-usage)
@@ -233,7 +233,7 @@ with a built-in collector.
 
 It combines two sources and merges them by ARN:
 
-1. **The 19 typed collectors** (EC2, S3, RDS, …) for rich data — state,
+1. **The 29 typed collectors** (EC2, S3, RDS, …) for rich data — state,
    availability zone, and service-specific summary fields.
 2. **A universal sweep via the [Resource Groups Tagging API]** (`tag:GetResources`),
    which returns ARNs and tags for taggable resources across hundreds of
@@ -1800,6 +1800,16 @@ Or via CLI flag:
 | `apigateway` | REST, HTTP & WebSocket APIs | Regional |
 | `stepfunctions` | State machines | Regional |
 | `eventbridge` | Rules, custom event buses | Regional |
+| `elasticache` | Cache clusters | Regional |
+| `efs` | File systems | Regional |
+| `kinesis` | Data streams | Regional |
+| `redshift` | Clusters | Regional |
+| `kms` | Customer-managed keys | Regional |
+| `ecr` | Repositories | Regional |
+| `acm` | Certificates | Regional |
+| `cloudformation` | Stacks | Regional |
+| `glue` | Databases, jobs, crawlers | Regional |
+| `athena` | Workgroups | Regional |
 
 Global services (S3, IAM, CloudFront, Route53) are collected once regardless of the regions list.
 
@@ -1993,6 +2003,16 @@ aws_explorer/
 │   │   ├── apigateway/
 │   │   ├── stepfunctions/
 │   │   ├── eventbridge/
+│   │   ├── elasticache/
+│   │   ├── efs/
+│   │   ├── kinesis/
+│   │   ├── redshift/
+│   │   ├── kms/
+│   │   ├── ecr/
+│   │   ├── acm/
+│   │   ├── cloudformation/
+│   │   ├── glue/
+│   │   ├── athena/
 │   │   └── service.go   # Collector interface + CollectInput
 │   ├── table/           # Terminal table component (selection, horizontal column scrolling)
 │   ├── tui/             # Main TUI model (sidebar, table, detail panel, search)

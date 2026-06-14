@@ -21,19 +21,29 @@ import (
 	"github.com/ryandam9/aws_explorer/internal/config"
 	"github.com/ryandam9/aws_explorer/internal/model"
 	"github.com/ryandam9/aws_explorer/internal/services"
+	"github.com/ryandam9/aws_explorer/internal/services/acm"
 	"github.com/ryandam9/aws_explorer/internal/services/apigateway"
+	"github.com/ryandam9/aws_explorer/internal/services/athena"
+	"github.com/ryandam9/aws_explorer/internal/services/cloudformation"
 	"github.com/ryandam9/aws_explorer/internal/services/cloudfront"
 	"github.com/ryandam9/aws_explorer/internal/services/cloudwatch"
 	"github.com/ryandam9/aws_explorer/internal/services/dynamodb"
-	"github.com/ryandam9/aws_explorer/internal/services/eventbridge"
 	"github.com/ryandam9/aws_explorer/internal/services/ec2"
+	"github.com/ryandam9/aws_explorer/internal/services/ecr"
 	"github.com/ryandam9/aws_explorer/internal/services/ecs"
+	"github.com/ryandam9/aws_explorer/internal/services/efs"
 	"github.com/ryandam9/aws_explorer/internal/services/eks"
+	"github.com/ryandam9/aws_explorer/internal/services/elasticache"
 	"github.com/ryandam9/aws_explorer/internal/services/elbv2"
 	"github.com/ryandam9/aws_explorer/internal/services/emr"
+	"github.com/ryandam9/aws_explorer/internal/services/eventbridge"
+	"github.com/ryandam9/aws_explorer/internal/services/glue"
 	"github.com/ryandam9/aws_explorer/internal/services/iam"
+	"github.com/ryandam9/aws_explorer/internal/services/kinesis"
+	"github.com/ryandam9/aws_explorer/internal/services/kms"
 	"github.com/ryandam9/aws_explorer/internal/services/lambda"
 	"github.com/ryandam9/aws_explorer/internal/services/rds"
+	"github.com/ryandam9/aws_explorer/internal/services/redshift"
 	"github.com/ryandam9/aws_explorer/internal/services/route53"
 	"github.com/ryandam9/aws_explorer/internal/services/s3"
 	"github.com/ryandam9/aws_explorer/internal/services/secretsmanager"
@@ -127,6 +137,16 @@ func NewEngine(ctx context.Context, cfg *config.Config) (*Engine, error) {
 	registry.Register(apigateway.NewCollector())
 	registry.Register(stepfunctions.NewCollector())
 	registry.Register(eventbridge.NewCollector())
+	registry.Register(elasticache.NewCollector())
+	registry.Register(efs.NewCollector())
+	registry.Register(kinesis.NewCollector())
+	registry.Register(redshift.NewCollector())
+	registry.Register(kms.NewCollector())
+	registry.Register(ecr.NewCollector())
+	registry.Register(acm.NewCollector())
+	registry.Register(cloudformation.NewCollector())
+	registry.Register(glue.NewCollector())
+	registry.Register(athena.NewCollector())
 
 	return &Engine{
 		Config:          cfg,

@@ -38,6 +38,16 @@ var servicePermissions = map[string][]string{
 	"apigateway":     {"apigateway:GET"},
 	"stepfunctions":  {"states:ListStateMachines"},
 	"eventbridge":    {"events:ListEventBuses", "events:ListRules"},
+	"elasticache":    {"elasticache:DescribeCacheClusters"},
+	"efs":            {"elasticfilesystem:DescribeFileSystems"},
+	"kinesis":        {"kinesis:ListStreams"},
+	"redshift":       {"redshift:DescribeClusters"},
+	"kms":            {"kms:ListKeys", "kms:DescribeKey"},
+	"ecr":            {"ecr:DescribeRepositories"},
+	"acm":            {"acm:ListCertificates"},
+	"cloudformation": {"cloudformation:DescribeStacks"},
+	"glue":           {"glue:GetDatabases", "glue:GetJobs", "glue:GetCrawlers"},
+	"athena":         {"athena:ListWorkGroups"},
 	"resourcegroups": {"tag:GetResources"},
 }
 

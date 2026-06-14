@@ -31,7 +31,16 @@ aws:
         # "standard" (default) or "adaptive" (adds client-side rate limiting).
         mode: ""
 services:
+    acm:
+        enabled: true
+        resources: {}
     apigateway:
+        enabled: true
+        resources: {}
+    athena:
+        enabled: true
+        resources: {}
+    cloudformation:
         enabled: true
         resources: {}
     cloudfront:
@@ -46,10 +55,19 @@ services:
     ec2:
         enabled: true
         resources: {}
+    ecr:
+        enabled: true
+        resources: {}
     ecs:
         enabled: true
         resources: {}
+    efs:
+        enabled: true
+        resources: {}
     eks:
+        enabled: true
+        resources: {}
+    elasticache:
         enabled: true
         resources: {}
     elbv2:
@@ -61,13 +79,25 @@ services:
     eventbridge:
         enabled: true
         resources: {}
+    glue:
+        enabled: true
+        resources: {}
     iam:
+        enabled: true
+        resources: {}
+    kinesis:
+        enabled: true
+        resources: {}
+    kms:
         enabled: true
         resources: {}
     lambda:
         enabled: true
         resources: {}
     rds:
+        enabled: true
+        resources: {}
+    redshift:
         enabled: true
         resources: {}
     route53:
