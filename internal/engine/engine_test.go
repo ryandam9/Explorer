@@ -388,3 +388,23 @@ func TestStreamRun_DeadlineExceededTaggedAsTimeout(t *testing.T) {
 		t.Errorf("timeout message should mention the configured deadline, got %q", errs[0].Message)
 	}
 }
+
+func TestRegionScopeLabel(t *testing.T) {
+	tests := []struct {
+		name       string
+		regions    []string
+		allRegions bool
+		want       string
+	}{
+		{"single region", []string{"ap-southeast-2"}, false, "ap-southeast-2"},
+		{"multiple regions", []string{"us-east-1", "eu-west-1"}, false, "us-east-1,eu-west-1"},
+		{"all regions flag", []string{"us-east-1"}, true, "all"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := regionScopeLabel(tt.regions, tt.allRegions); got != tt.want {
+				t.Errorf("regionScopeLabel(%v, %v) = %q, want %q", tt.regions, tt.allRegions, got, tt.want)
+			}
+		})
+	}
+}
