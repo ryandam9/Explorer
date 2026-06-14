@@ -9,9 +9,9 @@ LDFLAGS := -X github.com/ryandam9/aws_explorer/cmd.version=$(VERSION) \
            -X github.com/ryandam9/aws_explorer/cmd.commit=$(COMMIT) \
            -X github.com/ryandam9/aws_explorer/cmd.date=$(DATE)
 
-.PHONY: all fmt vet test build clean run run-all-regions tidy lint man docs help
+.PHONY: all fmt vet test build install clean run run-all-regions tidy lint man docs help
 
-all: fmt vet test build
+all: fmt vet test build install
 
 fmt:
 	$(GO) fmt $(PKG)
@@ -24,6 +24,21 @@ test:
 
 build:
 	$(GO) build -ldflags "$(LDFLAGS)" -o $(BINARY) main.go
+
+# install copies the binary to a bin directory (override with PREFIX=...):
+#   1) ~/.local/bin, if it is on $PATH
+#   2) /usr/local/bin, if it exists
+install: build
+	@dest="$(PREFIX)"; \
+	if [ -z "$$dest" ]; then \
+		case ":$$PATH:" in *":$$HOME/.local/bin:"*) dest="$$HOME/.local/bin" ;; esac; \
+	fi; \
+	if [ -z "$$dest" ] && [ -d /usr/local/bin ]; then dest="/usr/local/bin"; fi; \
+	if [ -z "$$dest" ]; then \
+		echo "install: no suitable bin dir found; rerun with PREFIX=/path/to/bin"; exit 1; \
+	fi; \
+	mkdir -p "$$dest" && install -m 0755 $(BINARY) "$$dest/$(notdir $(BINARY))" && \
+		echo "installed -> $$dest/$(notdir $(BINARY))"
 
 clean:
 	rm -f $(BINARY)
@@ -59,6 +74,7 @@ help:
 	@echo "  vet              - Run go vet"
 	@echo "  test             - Run tests"
 	@echo "  build            - Build binary"
+	@echo "  install          - Build and install binary to a bin dir (PREFIX= to override)"
 	@echo "  clean            - Remove binary and generated docs"
 	@echo "  man              - Generate man pages into ./man"
 	@echo "  docs             - Generate Markdown + HTML docs into ./docs/site"
@@ -66,4 +82,4 @@ help:
 	@echo "  run-all-regions  - Build and run with --all-regions"
 	@echo "  tidy             - Tidy go modules"
 	@echo "  lint             - Run golangci-lint (if installed)"
-	@echo "  all              - fmt + vet + test + build"
+	@echo "  all              - fmt + vet + test + build + install"
