@@ -4,6 +4,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/ryandam9/aws_explorer/internal/config"
 	"github.com/ryandam9/aws_explorer/internal/trail"
 )
 
@@ -109,5 +110,39 @@ func TestBuildTrailFilter_RejectsMultipleFilters(t *testing.T) {
 	trailEvent, trailSource = "RunInstances", "ec2.amazonaws.com"
 	if _, _, err := buildTrailFilter(nil); err == nil {
 		t.Error("expected an error when --event and --source are both set")
+	}
+}
+
+func TestTrailRegions(t *testing.T) {
+	savedRegion, savedCfg := awsRegion, AppConfig
+	defer func() { awsRegion, AppConfig = savedRegion, savedCfg }()
+
+	// -r pins a single region, beating everything else.
+	AppConfig = &config.Config{}
+	AppConfig.AWS.AllRegions = true
+	awsRegion = "eu-west-1"
+	if got := trailRegions(); len(got) != 1 || got[0] != "eu-west-1" {
+		t.Errorf("-r should pin one region, got %v", got)
+	}
+
+	// --all-regions (no -r) fans out to the fallback list.
+	awsRegion = ""
+	AppConfig = &config.Config{}
+	AppConfig.AWS.AllRegions = true
+	if got := trailRegions(); len(got) < 2 {
+		t.Errorf("--all-regions should fan out, got %v", got)
+	}
+
+	// Config regions are honored when set.
+	AppConfig = &config.Config{}
+	AppConfig.AWS.Regions = []string{"us-east-1", "ap-southeast-2"}
+	if got := trailRegions(); len(got) != 2 || got[1] != "ap-southeast-2" {
+		t.Errorf("config regions should be used, got %v", got)
+	}
+
+	// Default is a single region.
+	AppConfig = &config.Config{}
+	if got := trailRegions(); len(got) != 1 || got[0] != "us-east-1" {
+		t.Errorf("default should be us-east-1, got %v", got)
 	}
 }

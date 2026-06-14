@@ -24,7 +24,7 @@ func testEvents() []trail.Event {
 // newTestModel builds a sized model with the sample events loaded.
 func newTestModel(t *testing.T) Model {
 	t.Helper()
-	m := New(context.Background(), aws.Config{}, "us-east-1", trail.Filter{}, trail.Options{}, "account-wide activity")
+	m := New(context.Background(), aws.Config{}, []string{"us-east-1"}, trail.Filter{}, trail.Options{}, "account-wide activity")
 	mm, _ := m.Update(tea.WindowSizeMsg{Width: 120, Height: 40})
 	m = mm.(Model)
 	mm, _ = m.Update(loadedMsg{events: testEvents()})
@@ -100,7 +100,7 @@ func TestResetClearsFilterSortAndToggle(t *testing.T) {
 }
 
 func TestLoadErrorShownInBody(t *testing.T) {
-	m := New(context.Background(), aws.Config{}, "us-east-1", trail.Filter{}, trail.Options{}, "account-wide activity")
+	m := New(context.Background(), aws.Config{}, []string{"us-east-1"}, trail.Filter{}, trail.Options{}, "account-wide activity")
 	mm, _ := m.Update(tea.WindowSizeMsg{Width: 100, Height: 30})
 	m = mm.(Model)
 	mm, _ = m.Update(loadedMsg{err: errTest("not authorized")})

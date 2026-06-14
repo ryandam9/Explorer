@@ -56,12 +56,12 @@ var columns = []table.Column{
 // Model is the CloudTrail activity-feed TUI.
 type Model struct {
 	// Lookup inputs, captured at construction and used by the load command.
-	ctx    context.Context
-	cfg    aws.Config
-	region string
-	filter trail.Filter
-	opts   trail.Options // fetch options (errors-only is applied client-side)
-	scope  string        // human-readable scope for the header
+	ctx     context.Context
+	cfg     aws.Config
+	regions []string
+	filter  trail.Filter
+	opts    trail.Options // fetch options (errors-only is applied client-side)
+	scope   string        // human-readable scope for the header
 
 	loading   bool
 	loadErr   error
@@ -93,7 +93,7 @@ type Model struct {
 // is honored as the initial state of the in-TUI "failed only" toggle but the
 // fetch itself pulls everything, so the toggle can be flipped without another
 // (rate-limited) API round trip.
-func New(ctx context.Context, cfg aws.Config, region string, filter trail.Filter, opts trail.Options, scope string) Model {
+func New(ctx context.Context, cfg aws.Config, regions []string, filter trail.Filter, opts trail.Options, scope string) Model {
 	sp := spinner.New()
 	sp.Spinner = spinner.MiniDot
 	sp.Style = lipgloss.NewStyle().Foreground(lipgloss.Color(ui.ColorAccent()))
@@ -120,7 +120,7 @@ func New(ctx context.Context, cfg aws.Config, region string, filter trail.Filter
 	return Model{
 		ctx:        ctx,
 		cfg:        cfg,
-		region:     region,
+		regions:    regions,
 		filter:     filter,
 		opts:       opts,
 		scope:      scope,
@@ -142,8 +142,20 @@ func (m Model) Init() tea.Cmd {
 
 func (m Model) load() tea.Cmd {
 	return func() tea.Msg {
-		evs, trunc, err := trail.LookupFiltered(m.ctx, m.cfg, m.region, m.filter, m.opts)
+		evs, trunc, err := trail.LookupFilteredRegions(m.ctx, m.cfg, m.regions, m.filter, m.opts)
 		return loadedMsg{events: evs, truncated: trunc, err: err}
+	}
+}
+
+// regionLabel describes the scanned regions for the header.
+func regionLabel(regions []string) string {
+	switch len(regions) {
+	case 0:
+		return ""
+	case 1:
+		return regions[0]
+	default:
+		return strconv.Itoa(len(regions)) + " regions"
 	}
 }
 

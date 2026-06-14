@@ -7,7 +7,9 @@ package trail
 import (
 	"context"
 	"encoding/json"
+	"sort"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
@@ -76,15 +78,36 @@ type Options struct {
 	// ErrorsOnly keeps only events that carry an errorCode (failed or denied
 	// calls) — the security-triage view of the feed.
 	ErrorsOnly bool
+	// MaxPages overrides the page-scan cap (0 = the default for the lookup
+	// kind). Each page is up to 50 events; deeper scans cost ~600ms per page.
+	MaxPages int
 }
 
 // DefaultLimit is the event cap when Options.Limit is unset.
 const DefaultLimit = 50
 
-// maxPages bounds pagination: LookupEvents is rate-limited to 2 TPS, so an
-// unbounded scan of a chatty resource could take minutes. 8 pages × 50 events
-// is plenty to find recent mutations.
-const maxPages = 8
+// Page caps bound pagination: LookupEvents is rate-limited to 2 TPS, so an
+// unbounded scan could take minutes. A pivoted lookup (resource, principal,
+// event, source) matches few events, so a shallow cap finds them. The
+// unfiltered account-wide feed must page much deeper: its newest events are
+// dominated by read-only noise, so a shallow cap can return nothing useful
+// while real mutations sit just past it.
+const (
+	pivotPageCap = 8  // ~400 events for an attribute-filtered lookup
+	feedPageCap  = 20 // ~1000 events for the account-wide feed
+)
+
+// pageCapFor returns the page cap for a lookup. Options.MaxPages overrides it
+// (the TUI scans deeper); otherwise the account-wide feed gets the deeper cap.
+func pageCapFor(f Filter, opts Options) int {
+	if opts.MaxPages > 0 {
+		return opts.MaxPages
+	}
+	if _, hasAttr := f.attribute(); !hasAttr {
+		return feedPageCap
+	}
+	return pivotPageCap
+}
 
 // pageInterval keeps successive page fetches under the 2 TPS service limit.
 const pageInterval = 600 * time.Millisecond
@@ -142,6 +165,7 @@ func LookupFiltered(ctx context.Context, cfg aws.Config, region string, f Filter
 		input.StartTime = aws.Time(opts.Since)
 	}
 
+	maxPages := pageCapFor(f, opts)
 	for page := 0; page < maxPages; page++ {
 		if page > 0 {
 			select {
@@ -177,6 +201,75 @@ func LookupFiltered(ctx context.Context, cfg aws.Config, region string, f Filter
 	// Stopped at the page cap with a NextToken still pending: more events exist.
 	return events, true, nil
 }
+
+// LookupFilteredRegions runs LookupFiltered across several regions concurrently
+// and merges the results newest-first, capped at the effective limit. It is the
+// account-wide / --all-regions path: each region's CloudTrail has its own 2 TPS
+// budget, so the regions are queried in parallel. truncated is true when any
+// region truncated or the merged set exceeded the limit (older events exist).
+//
+// Collection is best-effort: a per-region failure is recorded but does not
+// abort the others. An error is returned only when every region failed.
+func LookupFilteredRegions(ctx context.Context, cfg aws.Config, regions []string, f Filter, opts Options) (events []Event, truncated bool, err error) {
+	switch len(regions) {
+	case 0:
+		return nil, false, nil
+	case 1:
+		return LookupFiltered(ctx, cfg, regions[0], f, opts)
+	}
+
+	limit := opts.Limit
+	if limit <= 0 {
+		limit = DefaultLimit
+	}
+
+	type result struct {
+		events    []Event
+		truncated bool
+		err       error
+	}
+	results := make([]result, len(regions))
+	var wg sync.WaitGroup
+	sem := make(chan struct{}, regionConcurrency)
+	for i, region := range regions {
+		wg.Add(1)
+		go func(i int, region string) {
+			defer wg.Done()
+			sem <- struct{}{}
+			defer func() { <-sem }()
+			evs, trunc, e := LookupFiltered(ctx, cfg, region, f, opts)
+			results[i] = result{events: evs, truncated: trunc, err: e}
+		}(i, region)
+	}
+	wg.Wait()
+
+	failures := 0
+	for _, r := range results {
+		if r.err != nil {
+			failures++
+			if err == nil {
+				err = r.err
+			}
+			continue
+		}
+		events = append(events, r.events...)
+		truncated = truncated || r.truncated
+	}
+	// Every region failed: surface the (first) error rather than empty success.
+	if failures == len(regions) {
+		return nil, false, err
+	}
+
+	sort.Slice(events, func(i, j int) bool { return events[i].Time.After(events[j].Time) })
+	if len(events) > limit {
+		events = events[:limit]
+		truncated = true
+	}
+	return events, truncated, nil
+}
+
+// regionConcurrency bounds how many regions are queried at once.
+const regionConcurrency = 8
 
 // rawCTEvent is the subset of the CloudTrail event record JSON needed to
 // attribute an event to a principal and source.
