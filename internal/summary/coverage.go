@@ -1,7 +1,6 @@
 package summary
 
 import (
-	"fmt"
 	"sort"
 	"strings"
 
@@ -102,8 +101,7 @@ func Coverage(resources []model.Resource, typedServices []string) []ServiceCover
 }
 
 // NotShown returns the catalog services with no resources in the inventory,
-// sorted so tag-discovered services (where the absence may hide untagged
-// resources) come first, then alphabetically by label.
+// sorted alphabetically by label for a stable, readable list.
 func NotShown(cov []ServiceCoverage) []ServiceCoverage {
 	var out []ServiceCoverage
 	for _, c := range cov {
@@ -112,57 +110,39 @@ func NotShown(cov []ServiceCoverage) []ServiceCoverage {
 		}
 	}
 	sort.SliceStable(out, func(i, j int) bool {
-		if out[i].Typed != out[j].Typed {
-			return !out[i].Typed // tag-discovered first
-		}
 		return out[i].Label < out[j].Label
 	})
 	return out
 }
 
-// CoverageNote renders a highlighted advisory about how complete the inventory
-// is: how many services have full typed coverage, the tag-discovery caveat, and
-// the common services that produced nothing. typedCount is the number of typed
-// collectors; tagSweep reports whether the all-services Tagging API sweep ran
-// (it is skipped by --typed-only). Returns "" when every catalog service is
-// present and there is nothing to advise.
-func CoverageNote(cov []ServiceCoverage, typedCount int, tagSweep bool) string {
+// CoverageNote renders a plain-language advisory for the summary table: if an
+// expected resource is absent, it may simply have no tags, followed by the
+// common services that produced nothing. tagSweep reports whether the
+// all-services tag search ran (it is skipped by --typed-only). Returns "" when
+// every catalog service is present and there is nothing to advise.
+//
+// The wording deliberately avoids internal terms like "typed collector" — the
+// reader is a user trying to understand why something is missing, not how the
+// tool is built.
+func CoverageNote(cov []ServiceCoverage, tagSweep bool) string {
 	missing := NotShown(cov)
 	if len(missing) == 0 {
 		return ""
 	}
 
-	heading := lipgloss.NewStyle().
-		Foreground(lipgloss.Color(ui.ColorWarning())).Bold(true)
+	warn := lipgloss.NewStyle().Foreground(lipgloss.Color(ui.ColorWarning())).Bold(true)
 	muted := ui.MutedStyle()
 
 	var b strings.Builder
-	b.WriteString(heading.Render("⚠ Coverage") + "\n")
-	if tagSweep {
-		b.WriteString(muted.Render(fmt.Sprintf(
-			"%d services use typed collectors and show every resource. All other services are\n"+
-				"tag-discovered — resources that have never been tagged can be missing below.", typedCount)) + "\n")
-	} else {
-		b.WriteString(muted.Render(fmt.Sprintf(
-			"Typed collectors only (--typed-only): the all-services tag sweep was skipped, so the\n"+
-				"%d typed services are shown and everything else is omitted.", typedCount)) + "\n")
+	b.WriteString(warn.Render("⚠ If a resource you expected isn't listed, it may have no tags, or there simply aren't any.") + "\n")
+	if !tagSweep {
+		b.WriteString(muted.Render("Run without --typed-only to also search for resources by their tags.") + "\n")
 	}
 
-	b.WriteString("\n" + muted.Render("Common services with nothing shown:") + "\n")
-	for _, c := range missing {
-		b.WriteString("  • " + c.Label + " — " + coverageReason(c, tagSweep) + "\n")
+	names := make([]string, len(missing))
+	for i, c := range missing {
+		names[i] = c.Label
 	}
-	return strings.TrimRight(b.String(), "\n")
-}
-
-// coverageReason explains why a catalog service produced no rows.
-func coverageReason(c ServiceCoverage, tagSweep bool) string {
-	switch {
-	case c.Typed:
-		return "typed: none found"
-	case !tagSweep:
-		return "tag-discovered: not collected (sweep skipped)"
-	default:
-		return "tag-discovered: none found, or present but untagged (hidden)"
-	}
+	b.WriteString(muted.Render("Common services with nothing shown: " + strings.Join(names, ", ")))
+	return b.String()
 }

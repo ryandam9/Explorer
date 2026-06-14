@@ -1812,19 +1812,20 @@ func (m tuiModel) hasCoverageBanner() bool {
 }
 
 // coverageBanner renders the one-line advisory shown above the table in the
-// summary view: tag-discovered services may hide untagged resources. Returns ""
-// unless the advisory is enabled and at least one common service shows nothing,
-// so the banner appears exactly when it has something to warn about.
+// summary view, in plain language: if an expected resource is missing it may
+// simply have no tags. Returns "" unless the advisory is enabled and at least
+// one common service shows nothing, so the banner appears exactly when it has
+// something to warn about.
 func (m tuiModel) coverageBanner() string {
 	if !m.hasCoverageBanner() {
 		return ""
 	}
 	var msg string
 	if m.coverageTagSweep {
-		msg = fmt.Sprintf("⚠ Coverage: %d common service(s) show nothing — tag-discovered ones may have untagged resources hidden. Full list: `summary` on the CLI.",
+		msg = fmt.Sprintf("⚠ If a resource you expect is missing, it may have no tags, or there simply aren't any — %d common service(s) show nothing here.",
 			m.coverageMissing)
 	} else {
-		msg = fmt.Sprintf("⚠ Coverage: typed collectors only (--typed-only) — %d common service(s) not collected. Full list: `summary` on the CLI.",
+		msg = fmt.Sprintf("⚠ --typed-only: resources found only by their tags were skipped — %d common service(s) show nothing here.",
 			m.coverageMissing)
 	}
 	w := m.width - 2

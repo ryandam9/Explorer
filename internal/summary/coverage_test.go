@@ -55,8 +55,8 @@ func TestCoverage_ShownReflectsResources(t *testing.T) {
 	}
 }
 
-func TestNotShown_OrdersTagDiscoveredFirst(t *testing.T) {
-	// Everything present except one typed (eks) and one tag-only (kms) service.
+func TestNotShown_SortedAlphabetically(t *testing.T) {
+	// Everything present except eks and kms.
 	resources := []model.Resource{}
 	for _, c := range commonServices {
 		if c.Key == "eks" || c.Key == "kms" {
@@ -68,9 +68,9 @@ func TestNotShown_OrdersTagDiscoveredFirst(t *testing.T) {
 	if len(missing) != 2 {
 		t.Fatalf("expected 2 missing services, got %d: %+v", len(missing), missing)
 	}
-	// Tag-discovered (kms) sorts before typed (eks).
-	if missing[0].Key != "kms" || missing[1].Key != "eks" {
-		t.Errorf("order = %s, %s; want kms then eks", missing[0].Key, missing[1].Key)
+	// Alphabetical by label: EKS before KMS.
+	if missing[0].Label != "EKS" || missing[1].Label != "KMS" {
+		t.Errorf("order = %s, %s; want EKS then KMS", missing[0].Label, missing[1].Label)
 	}
 }
 
@@ -79,37 +79,38 @@ func TestCoverageNote_Empty_WhenAllShown(t *testing.T) {
 	for _, c := range commonServices {
 		resources = append(resources, model.Resource{Service: c.Key, ID: "x"})
 	}
-	if note := CoverageNote(Coverage(resources, typedServices), len(typedServices), true); note != "" {
+	if note := CoverageNote(Coverage(resources, typedServices), true); note != "" {
 		t.Errorf("note should be empty when every catalog service is present, got:\n%s", note)
 	}
 }
 
-func TestCoverageNote_TagSweepCaveat(t *testing.T) {
-	// Only ec2 present; a tag-only service (Step Functions) and a typed one
-	// (EKS) are both missing, and each gets the right reason.
+func TestCoverageNote_PlainLanguage(t *testing.T) {
+	// Only ec2 present; the note names the missing services and explains the
+	// likely cause in plain terms — no internal jargon.
 	resources := []model.Resource{{Service: "ec2", ID: "i-1"}}
-	note := CoverageNote(Coverage(resources, typedServices), len(typedServices), true)
+	note := CoverageNote(Coverage(resources, typedServices), true)
 
-	if !strings.Contains(note, "Coverage") {
-		t.Errorf("note missing heading:\n%s", note)
+	if !strings.Contains(note, "no tags") {
+		t.Errorf("note should explain the tag cause in plain language:\n%s", note)
 	}
-	if !strings.Contains(note, "Step Functions — tag-discovered: none found, or present but untagged (hidden)") {
-		t.Errorf("note missing tag-discovered reason for Step Functions:\n%s", note)
+	for _, jargon := range []string{"typed", "tag-discovered", "collector", "sweep"} {
+		if strings.Contains(note, jargon) {
+			t.Errorf("note should avoid the internal term %q:\n%s", jargon, note)
+		}
 	}
-	if !strings.Contains(note, "EKS — typed: none found") {
-		t.Errorf("note missing typed reason for EKS:\n%s", note)
+	// The missing services are still listed by name.
+	for _, want := range []string{"Step Functions", "EKS"} {
+		if !strings.Contains(note, want) {
+			t.Errorf("note should list missing service %q:\n%s", want, note)
+		}
 	}
 }
 
 func TestCoverageNote_TypedOnlyMode(t *testing.T) {
-	// With the sweep skipped, tag-discovered services are "not collected".
 	resources := []model.Resource{{Service: "ec2", ID: "i-1"}}
-	note := CoverageNote(Coverage(resources, typedServices), len(typedServices), false)
+	note := CoverageNote(Coverage(resources, typedServices), false)
 
 	if !strings.Contains(note, "--typed-only") {
 		t.Errorf("typed-only note should mention the flag:\n%s", note)
-	}
-	if !strings.Contains(note, "Step Functions — tag-discovered: not collected (sweep skipped)") {
-		t.Errorf("typed-only note should say tag-discovered services were not collected:\n%s", note)
 	}
 }

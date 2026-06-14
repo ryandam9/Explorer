@@ -11,8 +11,14 @@ import (
 func TestCoverageBanner(t *testing.T) {
 	base := tuiModel{width: 200, coverageAdvisory: true, coverageTagSweep: true, coverageMissing: 3}
 
-	if b := base.coverageBanner(); !strings.Contains(b, "Coverage") || !strings.Contains(b, "3") {
-		t.Errorf("banner should mention coverage and the count, got %q", b)
+	b := base.coverageBanner()
+	if !strings.Contains(b, "no tags") || !strings.Contains(b, "3") {
+		t.Errorf("banner should explain the tag cause in plain language with the count, got %q", b)
+	}
+	for _, jargon := range []string{"typed", "Coverage", "collector", "tag-discovered"} {
+		if strings.Contains(b, jargon) {
+			t.Errorf("banner should avoid the internal term %q, got %q", jargon, b)
+		}
 	}
 
 	off := base
