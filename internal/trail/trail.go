@@ -65,6 +65,24 @@ func lookupAttr(key types.LookupAttributeKey, value string) types.LookupAttribut
 	return types.LookupAttribute{AttributeKey: key, AttributeValue: aws.String(value)}
 }
 
+// lookupAttributes chooses the single server-side LookupAttribute for a lookup
+// (LookupEvents accepts at most one). A set Filter field wins. Otherwise, the
+// account-wide feed filters to mutations server-side (ReadOnly=false) whenever
+// read-only events aren't wanted — this is the key lever that keeps the feed
+// from drowning in Describe*/List*/Get* noise, since CloudTrail returns events
+// newest-first and there is no other way to exclude reads before they consume
+// the page-scan budget. When read-only events are requested (--read-events)
+// there is no attribute and the API returns everything.
+func lookupAttributes(f Filter, opts Options) []types.LookupAttribute {
+	if attr, ok := f.attribute(); ok {
+		return []types.LookupAttribute{attr}
+	}
+	if !opts.IncludeReadOnly {
+		return []types.LookupAttribute{lookupAttr(types.LookupAttributeKeyReadOnly, "false")}
+	}
+	return nil
+}
+
 // Options tunes a Lookup. The zero value means: mutations only, last 90 days
 // (the LookupEvents window), up to DefaultLimit events.
 type Options struct {
@@ -185,9 +203,11 @@ func Lookup(ctx context.Context, cfg aws.Config, region, resourceID string, opts
 }
 
 // LookupFiltered fetches CloudTrail events matching the filter, newest first.
-// The zero Filter is an unfiltered account-wide activity feed; a single set
-// field pivots on that attribute (resource, principal, event name, or source).
-// Pages are fetched serially to respect the API's 2 TPS limit.
+// The zero Filter is an account-wide activity feed; a single set field pivots
+// on that attribute (resource, principal, event name, or source). For the
+// account-wide feed, mutations are filtered server-side (ReadOnly=false) unless
+// opts.IncludeReadOnly is set — see lookupAttributes. Pages are fetched serially
+// to respect the API's 2 TPS limit.
 //
 // The returned truncated flag is true when the scan stopped at the maxPages
 // safety cap with more events still available — i.e. the result is an
@@ -215,9 +235,7 @@ func LookupFiltered(ctx context.Context, cfg aws.Config, region string, f Filter
 	}
 
 	input := &cloudtrail.LookupEventsInput{MaxResults: aws.Int32(pageSize)}
-	if attr, ok := f.attribute(); ok {
-		input.LookupAttributes = []types.LookupAttribute{attr}
-	}
+	input.LookupAttributes = lookupAttributes(f, opts)
 	if !opts.Since.IsZero() {
 		input.StartTime = aws.Time(opts.Since)
 	}

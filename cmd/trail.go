@@ -50,20 +50,21 @@ Scope (at most one — LookupEvents accepts a single filter):
   • --source <service> every event from one service (e.g. ec2.amazonaws.com),
   • nothing            the account-wide activity feed.
 
-By default only mutating events are shown; --read-events includes the
-Describe*/List*/Get* noise too. --errors-only keeps just failed/denied calls
-(a burst of these is a recon or misconfiguration signal).
+By default only mutating events are shown. For the account-wide feed this is a
+server-side filter (CloudTrail ReadOnly=false), so the scan reaches real
+changes instead of paging through Describe*/List*/Get* noise; --read-events
+drops the filter and includes the reads. --errors-only keeps just failed/denied
+calls (a burst of these is a recon or misconfiguration signal).
 
 The --tui feed streams events in per region (it doesn't wait for the slowest
-region) and keeps the newest trail.maxEvents (default 200) that survive the
-hide-list below — raise it with --limit.
+region) and keeps the newest trail.maxEvents (default 200) — raise it with
+--limit.
 
-Noisy events are filtered out server-side via trail.hideEvents in the config
-file, so they never eat into that cap. The shipped default hides every
-read-only call (Get*/Describe*/List*); add your own (e.g. ConsoleLogin,
-AssumeRole) or clear the list to see everything. Matching is case-insensitive
-and a trailing "*" is a prefix wildcard. An explicit --event lookup is never
-hidden.
+To suppress specific events on top of the read-only filter (e.g. noisy
+mutations like AssumeRole or ConsoleLogin), list them under trail.hideEvents in
+the config file; they are dropped server-side so they never eat into the cap.
+Matching is case-insensitive and a trailing "*" is a prefix wildcard. An
+explicit --event lookup is never hidden.
 
 CloudTrail records events in the region where the activity happened (global
 services such as IAM record in us-east-1) — use -r to pick the region.
@@ -122,24 +123,21 @@ This is the CLI twin of the summary TUI's 't' CloudTrail timeline.`,
 			HideEvents:      AppConfig.Trail.HideEvents,
 		}
 
-		// The account-wide feed has no server-side attribute filter, so
-		// CloudTrail returns everything newest-first and the read-only/hidden
-		// noise is dropped only after each page is fetched — i.e. it still
-		// consumes the page-scan budget. Page much deeper for the unfiltered
-		// feed so real mutations buried under that noise are actually reached.
-		// Pivoted lookups (resource/principal/event/source) match few events,
-		// so they keep their shallow cap.
+		// The account-wide feed (no pivot) excludes read-only events
+		// server-side via ReadOnly=false, so it returns mutations directly
+		// instead of paging through Describe*/List*/Get* noise. The deeper page
+		// cap then only matters for --read-events (which drops the server-side
+		// filter and must page past the reads). Pivoted lookups match few
+		// events, so they keep their shallow cap.
 		if filter == (trail.Filter{}) {
 			opts.MaxPages = trail.DeepFeedPageCap
 		}
 
 		if trailTUI {
-			// The feed's cap counts events that survive the trail.hideEvents
-			// filter, so include read-only events in the fetch and let the
-			// (server-side) hide list drop the noise — that way the limit is
-			// spent on events the user actually sees. --limit wins; otherwise
-			// use config trail.maxEvents, falling back to the built-in default.
-			opts.IncludeReadOnly = true
+			// The feed keeps the newest events that survive the filters; the cap
+			// counts only what is shown (reads are excluded server-side). --limit
+			// wins; otherwise use config trail.maxEvents, then the built-in
+			// default.
 			if !cmd.Flags().Changed("limit") {
 				opts.Limit = AppConfig.Trail.MaxEvents
 				if opts.Limit <= 0 {
