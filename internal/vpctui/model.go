@@ -2813,6 +2813,9 @@ func (m *Model) helpText() string {
 		"  ?        Toggle help",
 		"  q        Quit",
 	}
+	// Order shortcuts within each section by key; section headers and blank
+	// lines stay put so the grouping is preserved.
+	lines = ui.SortHelpSections(lines)
 	return strings.Join(lines, "\n")
 }
 

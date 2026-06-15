@@ -51,7 +51,7 @@ const (
 // ── Layout constants ─────────────────────────────────────────────────────────
 
 const (
-	sidebarInner   = 20 // inner content width of the sidebar panel (name + count)
+	sidebarInner   = 26 // inner content width of the sidebar panel (name + count)
 	detailInner    = 34 // minimum inner content width of the detail panel
 	detailInnerMax = 72 // cap so the detail panel never dominates a wide terminal
 	minTableInner  = 40 // table panel keeps at least this much content width
@@ -2287,6 +2287,9 @@ func (m tuiModel) helpBody() string {
 		// Slot it under Resources & Audit, right after the CSV export line.
 		lines = insertAfter(lines, "  C                  Export current view to CSV (~/.aws_explorer/exports)", coverageLine)
 	}
+	// Order the shortcuts within each section by key so a reader can find one
+	// quickly; the section grouping (Navigation, Utility, …) is preserved.
+	lines = ui.SortHelpSections(lines)
 	return lipgloss.JoinVertical(lipgloss.Left, lines...)
 }
 

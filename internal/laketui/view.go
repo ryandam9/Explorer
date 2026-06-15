@@ -2,6 +2,7 @@ package laketui
 
 import (
 	"fmt"
+	"sort"
 	"strings"
 
 	"github.com/charmbracelet/lipgloss"
@@ -229,6 +230,7 @@ func (m Model) helpOverlay() string {
 		{"?", "Toggle this help"},
 		{"q / Ctrl+C", "Quit"},
 	}
+	sort.SliceStable(rows, func(i, j int) bool { return ui.SortKeyLess(rows[i].key, rows[j].key) })
 	keyStyle := lipgloss.NewStyle().Foreground(lipgloss.Color(ui.ColorAccent())).Bold(true).Width(12)
 	var b strings.Builder
 	b.WriteString(ui.HeaderStyle().Render("CloudTrail Lake — keys") + "\n\n")

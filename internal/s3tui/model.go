@@ -2498,7 +2498,12 @@ func (m *Model) helpView() string {
 		"  ?                  Toggle this help",
 		"  q, Ctrl+C          Quit",
 	)
-	body := lipgloss.JoinVertical(lipgloss.Left, sections...)
+	// Flatten any multi-line entries (the optional delete row rides on the
+	// refresh line) so each shortcut is its own line, then order shortcuts
+	// within each section by key while keeping the section grouping.
+	lines := strings.Split(strings.Join(sections, "\n"), "\n")
+	lines = ui.SortHelpSections(lines)
+	body := lipgloss.JoinVertical(lipgloss.Left, lines...)
 	return ui.HelpView(title, body, min(88, max(32, m.width-12)))
 }
 

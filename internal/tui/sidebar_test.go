@@ -18,7 +18,8 @@ import (
 func TestSidebarServiceNamesUniformSingleLine(t *testing.T) {
 	m := NewModel(context.Background(), nil, "", &config.Config{}).(tuiModel)
 	resources := []model.Resource{
-		{Service: "elasticloadbalancing", Type: "loadbalancer", Region: "us-east-1", ID: "lb-1", Name: "lb", State: "active"},
+		// A name wider than the sidebar's row budget, to exercise truncation.
+		{Service: "elasticloadbalancingsupername", Type: "loadbalancer", Region: "us-east-1", ID: "lb-1", Name: "lb", State: "active"},
 		{Service: "secretsmanager", Type: "secret", Region: "us-east-1", ID: "sec-1", Name: "s", State: "active"},
 		{Service: "kms", Type: "key", Region: "us-east-1", ID: "key-1", Name: "k", State: "active"},
 		{Service: "emr", Type: "cluster", Region: "us-east-1", ID: "j-1", Name: "c", State: "running"},
@@ -29,12 +30,12 @@ func TestSidebarServiceNamesUniformSingleLine(t *testing.T) {
 	sidebar := m.renderSidebar()
 	plain := ansi.Strip(sidebar)
 
-	// An over-wide name is truncated to the row budget…
-	if strings.Contains(plain, "elasticloadbalancing") {
+	// An over-wide name is truncated to the row budget with an ellipsis…
+	if strings.Contains(plain, "elasticloadbalancingsupername") {
 		t.Error("over-wide service name should be truncated, not rendered in full")
 	}
-	if !strings.Contains(plain, "elasticloadba…") {
-		t.Errorf("expected the truncated name, sidebar:\n%s", plain)
+	if !strings.Contains(plain, "…") {
+		t.Errorf("expected a truncation ellipsis on the over-wide name, sidebar:\n%s", plain)
 	}
 	// …while a name that exactly fills the budget fits untruncated.
 	if !strings.Contains(plain, "secretsmanager") {
