@@ -291,8 +291,16 @@ func deepLink(n linkInput) (string, bool) {
 		}
 
 	case "emr":
-		return fmt.Sprintf("https://%s.console.aws.amazon.com/emr/home?region=%s#/clusterDetails/%s",
-			n.region, n.region, q(lastSegment(n.id))), true
+		emrHome := fmt.Sprintf("https://%s.console.aws.amazon.com/emr/home?region=%s", n.region, n.region)
+		switch n.typ {
+		case "studio":
+			return emrHome + "#/studio/" + q(lastSegment(n.id)), true
+		case "notebook", "editor":
+			return emrHome + "#/notebooks/" + q(lastSegment(n.id)), true
+		default:
+			// Clusters (and steps, which link to their cluster page).
+			return emrHome + "#/clusterDetails/" + q(lastSegment(n.id)), true
+		}
 
 	case "acm":
 		return fmt.Sprintf("https://%s.console.aws.amazon.com/acm/home?region=%s#/certificates/%s",

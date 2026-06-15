@@ -830,6 +830,82 @@ and `sts:GetCallerIdentity` (for ARN/console links). Per-region or per-listing
 denials degrade that part of the dashboard with a logged note and never abort
 the session.
 
+## Amazon EMR dashboard
+
+`emr` opens an interactive dashboard for Amazon EMR. Each row is a **cluster**,
+colour-coded by state, showing its release label, the applications installed on
+it (Spark, HBase, Hive, Oozie…) and its size. Press **Enter** (or `s`) on a
+cluster to drill into its **step history** — state, duration and
+action-on-failure, with the failure reason inline on a failed step. Press `d`
+for the cluster detail (log URI, role, EC2 attributes).
+
+```bash
+./bin/aws_explorer emr [--region us-east-1 | --all-regions] [--theme <name>]
+```
+
+```
+ EMR ▸ Clusters
+
+ NAME              ID           STATE                  RELEASE     APPLICATIONS           HRS
+ analytics-prod    j-1A2B3C4D5  ● WAITING              emr-7.1.0   Spark, HBase, Hive…    184
+ nightly-batch     j-9Z8Y7X6W   ● RUNNING              emr-7.1.0   Spark, Oozie            20
+ ingest-legacy     j-0Q1W2E3R   ✗ TERMINATED_WITH_ERR  emr-6.10.0  Spark, HBase            —
+   └ Step 'load-orders' failed: ActionOnFailure=TERMINATE_CLUSTER
+```
+
+Step history (Enter on a cluster):
+
+```
+ Steps — analytics-prod [us-east-1]
+ STARTED           STATE         DURATION   ACTION-ON-FAIL      NAME
+ 2026-06-15 01:14  ✓ COMPLETED   18m 02s    CONTINUE            spark-submit nightly-orders
+ 2026-06-14 01:14  ✗ FAILED      2m 41s     TERMINATE_CLUSTER   spark-submit nightly-orders
+   ✗ Application application_… failed 2 times due to AM Container…
+     log: s3://logs/j-1A2B3C4D5/steps/s-XYZ/stderr.gz
+```
+
+| Key | Action |
+|-----|--------|
+| `↑/↓` (`j/k`) | Move selection |
+| `Enter` / `s` | Open the selected cluster's step history |
+| `d` | Show the selected cluster's detail (release, log URI, role, EC2 attributes) |
+| `/` | Filter the cluster list |
+| `o` | Open the selected cluster in the AWS console |
+| `r` | Refresh |
+| `y` | (step history) copy the selected step's failure reason |
+| `i` | About this page · `q` quit |
+
+> **Scope note.** This dashboard covers the EMR **control plane** (clusters,
+> steps) via the AWS API. The on-cluster services — live YARN apps, HBase
+> tables, Oozie workflows — have no AWS API and are a later, opt-in phase; see
+> [`docs/emr-design.md`](docs/emr-design.md) for the full design.
+
+### Scriptable twins
+
+```bash
+aws_explorer emr clusters      [--all-regions] [--state RUNNING,WAITING] [-o table|json|ndjson|csv]
+aws_explorer emr steps <id>    [-r us-east-1] [--limit 50] [--status FAILED] [-o …]
+```
+
+```bash
+# Which clusters are still up?
+aws_explorer emr clusters --state RUNNING,WAITING -o json | jq '[.[].name]'
+
+# Failed steps of one cluster
+aws_explorer emr steps j-1A2B3C4D5 --status FAILED -o json | jq '.[] | {name, failureReason}'
+```
+
+The clusters JSON exposes `state`, `releaseLabel`, `applications`,
+`normalizedInstanceHours` and `autoTerminate`; the steps JSON exposes
+`durationSeconds`, ISO-8601 `started`/`ended` and the `failureLog` S3 pointer.
+`steps` is region-specific: it uses `--region` when given, otherwise the first
+region in scope.
+
+**IAM permissions.** Read-only:
+`elasticmapreduce:{ListClusters,DescribeCluster,ListSteps}`. Per-region or
+per-cluster denials degrade that part of the dashboard with a logged note and
+never abort the session.
+
 ## Bill Usage
 
 `bill` shows the account's actual cost from the AWS Cost Explorer API, grouped

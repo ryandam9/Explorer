@@ -6,6 +6,7 @@ import (
 
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/service/emr/types"
+	"github.com/ryandam9/aws_explorer/internal/model"
 	"github.com/ryandam9/aws_explorer/internal/services"
 )
 
@@ -128,5 +129,126 @@ func TestMapCluster_NilNormalizedHours(t *testing.T) {
 
 	if res.Summary["normalizedInstanceHours"] != "0" {
 		t.Errorf("Summary[normalizedInstanceHours] = %q, want %q", res.Summary["normalizedInstanceHours"], "0")
+	}
+}
+
+func TestApplyClusterDetail_Summary(t *testing.T) {
+	res := &model.Resource{Summary: map[string]string{}}
+	cl := &types.Cluster{
+		ReleaseLabel:        aws.String("emr-7.1.0"),
+		AutoTerminate:       aws.Bool(false),
+		MasterPublicDnsName: aws.String("ip-10-0-1-23.ec2.internal"),
+		Applications: []types.Application{
+			{Name: aws.String("Spark"), Version: aws.String("3.5.0")},
+			{Name: aws.String("HBase")},
+			{Name: aws.String("Oozie")},
+		},
+		Status: &types.ClusterStatus{
+			State: types.ClusterStateTerminatedWithErrors,
+			StateChangeReason: &types.ClusterStateChangeReason{
+				Message: aws.String("Step failed: load-orders"),
+			},
+		},
+	}
+
+	applyClusterDetail(res, cl, services.DetailLevelSummary)
+
+	if got := res.Summary["releaseLabel"]; got != "emr-7.1.0" {
+		t.Errorf("releaseLabel = %q, want emr-7.1.0", got)
+	}
+	if got := res.Summary["applications"]; got != "Spark, HBase, Oozie" {
+		t.Errorf("applications = %q, want %q", got, "Spark, HBase, Oozie")
+	}
+	if got := res.Summary["autoTerminate"]; got != "false" {
+		t.Errorf("autoTerminate = %q, want false", got)
+	}
+	if got := res.Summary["stateChangeReason"]; got != "Step failed: load-orders" {
+		t.Errorf("stateChangeReason = %q", got)
+	}
+	// Summary scope must not populate the detail blob.
+	if res.Details != nil {
+		t.Errorf("Details should be nil at summary scope, got %v", res.Details)
+	}
+}
+
+func TestApplyClusterDetail_DetailedPopulatesDetails(t *testing.T) {
+	res := &model.Resource{}
+	cl := &types.Cluster{
+		ReleaseLabel: aws.String("emr-6.15.0"),
+		LogUri:       aws.String("s3://logs/"),
+		ServiceRole:  aws.String("EMR_DefaultRole"),
+		Ec2InstanceAttributes: &types.Ec2InstanceAttributes{
+			Ec2SubnetId:         aws.String("subnet-abc"),
+			Ec2AvailabilityZone: aws.String("us-east-1a"),
+		},
+	}
+
+	applyClusterDetail(res, cl, services.DetailLevelDetailed)
+
+	if res.Details == nil {
+		t.Fatal("Details should be populated at detailed scope")
+	}
+	if got := res.Details["logUri"]; got != "s3://logs/" {
+		t.Errorf("Details[logUri] = %v, want s3://logs/", got)
+	}
+	if got := res.Details["subnetId"]; got != "subnet-abc" {
+		t.Errorf("Details[subnetId] = %v, want subnet-abc", got)
+	}
+}
+
+func TestMapStep_FailedCarriesReasonAndLog(t *testing.T) {
+	created := time.Date(2026, 6, 14, 1, 14, 0, 0, time.UTC)
+	step := types.StepSummary{
+		Id:              aws.String("s-XYZ"),
+		Name:            aws.String("spark-submit nightly-orders"),
+		ActionOnFailure: types.ActionOnFailureTerminateCluster,
+		Status: &types.StepStatus{
+			State: types.StepStateFailed,
+			Timeline: &types.StepTimeline{
+				CreationDateTime: &created,
+			},
+			FailureDetails: &types.FailureDetails{
+				Reason:  aws.String("Application failed"),
+				LogFile: aws.String("s3://logs/j-1/steps/s-XYZ/stderr.gz"),
+			},
+		},
+	}
+
+	res := mapStep("us-east-1", "j-1A2B3C4D5", step)
+
+	if res.Type != "step" {
+		t.Errorf("Type = %q, want step", res.Type)
+	}
+	if res.State != "FAILED" {
+		t.Errorf("State = %q, want FAILED", res.State)
+	}
+	if res.Summary["cluster"] != "j-1A2B3C4D5" {
+		t.Errorf("Summary[cluster] = %q", res.Summary["cluster"])
+	}
+	if res.Summary["actionOnFailure"] != "TERMINATE_CLUSTER" {
+		t.Errorf("Summary[actionOnFailure] = %q", res.Summary["actionOnFailure"])
+	}
+	if res.Summary["failureReason"] != "Application failed" {
+		t.Errorf("Summary[failureReason] = %q", res.Summary["failureReason"])
+	}
+	if res.Summary["failureLog"] == "" {
+		t.Error("Summary[failureLog] should be set on failure")
+	}
+}
+
+func TestIsTerminated(t *testing.T) {
+	for _, tc := range []struct {
+		state string
+		want  bool
+	}{
+		{"RUNNING", false},
+		{"WAITING", false},
+		{"TERMINATED", true},
+		{"TERMINATED_WITH_ERRORS", true},
+		{"terminated", true},
+	} {
+		if got := isTerminated(tc.state); got != tc.want {
+			t.Errorf("isTerminated(%q) = %v, want %v", tc.state, got, tc.want)
+		}
 	}
 }
