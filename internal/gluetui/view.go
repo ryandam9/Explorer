@@ -26,7 +26,7 @@ func (mm *m) View() string {
 		sb.WriteString(mm.renderTable())
 	}
 
-	sb.WriteString(ui.StatusBar(mm.width, mm.statusLeft(), mm.helpHints()))
+	sb.WriteString("\n" + ui.StatusBar(mm.width, mm.statusLeft(), mm.helpHints()))
 
 	frame := mm.applyToast(sb.String())
 	if mm.defActive {
@@ -144,7 +144,9 @@ func (mm *m) renderTable() string {
 		}
 	}
 
-	return boxStyle(mm.width, mm.height-4).Render(b.String())
+	// One row shorter than the other panels: this view also carries the tab bar
+	// above the box, so the panel must leave a line for the status bar below it.
+	return boxStyle(mm.width, mm.height-5).Render(b.String())
 }
 
 func (mm *m) renderRuns() string {
@@ -286,24 +288,54 @@ func (mm *m) applyToast(rendered string) string {
 // their width, the single flex column (width 0) absorbs the remainder (down to
 // a floor), accounting for one space between columns.
 func resolveWidths(specs []colSpec, total int) []int {
-	widths := make([]int, len(specs))
-	gaps := len(specs) - 1
-	fixed := gaps
+	n := len(specs)
+	widths := make([]int, n)
+	if n == 0 {
+		return widths
+	}
+	gaps := n - 1
+	// Budget for column text: the row total minus the inter-column gaps and the
+	// single leading space every header/row is prefixed with. Reserving it keeps
+	// a full-width row from spilling one cell past the panel and wrapping.
+	budget := total - gaps - 1
+	if budget < n {
+		budget = n
+	}
+
 	flex := -1
+	used := 0
 	for i, s := range specs {
-		if s.width == 0 {
+		if s.width == 0 && flex == -1 {
 			flex = i
 			continue
 		}
 		widths[i] = s.width
-		fixed += s.width
+		used += s.width
 	}
 	if flex >= 0 {
-		w := total - fixed
+		w := budget - used
 		if w < 8 {
 			w = 8
 		}
 		widths[flex] = w
+		used += w
+	}
+
+	// When the fixed columns alone overrun the budget (narrow terminals), shrink
+	// the widest column one cell at a time until the row fits. This trades a
+	// little truncation for a table that never wraps fields onto the next line.
+	for used > budget {
+		wi := 0
+		for i := 1; i < n; i++ {
+			if widths[i] > widths[wi] {
+				wi = i
+			}
+		}
+		if widths[wi] <= 1 {
+			break
+		}
+		widths[wi]--
+		used--
 	}
 	return widths
 }
