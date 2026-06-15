@@ -15,6 +15,7 @@ import (
 	"github.com/ryandam9/aws_explorer/internal/config"
 	"github.com/ryandam9/aws_explorer/internal/consolelink"
 	"github.com/ryandam9/aws_explorer/internal/emrconn"
+	"github.com/ryandam9/aws_explorer/internal/table"
 	"github.com/ryandam9/aws_explorer/internal/ui"
 )
 
@@ -39,7 +40,11 @@ type m struct {
 	loading bool
 	err     error
 
-	sel int
+	// Cluster list backed by the shared table widget. view holds the clusters
+	// currently shown (filtered + sorted), parallel to the table's rows, so the
+	// cursor maps straight back to a Cluster.
+	tbl  table.Model
+	view []Cluster
 
 	// Column sort for the cluster list: sortCol -1 keeps the natural (name,
 	// region) order; otherwise it is an index into the cluster columns and
@@ -165,6 +170,14 @@ func NewModel(ctx context.Context, awsCfg *config.AWSConfig, regions []string, a
 	f.Placeholder = "Filter…"
 	f.Width = 30
 
+	activeRegions := client.Regions()
+	tbl := table.New(
+		table.WithColumns(clusterColumns(len(activeRegions) > 1)),
+		table.WithFocused(true),
+		table.WithStyles(ui.TableStyles()),
+		table.WithFrozenColumns(1), // pin NAME while scrolling columns
+	)
+
 	// Build the opt-in on-cluster dialer; a nil dialer (off/misconfigured) makes
 	// the live browsers render the connect helper rather than failing.
 	var dialer *emrconn.Dialer
@@ -178,7 +191,7 @@ func NewModel(ctx context.Context, awsCfg *config.AWSConfig, regions []string, a
 	return &m{
 		ctx:        ctx,
 		client:     client,
-		regions:    client.Regions(),
+		regions:    activeRegions,
 		allRegions: allRegions,
 		appCfg:     appCfg,
 		configPath: configPath,
@@ -186,9 +199,49 @@ func NewModel(ctx context.Context, awsCfg *config.AWSConfig, regions []string, a
 		dialerErr:  dialerErr,
 		filter:     f,
 		spinner:    s,
+		tbl:        tbl,
 		loading:    true,
 		sortCol:    -1,
 	}, nil
+}
+
+// rebuild recomputes the filtered+sorted cluster view and pushes it into the
+// shared table, refreshing the sort-arrow header and preserving the cursor.
+func (mm *m) rebuild() {
+	mm.view = mm.buildView()
+
+	cols := clusterColumns(len(mm.regions) > 1)
+	table.ApplySortHeader(cols, mm.sortCol, mm.sortAsc, func(int) bool { return true })
+	mm.tbl.SetColumns(cols)
+
+	multi := len(mm.regions) > 1
+	rows := make([]table.Row, 0, len(mm.view))
+	for _, c := range mm.view {
+		rows = append(rows, clusterRow(c, multi))
+	}
+	mm.tbl.SetRows(rows)
+	mm.layoutTable()
+}
+
+// layoutTable sizes the cluster table to the current terminal. The cluster
+// list's chrome is: an optional region badge, the title and filter lines above,
+// and the panel border plus the column-scroll hint and status bar below.
+func (mm *m) layoutTable() {
+	if mm.width <= 0 || mm.height <= 0 {
+		return
+	}
+	mm.tbl.SetWidth(mm.width - 4) // panel border + padding
+	// 1 title + 1 filter + 2 panel border + 1 scroll hint + 1 status bar, plus a
+	// badge line whenever the region scope is spotlighted.
+	chrome := 6
+	if ui.RegionBadge(mm.regions, mm.allRegions) != "" {
+		chrome++
+	}
+	h := mm.height - chrome
+	if h < 3 {
+		h = 3
+	}
+	mm.tbl.SetHeight(h)
 }
 
 func (mm *m) Init() tea.Cmd {
@@ -288,6 +341,7 @@ func (mm *m) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.WindowSizeMsg:
 		mm.width = msg.Width
 		mm.height = msg.Height
+		mm.layoutTable()
 
 	case spinner.TickMsg:
 		var cmd tea.Cmd
@@ -309,7 +363,7 @@ func (mm *m) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			mm.err = msg.err
 		} else {
 			mm.inv = msg.inv
-			mm.clamp()
+			mm.rebuild()
 		}
 
 	case stepsMsg:
@@ -447,12 +501,12 @@ func (mm *m) handleKey(msg tea.KeyMsg) []tea.Cmd {
 			}
 			mm.filterActive = false
 			mm.filter.Blur()
-			mm.clamp()
+			mm.rebuild()
 		default:
 			var cmd tea.Cmd
 			mm.filter, cmd = mm.filter.Update(msg)
 			cmds = append(cmds, cmd)
-			mm.clamp()
+			mm.rebuild()
 		}
 		return cmds
 	}
@@ -590,13 +644,17 @@ func (mm *m) handleKey(msg tea.KeyMsg) []tea.Cmd {
 	case "q", "ctrl+c":
 		return []tea.Cmd{tea.Quit}
 	case "up", "k":
-		if mm.sel > 0 {
-			mm.sel--
-		}
+		mm.tbl.MoveUp(1)
 	case "down", "j":
-		if mm.sel < mm.rowCount()-1 {
-			mm.sel++
-		}
+		mm.tbl.MoveDown(1)
+	case "g", "home":
+		mm.tbl.GotoTop()
+	case "G", "end":
+		mm.tbl.GotoBottom()
+	case "<", ",":
+		mm.tbl.ScrollLeft()
+	case ">", ".":
+		mm.tbl.ScrollRight()
 	case "/":
 		mm.filterActive = true
 		mm.filter.Focus()
@@ -670,7 +728,8 @@ func (mm *m) handleKey(msg tea.KeyMsg) []tea.Cmd {
 	case "R":
 		if mm.sortCol >= 0 {
 			mm.sortAsc = !mm.sortAsc
-			mm.sel = 0
+			mm.tbl.SetCursor(0)
+			mm.rebuild()
 		}
 	case ui.KeyAbout:
 		mm.showAbout = true
@@ -683,13 +742,13 @@ func (mm *m) handleKey(msg tea.KeyMsg) []tea.Cmd {
 // direction (descending for the numeric HRS column, ascending otherwise);
 // press R to flip it.
 func (mm *m) cycleSort() {
-	specs, _ := mm.specsAndRows()
 	mm.sortCol++
-	if mm.sortCol >= len(specs) {
+	if mm.sortCol >= len(clusterColumns(len(mm.regions) > 1)) {
 		mm.sortCol = -1
 	}
 	mm.sortAsc = mm.sortCol != colHRS
-	mm.sel = 0
+	mm.tbl.SetCursor(0)
+	mm.rebuild()
 }
 
 // openConsole copies (and opens, when local) the console URL for the selected
@@ -724,19 +783,6 @@ func (mm *m) oozieRowCount() int {
 		return len(mm.oozieCoord)
 	}
 	return len(mm.oozieWF)
-}
-
-func (mm *m) clamp() {
-	if mm.sel >= mm.rowCount() {
-		mm.sel = max(0, mm.rowCount()-1)
-	}
-}
-
-func max(a, b int) int {
-	if a > b {
-		return a
-	}
-	return b
 }
 
 func (mm *m) PageTitle() string {

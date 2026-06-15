@@ -127,42 +127,7 @@ func boolLabel(b bool) string {
 	return "disabled"
 }
 
-// sortedSpecs returns specs with a ↑/↓ marker appended to the title of the
-// column the list is currently sorted by, leaving widths untouched.
-func (mm *m) sortedSpecs(specs []colSpec) []colSpec {
-	if mm.sortCol < 0 || mm.sortCol >= len(specs) {
-		return specs
-	}
-	arrow := " ↑"
-	if !mm.sortAsc {
-		arrow = " ↓"
-	}
-	out := append([]colSpec(nil), specs...)
-	out[mm.sortCol].title += arrow
-	return out
-}
-
-// sortLabel describes the active sort for the status bar, e.g. "NAME ↑".
-func (mm *m) sortLabel(specs []colSpec) string {
-	if mm.sortCol < 0 || mm.sortCol >= len(specs) {
-		return ""
-	}
-	arrow := "↑"
-	if !mm.sortAsc {
-		arrow = "↓"
-	}
-	return specs[mm.sortCol].title + " " + arrow
-}
-
 func (mm *m) renderTable() string {
-	specs, _ := mm.specsAndRows()
-	rows := mm.currentRows()
-	contentW := mm.width - 4
-	if contentW < 20 {
-		contentW = 20
-	}
-	widths := resolveWidths(specs, contentW)
-
 	var b strings.Builder
 	b.WriteString(lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color(ui.ColorHeading())).
 		Render(" EMR ▸ Clusters") + "\n")
@@ -175,31 +140,25 @@ func (mm *m) renderTable() string {
 	} else {
 		b.WriteString("  (/ to filter)\n")
 	}
-	b.WriteString("\n")
 
-	// Header (with a ↑/↓ marker on the sorted column).
-	b.WriteString(lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color(ui.ColorHeading())).
-		Render(headerLine(mm.sortedSpecs(specs), widths)) + "\n")
-
-	if mm.loading {
-		b.WriteString(fmt.Sprintf("  %s Loading EMR clusters…\n", mm.spinner.View()))
-	} else if len(rows) == 0 {
-		b.WriteString("  No clusters found in scope.\n")
-	} else {
-		visible := mm.height - 10
-		if visible < 3 {
-			visible = 3
+	switch {
+	case mm.loading:
+		b.WriteString(fmt.Sprintf("\n  %s Loading EMR clusters…", mm.spinner.View()))
+	case len(mm.view) == 0:
+		b.WriteString("\n  No clusters found in scope.")
+	default:
+		// The shared table auto-fits columns, scrolls wide column sets, and draws
+		// its own vertical scrollbar; the panel and the "more columns" hint mirror
+		// the other table dashboards.
+		b.WriteString(ui.TablePanelStyle(true).Render(mm.tbl.View()))
+		if hint := ui.TableScrollIndicator(&mm.tbl); hint != "" {
+			b.WriteString("\n" + hint)
 		}
-		start, end := visibleRange(mm.sel, len(rows), visible)
-		for i := start; i < end; i++ {
-			b.WriteString(renderRow(rows[i].cells, widths, i == mm.sel) + "\n")
-		}
-		// The selected cluster's state-change reason (terminated-with-errors etc.)
-		// is no longer crammed inline; it lives in the detail overlay (press d),
-		// which wraps the full message instead of truncating it.
 	}
 
-	return boxStyle(mm.width, mm.height-4).Render(b.String())
+	// The selected cluster's state-change reason (terminated-with-errors etc.)
+	// lives in the detail overlay (press d), which wraps the full message.
+	return b.String()
 }
 
 func (mm *m) renderSteps() string {
@@ -588,11 +547,8 @@ func (mm *m) statusLeft() string {
 	if len(mm.regions) != 1 {
 		regionLabel = fmt.Sprintf("all (%d regions)", len(mm.regions))
 	}
-	left := fmt.Sprintf("Region: %s  ·  Clusters: %d", regionLabel, mm.rowCount())
-	if specs, _ := mm.specsAndRows(); mm.sortLabel(specs) != "" {
-		left += "  ·  sort: " + mm.sortLabel(specs)
-	}
-	return left
+	// The active sort is shown by the ↑/↓ arrow on the column header.
+	return fmt.Sprintf("Region: %s  ·  Clusters: %d", regionLabel, mm.rowCount())
 }
 
 func (mm *m) helpHints() []ui.KeyHint {
@@ -633,7 +589,7 @@ func (mm *m) helpHints() []ui.KeyHint {
 			ui.H("q", "quit"),
 		}
 	}
-	return []ui.KeyHint{
+	hints := []ui.KeyHint{
 		ui.H("↑/↓", "rows"),
 		ui.H("Enter", "steps"),
 		ui.H("d", "detail"),
@@ -643,11 +599,19 @@ func (mm *m) helpHints() []ui.KeyHint {
 		ui.H("h", "hbase"),
 		ui.H("z", "oozie"),
 		ui.H("S", "sort"),
+	}
+	if mm.sortCol >= 0 {
+		hints = append(hints, ui.H("R", "reverse"))
+	}
+	if hl, hr := mm.tbl.ColScrollInfo(); hl+hr > 0 {
+		hints = append(hints, ui.H("</>", "columns"))
+	}
+	return append(hints,
 		ui.H("/", "filter"),
 		ui.H("o", "console"),
 		ui.H("r", "refresh"),
 		ui.H("q", "quit"),
-	}
+	)
 }
 
 func (mm *m) applyToast(rendered string) string {
