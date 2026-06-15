@@ -3,6 +3,7 @@ package emrtui
 import (
 	"context"
 	"reflect"
+	"strings"
 	"testing"
 
 	"github.com/ryandam9/aws_explorer/internal/emrconn"
@@ -101,3 +102,27 @@ func TestSortHBaseTables(t *testing.T) {
 		t.Errorf("unexpected order: %+v", tables)
 	}
 }
+
+func TestScannerSpec(t *testing.T) {
+	spec := string(scannerSpec())
+	for _, want := range []string{"batch", "caching", "FirstKeyOnlyFilter", "1000"} {
+		if !contains(spec, want) {
+			t.Errorf("scanner spec missing %q: %s", want, spec)
+		}
+	}
+}
+
+func TestCountRowsInBatch(t *testing.T) {
+	body := []byte(`{"Row":[{"key":"a"},{"key":"b"},{"key":"c"}]}`)
+	if got := countRowsInBatch(body); got != 3 {
+		t.Errorf("countRowsInBatch = %d, want 3", got)
+	}
+	if got := countRowsInBatch([]byte(`{}`)); got != 0 {
+		t.Errorf("empty = %d, want 0", got)
+	}
+	if got := countRowsInBatch([]byte(`not json`)); got != 0 {
+		t.Errorf("bad json = %d, want 0", got)
+	}
+}
+
+func contains(s, sub string) bool { return strings.Contains(s, sub) }

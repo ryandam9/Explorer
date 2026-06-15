@@ -326,9 +326,17 @@ emr:
         # direct - the tool runs inside the VPC; plain HTTP to the primary node
         # socks  - route through a SOCKS5 proxy, e.g. an `ssh -D 8157` tunnel
         #          (the pattern AWS documents for the cluster web UIs)
+        # tunnel - the tool opens its own SSH connection to the primary node and
+        #          dials the daemon through it, using the `ssh` settings below
         mode: "off"
         # host:port of the SOCKS5 proxy used in `socks` mode.
         socksproxy: 127.0.0.1:8157
+        # SSH login used by `tunnel` mode (EMR's default user is "hadoop"). The
+        # key must be unencrypted; a leading "~" in keyfile is expanded.
+        ssh:
+            user: hadoop
+            keyfile: ~/.ssh/emr.pem
+            port: 22
         # Per-request timeout in seconds (0 = default 5s).
         timeoutseconds: 5
         # Daemon ports (0 = EMR defaults: yarn 8088, hbase 8080, oozie 11000).

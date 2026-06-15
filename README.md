@@ -925,8 +925,11 @@ cluster's VPC — so this is **opt-in** and **off by default**. Enable it under
 ```yaml
 emr:
   onCluster:
-    mode: socks            # off (default) | direct | socks
+    mode: socks            # off (default) | direct | socks | tunnel
     socksProxy: 127.0.0.1:8157
+    ssh:                   # used by 'tunnel' mode
+      user: hadoop
+      keyFile: ~/.ssh/emr.pem
 ```
 
 - **`direct`** — the tool is already inside the VPC (bastion / in-VPC CloudShell
@@ -938,6 +941,11 @@ emr:
   ssh -i <key.pem> -N -D 8157 hadoop@<primary-dns>
   ```
 
+- **`tunnel`** — let the tool open its **own** SSH connection to the primary node
+  (using `ssh.user` / `ssh.keyFile`) and dial the daemon through it — no separate
+  `ssh -D` needed. The key must be unencrypted. Because EMR primary nodes are
+  ephemeral and not in `known_hosts`, this mode does not pin the host key.
+
 When access is off or the daemon can't be reached, the browser shows a "how to
 connect" helper (including the exact tunnel command) instead of an error — every
 on-cluster request is a read-only `GET` with a timeout.
@@ -945,9 +953,11 @@ on-cluster request is a read-only `GET` with a timeout.
 The **HBase browser** lists namespaces → tables with a derived **state**
 (`ENABLED` / `DISABLED` / `PARTIAL`, inferred from how many of a table's regions
 are assigned), the **region count**, **online regions**, and **column
-families**. Region counts are exact; *row* counts are deliberately not shown —
-HBase has no cheap count, so an exact count needs a full table scan (a future,
-explicitly-confirmed action).
+families** (all exact). HBase has no cheap row count, so the **ROWS** column
+shows `—` until you ask for it: press **`c`** on a table to run an exact
+**full-table scan** (read-only but not free — it prompts for confirmation first,
+is bounded at 5M rows, and shows a `+` when capped). The CLI twin exposes the
+same scan as `emr hbase <id> --count ns:table`.
 
 The **Oozie browser** has two tabs (`Tab` switches them): **Workflows** (name ·
 status · user · start time) and **Coordinators** (name · status · frequency ·
@@ -968,6 +978,7 @@ aws_explorer emr apps <id>      [-r us-east-1] [-o …]
 aws_explorer emr yarn <id>      [-r us-east-1] [-o …]   # live YARN apps (on-cluster)
 aws_explorer emr hbase <id>     [-r us-east-1] [-o …]   # HBase tables (on-cluster)
 aws_explorer emr oozie <id>     [-r us-east-1] [--coordinators] [-o …]   # Oozie jobs (on-cluster)
+aws_explorer emr hbase <id>     --count ns:table [-r us-east-1]          # exact row count (full scan)
 ```
 
 ```bash

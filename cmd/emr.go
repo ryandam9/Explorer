@@ -228,8 +228,9 @@ API — it runs on the cluster's primary node, reachable only from inside the VP
 		}
 		dialer, err := emrconn.New(onCluster)
 		if err != nil {
-			return fmt.Errorf("on-cluster access not available: %w\n\nEnable it in config.yaml under emr.onCluster (mode: socks|direct)", err)
+			return fmt.Errorf("on-cluster access not available: %w\n\nEnable it in config.yaml under emr.onCluster (mode: socks|direct|tunnel)", err)
 		}
+		defer dialer.Close()
 
 		client, err := newEMRClient(ctx)
 		if err != nil {
@@ -273,8 +274,9 @@ API — it runs on the cluster's primary node, reachable only from inside the VP
 		}
 		dialer, err := emrconn.New(onCluster)
 		if err != nil {
-			return fmt.Errorf("on-cluster access not available: %w\n\nEnable it in config.yaml under emr.onCluster (mode: socks|direct)", err)
+			return fmt.Errorf("on-cluster access not available: %w\n\nEnable it in config.yaml under emr.onCluster (mode: socks|direct|tunnel)", err)
 		}
+		defer dialer.Close()
 
 		client, err := newEMRClient(ctx)
 		if err != nil {
@@ -285,6 +287,19 @@ API — it runs on the cluster's primary node, reachable only from inside the VP
 		if err != nil {
 			return fmt.Errorf("failed to resolve cluster %q primary DNS in %s: %w", args[0], region, err)
 		}
+		// --count runs an explicit full-table row scan instead of listing.
+		if emrHBaseCount != "" {
+			count, capped, cerr := emrtui.CountHBaseRows(ctx, dialer, dns, emrHBaseCount)
+			if cerr != nil {
+				return fmt.Errorf("failed to count rows in %q: %w", emrHBaseCount, cerr)
+			}
+			suffix := ""
+			if capped {
+				suffix = "+ (capped)"
+			}
+			fmt.Printf("%d%s\n", count, suffix)
+			return nil
+		}
 		tables, err := emrtui.FetchHBase(ctx, dialer, dns)
 		if err != nil {
 			return fmt.Errorf("failed to query HBase on cluster %q: %w", args[0], err)
@@ -292,6 +307,8 @@ API — it runs on the cluster's primary node, reachable only from inside the VP
 		return emrtui.RenderHBaseTables(os.Stdout, tables, outputFormat, noHeader)
 	},
 }
+
+var emrHBaseCount string
 
 var emrOozieCoordinators bool
 
@@ -320,8 +337,9 @@ API — it runs on the cluster's primary node, reachable only from inside the VP
 		}
 		dialer, err := emrconn.New(onCluster)
 		if err != nil {
-			return fmt.Errorf("on-cluster access not available: %w\n\nEnable it in config.yaml under emr.onCluster (mode: socks|direct)", err)
+			return fmt.Errorf("on-cluster access not available: %w\n\nEnable it in config.yaml under emr.onCluster (mode: socks|direct|tunnel)", err)
 		}
+		defer dialer.Close()
 
 		client, err := newEMRClient(ctx)
 		if err != nil {
@@ -354,6 +372,8 @@ func init() {
 	emrStepsCmd.Flags().StringVar(&emrStepsStatus, "status", "", "only show steps in this state (e.g. FAILED, COMPLETED)")
 
 	emrInstancesCmd.Flags().IntVar(&emrInstancesLimit, "limit", 0, "maximum number of instances to fetch (0 = all)")
+
+	emrHBaseCmd.Flags().StringVar(&emrHBaseCount, "count", "", "count rows in this table (full scan) instead of listing tables; takes a qualified name like ns:table")
 
 	emrOozieCmd.Flags().BoolVar(&emrOozieCoordinators, "coordinators", false, "list coordinator jobs instead of workflows")
 

@@ -11,18 +11,34 @@
 package emrconn
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
 	"io"
 	"net"
 	"net/http"
+	"net/url"
 	"time"
 
 	"golang.org/x/net/proxy"
 
 	"github.com/ryandam9/aws_explorer/internal/config"
 )
+
+// PathOf extracts the request path (with query) from an absolute URL, so a
+// Location header returned by the daemon can be re-fetched through the dialer.
+// A value that is already a path is returned unchanged.
+func PathOf(raw string) string {
+	u, err := url.Parse(raw)
+	if err != nil || u.Path == "" {
+		return raw
+	}
+	if u.RawQuery != "" {
+		return u.Path + "?" + u.RawQuery
+	}
+	return u.Path
+}
 
 // Mode is how the daemons are reached.
 type Mode string
@@ -31,6 +47,7 @@ const (
 	ModeOff    Mode = "off"
 	ModeDirect Mode = "direct"
 	ModeSocks  Mode = "socks"
+	ModeTunnel Mode = "tunnel"
 )
 
 // Default daemon ports on Amazon EMR.
@@ -64,6 +81,7 @@ type Dialer struct {
 	ports   config.OnClusterPorts
 	timeout time.Duration
 	client  *http.Client
+	tunnel  *tunnelDialer // non-nil only in tunnel mode
 }
 
 // New builds a Dialer from the on-cluster config. It returns (nil, ErrDisabled)
@@ -80,6 +98,7 @@ func New(cfg config.OnClusterConfig) (*Dialer, error) {
 	}
 
 	transport := &http.Transport{}
+	var tun *tunnelDialer
 	switch mode {
 	case ModeDirect:
 		// Default transport dials directly; nothing to configure.
@@ -96,8 +115,15 @@ func New(cfg config.OnClusterConfig) (*Dialer, error) {
 			return nil, fmt.Errorf("socks dialer does not support contexts")
 		}
 		transport.DialContext = cd.DialContext
+	case ModeTunnel:
+		t, err := newTunnelDialer(cfg.SSH, timeout)
+		if err != nil {
+			return nil, err
+		}
+		tun = t
+		transport.DialContext = t.dialContext
 	default:
-		return nil, fmt.Errorf("unknown on-cluster mode %q (want off|direct|socks)", cfg.Mode)
+		return nil, fmt.Errorf("unknown on-cluster mode %q (want off|direct|socks|tunnel)", cfg.Mode)
 	}
 
 	return &Dialer{
@@ -105,7 +131,16 @@ func New(cfg config.OnClusterConfig) (*Dialer, error) {
 		ports:   cfg.Ports,
 		timeout: timeout,
 		client:  &http.Client{Transport: transport, Timeout: timeout},
+		tunnel:  tun,
 	}, nil
+}
+
+// Close releases any resources held by the dialer (the SSH connections used by
+// tunnel mode). Safe to call on any dialer.
+func (d *Dialer) Close() {
+	if d != nil && d.tunnel != nil {
+		d.tunnel.Close()
+	}
 }
 
 // Mode returns the dialer's resolved mode.
@@ -147,6 +182,42 @@ func (d *Dialer) GetRaw(ctx context.Context, svc Service, host, path string) ([]
 	return d.get(ctx, d.BaseURL(svc, host)+path)
 }
 
+// Response is the result of a non-GET request: the status code, body, and the
+// Location response header (set by POSTs that create a resource).
+type Response struct {
+	Status   int
+	Body     []byte
+	Location string
+}
+
+// Request performs method against a service endpoint and returns the status,
+// body and Location header. Transport failures wrap ErrUnreachable; a >=400
+// status is returned without error so callers can branch on it (e.g. 204 = done).
+func (d *Dialer) Request(ctx context.Context, method string, svc Service, host, path string, body []byte, contentType string) (Response, error) {
+	ctx, cancel := context.WithTimeout(ctx, d.timeout)
+	defer cancel()
+
+	var rdr io.Reader
+	if body != nil {
+		rdr = bytes.NewReader(body)
+	}
+	req, err := http.NewRequestWithContext(ctx, method, d.BaseURL(svc, host)+path, rdr)
+	if err != nil {
+		return Response{}, err
+	}
+	req.Header.Set("Accept", "application/json")
+	if contentType != "" {
+		req.Header.Set("Content-Type", contentType)
+	}
+	resp, err := d.client.Do(req)
+	if err != nil {
+		return Response{}, fmt.Errorf("%w: %v", ErrUnreachable, err)
+	}
+	defer resp.Body.Close()
+	b, _ := io.ReadAll(resp.Body)
+	return Response{Status: resp.StatusCode, Body: b, Location: resp.Header.Get("Location")}, nil
+}
+
 // get GETs a URL and returns the raw body, wrapping transport failures in
 // ErrUnreachable.
 func (d *Dialer) get(ctx context.Context, url string) ([]byte, error) {
@@ -183,6 +254,8 @@ func normalizeMode(s string) Mode {
 		return ModeDirect
 	case ModeSocks:
 		return ModeSocks
+	case ModeTunnel:
+		return ModeTunnel
 	default:
 		return ModeOff
 	}

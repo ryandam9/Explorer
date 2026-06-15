@@ -41,6 +41,13 @@ func (mm *m) View() string {
 	if mm.appUIActive {
 		frame = ui.OverlayCenter(frame, ui.AboutView("Application UIs — "+mm.appUICluster.Name, mm.appUIBody(), ui.AboutWidth(mm.width)), mm.width, mm.height)
 	}
+	if mm.hbaseConfirm && mm.hbaseSel < len(mm.hbaseTables) {
+		t := mm.hbaseTables[mm.hbaseSel]
+		body := fmt.Sprintf("Count the rows in %q?\n\nThis opens an HBase scanner and reads the whole table "+
+			"(up to %s rows). It is read-only but can be slow and load the cluster on a large table.\n\n"+
+			"y / Enter — scan now      any other key — cancel", t.Qualified, itoa(scannerCap))
+		frame = ui.OverlayCenter(frame, ui.AboutView("Count rows — full scan", body, ui.AboutWidth(mm.width)), mm.width, mm.height)
+	}
 	if mm.showAbout {
 		frame = ui.OverlayCenter(frame, ui.AboutView("About — Amazon EMR", emrAboutText, ui.AboutWidth(mm.width)), mm.width, mm.height)
 	}
@@ -287,7 +294,7 @@ func (mm *m) renderYARN() string {
 }
 
 func (mm *m) renderHBase() string {
-	specs := []colSpec{{"NAMESPACE", 14}, {"TABLE", 0}, {"STATE", 12}, {"REGIONS", 9}, {"ONLINE", 8}, {"FAMILIES", 22}}
+	specs := []colSpec{{"NAMESPACE", 13}, {"TABLE", 0}, {"STATE", 11}, {"REGIONS", 8}, {"ONLINE", 7}, {"ROWS", 12}, {"FAMILIES", 16}}
 	contentW := mm.width - 4
 	if contentW < 20 {
 		contentW = 20
@@ -297,10 +304,15 @@ func (mm *m) renderHBase() string {
 	var b strings.Builder
 	b.WriteString(lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color(ui.ColorHeading())).
 		Render(fmt.Sprintf(" HBase — %s [%s]", mm.hbaseCluster.Name, mm.hbaseCluster.Region)) + "\n")
+	via := ""
 	if mm.dialer != nil {
-		b.WriteString(lipgloss.NewStyle().Foreground(lipgloss.Color(ui.ColorMuted())).
-			Render(fmt.Sprintf("  via %s", mm.dialer.Mode())) + "\n")
+		via = fmt.Sprintf("via %s · ", mm.dialer.Mode())
 	}
+	note := via + "c counts rows (full scan, asks first)"
+	if mm.hbaseCounting {
+		note = mm.spinner.View() + " scanning table to count rows…"
+	}
+	b.WriteString(lipgloss.NewStyle().Foreground(lipgloss.Color(ui.ColorMuted())).Render("  "+note) + "\n")
 	b.WriteString("\n")
 
 	switch {
@@ -331,15 +343,30 @@ func (mm *m) renderHBase() string {
 				{text: t.State, color: hbaseStateColor(t.State)},
 				{text: itoa(t.Regions)},
 				{text: itoa(t.Online)},
+				{text: hbaseRowsLabel(t)},
 				{text: strings.Join(t.Families, ",")},
 			}
 			b.WriteString(renderRow(cells, widths, i == mm.hbaseSel) + "\n")
 		}
 		b.WriteString("\n  " + lipgloss.NewStyle().Foreground(lipgloss.Color(ui.ColorText())).
-			Render(fmt.Sprintf("%d tables · region counts are exact; row counts need a scan (not shown)", len(mm.hbaseTables))) + "\n")
+			Render(fmt.Sprintf("%d tables · region counts are exact; press c to count rows (full table scan)", len(mm.hbaseTables))) + "\n")
 	}
 
+	// Row-count confirmation overlay text is composited by View(); here we just
+	// render the underlying table.
 	return boxStyle(mm.width, mm.height-4).Render(b.String())
+}
+
+// hbaseRowsLabel renders a table's row-count cell: "—" until counted, then the
+// number (with a "+" when the scan hit the cap).
+func hbaseRowsLabel(t HBaseTable) string {
+	if !t.Counted {
+		return "—"
+	}
+	if t.CountCapped {
+		return itoa(t.RowCount) + "+"
+	}
+	return itoa(t.RowCount)
 }
 
 func (mm *m) renderOozie() string {
@@ -561,9 +588,9 @@ func (mm *m) helpHints() []ui.KeyHint {
 	if mm.hbaseActive {
 		return []ui.KeyHint{
 			ui.H("↑/↓", "tables"),
+			ui.H("c", "count rows"),
 			ui.H("r", "refresh"),
 			ui.H("Esc", "back"),
-			ui.H("i", "about"),
 			ui.H("q", "quit"),
 		}
 	}

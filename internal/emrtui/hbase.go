@@ -27,6 +27,12 @@ type HBaseTable struct {
 	Online    int      // regions with an assigned location
 	Families  []string // column families
 	State     string   // derived: ENABLED / DISABLED / PARTIAL / "—"
+
+	// Row count, populated only after an explicit, confirmed scan (the `c`
+	// action). Counted distinguishes "not counted yet" from "counted 0".
+	RowCount    int
+	Counted     bool
+	CountCapped bool
 }
 
 // --- HBase REST wire types (JSON via Accept: application/json) --------------
@@ -210,6 +216,87 @@ func enrichHBaseTables(ctx context.Context, d *emrconn.Dialer, host string, tabl
 		}(i)
 	}
 	wg.Wait()
+}
+
+// scannerBatch is how many rows each scanner page returns; scannerCap bounds a
+// count so an enormous table can't run unbounded.
+const (
+	scannerBatch = 1000
+	scannerCap   = 5_000_000
+)
+
+// scannerSpec is the HBase REST scanner creation body. FirstKeyOnlyFilter
+// returns just one cell per row (KeyOnlyFilter then drops its value), so the
+// scan transfers as little as possible while still counting every row.
+func scannerSpec() []byte {
+	return []byte(`{"batch":` + itoa(scannerBatch) +
+		`,"caching":` + itoa(scannerBatch) +
+		`,"filter":"{\"type\":\"FirstKeyOnlyFilter\"}"}`)
+}
+
+// countRowsInBatch counts the rows in one HBase REST CellSet page. Pure.
+func countRowsInBatch(body []byte) int {
+	var cs struct {
+		Row []json.RawMessage `json:"Row"`
+	}
+	if err := json.Unmarshal(body, &cs); err != nil {
+		return 0
+	}
+	return len(cs.Row)
+}
+
+// CountHBaseRows performs an exact row count of a table by opening a REST
+// scanner and paging through it. This reads the whole table — it is read-only
+// but NOT free — so callers must gate it behind explicit user confirmation. It
+// stops at scannerCap (returning capped=true) and respects the context.
+func CountHBaseRows(ctx context.Context, d *emrconn.Dialer, masterDNS, qualified string) (count int, capped bool, err error) {
+	if d == nil {
+		return 0, false, emrconn.ErrDisabled
+	}
+	if masterDNS == "" {
+		return 0, false, fmt.Errorf("%w: cluster has no primary-node DNS", emrconn.ErrUnreachable)
+	}
+
+	// Create the scanner.
+	resp, err := d.Request(ctx, "PUT", emrconn.ServiceHBase, masterDNS, "/"+qualified+"/scanner/", scannerSpec(), "application/json")
+	if err != nil {
+		return 0, false, err
+	}
+	if resp.Status != 201 || resp.Location == "" {
+		return 0, false, fmt.Errorf("%w: scanner create returned HTTP %d", emrconn.ErrUnreachable, resp.Status)
+	}
+	scannerPath := emrconn.PathOf(resp.Location)
+	// Best-effort cleanup of the server-side scanner.
+	defer func() {
+		_, _ = d.Request(context.Background(), "DELETE", emrconn.ServiceHBase, masterDNS, scannerPath, nil, "")
+	}()
+
+	// Page through until 204 (exhausted), the cap, or context cancellation.
+	for {
+		select {
+		case <-ctx.Done():
+			return count, false, ctx.Err()
+		default:
+		}
+		page, perr := d.Request(ctx, "GET", emrconn.ServiceHBase, masterDNS, scannerPath, nil, "")
+		if perr != nil {
+			return count, false, perr
+		}
+		if page.Status == 204 { // No more rows.
+			return count, false, nil
+		}
+		if page.Status != 200 {
+			return count, false, fmt.Errorf("%w: scanner page returned HTTP %d", emrconn.ErrUnreachable, page.Status)
+		}
+		n := countRowsInBatch(page.Body)
+		if n == 0 {
+			return count, false, nil
+		}
+		count += n
+		if count >= scannerCap {
+			return count, true, nil
+		}
+	}
 }
 
 func sortHBaseTables(tables []HBaseTable) {
