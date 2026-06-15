@@ -110,7 +110,7 @@ const reportHTMLTemplate = `<!DOCTYPE html>
 <link rel="stylesheet" href="https://cdn.datatables.net/2.1.8/css/dataTables.dataTables.min.css">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Archivo+Black&family=Space+Grotesk:wght@400;500;600;700&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Archivo+Black&family=Space+Grotesk:wght@400;500;600;700&family=Space+Mono:wght@400;700&display=swap" rel="stylesheet">
 <style>
 /* Neo-brutalism: flat bright blocks, thick black borders, hard offset shadows. */
 :root {
@@ -119,6 +119,7 @@ const reportHTMLTemplate = `<!DOCTYPE html>
   --shadow:6px 6px 0 var(--ink); --shadow-sm:3px 3px 0 var(--ink);
   --body:"Space Grotesk",ui-sans-serif,system-ui,-apple-system,"Segoe UI",sans-serif;
   --display:"Archivo Black","Space Grotesk",sans-serif;
+  --mono:"Space Mono",ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
 }
 * { box-sizing:border-box; }
 html { scroll-behavior:smooth; }
@@ -127,7 +128,7 @@ body { margin:0; font:16px/1.55 var(--body); color:var(--ink); background:var(--
 .banner { background:var(--yellow); border-bottom:5px solid var(--ink); padding:1.7rem 2rem; }
 .banner h1 { margin:0 0 .6rem; font-family:var(--display); font-size:2rem; text-transform:uppercase; letter-spacing:-.01em; }
 .banner .meta { display:flex; gap:.7rem; flex-wrap:wrap; align-items:center; font-weight:600; font-size:.9rem; }
-.banner .meta span { background:var(--panel); border:3px solid var(--ink); box-shadow:var(--shadow-sm); padding:.15rem .65rem; }
+.banner .meta span { background:var(--panel); border:3px solid var(--ink); box-shadow:var(--shadow-sm); padding:.15rem .65rem; font-family:var(--mono); }
 .banner .badge { background:var(--pink); font-weight:700; text-transform:uppercase; }
 /* Layout */
 .layout { display:flex; align-items:flex-start; gap:1.5rem; max-width:1500px; margin:0 auto; padding:1.5rem; }
@@ -143,7 +144,7 @@ main h2:first-of-type { margin-top:0; }
 main h3 { margin:1.5rem 0 .5rem; font-family:var(--display); font-size:1rem; text-transform:uppercase; }
 main > p em { display:inline-block; background:var(--panel); border:2px solid var(--ink); padding:.1rem .45rem; font-style:normal; font-weight:600; }
 a { color:var(--ink); font-weight:700; text-decoration:underline; text-decoration-thickness:2px; }
-code { background:var(--lime); border:2px solid var(--ink); padding:.05em .3em; font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace; font-size:.85em; }
+code { background:var(--lime); border:2px solid var(--ink); padding:.05em .3em; font-family:var(--mono); font-size:.85em; }
 ul { padding-left:1.2rem; }
 li { margin:.25rem 0; }
 blockquote { margin:1rem 0; padding:.6rem 1rem; background:var(--panel); border:3px solid var(--ink); border-left:9px solid var(--pink); box-shadow:var(--shadow-sm); }
@@ -152,10 +153,10 @@ hr { border:none; border-top:3px solid var(--ink); margin:2rem 0; }
    backgrounds (e.g. the header) always reach the right edge. */
 .dt-wrap { overflow-x:auto; margin:.4rem 0 1.4rem; background:var(--panel); border:3px solid var(--ink); box-shadow:var(--shadow); }
 table { border-collapse:separate; border-spacing:0; width:100%; margin:0; background:var(--panel); font-size:.86rem; }
-th, td { border-right:2px solid var(--ink); border-bottom:2px solid var(--ink); padding:.5rem .7rem; text-align:left; vertical-align:top; white-space:nowrap; }
+th, td { border-right:2px solid var(--ink); border-bottom:2px solid var(--ink); padding:.5rem .7rem; text-align:left; vertical-align:top; white-space:nowrap; font-family:var(--mono); font-size:.82rem; }
 th:last-child, td:last-child { border-right:none; }
 tbody tr:last-child td { border-bottom:none; }
-th { background:var(--blue); font-weight:700; text-transform:uppercase; font-size:.76rem; letter-spacing:.02em; }
+th { background:var(--blue); font-weight:700; text-transform:uppercase; font-size:.74rem; letter-spacing:.02em; }
 tbody tr:nth-child(even) { background:#fff7d6; }
 tbody tr:hover { background:var(--yellow); }
 /* DataTables controls, restyled to match */
