@@ -20,7 +20,7 @@ import (
 
 // auditCategories lists the implemented finding categories. More join as the
 // roadmap lands (security, messaging, …); --only validates against this.
-var auditCategories = []string{"cost", "security", "iam", "messaging", "cloudtrail", "glue"}
+var auditCategories = []string{"cost", "security", "iam", "messaging", "cloudtrail", "glue", "emr"}
 
 // auditExitFindings is the exit code when --fail-on is set and findings at or
 // above the threshold exist (operational errors exit 1, clean runs 0), so CI

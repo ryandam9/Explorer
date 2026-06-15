@@ -25,6 +25,7 @@ type m struct {
 	regions    []string
 	allRegions bool
 	appCfg     *config.Config
+	configPath string
 
 	width, height int
 
@@ -68,8 +69,9 @@ type stepsMsg struct {
 
 type clearToastMsg struct{}
 
-// NewModel builds the EMR dashboard over one or more regions.
-func NewModel(ctx context.Context, awsCfg *config.AWSConfig, regions []string, allRegions bool, appCfg *config.Config) (tea.Model, error) {
+// NewModel builds the EMR dashboard over one or more regions. configPath is
+// passed through to the child s3 process for the log-location jump (AXE-036).
+func NewModel(ctx context.Context, awsCfg *config.AWSConfig, regions []string, allRegions bool, appCfg *config.Config, configPath string) (tea.Model, error) {
 	client, err := NewClient(ctx, awsCfg, regions, allRegions)
 	if err != nil {
 		return nil, err
@@ -89,6 +91,7 @@ func NewModel(ctx context.Context, awsCfg *config.AWSConfig, regions []string, a
 		regions:    client.Regions(),
 		allRegions: allRegions,
 		appCfg:     appCfg,
+		configPath: configPath,
 		filter:     f,
 		spinner:    s,
 		loading:    true,
@@ -139,6 +142,12 @@ func (mm *m) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case clearToastMsg:
 		mm.toast = ""
+
+	case s3JumpDoneMsg:
+		if msg.err != nil {
+			mm.setToast("Could not open S3 logs: " + msg.err.Error())
+			cmds = append(cmds, toastCmd(4*time.Second))
+		}
 
 	case invMsg:
 		mm.loading = false
@@ -234,6 +243,10 @@ func (mm *m) handleKey(msg tea.KeyMsg) []tea.Cmd {
 				mm.setToast("Copied failure reason")
 				cmds = append(cmds, toastCmd(3*time.Second))
 			}
+		case "L":
+			if mm.stepsSel < len(mm.steps) {
+				mm.jumpToStepLogs(mm.steps[mm.stepsSel], &cmds)
+			}
 		case ui.KeyAbout:
 			mm.showAbout = true
 		}
@@ -272,6 +285,10 @@ func (mm *m) handleKey(msg tea.KeyMsg) []tea.Cmd {
 		if cl, ok := mm.selectedCluster(); ok {
 			mm.detailActive = true
 			mm.detailCluster = cl
+		}
+	case "L":
+		if cl, ok := mm.selectedCluster(); ok {
+			mm.jumpToClusterLogs(cl, &cmds)
 		}
 	case "o":
 		mm.openConsole(&cmds)

@@ -530,6 +530,28 @@ Glue-category notes:
 - Uses `glue:{GetJobs,GetJobRuns,GetCrawlers,GetConnections}` plus
   `ec2:{DescribeSubnets,DescribeSecurityGroups}` (for `GLU-CONN-001`).
 
+**EMR category** (`--only emr`; check IDs `EMR-*`) — health and cost for Amazon
+EMR clusters:
+
+| ID | Finding | Severity |
+|----|---------|----------|
+| `EMR-STEP-002` | Cluster terminated with errors (bootstrap/step/hardware failure) | 🔴 critical |
+| `EMR-COST-001` | Cluster idle in `WAITING` for over 24h — provisioned but doing no work | 🟡 warning |
+| `EMR-STEP-001` | Cluster whose most recent step ended in a failure state | 🟡 warning |
+| `EMR-LOG-001` | Cluster with no S3 log URI — logs are lost when nodes terminate | 🟡 warning |
+| `EMR-SEC-001` | Cluster without a security configuration (encryption not enforced) | 🟡 warning |
+| `EMR-COST-002` | Long-running cluster (up over 7 days) with no auto-termination policy | 🔵 info |
+
+EMR-category notes:
+
+- A `TERMINATED_WITH_ERRORS` cluster gets only `EMR-STEP-002`; a cleanly
+  `TERMINATED` cluster is silent (it's gone). The live-posture checks apply only
+  to running/waiting clusters.
+- `EMR-STEP-001` reads each live cluster's latest step via `ListSteps`; a denied
+  call leaves step health unknown and fires nothing for that cluster
+  (under-warn).
+- Uses `elasticmapreduce:{ListClusters,DescribeCluster,ListSteps}`.
+
 † Traffic-based checks use CloudWatch metrics over a 14-day window and need
 `cloudwatch:GetMetricData`; without it they are skipped (with a note) while
 the rest of the audit runs. Resources younger than 14 days are never flagged
@@ -869,11 +891,17 @@ Step history (Enter on a cluster):
 | `↑/↓` (`j/k`) | Move selection |
 | `Enter` / `s` | Open the selected cluster's step history |
 | `d` | Show the selected cluster's detail (release, log URI, role, EC2 attributes) |
+| `L` | Open the cluster's (or selected step's) logs in the S3 browser |
 | `/` | Filter the cluster list |
 | `o` | Open the selected cluster in the AWS console |
 | `r` | Refresh |
 | `y` | (step history) copy the selected step's failure reason |
 | `i` | About this page · `q` quit |
+
+`L` opens the [S3 browser](#s3-tui-usage) rooted at the cluster's log archive
+(`<LogUri>/<cluster-id>/`), or at a specific step's folder
+(`…/steps/<step-id>/`) from the step view. Clusters with no `LogUri` show a
+toast instead.
 
 > **Scope note.** This dashboard covers the EMR **control plane** (clusters,
 > steps) via the AWS API. The on-cluster services — live YARN apps, HBase
@@ -883,8 +911,10 @@ Step history (Enter on a cluster):
 ### Scriptable twins
 
 ```bash
-aws_explorer emr clusters      [--all-regions] [--state RUNNING,WAITING] [-o table|json|ndjson|csv]
-aws_explorer emr steps <id>    [-r us-east-1] [--limit 50] [--status FAILED] [-o …]
+aws_explorer emr clusters       [--all-regions] [--state RUNNING,WAITING] [-o table|json|ndjson|csv]
+aws_explorer emr steps <id>     [-r us-east-1] [--limit 50] [--status FAILED] [-o …]
+aws_explorer emr instances <id> [-r us-east-1] [--limit N] [-o …]
+aws_explorer emr apps <id>      [-r us-east-1] [-o …]
 ```
 
 ```bash
@@ -902,9 +932,10 @@ The clusters JSON exposes `state`, `releaseLabel`, `applications`,
 region in scope.
 
 **IAM permissions.** Read-only:
-`elasticmapreduce:{ListClusters,DescribeCluster,ListSteps}`. Per-region or
-per-cluster denials degrade that part of the dashboard with a logged note and
-never abort the session.
+`elasticmapreduce:{ListClusters,DescribeCluster,ListSteps,ListInstances}` (plus
+the [S3 browser](#s3-tui-usage)'s `s3:*` read actions for the `L` log jump).
+Per-region or per-cluster denials degrade that part of the dashboard with a
+logged note and never abort the session.
 
 ## Bill Usage
 

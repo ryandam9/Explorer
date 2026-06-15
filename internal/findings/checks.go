@@ -127,6 +127,20 @@ var checkRegistry = []CheckMeta{
 		"trail not delivering to CloudWatch Logs — no metric filters or alarms on its events", SevInfo},
 	{CheckTrailMgmtEventsPartial, "TrailManagementEventsIncomplete",
 		"trail not recording all management read/write events, leaving gaps in the audit record", SevWarning},
+
+	// Amazon EMR category (AXE-043).
+	{CheckEMRIdleCluster, "EMRClusterIdle",
+		"EMR cluster idle in WAITING for over 24h — provisioned but doing no work", SevWarning},
+	{CheckEMRLongRunning, "EMRClusterLongRunning",
+		"long-running EMR cluster (up over 7 days) with no auto-termination policy", SevInfo},
+	{CheckEMRLatestStepFail, "EMRClusterLatestStepFailed",
+		"EMR cluster whose most recent step ended in a failure state", SevWarning},
+	{CheckEMRTerminatedErr, "EMRClusterTerminatedWithErrors",
+		"EMR cluster that terminated with errors (bootstrap/step/hardware failure)", SevCritical},
+	{CheckEMRNoLogURI, "EMRClusterNoLogDestination",
+		"EMR cluster with no S3 log URI — logs are lost when nodes terminate", SevWarning},
+	{CheckEMRNoSecurityConf, "EMRClusterNoSecurityConfiguration",
+		"EMR cluster without a security configuration (encryption not enforced)", SevWarning},
 }
 
 // Checks returns the registry of every known check, in declaration order.
