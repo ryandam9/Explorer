@@ -31,25 +31,6 @@ type rowT struct {
 	job    *Job
 }
 
-// resourceType maps the active tab to the model.Resource type string used for
-// console links.
-func (t tab) resourceType() string {
-	switch t {
-	case tabJobs:
-		return "job"
-	case tabCrawlers:
-		return "crawler"
-	case tabTriggers:
-		return "trigger"
-	case tabWorkflows:
-		return "workflow"
-	case tabConnections:
-		return "connection"
-	default:
-		return "database"
-	}
-}
-
 // specsAndRows returns the column layout and the unfiltered rows for a tab.
 func (mm *m) specsAndRows(t tab) ([]colSpec, []rowT) {
 	multi := len(mm.regions) > 1

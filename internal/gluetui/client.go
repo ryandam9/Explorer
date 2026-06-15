@@ -91,6 +91,24 @@ type JobRun struct {
 	Attempt    int32
 }
 
+// JobDef is a job's configuration, flattened for the definition detail panel
+// (AXE-029). DefaultArguments has secret-looking values redacted.
+type JobDef struct {
+	Name             string
+	Region           string
+	Role             string
+	GlueVersion      string
+	ExecutionClass   string
+	Worker           string
+	TimeoutMinutes   int32
+	MaxRetries       int32
+	Script           string
+	SecurityConfig   string
+	Connections      []string
+	BookmarkEnabled  bool
+	DefaultArguments map[string]string
+}
+
 // Inventory is the full set of Glue resources gathered across regions.
 type Inventory struct {
 	Jobs        []Job
@@ -412,6 +430,38 @@ func (c *Client) JobRuns(ctx context.Context, region, jobName string, limit int3
 		runs = append(runs, jr)
 	}
 	return runs, nil
+}
+
+// JobDefinition fetches a job's full configuration on demand (one GetJob call),
+// flattened for the detail panel with secret-looking arguments redacted.
+func (c *Client) JobDefinition(ctx context.Context, region, name string) (JobDef, error) {
+	out, err := c.clientFor(region).GetJob(ctx, &glue.GetJobInput{JobName: aws.String(name)})
+	if err != nil {
+		return JobDef{}, err
+	}
+	if out.Job == nil {
+		return JobDef{}, fmt.Errorf("job %q not found", name)
+	}
+	j := out.Job
+	def := JobDef{
+		Name: name, Region: region,
+		Role:             aws.ToString(j.Role),
+		GlueVersion:      aws.ToString(j.GlueVersion),
+		ExecutionClass:   string(j.ExecutionClass),
+		Worker:           workerSummary(*j),
+		TimeoutMinutes:   aws.ToInt32(j.Timeout),
+		MaxRetries:       j.MaxRetries,
+		SecurityConfig:   aws.ToString(j.SecurityConfiguration),
+		BookmarkEnabled:  j.DefaultArguments["--job-bookmark-option"] == "job-bookmark-enable",
+		DefaultArguments: redactArgs(j.DefaultArguments),
+	}
+	if j.Command != nil {
+		def.Script = aws.ToString(j.Command.ScriptLocation)
+	}
+	if j.Connections != nil {
+		def.Connections = j.Connections.Connections
+	}
+	return def, nil
 }
 
 func (c *Client) mapCrawler(region string, cr gluetypes.Crawler) Crawler {

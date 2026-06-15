@@ -1,6 +1,7 @@
 package gluetui
 
 import (
+	"strings"
 	"testing"
 	"time"
 )
@@ -132,5 +133,53 @@ func TestRowMatches(t *testing.T) {
 func TestShortTime(t *testing.T) {
 	if got := shortTime(time.Time{}); got != "—" {
 		t.Errorf("zero time = %q", got)
+	}
+}
+
+func TestRedactArgs(t *testing.T) {
+	in := map[string]string{
+		"--TempDir":             "s3://tmp/",
+		"--db-password":         "hunter2",
+		"--API_KEY":             "abc",
+		"--job-bookmark-option": "job-bookmark-enable",
+	}
+	out := redactArgs(in)
+	if out["--TempDir"] != "s3://tmp/" {
+		t.Errorf("non-secret altered: %q", out["--TempDir"])
+	}
+	if out["--db-password"] != "***" || out["--API_KEY"] != "***" {
+		t.Errorf("secret not redacted: %v", out)
+	}
+	if redactArgs(nil) != nil {
+		t.Error("nil args should yield nil")
+	}
+}
+
+func TestIsSecretKey(t *testing.T) {
+	for _, k := range []string{"--db-password", "--API_KEY", "--MySecretArg", "--auth-token", "--my-credential"} {
+		if !isSecretKey(k) {
+			t.Errorf("%q should be secret", k)
+		}
+	}
+	for _, k := range []string{"--TempDir", "--job-language", "--enable-metrics"} {
+		if isSecretKey(k) {
+			t.Errorf("%q should not be secret", k)
+		}
+	}
+}
+
+func TestDefBody(t *testing.T) {
+	mm := &m{def: JobDef{
+		Name: "etl", Role: "role/glue", GlueVersion: "4.0", Worker: "G.1X ×10",
+		TimeoutMinutes: 2880, MaxRetries: 1, Script: "s3://s/etl.py",
+		BookmarkEnabled:  true,
+		Connections:      []string{"prod-redshift"},
+		DefaultArguments: map[string]string{"--db-password": "***", "--TempDir": "s3://tmp/"},
+	}}
+	body := mm.defBody()
+	for _, want := range []string{"role/glue", "G.1X ×10", "enabled", "s3://s/etl.py", "--db-password = ***", "prod-redshift"} {
+		if !strings.Contains(body, want) {
+			t.Errorf("defBody missing %q:\n%s", want, body)
+		}
 	}
 }

@@ -60,6 +60,12 @@ type m struct {
 	runsErr     error
 	runsSel     int
 
+	// Job-definition overlay (d on a job).
+	defActive  bool
+	def        JobDef
+	defLoading bool
+	defErr     error
+
 	spinner   spinner.Model
 	toast     string
 	toastExp  time.Time
@@ -75,6 +81,11 @@ type runsMsg struct {
 	job  Job
 	runs []JobRun
 	err  error
+}
+
+type defMsg struct {
+	def JobDef
+	err error
 }
 
 type clearToastMsg struct{}
@@ -126,6 +137,14 @@ func (mm *m) loadRunsCmd(job Job) tea.Cmd {
 	}
 }
 
+func (mm *m) loadDefCmd(job Job) tea.Cmd {
+	return func() tea.Msg {
+		slog.Info("Loading Glue job definition", "job", job.Name, "region", job.Region)
+		def, err := mm.client.JobDefinition(mm.ctx, job.Region, job.Name)
+		return defMsg{def: def, err: err}
+	}
+}
+
 func toastCmd(d time.Duration) tea.Cmd {
 	return tea.Tick(d, func(time.Time) tea.Msg { return clearToastMsg{} })
 }
@@ -166,6 +185,11 @@ func (mm *m) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		mm.runs = msg.runs
 		mm.runsSel = 0
 
+	case defMsg:
+		mm.defLoading = false
+		mm.defErr = msg.err
+		mm.def = msg.def
+
 	case tea.KeyMsg:
 		cmds = append(cmds, mm.handleKey(msg)...)
 	}
@@ -191,6 +215,18 @@ func (mm *m) handleKey(msg tea.KeyMsg) []tea.Cmd {
 
 	if mm.showAbout {
 		mm.showAbout = false
+		return cmds
+	}
+
+	// Job-definition overlay: any key closes it (q still quits). Checked before
+	// the other guards since it floats over the dashboard.
+	if mm.defActive {
+		switch msg.String() {
+		case "q", "ctrl+c":
+			return []tea.Cmd{tea.Quit}
+		default:
+			mm.defActive = false
+		}
 		return cmds
 	}
 
@@ -274,6 +310,16 @@ func (mm *m) handleKey(msg tea.KeyMsg) []tea.Cmd {
 				mm.runs = nil
 				mm.runsErr = nil
 				cmds = append(cmds, mm.loadRunsCmd(job), mm.spinner.Tick)
+			}
+		}
+	case "d":
+		if mm.tab == tabJobs {
+			if job, ok := mm.selectedJob(); ok {
+				mm.defActive = true
+				mm.defLoading = true
+				mm.def = JobDef{}
+				mm.defErr = nil
+				cmds = append(cmds, mm.loadDefCmd(job), mm.spinner.Tick)
 			}
 		}
 	case "o":

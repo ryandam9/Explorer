@@ -74,7 +74,7 @@ findings. This document closes that gap.
 | [AXE-026](#axe-026) | `glue` interactive dashboard TUI | **P1** · ✅ shipped |
 | [AXE-027](#axe-027) | Job-run history view (state · duration · DPU-hours · error) | **P1** · ✅ shipped |
 | [AXE-028](#axe-028) | Jump from a job run to its CloudWatch logs | **P2** |
-| [AXE-029](#axe-029) | Job definition / settings detail panel | **P2** |
+| [AXE-029](#axe-029) | Job definition / settings detail panel | **P2** · ✅ shipped |
 | [AXE-030](#axe-030) | CLI twins (`glue jobs` / `runs` / `crawlers` / …) | **P2** |
 | [AXE-031](#axe-031) | `glue` audit category (health & cost findings) | **P2** |
 | [AXE-032](#axe-032) | Glue console deep links | **P3** · ✅ shipped |
@@ -345,6 +345,12 @@ The log **stream** is the `JobRunId` (continuous logging uses
 ---
 
 ### AXE-029 — Job definition / settings detail panel {#axe-029}
+
+> **Status: ✅ shipped** — `d` on a job in the dashboard opens an overlay with
+> role, Glue version, execution class, worker, timeout, retries, script S3
+> location, connections, security config, job-bookmark option and default
+> arguments (secret-looking values redacted), fetched on demand via one
+> `GetJob` call. Redaction/render helpers are fixture-tested.
 
 **Problem.** "What is this job actually configured with?" — role, script, worker
 type, version, timeout, retries, bookmarks, connections, default arguments. Today

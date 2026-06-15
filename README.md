@@ -758,6 +758,7 @@ Run history (Enter on a job):
 | `Tab` / `Shift+Tab` | Switch pane |
 | `↑/↓` (`j/k`) | Move selection |
 | `Enter` | Open the selected job's run history |
+| `d` | Show the selected job's definition (role, version, worker, script, connections, args — secrets redacted) |
 | `/` | Filter the current pane |
 | `o` | Open the selected resource in the AWS console |
 | `r` | Refresh |
@@ -769,7 +770,7 @@ runs that report no `DPUSeconds` (still running, or legacy jobs) show no figure
 rather than `$0.00`.
 
 **IAM permissions.** Read-only:
-`glue:{GetJobs,GetJobRuns,GetCrawlers,GetTriggers,ListWorkflows,GetConnections,GetDatabases}`
+`glue:{GetJobs,GetJob,GetJobRuns,GetCrawlers,GetTriggers,ListWorkflows,GetConnections,GetDatabases}`
 and `sts:GetCallerIdentity` (for ARN/console links). Per-region or per-listing
 denials degrade that part of the dashboard with a logged note and never abort
 the session.

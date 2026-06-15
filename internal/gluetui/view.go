@@ -29,10 +29,53 @@ func (mm *m) View() string {
 	sb.WriteString(ui.StatusBar(mm.width, mm.statusLeft(), mm.helpHints()))
 
 	frame := mm.applyToast(sb.String())
+	if mm.defActive {
+		title := "Job — " + mm.def.Name
+		if mm.defLoading {
+			title = "Job definition"
+		}
+		frame = ui.OverlayCenter(frame, ui.AboutView(title, mm.defBody(), ui.AboutWidth(mm.width)), mm.width, mm.height)
+	}
 	if mm.showAbout {
 		frame = ui.OverlayCenter(frame, ui.AboutView("About — AWS Glue", glueAboutText, ui.AboutWidth(mm.width)), mm.width, mm.height)
 	}
 	return frame
+}
+
+// defBody renders the job-definition overlay's contents (loading / error /
+// detail). Kept pure over the model's def state so it is straightforward to read.
+func (mm *m) defBody() string {
+	if mm.defLoading {
+		return mm.spinner.View() + " Loading job definition…"
+	}
+	if mm.defErr != nil {
+		return "Could not load definition: " + mm.defErr.Error()
+	}
+	d := mm.def
+	var b strings.Builder
+	row := func(label, value string) {
+		if value == "" {
+			value = "—"
+		}
+		b.WriteString(fmt.Sprintf("%-16s %s\n", label, value))
+	}
+	row("Role", d.Role)
+	row("Glue version", d.GlueVersion)
+	row("Execution class", d.ExecutionClass)
+	row("Worker", d.Worker)
+	row("Timeout", fmt.Sprintf("%d min", d.TimeoutMinutes))
+	row("Max retries", fmt.Sprintf("%d", d.MaxRetries))
+	row("Job bookmark", map[bool]string{true: "enabled", false: "disabled"}[d.BookmarkEnabled])
+	row("Script", d.Script)
+	row("Connections", strings.Join(d.Connections, ", "))
+	row("Security config", d.SecurityConfig)
+	if len(d.DefaultArguments) > 0 {
+		b.WriteString("\nDefault arguments (secrets redacted):\n")
+		for _, k := range sortedKeys(d.DefaultArguments) {
+			b.WriteString(fmt.Sprintf("  %s = %s\n", k, d.DefaultArguments[k]))
+		}
+	}
+	return strings.TrimRight(b.String(), "\n")
 }
 
 const glueAboutText = "This is the AWS Glue dashboard. Tab across Jobs, Crawlers, Triggers, " +
@@ -208,7 +251,7 @@ func (mm *m) helpHints() []ui.KeyHint {
 		ui.H("↑/↓", "rows"),
 	}
 	if mm.tab == tabJobs {
-		hints = append(hints, ui.H("Enter", "runs"))
+		hints = append(hints, ui.H("Enter", "runs"), ui.H("d", "definition"))
 	}
 	hints = append(hints,
 		ui.H("/", "filter"),
