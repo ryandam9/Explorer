@@ -155,6 +155,8 @@ func TestExportHTMLStructure(t *testing.T) {
 		"<nav class=\"toc\">",
 		"<a href=\"#subnets-1\">Subnets (1)</a>", // TOC anchor matches blackfriday's heading id
 		"<table>",
+		"cdn.datatables.net", // DataTables stylesheet/script loaded
+		"new DataTable(t,",   // resource tables initialized as DataTables
 	} {
 		if !strings.Contains(html, want) {
 			t.Errorf("export HTML missing %q", want)

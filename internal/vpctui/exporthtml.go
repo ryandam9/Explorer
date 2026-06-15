@@ -13,12 +13,12 @@ import (
 // ---------------------------------------------------------------------------
 // HTML export
 //
-// exportHTML renders the same content as exportMarkdown into a self-contained,
-// styled HTML document: a sticky table-of-contents sidebar (built from the
-// level-2 section headings), a header banner, and the Markdown converted to
-// HTML. Wide resource tables scroll horizontally so an arbitrary number of
-// columns stays readable. The output embeds its own CSS so the file works
-// offline straight from disk.
+// exportHTML renders the same content as exportMarkdown into a styled HTML
+// document: a sticky table-of-contents sidebar (built from the level-2 section
+// headings), a header banner, and the Markdown converted to HTML. Resource
+// tables are turned into interactive DataTables (per-table search + column
+// sorting) via a CDN; opened offline they degrade to plain, horizontally
+// scrolling tables. The page's own CSS is embedded.
 // ---------------------------------------------------------------------------
 
 type htmlTOCEntry struct {
@@ -99,6 +99,7 @@ const reportHTMLTemplate = `<!DOCTYPE html>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>{{.Title}}</title>
+<link rel="stylesheet" href="https://cdn.datatables.net/2.1.8/css/dataTables.dataTables.min.css">
 <style>
 :root {
   --bg:#f6f8fa; --panel:#ffffff; --border:#d0d7de; --text:#1f2328; --muted:#656d76;
@@ -156,6 +157,26 @@ hr { border:none; border-top:1px solid var(--border); margin:2rem 0; }
 {{.Content}}
 </main>
 </div>
+<script src="https://code.jquery.com/jquery-3.7.1.min.js"></script>
+<script src="https://cdn.datatables.net/2.1.8/js/dataTables.min.js"></script>
+<script>
+// Turn each resource table into a searchable, sortable DataTable. The small
+// two-column Summary and VPC tables are left as plain tables. If the CDN can't
+// load (offline), the tables still render as styled HTML.
+document.addEventListener('DOMContentLoaded', function () {
+  if (typeof DataTable === 'undefined') { return; }
+  document.querySelectorAll('main table').forEach(function (t) {
+    if (t.querySelectorAll('thead th').length <= 2) { return; }
+    new DataTable(t, {
+      paging: true,
+      pageLength: -1,
+      lengthMenu: [[25, 50, 100, -1], [25, 50, 100, 'All']],
+      order: [],
+      stateSave: false
+    });
+  });
+});
+</script>
 </body>
 </html>
 `
