@@ -69,6 +69,24 @@ type Step struct {
 	Args            []string
 }
 
+// Instance is one EC2 instance in a cluster, flattened for the instances twin.
+type Instance struct {
+	ID         string
+	EC2ID      string
+	Type       string
+	Market     string // ON_DEMAND / SPOT
+	State      string
+	PrivateDNS string
+	PublicDNS  string
+	Group      string // instance group or fleet id
+}
+
+// AppInfo is one installed application and its version.
+type AppInfo struct {
+	Name    string
+	Version string
+}
+
 // Inventory is the full set of EMR clusters gathered across regions.
 type Inventory struct {
 	Clusters []Cluster
@@ -241,6 +259,67 @@ func (c *Client) Steps(ctx context.Context, region, clusterID string, limit int)
 		}
 	}
 	return steps, nil
+}
+
+// Instances fetches a cluster's EC2 instances (capped to limit).
+func (c *Client) Instances(ctx context.Context, region, clusterID string, limit int) ([]Instance, error) {
+	cl := c.clientFor(region)
+	var out []Instance
+	pag := emr.NewListInstancesPaginator(cl, &emr.ListInstancesInput{ClusterId: aws.String(clusterID)})
+	for pag.HasMorePages() {
+		page, err := pag.NextPage(ctx)
+		if err != nil {
+			return out, err
+		}
+		for _, in := range page.Instances {
+			out = append(out, instanceFrom(in))
+			if limit > 0 && len(out) >= limit {
+				return out, nil
+			}
+		}
+	}
+	return out, nil
+}
+
+// Apps fetches a cluster's installed applications and versions (one
+// DescribeCluster call).
+func (c *Client) Apps(ctx context.Context, region, clusterID string) ([]AppInfo, error) {
+	out, err := c.clientFor(region).DescribeCluster(ctx, &emr.DescribeClusterInput{ClusterId: aws.String(clusterID)})
+	if err != nil {
+		return nil, err
+	}
+	if out.Cluster == nil {
+		return nil, fmt.Errorf("cluster %q not found", clusterID)
+	}
+	apps := make([]AppInfo, 0, len(out.Cluster.Applications))
+	for _, a := range out.Cluster.Applications {
+		name := aws.ToString(a.Name)
+		if name == "" {
+			continue
+		}
+		apps = append(apps, AppInfo{Name: name, Version: aws.ToString(a.Version)})
+	}
+	return apps, nil
+}
+
+func instanceFrom(in emrtypes.Instance) Instance {
+	out := Instance{
+		ID:         aws.ToString(in.Id),
+		EC2ID:      aws.ToString(in.Ec2InstanceId),
+		Type:       aws.ToString(in.InstanceType),
+		Market:     string(in.Market),
+		PrivateDNS: aws.ToString(in.PrivateDnsName),
+		PublicDNS:  aws.ToString(in.PublicDnsName),
+	}
+	if g := aws.ToString(in.InstanceGroupId); g != "" {
+		out.Group = g
+	} else if f := aws.ToString(in.InstanceFleetId); f != "" {
+		out.Group = f
+	}
+	if in.Status != nil {
+		out.State = string(in.Status.State)
+	}
+	return out
 }
 
 // clusterFromSummary maps a ListClusters summary to the dashboard's Cluster.

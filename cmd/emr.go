@@ -48,7 +48,7 @@ config's aws.regions list is used.`,
 
 		regions, scanAll := emrRegionScope()
 
-		model, err := emrtui.NewModel(ctx, emrCfg, regions, scanAll, AppConfig)
+		model, err := emrtui.NewModel(ctx, emrCfg, regions, scanAll, AppConfig, configFilePath())
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "Error initializing EMR dashboard: %v\n", err)
 			os.Exit(1)
@@ -143,6 +143,65 @@ var emrStepsCmd = &cobra.Command{
 	},
 }
 
+var emrInstancesLimit int
+
+// emrRegionForCommand resolves the region a per-cluster twin should query.
+func emrRegionForCommand(client *emrtui.Client) string {
+	region := awsRegion
+	if region == "" && len(client.Regions()) > 0 {
+		region = client.Regions()[0]
+	}
+	return region
+}
+
+var emrInstancesCmd = &cobra.Command{
+	Use:     "instances <cluster-id>",
+	Short:   "List an EMR cluster's EC2 instances",
+	Args:    cobra.ExactArgs(1),
+	Example: "  aws_explorer emr instances j-1A2B3C4D5 -r us-east-1 -o json",
+	RunE: func(cmd *cobra.Command, args []string) error {
+		if err := output.ValidateFormat(outputFormat); err != nil {
+			return err
+		}
+		ctx := context.Background()
+		SilenceScanLogs()
+		client, err := newEMRClient(ctx)
+		if err != nil {
+			return err
+		}
+		region := emrRegionForCommand(client)
+		instances, err := client.Instances(ctx, region, args[0], emrInstancesLimit)
+		if err != nil {
+			return fmt.Errorf("failed to get instances for cluster %q in %s: %w", args[0], region, err)
+		}
+		return emrtui.RenderInstances(os.Stdout, instances, outputFormat, noHeader)
+	},
+}
+
+var emrAppsCmd = &cobra.Command{
+	Use:     "apps <cluster-id>",
+	Short:   "List an EMR cluster's installed applications and versions",
+	Args:    cobra.ExactArgs(1),
+	Example: "  aws_explorer emr apps j-1A2B3C4D5 -r us-east-1",
+	RunE: func(cmd *cobra.Command, args []string) error {
+		if err := output.ValidateFormat(outputFormat); err != nil {
+			return err
+		}
+		ctx := context.Background()
+		SilenceScanLogs()
+		client, err := newEMRClient(ctx)
+		if err != nil {
+			return err
+		}
+		region := emrRegionForCommand(client)
+		apps, err := client.Apps(ctx, region, args[0])
+		if err != nil {
+			return fmt.Errorf("failed to get applications for cluster %q in %s: %w", args[0], region, err)
+		}
+		return emrtui.RenderApps(os.Stdout, apps, outputFormat, noHeader)
+	},
+}
+
 func init() {
 	emrCmd.Flags().StringVar(&emrTheme, "theme", defaultThemeName, "Color theme ("+strings.Join(ui.ThemeNames(), ", ")+")")
 	registerAlwaysTUIFlag(emrCmd)
@@ -153,6 +212,8 @@ func init() {
 	emrStepsCmd.Flags().IntVar(&emrStepsLimit, "limit", 50, "maximum number of steps to fetch")
 	emrStepsCmd.Flags().StringVar(&emrStepsStatus, "status", "", "only show steps in this state (e.g. FAILED, COMPLETED)")
 
-	emrCmd.AddCommand(emrClustersCmd, emrStepsCmd)
+	emrInstancesCmd.Flags().IntVar(&emrInstancesLimit, "limit", 0, "maximum number of instances to fetch (0 = all)")
+
+	emrCmd.AddCommand(emrClustersCmd, emrStepsCmd, emrInstancesCmd, emrAppsCmd)
 	rootCmd.AddCommand(emrCmd)
 }

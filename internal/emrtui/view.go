@@ -222,6 +222,7 @@ func (mm *m) helpHints() []ui.KeyHint {
 	if mm.stepsActive {
 		return []ui.KeyHint{
 			ui.H("↑/↓", "steps"),
+			ui.H("L", "logs"),
 			ui.H("y", "copy reason"),
 			ui.H("Esc", "back"),
 			ui.H("i", "about"),
@@ -232,6 +233,7 @@ func (mm *m) helpHints() []ui.KeyHint {
 		ui.H("↑/↓", "rows"),
 		ui.H("Enter", "steps"),
 		ui.H("d", "detail"),
+		ui.H("L", "logs"),
 		ui.H("/", "filter"),
 		ui.H("o", "console"),
 		ui.H("r", "refresh"),

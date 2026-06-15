@@ -187,6 +187,81 @@ func RenderSteps(w io.Writer, steps []Step, format string, noHeader bool) error 
 	}
 }
 
+// --- Instances -------------------------------------------------------------
+
+// RenderInstances writes a cluster's instances in the requested format.
+func RenderInstances(w io.Writer, instances []Instance, format string, noHeader bool) error {
+	switch strings.ToLower(format) {
+	case "json":
+		return writeJSON(w, instances)
+	case "ndjson":
+		enc := json.NewEncoder(w)
+		for _, in := range instances {
+			if err := enc.Encode(in); err != nil {
+				return err
+			}
+		}
+		return nil
+	case "csv":
+		cw := csv.NewWriter(w)
+		if !noHeader {
+			_ = cw.Write([]string{"ID", "EC2ID", "Type", "Market", "State", "PrivateDNS", "PublicDNS", "Group"})
+		}
+		for _, in := range instances {
+			_ = cw.Write([]string{in.ID, in.EC2ID, in.Type, in.Market, in.State, in.PrivateDNS, in.PublicDNS, in.Group})
+		}
+		cw.Flush()
+		return cw.Error()
+	default:
+		tw := tabwriter.NewWriter(w, 0, 0, 2, ' ', 0)
+		if !noHeader {
+			fmt.Fprintln(tw, "EC2-ID\tTYPE\tMARKET\tSTATE\tPRIVATE-DNS")
+		}
+		for _, in := range instances {
+			fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%s\n",
+				dash(in.EC2ID), dash(in.Type), dash(in.Market), dash(in.State), dash(in.PrivateDNS))
+		}
+		return tw.Flush()
+	}
+}
+
+// --- Applications ----------------------------------------------------------
+
+// RenderApps writes a cluster's installed applications in the requested format.
+func RenderApps(w io.Writer, apps []AppInfo, format string, noHeader bool) error {
+	switch strings.ToLower(format) {
+	case "json":
+		return writeJSON(w, apps)
+	case "ndjson":
+		enc := json.NewEncoder(w)
+		for _, a := range apps {
+			if err := enc.Encode(a); err != nil {
+				return err
+			}
+		}
+		return nil
+	case "csv":
+		cw := csv.NewWriter(w)
+		if !noHeader {
+			_ = cw.Write([]string{"Name", "Version"})
+		}
+		for _, a := range apps {
+			_ = cw.Write([]string{a.Name, a.Version})
+		}
+		cw.Flush()
+		return cw.Error()
+	default:
+		tw := tabwriter.NewWriter(w, 0, 0, 2, ' ', 0)
+		if !noHeader {
+			fmt.Fprintln(tw, "APPLICATION\tVERSION")
+		}
+		for _, a := range apps {
+			fmt.Fprintf(tw, "%s\t%s\n", a.Name, dash(a.Version))
+		}
+		return tw.Flush()
+	}
+}
+
 // FilterStepsByStatus returns only the steps whose state matches status
 // (case-insensitive); an empty status returns all steps.
 func FilterStepsByStatus(steps []Step, status string) []Step {
