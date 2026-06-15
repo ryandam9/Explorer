@@ -31,6 +31,9 @@ func (mm *m) View() string {
 	if mm.detailActive {
 		frame = ui.OverlayCenter(frame, ui.AboutView("Cluster — "+mm.detailCluster.Name, mm.detailBody(), ui.AboutWidth(mm.width)), mm.width, mm.height)
 	}
+	if mm.appUIActive {
+		frame = ui.OverlayCenter(frame, ui.AboutView("Application UIs — "+mm.appUICluster.Name, mm.appUIBody(), ui.AboutWidth(mm.width)), mm.width, mm.height)
+	}
 	if mm.showAbout {
 		frame = ui.OverlayCenter(frame, ui.AboutView("About — Amazon EMR", emrAboutText, ui.AboutWidth(mm.width)), mm.width, mm.height)
 	}
@@ -43,6 +46,9 @@ const emrAboutText = "This is the Amazon EMR dashboard. Each row is a cluster, c
 	"Press Enter (or s) on a cluster to see its step history: state, duration and " +
 	"action-on-failure, with the failure reason inline on a failed step. Press d for " +
 	"the cluster detail (release, log URI, role, EC2 attributes).\n\n" +
+	"Press L to open the cluster's (or a step's) logs in the S3 browser, and u to open " +
+	"a persistent application UI (Spark History, YARN Timeline, Tez) — hosted off-cluster, " +
+	"so no SSH tunnel is needed.\n\n" +
 	"Press o on a cluster to open it in the AWS console, / to filter, and r to refresh."
 
 // detailBody renders the cluster-detail overlay's contents.
@@ -72,6 +78,28 @@ func (mm *m) detailBody() string {
 	row("Availability zone", cl.AvailabilityAZ)
 	row("EC2 key", cl.KeyName)
 	return strings.TrimRight(b.String(), "\n")
+}
+
+// appUIBody renders the persistent application-UI picker overlay: a short menu
+// while idle, or a spinner while the presigned URL is being generated.
+func (mm *m) appUIBody() string {
+	if mm.appUILoading {
+		return mm.spinner.View() + " Generating " + appUIOptions[mm.appUISel].Label + " link…\n\n" +
+			"This provisions an off-cluster UI and can take a few seconds."
+	}
+	var b strings.Builder
+	b.WriteString("Open a persistent (off-cluster) application UI — no SSH tunnel needed:\n\n")
+	for i, opt := range appUIOptions {
+		cursor := "  "
+		line := opt.Label
+		if i == mm.appUISel {
+			cursor = "▸ "
+			line = lipgloss.NewStyle().Foreground(lipgloss.Color(ui.ColorAccent())).Bold(true).Render(line)
+		}
+		b.WriteString(cursor + line + "\n")
+	}
+	b.WriteString("\n↑/↓ choose · Enter open · Esc cancel")
+	return b.String()
 }
 
 func boolLabel(b bool) string {
@@ -234,6 +262,7 @@ func (mm *m) helpHints() []ui.KeyHint {
 		ui.H("Enter", "steps"),
 		ui.H("d", "detail"),
 		ui.H("L", "logs"),
+		ui.H("u", "app UIs"),
 		ui.H("/", "filter"),
 		ui.H("o", "console"),
 		ui.H("r", "refresh"),

@@ -892,6 +892,7 @@ Step history (Enter on a cluster):
 | `Enter` / `s` | Open the selected cluster's step history |
 | `d` | Show the selected cluster's detail (release, log URI, role, EC2 attributes) |
 | `L` | Open the cluster's (or selected step's) logs in the S3 browser |
+| `u` | Open a persistent application UI (Spark History / YARN Timeline / Tez) |
 | `/` | Filter the cluster list |
 | `o` | Open the selected cluster in the AWS console |
 | `r` | Refresh |
@@ -902,6 +903,11 @@ Step history (Enter on a cluster):
 (`<LogUri>/<cluster-id>/`), or at a specific step's folder
 (`…/steps/<step-id>/`) from the step view. Clusters with no `LogUri` show a
 toast instead.
+
+`u` provisions (or reuses) the cluster's **persistent application UIs** —
+Spark History Server, YARN Timeline Server or Tez UI — and opens a presigned
+link to the chosen one. These are hosted **off-cluster**, so the link needs no
+SSH tunnel and stays valid for 30 days after the application terminates.
 
 > **Scope note.** This dashboard covers the EMR **control plane** (clusters,
 > steps) via the AWS API. The on-cluster services — live YARN apps, HBase
@@ -932,10 +938,11 @@ The clusters JSON exposes `state`, `releaseLabel`, `applications`,
 region in scope.
 
 **IAM permissions.** Read-only:
-`elasticmapreduce:{ListClusters,DescribeCluster,ListSteps,ListInstances}` (plus
-the [S3 browser](#s3-tui-usage)'s `s3:*` read actions for the `L` log jump).
-Per-region or per-cluster denials degrade that part of the dashboard with a
-logged note and never abort the session.
+`elasticmapreduce:{ListClusters,DescribeCluster,ListSteps,ListInstances}`, plus
+`elasticmapreduce:{CreatePersistentAppUI,DescribePersistentAppUI,GetPersistentAppUIPresignedURL}`
+for the `u` application-UI links, and the [S3 browser](#s3-tui-usage)'s `s3:*`
+read actions for the `L` log jump. Per-region or per-cluster denials degrade
+that part of the dashboard with a logged note and never abort the session.
 
 ## Bill Usage
 

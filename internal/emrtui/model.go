@@ -50,6 +50,12 @@ type m struct {
 	detailActive  bool
 	detailCluster Cluster
 
+	// Persistent application-UI picker (u on a cluster).
+	appUIActive  bool
+	appUICluster Cluster
+	appUISel     int
+	appUILoading bool
+
 	spinner   spinner.Model
 	toast     string
 	toastExp  time.Time
@@ -65,6 +71,12 @@ type stepsMsg struct {
 	cluster Cluster
 	steps   []Step
 	err     error
+}
+
+type appUIMsg struct {
+	label string
+	url   string
+	err   error
 }
 
 type clearToastMsg struct{}
@@ -118,6 +130,14 @@ func (mm *m) loadStepsCmd(cl Cluster) tea.Cmd {
 	}
 }
 
+func (mm *m) loadAppUICmd(cl Cluster, opt appUIOption) tea.Cmd {
+	return func() tea.Msg {
+		slog.Info("Generating EMR persistent app UI link", "cluster", cl.ID, "type", opt.UIType)
+		url, err := mm.client.PersistentAppUIURL(mm.ctx, cl.Region, cl.ARN, opt.UIType)
+		return appUIMsg{label: opt.Label, url: url, err: err}
+	}
+}
+
 func toastCmd(d time.Duration) tea.Cmd {
 	return tea.Tick(d, func(time.Time) tea.Msg { return clearToastMsg{} })
 }
@@ -164,6 +184,16 @@ func (mm *m) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		mm.steps = msg.steps
 		mm.stepsSel = 0
 
+	case appUIMsg:
+		mm.appUILoading = false
+		mm.appUIActive = false
+		if msg.err != nil {
+			mm.setToast(msg.label + ": " + msg.err.Error())
+			cmds = append(cmds, toastCmd(5*time.Second))
+		} else {
+			mm.openURL(msg.url, msg.label+" link copied", &cmds)
+		}
+
 	case tea.KeyMsg:
 		cmds = append(cmds, mm.handleKey(msg)...)
 	}
@@ -199,6 +229,35 @@ func (mm *m) handleKey(msg tea.KeyMsg) []tea.Cmd {
 			return []tea.Cmd{tea.Quit}
 		default:
 			mm.detailActive = false
+		}
+		return cmds
+	}
+
+	// Persistent application-UI picker.
+	if mm.appUIActive {
+		if mm.appUILoading {
+			if msg.String() == "ctrl+c" || msg.String() == "q" {
+				return []tea.Cmd{tea.Quit}
+			}
+			return cmds // ignore keys while the link is being generated
+		}
+		switch msg.String() {
+		case "q", "ctrl+c":
+			return []tea.Cmd{tea.Quit}
+		case "esc":
+			mm.appUIActive = false
+		case "up", "k":
+			if mm.appUISel > 0 {
+				mm.appUISel--
+			}
+		case "down", "j":
+			if mm.appUISel < len(appUIOptions)-1 {
+				mm.appUISel++
+			}
+		case "enter":
+			mm.appUILoading = true
+			mm.setToast("Generating " + appUIOptions[mm.appUISel].Label + " link…")
+			cmds = append(cmds, mm.loadAppUICmd(mm.appUICluster, appUIOptions[mm.appUISel]), mm.spinner.Tick, toastCmd(5*time.Second))
 		}
 		return cmds
 	}
@@ -290,6 +349,18 @@ func (mm *m) handleKey(msg tea.KeyMsg) []tea.Cmd {
 		if cl, ok := mm.selectedCluster(); ok {
 			mm.jumpToClusterLogs(cl, &cmds)
 		}
+	case "u":
+		if cl, ok := mm.selectedCluster(); ok {
+			if cl.ARN == "" {
+				mm.setToast("Cluster has no ARN for a persistent UI")
+				cmds = append(cmds, toastCmd(3*time.Second))
+			} else {
+				mm.appUIActive = true
+				mm.appUICluster = cl
+				mm.appUISel = 0
+				mm.appUILoading = false
+			}
+		}
 	case "o":
 		mm.openConsole(&cmds)
 	case ui.KeyAbout:
@@ -306,11 +377,20 @@ func (mm *m) openConsole(cmds *[]tea.Cmd) {
 		return
 	}
 	url, _ := consolelink.URL(res)
+	mm.openURL(url, "console URL", cmds)
+}
+
+// openURL copies the URL and opens it in a browser when running locally,
+// toasting "<what> copied" (or "Opened in browser · …" when it launched).
+func (mm *m) openURL(url, what string, cmds *[]tea.Cmd) {
+	if url == "" {
+		return
+	}
 	_ = clipboard.WriteAll(url)
 	if consolelink.CanOpenBrowser() && consolelink.Open(url) == nil {
-		mm.setToast("Opened in browser · copied console URL")
+		mm.setToast("Opened in browser · " + what)
 	} else {
-		mm.setToast("Copied console URL")
+		mm.setToast(what + " copied")
 	}
 	*cmds = append(*cmds, toastCmd(3*time.Second))
 }
