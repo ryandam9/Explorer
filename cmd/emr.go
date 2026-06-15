@@ -9,6 +9,8 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/spf13/cobra"
 
+	"github.com/ryandam9/aws_explorer/internal/config"
+	"github.com/ryandam9/aws_explorer/internal/emrconn"
 	"github.com/ryandam9/aws_explorer/internal/emrtui"
 	"github.com/ryandam9/aws_explorer/internal/output"
 	"github.com/ryandam9/aws_explorer/internal/ui"
@@ -202,6 +204,50 @@ var emrAppsCmd = &cobra.Command{
 	},
 }
 
+var emrYarnCmd = &cobra.Command{
+	Use:   "yarn <cluster-id>",
+	Short: "List a cluster's live YARN applications (requires on-cluster access)",
+	Long: `List the live YARN applications running on an EMR cluster, read from the
+ResourceManager REST API on the cluster's primary node.
+
+This needs on-cluster access (emr.onCluster in config) because YARN has no AWS
+API — it runs on the cluster's primary node, reachable only from inside the VPC
+(directly, or through a SOCKS proxy such as an 'ssh -D' dynamic tunnel).`,
+	Args:    cobra.ExactArgs(1),
+	Example: "  aws_explorer emr yarn j-1A2B3C4D5 -r us-east-1 -o json",
+	RunE: func(cmd *cobra.Command, args []string) error {
+		if err := output.ValidateFormat(outputFormat); err != nil {
+			return err
+		}
+		ctx := context.Background()
+		SilenceScanLogs()
+
+		var onCluster config.OnClusterConfig
+		if AppConfig != nil {
+			onCluster = AppConfig.EMR.OnCluster
+		}
+		dialer, err := emrconn.New(onCluster)
+		if err != nil {
+			return fmt.Errorf("on-cluster access not available: %w\n\nEnable it in config.yaml under emr.onCluster (mode: socks|direct)", err)
+		}
+
+		client, err := newEMRClient(ctx)
+		if err != nil {
+			return err
+		}
+		region := emrRegionForCommand(client)
+		dns, err := client.MasterDNS(ctx, region, args[0])
+		if err != nil {
+			return fmt.Errorf("failed to resolve cluster %q primary DNS in %s: %w", args[0], region, err)
+		}
+		apps, _, err := emrtui.FetchYARN(ctx, dialer, dns)
+		if err != nil {
+			return fmt.Errorf("failed to query YARN on cluster %q: %w", args[0], err)
+		}
+		return emrtui.RenderYARNApps(os.Stdout, apps, outputFormat, noHeader)
+	},
+}
+
 func init() {
 	emrCmd.Flags().StringVar(&emrTheme, "theme", defaultThemeName, "Color theme ("+strings.Join(ui.ThemeNames(), ", ")+")")
 	registerAlwaysTUIFlag(emrCmd)
@@ -214,6 +260,6 @@ func init() {
 
 	emrInstancesCmd.Flags().IntVar(&emrInstancesLimit, "limit", 0, "maximum number of instances to fetch (0 = all)")
 
-	emrCmd.AddCommand(emrClustersCmd, emrStepsCmd, emrInstancesCmd, emrAppsCmd)
+	emrCmd.AddCommand(emrClustersCmd, emrStepsCmd, emrInstancesCmd, emrAppsCmd, emrYarnCmd)
 	rootCmd.AddCommand(emrCmd)
 }

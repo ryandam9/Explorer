@@ -281,6 +281,18 @@ func (c *Client) Instances(ctx context.Context, region, clusterID string, limit 
 	return out, nil
 }
 
+// MasterDNS returns a cluster's primary-node DNS (for the on-cluster browsers).
+func (c *Client) MasterDNS(ctx context.Context, region, clusterID string) (string, error) {
+	out, err := c.clientFor(region).DescribeCluster(ctx, &emr.DescribeClusterInput{ClusterId: aws.String(clusterID)})
+	if err != nil {
+		return "", err
+	}
+	if out.Cluster == nil {
+		return "", fmt.Errorf("cluster %q not found", clusterID)
+	}
+	return aws.ToString(out.Cluster.MasterPublicDnsName), nil
+}
+
 // Apps fetches a cluster's installed applications and versions (one
 // DescribeCluster call).
 func (c *Client) Apps(ctx context.Context, region, clusterID string) ([]AppInfo, error) {

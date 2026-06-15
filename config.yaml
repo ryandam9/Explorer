@@ -315,6 +315,27 @@ trail:
     # Maximum number of events the `--tui` feed keeps. 0 uses the built-in
     # default (200). `--limit` overrides it.
     maxevents: 200
+emr:
+    # Optional on-cluster access for the `emr` dashboard's live YARN browser
+    # (and, later, HBase/Oozie). These run as REST daemons on a cluster's
+    # primary node and have NO AWS API — they are reachable only from inside the
+    # cluster's VPC. This is OFF by default; it is the one place the tool reaches
+    # outside the AWS API surface, so you must opt in.
+    oncluster:
+        # off    - features disabled (default)
+        # direct - the tool runs inside the VPC; plain HTTP to the primary node
+        # socks  - route through a SOCKS5 proxy, e.g. an `ssh -D 8157` tunnel
+        #          (the pattern AWS documents for the cluster web UIs)
+        mode: "off"
+        # host:port of the SOCKS5 proxy used in `socks` mode.
+        socksproxy: 127.0.0.1:8157
+        # Per-request timeout in seconds (0 = default 5s).
+        timeoutseconds: 5
+        # Daemon ports (0 = EMR defaults: yarn 8088, hbase 8080, oozie 11000).
+        ports:
+            yarn: 8088
+            hbase: 8080
+            oozie: 11000
 ui:
     theme: princess-parrot
     themes:

@@ -6,6 +6,7 @@ import (
 
 	"github.com/charmbracelet/lipgloss"
 
+	"github.com/ryandam9/aws_explorer/internal/emrconn"
 	"github.com/ryandam9/aws_explorer/internal/ui"
 )
 
@@ -21,6 +22,8 @@ func (mm *m) View() string {
 
 	if mm.stepsActive {
 		sb.WriteString(mm.renderSteps())
+	} else if mm.yarnActive {
+		sb.WriteString(mm.renderYARN())
 	} else {
 		sb.WriteString(mm.renderTable())
 	}
@@ -215,6 +218,84 @@ func (mm *m) renderSteps() string {
 	return boxStyle(mm.width, mm.height-4).Render(b.String())
 }
 
+func (mm *m) renderYARN() string {
+	specs := []colSpec{{"APPLICATION", 30}, {"STATE", 12}, {"FINAL", 11}, {"PROG", 6}, {"QUEUE", 12}, {"USER", 10}, {"ELAPSED", 0}}
+	contentW := mm.width - 4
+	if contentW < 20 {
+		contentW = 20
+	}
+	widths := resolveWidths(specs, contentW)
+
+	var b strings.Builder
+	b.WriteString(lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color(ui.ColorHeading())).
+		Render(fmt.Sprintf(" YARN — %s [%s]", mm.yarnCluster.Name, mm.yarnCluster.Region)) + "\n")
+	if mm.dialer != nil {
+		b.WriteString(lipgloss.NewStyle().Foreground(lipgloss.Color(ui.ColorMuted())).
+			Render(fmt.Sprintf("  via %s", mm.dialer.Mode())) + "\n")
+	}
+	b.WriteString("\n")
+
+	switch {
+	case mm.yarnLoading:
+		b.WriteString(fmt.Sprintf("  %s Querying the ResourceManager…\n", mm.spinner.View()))
+	case mm.yarnErr != nil && emrconn.IsUnreachable(mm.yarnErr):
+		// Reachability failure → render the actionable connect helper.
+		b.WriteString(emrconn.ConnectHelp(mm.yarnCluster.MasterDNS, yarnPort(mm.dialer)) + "\n")
+	case mm.yarnErr != nil:
+		b.WriteString("  " + lipgloss.NewStyle().Foreground(lipgloss.Color(ui.ColorError())).
+			Render("Could not load YARN apps: "+mm.yarnErr.Error()) + "\n")
+	case len(mm.yarnApps) == 0:
+		b.WriteString(lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color(ui.ColorHeading())).
+			Render(headerLine(specs, widths)) + "\n")
+		b.WriteString("  No applications reported by the ResourceManager.\n")
+	default:
+		b.WriteString(lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color(ui.ColorHeading())).
+			Render(headerLine(specs, widths)) + "\n")
+		visible := mm.height - 13
+		if visible < 3 {
+			visible = 3
+		}
+		start, end := visibleRange(mm.yarnSel, len(mm.yarnApps), visible)
+		for i := start; i < end; i++ {
+			a := mm.yarnApps[i]
+			cells := []cell{
+				{text: a.ID},
+				{text: stateLabel(a.State), color: stateColor(a.State)},
+				{text: a.FinalStatus, color: stateColor(a.FinalStatus)},
+				{text: fmt.Sprintf("%.0f%%", a.Progress)},
+				{text: a.Queue},
+				{text: a.User},
+				{text: a.elapsed()},
+			}
+			b.WriteString(renderRow(cells, widths, i == mm.yarnSel) + "\n")
+		}
+		// Cluster-metrics footer.
+		m := mm.yarnMetrics
+		b.WriteString("\n  " + lipgloss.NewStyle().Foreground(lipgloss.Color(ui.ColorText())).
+			Render(fmt.Sprintf("%d running · memory %s/%s · vcores %d/%d",
+				m.AppsRunning, mib(m.AllocatedMB), mib(m.TotalMB), m.AllocatedVCfg, m.TotalVC)) + "\n")
+	}
+
+	return boxStyle(mm.width, mm.height-4).Render(b.String())
+}
+
+// yarnPort returns the YARN daemon port for the connect helper (0 when no
+// dialer is configured).
+func yarnPort(d *emrconn.Dialer) int {
+	if d == nil {
+		return emrconn.DefaultYARNPort
+	}
+	return d.Port(emrconn.ServiceYARN)
+}
+
+// mib renders mebibytes as GiB when large enough, else MiB.
+func mib(mbytes int64) string {
+	if mbytes >= 1024 {
+		return fmt.Sprintf("%.1fGB", float64(mbytes)/1024)
+	}
+	return fmt.Sprintf("%dMB", mbytes)
+}
+
 func (mm *m) renderError() string {
 	b := "\n" + lipgloss.NewStyle().Foreground(lipgloss.Color(ui.ColorError())).Bold(true).
 		Render("  Amazon EMR dashboard error") + "\n\n"
@@ -239,6 +320,9 @@ func (mm *m) statusLeft() string {
 	if mm.stepsActive {
 		return fmt.Sprintf("Cluster: %s  ·  Steps: %d", mm.stepsCluster.Name, len(mm.steps))
 	}
+	if mm.yarnActive {
+		return fmt.Sprintf("Cluster: %s  ·  YARN apps: %d", mm.yarnCluster.Name, len(mm.yarnApps))
+	}
 	regionLabel := mm.regions[0]
 	if len(mm.regions) != 1 {
 		regionLabel = fmt.Sprintf("all (%d regions)", len(mm.regions))
@@ -257,16 +341,25 @@ func (mm *m) helpHints() []ui.KeyHint {
 			ui.H("q", "quit"),
 		}
 	}
+	if mm.yarnActive {
+		return []ui.KeyHint{
+			ui.H("↑/↓", "apps"),
+			ui.H("r", "refresh"),
+			ui.H("Esc", "back"),
+			ui.H("i", "about"),
+			ui.H("q", "quit"),
+		}
+	}
 	return []ui.KeyHint{
 		ui.H("↑/↓", "rows"),
 		ui.H("Enter", "steps"),
 		ui.H("d", "detail"),
 		ui.H("L", "logs"),
 		ui.H("u", "app UIs"),
+		ui.H("y", "yarn"),
 		ui.H("/", "filter"),
 		ui.H("o", "console"),
 		ui.H("r", "refresh"),
-		ui.H("i", "about"),
 		ui.H("q", "quit"),
 	}
 }

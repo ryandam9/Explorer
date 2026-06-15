@@ -262,6 +262,70 @@ func RenderApps(w io.Writer, apps []AppInfo, format string, noHeader bool) error
 	}
 }
 
+// --- YARN applications -----------------------------------------------------
+
+type yarnJSON struct {
+	ID          string  `json:"id"`
+	Name        string  `json:"name,omitempty"`
+	State       string  `json:"state,omitempty"`
+	FinalStatus string  `json:"finalStatus,omitempty"`
+	Progress    float64 `json:"progress"`
+	Queue       string  `json:"queue,omitempty"`
+	User        string  `json:"user,omitempty"`
+	Type        string  `json:"type,omitempty"`
+	ElapsedMS   int64   `json:"elapsedMs"`
+}
+
+func yarnToJSON(apps []YarnApp) []yarnJSON {
+	out := make([]yarnJSON, 0, len(apps))
+	for _, a := range apps {
+		out = append(out, yarnJSON{
+			ID: a.ID, Name: a.Name, State: a.State, FinalStatus: a.FinalStatus,
+			Progress: a.Progress, Queue: a.Queue, User: a.User, Type: a.Type, ElapsedMS: a.ElapsedMS,
+		})
+	}
+	return out
+}
+
+// RenderYARNApps writes a cluster's live YARN applications in the requested format.
+func RenderYARNApps(w io.Writer, apps []YarnApp, format string, noHeader bool) error {
+	switch strings.ToLower(format) {
+	case "json":
+		return writeJSON(w, yarnToJSON(apps))
+	case "ndjson":
+		enc := json.NewEncoder(w)
+		for _, a := range yarnToJSON(apps) {
+			if err := enc.Encode(a); err != nil {
+				return err
+			}
+		}
+		return nil
+	case "csv":
+		cw := csv.NewWriter(w)
+		if !noHeader {
+			_ = cw.Write([]string{"ID", "State", "FinalStatus", "Progress", "Queue", "User", "Type", "ElapsedMs"})
+		}
+		for _, a := range apps {
+			_ = cw.Write([]string{
+				a.ID, a.State, a.FinalStatus, strconv.FormatFloat(a.Progress, 'f', 0, 64),
+				a.Queue, a.User, a.Type, strconv.FormatInt(a.ElapsedMS, 10),
+			})
+		}
+		cw.Flush()
+		return cw.Error()
+	default:
+		tw := tabwriter.NewWriter(w, 0, 0, 2, ' ', 0)
+		if !noHeader {
+			fmt.Fprintln(tw, "APPLICATION\tSTATE\tFINAL\tPROG\tQUEUE\tUSER\tELAPSED")
+		}
+		for _, a := range apps {
+			fmt.Fprintf(tw, "%s\t%s\t%s\t%.0f%%\t%s\t%s\t%s\n",
+				a.ID, dash(a.State), dash(a.FinalStatus), a.Progress, dash(a.Queue), dash(a.User), a.elapsed())
+		}
+		return tw.Flush()
+	}
+}
+
 // FilterStepsByStatus returns only the steps whose state matches status
 // (case-insensitive); an empty status returns all steps.
 func FilterStepsByStatus(steps []Step, status string) []Step {

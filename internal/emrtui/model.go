@@ -13,6 +13,7 @@ import (
 
 	"github.com/ryandam9/aws_explorer/internal/config"
 	"github.com/ryandam9/aws_explorer/internal/consolelink"
+	"github.com/ryandam9/aws_explorer/internal/emrconn"
 	"github.com/ryandam9/aws_explorer/internal/ui"
 )
 
@@ -26,6 +27,10 @@ type m struct {
 	allRegions bool
 	appCfg     *config.Config
 	configPath string
+
+	// On-cluster connection layer (AXE-039); dialer is nil when off/misconfigured.
+	dialer    *emrconn.Dialer
+	dialerErr error
 
 	width, height int
 
@@ -56,6 +61,15 @@ type m struct {
 	appUISel     int
 	appUILoading bool
 
+	// Live YARN application browser (y on a cluster).
+	yarnActive  bool
+	yarnCluster Cluster
+	yarnApps    []YarnApp
+	yarnMetrics ClusterMetrics
+	yarnLoading bool
+	yarnErr     error
+	yarnSel     int
+
 	spinner   spinner.Model
 	toast     string
 	toastExp  time.Time
@@ -79,6 +93,13 @@ type appUIMsg struct {
 	err   error
 }
 
+type yarnMsg struct {
+	cluster Cluster
+	apps    []YarnApp
+	metrics ClusterMetrics
+	err     error
+}
+
 type clearToastMsg struct{}
 
 // NewModel builds the EMR dashboard over one or more regions. configPath is
@@ -97,6 +118,16 @@ func NewModel(ctx context.Context, awsCfg *config.AWSConfig, regions []string, a
 	f.Placeholder = "Filter…"
 	f.Width = 30
 
+	// Build the opt-in on-cluster dialer; a nil dialer (off/misconfigured) makes
+	// the live browsers render the connect helper rather than failing.
+	var dialer *emrconn.Dialer
+	var dialerErr error
+	if appCfg != nil {
+		dialer, dialerErr = emrconn.New(appCfg.EMR.OnCluster)
+	} else {
+		dialerErr = emrconn.ErrDisabled
+	}
+
 	return &m{
 		ctx:        ctx,
 		client:     client,
@@ -104,6 +135,8 @@ func NewModel(ctx context.Context, awsCfg *config.AWSConfig, regions []string, a
 		allRegions: allRegions,
 		appCfg:     appCfg,
 		configPath: configPath,
+		dialer:     dialer,
+		dialerErr:  dialerErr,
 		filter:     f,
 		spinner:    s,
 		loading:    true,
@@ -127,6 +160,21 @@ func (mm *m) loadStepsCmd(cl Cluster) tea.Cmd {
 		slog.Info("Loading EMR steps", "cluster", cl.ID, "region", cl.Region)
 		steps, err := mm.client.Steps(mm.ctx, cl.Region, cl.ID, stepWindow)
 		return stepsMsg{cluster: cl, steps: steps, err: err}
+	}
+}
+
+func (mm *m) loadYarnCmd(cl Cluster) tea.Cmd {
+	return func() tea.Msg {
+		if mm.dialer == nil {
+			err := mm.dialerErr
+			if err == nil {
+				err = emrconn.ErrDisabled
+			}
+			return yarnMsg{cluster: cl, err: err}
+		}
+		slog.Info("Loading YARN applications", "cluster", cl.ID)
+		apps, metrics, err := FetchYARN(mm.ctx, mm.dialer, cl.MasterDNS)
+		return yarnMsg{cluster: cl, apps: apps, metrics: metrics, err: err}
 	}
 }
 
@@ -193,6 +241,13 @@ func (mm *m) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		} else {
 			mm.openURL(msg.url, msg.label+" link copied", &cmds)
 		}
+
+	case yarnMsg:
+		mm.yarnLoading = false
+		mm.yarnErr = msg.err
+		mm.yarnApps = msg.apps
+		mm.yarnMetrics = msg.metrics
+		mm.yarnSel = 0
 
 	case tea.KeyMsg:
 		cmds = append(cmds, mm.handleKey(msg)...)
@@ -312,6 +367,31 @@ func (mm *m) handleKey(msg tea.KeyMsg) []tea.Cmd {
 		return cmds
 	}
 
+	// Live YARN browser sub-view.
+	if mm.yarnActive {
+		switch msg.String() {
+		case "q", "ctrl+c":
+			return []tea.Cmd{tea.Quit}
+		case "esc", "backspace", "left", "h":
+			mm.yarnActive = false
+		case "up", "k":
+			if mm.yarnSel > 0 {
+				mm.yarnSel--
+			}
+		case "down", "j":
+			if mm.yarnSel < len(mm.yarnApps)-1 {
+				mm.yarnSel++
+			}
+		case "r":
+			mm.yarnLoading = true
+			mm.yarnErr = nil
+			cmds = append(cmds, mm.loadYarnCmd(mm.yarnCluster), mm.spinner.Tick)
+		case ui.KeyAbout:
+			mm.showAbout = true
+		}
+		return cmds
+	}
+
 	// Cluster list.
 	switch msg.String() {
 	case "q", "ctrl+c":
@@ -360,6 +440,15 @@ func (mm *m) handleKey(msg tea.KeyMsg) []tea.Cmd {
 				mm.appUISel = 0
 				mm.appUILoading = false
 			}
+		}
+	case "y":
+		if cl, ok := mm.selectedCluster(); ok {
+			mm.yarnActive = true
+			mm.yarnCluster = cl
+			mm.yarnLoading = true
+			mm.yarnApps = nil
+			mm.yarnErr = nil
+			cmds = append(cmds, mm.loadYarnCmd(cl), mm.spinner.Tick)
 		}
 	case "o":
 		mm.openConsole(&cmds)
@@ -412,6 +501,9 @@ func (mm *m) PageTitle() string {
 	base := "Amazon EMR"
 	if mm.stepsActive {
 		return base + " › " + mm.stepsCluster.Name + " › steps"
+	}
+	if mm.yarnActive {
+		return base + " › " + mm.yarnCluster.Name + " › YARN"
 	}
 	return base + " › Clusters"
 }
