@@ -70,14 +70,14 @@ findings. This document closes that gap.
 
 | ID | Title | Priority |
 |----|-------|----------|
-| [AXE-025](#axe-025) | Glue collector enrichment (run state, definition, last crawl) | **P1** |
-| [AXE-026](#axe-026) | `glue` interactive dashboard TUI | **P1** |
-| [AXE-027](#axe-027) | Job-run history view (state · duration · DPU-hours · error) | **P1** |
+| [AXE-025](#axe-025) | Glue collector enrichment (run state, definition, last crawl) | **P1** · ✅ shipped |
+| [AXE-026](#axe-026) | `glue` interactive dashboard TUI | **P1** · ✅ shipped |
+| [AXE-027](#axe-027) | Job-run history view (state · duration · DPU-hours · error) | **P1** · ✅ shipped |
 | [AXE-028](#axe-028) | Jump from a job run to its CloudWatch logs | **P2** |
 | [AXE-029](#axe-029) | Job definition / settings detail panel | **P2** |
 | [AXE-030](#axe-030) | CLI twins (`glue jobs` / `runs` / `crawlers` / …) | **P2** |
 | [AXE-031](#axe-031) | `glue` audit category (health & cost findings) | **P2** |
-| [AXE-032](#axe-032) | Glue console deep links | **P3** |
+| [AXE-032](#axe-032) | Glue console deep links | **P3** · ✅ shipped |
 
 Priorities: **P1** = build first, **P2** = next, **P3** = deferrable. A suggested
 phasing is at the [end of this document](#phasing).
@@ -130,6 +130,11 @@ Where the new code plugs in (all paths confirmed against the current tree):
 ## Theme J — AWS Glue / data integration
 
 ### AXE-025 — Glue collector enrichment {#axe-025}
+
+> **Status: ✅ shipped** (#196) — the collector lists `job` / `crawler` /
+> `database` / `trigger` / `workflow` / `connection`, stamps each job's latest
+> run state and each crawler's last-crawl status, and captures the full job
+> definition (secrets redacted) at detailed scope. Pure, fixture-tested mapping.
 
 **Problem.** The inventory knows a job/crawler/database *exists* but nothing
 about its health. The single most useful fact — "did it succeed, and when?" — is
@@ -185,6 +190,11 @@ absent. Triggers, workflows and connections aren't collected at all.
 ---
 
 ### AXE-026 — `glue` interactive dashboard TUI {#axe-026}
+
+> **Status: ✅ shipped** — `aws_explorer glue` (`cmd/glue.go`, `internal/gluetui`).
+> Tabbed Bubble Tea dashboard over Jobs / Crawlers / Triggers / Workflows /
+> Connections / Catalog, colour-coded by state, with `/` filter, `o` console,
+> `r` refresh and `i` about. Per-region/per-listing failures degrade softly.
 
 **Problem.** Glue's console is a maze of separate pages (Studio, classic
 console, Data Catalog). One terminal dashboard that shows jobs, their runs,
@@ -244,6 +254,12 @@ selected run's logs (AXE-028) · `o` open in the console (AXE-032) · `/` filter
 ---
 
 ### AXE-027 — Job-run history view {#axe-027}
+
+> **Status: ✅ shipped** — `Enter` on a job in the dashboard opens its run
+> history (newest first): state, duration, DPU-hours, an estimated cost
+> (`internal/costs.GlueRunCostUSD`, $0.44/DPU-hour), worker and attempt, with
+> the error message inline on failures and a DPU-hours/cost footer. Pure
+> formatting/cost helpers are fixture-tested (`format_test.go`).
 
 **Problem.** "Why did it fail, how long did it take, how much did it cost?" The
 answer is in `GetJobRuns` but buried behind console clicks.
@@ -457,6 +473,10 @@ via the existing CI plumbing (AXE-023).
 ---
 
 ### AXE-032 — Glue console deep links {#axe-032}
+
+> **Status: ✅ shipped** (#196) — `case "glue"` in `internal/consolelink` maps
+> `job` (Glue Studio editor), `crawler`, `database`, `trigger`, `workflow` and
+> `connection` to console URLs; ARN-search fallback for the rest. Table-tested.
 
 **Problem.** Sometimes you need the console (the visual job editor, the DAG).
 Generating the deep link is pure string work and saves a minute each time.
