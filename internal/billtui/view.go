@@ -49,6 +49,8 @@ func (m Model) View() string {
 		view = ui.OverlayCenter(view, m.resourcesOverlay(), m.width, m.height)
 	case overlayHelp:
 		view = ui.OverlayCenter(view, m.helpOverlay(), m.width, m.height)
+	case overlayAbout:
+		view = ui.OverlayCenter(view, ui.AboutView("About — Live Bill", billAboutText, ui.AboutWidth(m.width)), m.width, m.height)
 	}
 	// The debug pane floats above any other overlay so it stays reachable.
 	return m.debug.Overlay(view, m.width, m.height)
@@ -154,11 +156,24 @@ func (m Model) keyHints() []ui.KeyHint {
 		ui.H("y", "copy"),
 		ui.H("C", "csv"),
 		ui.H("~", "debug"),
+		ui.H("i", "about"),
 		ui.H("?", "help"),
 		ui.H("q", "quit"),
 	)
 	return hints
 }
+
+// billAboutText explains what the live bill TUI is for, shown in the About
+// overlay ("i").
+const billAboutText = "This is the live bill — your account's actual cost from the AWS Cost " +
+	"Explorer API, grouped by service and usage type, with usage quantity and a " +
+	"grand total. These are the Billing console's numbers, not the list-price " +
+	"estimates the audit attaches to waste.\n\n" +
+	"In --tui mode the screen re-fetches on a fixed interval; a Δ column shows " +
+	"what each line moved since the last refresh. Press x for a per-resource " +
+	"breakdown of a service, u to refresh now, / to filter and C to export.\n\n" +
+	"Note: Cost Explorer is a paid API — every request (including each automatic " +
+	"refresh) costs $0.01. Press ? for the full list of keyboard shortcuts."
 
 // overlayStyle is the shared frame for all overlays.
 func (m Model) overlayStyle() lipgloss.Style {
@@ -300,6 +315,7 @@ func (m Model) helpOverlay() string {
 		{"y", "Copy the selected service and usage type (or the whole detail panel when it's open)"},
 		{"C", "Export the current view to CSV under ~/.aws_explorer/exports/"},
 		{"~", "Debug: live view of what the tool is doing"},
+		{"i", "About this page (what it does)"},
 		{"?", "Toggle this help"},
 		{"q / Ctrl+C", "Quit"},
 	}

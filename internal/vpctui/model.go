@@ -20,6 +20,7 @@ import (
 	"github.com/ryandam9/aws_explorer/internal/consolelink"
 	"github.com/ryandam9/aws_explorer/internal/debugpane"
 	"github.com/ryandam9/aws_explorer/internal/display"
+	"github.com/ryandam9/aws_explorer/internal/loggroup"
 	"github.com/ryandam9/aws_explorer/internal/table"
 	"github.com/ryandam9/aws_explorer/internal/trail"
 	"github.com/ryandam9/aws_explorer/internal/ui"
@@ -288,6 +289,7 @@ type Model struct {
 
 	// Settings / help
 	showHelp     bool
+	showAbout    bool // "i" — what this page is for
 	showSettings bool
 	settings     ui.SettingsModel
 	configPath   string
@@ -1158,6 +1160,12 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.diffActorsSkipped = msg.skipped
 		m.diffVP.SetContent(m.renderDiff())
 
+	case cwJumpDoneMsg:
+		// Returned from the suspended CloudWatch Logs TUI; surface only errors.
+		if msg.err != nil {
+			m.statusMsg = "Logs view error: " + msg.err.Error()
+		}
+
 	case errMsg:
 		m.err = msg.err
 		m.loading = false
@@ -1352,12 +1360,21 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 
+	// About overlay: static text, any key closes it.
+	if m.showAbout {
+		m.showAbout = false
+		return m, nil
+	}
+
 	// Global keys.
 	switch key {
 	case ui.KeyQuit, "ctrl+c":
 		return m, tea.Quit
 	case ui.KeyHelp:
 		m.showHelp = true
+		return m, nil
+	case ui.KeyAbout:
+		m.showAbout = true
 		return m, nil
 	case ui.KeySettings:
 		m.showSettings = true
@@ -1635,6 +1652,19 @@ func (m *Model) handleResourceTableKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			}
 		}
 		return m, nil
+	case "L":
+		// Jump to the CloudWatch Logs explorer pre-filtered to the selected
+		// resource's log group (Lambda → /aws/lambda/…, RDS → /aws/rds/…). The
+		// VPC TUI suspends, the cw TUI runs in the same terminal, and quitting
+		// it returns here with selection and scroll intact.
+		cmd, reason := m.jumpToLogsForSelected()
+		if cmd == nil {
+			if reason != "" {
+				m.statusMsg = reason
+			}
+			return m, nil
+		}
+		return m, cmd
 	case "x":
 		// Cross-reference ("where used") for the selected resource.
 		if id := m.selectedResourceID(); id != "" {
@@ -1867,9 +1897,16 @@ func (m *Model) View() string {
 	if m.showHelp {
 		helpW := 60
 		if m.width > 0 {
-			helpW = min(m.width-4, 70)
+			// Roomy enough that the longest shortcut line fits without wrapping
+			// on a normal terminal; min() keeps it inside narrow ones.
+			helpW = min(m.width-4, 98)
 		}
 		return lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center, ui.HelpView("VPC Explorer — help", m.helpText(), helpW))
+	}
+
+	if m.showAbout {
+		about := ui.AboutView("About — VPC Explorer", vpcAboutText, ui.AboutWidth(m.width))
+		return lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center, about)
 	}
 
 	if m.showDetail {
@@ -2650,6 +2687,7 @@ func (m *Model) statusHints() []ui.KeyHint {
 			ui.H("r", "refresh"),
 			ui.H("S", "theme"),
 			ui.H("~", "debug"),
+			ui.H("i", "about"),
 			ui.H("q", "quit"),
 			ui.H("?", "help"),
 		)
@@ -2667,6 +2705,7 @@ func (m *Model) statusHints() []ui.KeyHint {
 				ui.H("w", "changes"),
 				ui.H("E", "export"),
 				ui.H("Esc", "back"),
+				ui.H("i", "about"),
 				ui.H("?", "help"),
 			}
 		case focusResourceTable:
@@ -2691,11 +2730,17 @@ func (m *Model) statusHints() []ui.KeyHint {
 			if m.activeResource == rtNetworkInterfaces {
 				hints = append(hints, ui.H("t", "trace"), ui.H("e", "eff rules"))
 			}
+			// CloudWatch Logs jump only works for resources with a derivable
+			// log group (Lambda, RDS).
+			if loggroup.Supported(rtKey(m.activeResource)) {
+				hints = append(hints, ui.H("L", "logs"))
+			}
 			return append(hints,
 				ui.H("F", "findings"),
 				ui.H("r", "refresh"),
 				ui.H("Tab", "to sidebar"),
 				ui.H("Esc", "back"),
+				ui.H("i", "about"),
 				ui.H("?", "help"),
 			)
 		}
@@ -2711,6 +2756,20 @@ func colScrollHints(t *table.Model) []ui.KeyHint {
 	}
 	return nil
 }
+
+// vpcAboutText explains what the VPC Explorer screen is for, shown in the
+// About overlay ("i").
+const vpcAboutText = "The VPC Explorer drills into a single VPC's networking and the compute " +
+	"and services attached to it. Pick a VPC on the left, a resource category in " +
+	"the middle (subnets, security groups, route tables, ENIs, gateways, " +
+	"endpoints, NACLs, peering, flow logs, plus EC2/Lambda/RDS/load balancers), " +
+	"and browse the matching resources on the right.\n\n" +
+	"Beyond browsing, it is a deterministic VPC debugging toolkit: F runs the " +
+	"findings linter, t traces a connectivity path from an ENI, x shows where a " +
+	"resource is used, e merges effective security rules, P audits public " +
+	"exposure, D shows DNS config, and A drives the AWS Reachability Analyzer.\n\n" +
+	"For Lambda and RDS resources, L jumps straight to their CloudWatch logs.\n\n" +
+	"Press ? for the full list of keyboard shortcuts."
 
 func (m *Model) helpText() string {
 	lines := []string{
@@ -2738,6 +2797,7 @@ func (m *Model) helpText() string {
 		"  E        Export a Markdown report (resources + findings) to a file",
 		"  t        Trace connectivity from the selected network interface",
 		"  x        Where used: SGs, subnets, route tables, ENIs, NAT/IGW, NACLs, endpoints, peering",
+		"  L        Open the CloudWatch Logs explorer for the selected Lambda/RDS resource",
 		"  e        Effective merged security rules (network interface)",
 		"  r        Refresh current resource list",
 		"  Esc      Go back to VPC list",
@@ -2749,6 +2809,7 @@ func (m *Model) helpText() string {
 		lipgloss.NewStyle().Foreground(lipgloss.Color(ui.ColorMuted())).Render("Global"),
 		"  S        Settings (theme & colors)",
 		"  ~        Debug: live view of what the tool is doing",
+		"  i        About this page (what it does)",
 		"  ?        Toggle help",
 		"  q        Quit",
 	}

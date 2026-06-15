@@ -55,6 +55,7 @@ const (
 	overlayNone overlayKind = iota
 	overlayDetail
 	overlayHelp
+	overlayAbout
 )
 
 // columns of the events table. The sequence number and time stay pinned while
@@ -308,7 +309,7 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 
 	if m.overlay != overlayNone {
 		switch msg.String() {
-		case "esc", "q", "enter", "?":
+		case "esc", "q", "enter", "?", ui.KeyAbout:
 			m.overlay = overlayNone
 		case "y":
 			// Copy the whole detail panel so it can be shared as-is, without the
@@ -372,6 +373,8 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.exportCSV()
 	case "?":
 		m.overlay = overlayHelp
+	case ui.KeyAbout:
+		m.overlay = overlayAbout
 	case ui.KeyDebug:
 		m.debug.Open(m.width, m.height)
 	default:

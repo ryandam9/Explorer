@@ -56,6 +56,7 @@ const (
 	overlayDetail
 	overlayResources
 	overlayHelp
+	overlayAbout
 )
 
 // columns of the bill table. The sequence number and service stay pinned
@@ -293,7 +294,7 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			if m.overlay == overlayResources && m.resScroll < len(m.resRows)-1 {
 				m.resScroll++
 			}
-		case "esc", "q", "enter", "?", "x":
+		case "esc", "q", "enter", "?", "x", ui.KeyAbout:
 			m.overlay = overlayNone
 			m.resService = ""
 		case "y":
@@ -366,6 +367,8 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.exportCSV()
 	case "?":
 		m.overlay = overlayHelp
+	case ui.KeyAbout:
+		m.overlay = overlayAbout
 	case ui.KeyDebug:
 		m.debug.Open(m.width, m.height)
 	default:

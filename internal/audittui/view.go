@@ -50,6 +50,8 @@ func (m Model) View() string {
 		view = ui.OverlayCenter(view, m.errorsOverlay(), m.width, m.height)
 	case overlayHelp:
 		view = ui.OverlayCenter(view, m.helpOverlay(), m.width, m.height)
+	case overlayAbout:
+		view = ui.OverlayCenter(view, ui.AboutView("About — Cost Audit", auditAboutText, ui.AboutWidth(m.width)), m.width, m.height)
 	}
 	// The debug pane floats above any other overlay so it stays reachable.
 	return m.debug.Overlay(view, m.width, m.height)
@@ -151,15 +153,27 @@ func (m Model) keyHints() []ui.KeyHint {
 	if len(m.errs) > 0 {
 		hints = append(hints, ui.H("e", "errors"))
 	}
-	hints = append(hints, ui.H("~", "debug"), ui.H("?", "help"), ui.H("q", "quit"))
+	hints = append(hints, ui.H("~", "debug"), ui.H("i", "about"), ui.H("?", "help"), ui.H("q", "quit"))
 	return hints
 }
+
+// auditAboutText explains what the audit TUI is for, shown in the About
+// overlay ("i").
+const auditAboutText = "This is the cost & posture audit. It scans your configured regions for " +
+	"findings across cost/waste, security, IAM hygiene, messaging and CloudTrail " +
+	"checks, and ranks them by severity. Each cost finding carries an estimated " +
+	"monthly saving, with a running total in the header.\n\n" +
+	"The table fills in as each region completes. Press Enter on a finding for its " +
+	"full explanation, fix and estimate; / filters, s/R sort, y copies the ARN, " +
+	"and C exports the current view to CSV.\n\n" +
+	"Every finding has a stable check ID (e.g. COST-EBS-001) safe to reference in " +
+	"runbooks. Press ? for the full list of keyboard shortcuts."
 
 // overlayStyle is the shared frame for all overlays.
 func (m Model) overlayStyle() lipgloss.Style {
 	w := m.width - 8
-	if w > 84 {
-		w = 84
+	if w > 96 {
+		w = 96
 	}
 	if w < 30 {
 		w = 30
@@ -288,6 +302,7 @@ func (m Model) helpOverlay() string {
 		{"C", "Export the current view to CSV under ~/.aws_explorer/exports/"},
 		{"e", "Show collection errors"},
 		{"~", "Debug: live view of what the tool is doing"},
+		{"i", "About this page (what it does)"},
 		{"?", "Toggle this help"},
 		{"q / Ctrl+C", "Quit"},
 	}
