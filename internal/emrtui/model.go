@@ -70,6 +70,14 @@ type m struct {
 	yarnErr     error
 	yarnSel     int
 
+	// HBase table browser (h on a cluster).
+	hbaseActive  bool
+	hbaseCluster Cluster
+	hbaseTables  []HBaseTable
+	hbaseLoading bool
+	hbaseErr     error
+	hbaseSel     int
+
 	spinner   spinner.Model
 	toast     string
 	toastExp  time.Time
@@ -97,6 +105,12 @@ type yarnMsg struct {
 	cluster Cluster
 	apps    []YarnApp
 	metrics ClusterMetrics
+	err     error
+}
+
+type hbaseMsg struct {
+	cluster Cluster
+	tables  []HBaseTable
 	err     error
 }
 
@@ -178,6 +192,21 @@ func (mm *m) loadYarnCmd(cl Cluster) tea.Cmd {
 	}
 }
 
+func (mm *m) loadHbaseCmd(cl Cluster) tea.Cmd {
+	return func() tea.Msg {
+		if mm.dialer == nil {
+			err := mm.dialerErr
+			if err == nil {
+				err = emrconn.ErrDisabled
+			}
+			return hbaseMsg{cluster: cl, err: err}
+		}
+		slog.Info("Loading HBase tables", "cluster", cl.ID)
+		tables, err := FetchHBase(mm.ctx, mm.dialer, cl.MasterDNS)
+		return hbaseMsg{cluster: cl, tables: tables, err: err}
+	}
+}
+
 func (mm *m) loadAppUICmd(cl Cluster, opt appUIOption) tea.Cmd {
 	return func() tea.Msg {
 		slog.Info("Generating EMR persistent app UI link", "cluster", cl.ID, "type", opt.UIType)
@@ -248,6 +277,12 @@ func (mm *m) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		mm.yarnApps = msg.apps
 		mm.yarnMetrics = msg.metrics
 		mm.yarnSel = 0
+
+	case hbaseMsg:
+		mm.hbaseLoading = false
+		mm.hbaseErr = msg.err
+		mm.hbaseTables = msg.tables
+		mm.hbaseSel = 0
 
 	case tea.KeyMsg:
 		cmds = append(cmds, mm.handleKey(msg)...)
@@ -392,6 +427,31 @@ func (mm *m) handleKey(msg tea.KeyMsg) []tea.Cmd {
 		return cmds
 	}
 
+	// HBase table browser sub-view.
+	if mm.hbaseActive {
+		switch msg.String() {
+		case "q", "ctrl+c":
+			return []tea.Cmd{tea.Quit}
+		case "esc", "backspace", "left":
+			mm.hbaseActive = false
+		case "up", "k":
+			if mm.hbaseSel > 0 {
+				mm.hbaseSel--
+			}
+		case "down", "j":
+			if mm.hbaseSel < len(mm.hbaseTables)-1 {
+				mm.hbaseSel++
+			}
+		case "r":
+			mm.hbaseLoading = true
+			mm.hbaseErr = nil
+			cmds = append(cmds, mm.loadHbaseCmd(mm.hbaseCluster), mm.spinner.Tick)
+		case ui.KeyAbout:
+			mm.showAbout = true
+		}
+		return cmds
+	}
+
 	// Cluster list.
 	switch msg.String() {
 	case "q", "ctrl+c":
@@ -450,6 +510,15 @@ func (mm *m) handleKey(msg tea.KeyMsg) []tea.Cmd {
 			mm.yarnErr = nil
 			cmds = append(cmds, mm.loadYarnCmd(cl), mm.spinner.Tick)
 		}
+	case "h":
+		if cl, ok := mm.selectedCluster(); ok {
+			mm.hbaseActive = true
+			mm.hbaseCluster = cl
+			mm.hbaseLoading = true
+			mm.hbaseTables = nil
+			mm.hbaseErr = nil
+			cmds = append(cmds, mm.loadHbaseCmd(cl), mm.spinner.Tick)
+		}
 	case "o":
 		mm.openConsole(&cmds)
 	case ui.KeyAbout:
@@ -504,6 +573,9 @@ func (mm *m) PageTitle() string {
 	}
 	if mm.yarnActive {
 		return base + " › " + mm.yarnCluster.Name + " › YARN"
+	}
+	if mm.hbaseActive {
+		return base + " › " + mm.hbaseCluster.Name + " › HBase"
 	}
 	return base + " › Clusters"
 }

@@ -24,6 +24,8 @@ func (mm *m) View() string {
 		sb.WriteString(mm.renderSteps())
 	} else if mm.yarnActive {
 		sb.WriteString(mm.renderYARN())
+	} else if mm.hbaseActive {
+		sb.WriteString(mm.renderHBase())
 	} else {
 		sb.WriteString(mm.renderTable())
 	}
@@ -52,6 +54,8 @@ const emrAboutText = "This is the Amazon EMR dashboard. Each row is a cluster, c
 	"Press L to open the cluster's (or a step's) logs in the S3 browser, and u to open " +
 	"a persistent application UI (Spark History, YARN Timeline, Tez) — hosted off-cluster, " +
 	"so no SSH tunnel is needed.\n\n" +
+	"Press y for the live YARN application browser and h for the HBase table browser; both " +
+	"read on-cluster REST daemons and need emr.onCluster configured (off by default).\n\n" +
 	"Press o on a cluster to open it in the AWS console, / to filter, and r to refresh."
 
 // detailBody renders the cluster-detail overlay's contents.
@@ -279,6 +283,83 @@ func (mm *m) renderYARN() string {
 	return boxStyle(mm.width, mm.height-4).Render(b.String())
 }
 
+func (mm *m) renderHBase() string {
+	specs := []colSpec{{"NAMESPACE", 14}, {"TABLE", 0}, {"STATE", 12}, {"REGIONS", 9}, {"ONLINE", 8}, {"FAMILIES", 22}}
+	contentW := mm.width - 4
+	if contentW < 20 {
+		contentW = 20
+	}
+	widths := resolveWidths(specs, contentW)
+
+	var b strings.Builder
+	b.WriteString(lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color(ui.ColorHeading())).
+		Render(fmt.Sprintf(" HBase — %s [%s]", mm.hbaseCluster.Name, mm.hbaseCluster.Region)) + "\n")
+	if mm.dialer != nil {
+		b.WriteString(lipgloss.NewStyle().Foreground(lipgloss.Color(ui.ColorMuted())).
+			Render(fmt.Sprintf("  via %s", mm.dialer.Mode())) + "\n")
+	}
+	b.WriteString("\n")
+
+	switch {
+	case mm.hbaseLoading:
+		b.WriteString(fmt.Sprintf("  %s Querying the HBase REST server…\n", mm.spinner.View()))
+	case mm.hbaseErr != nil && emrconn.IsUnreachable(mm.hbaseErr):
+		b.WriteString(emrconn.ConnectHelp(mm.hbaseCluster.MasterDNS, hbasePort(mm.dialer)) + "\n")
+	case mm.hbaseErr != nil:
+		b.WriteString("  " + lipgloss.NewStyle().Foreground(lipgloss.Color(ui.ColorError())).
+			Render("Could not load HBase tables: "+mm.hbaseErr.Error()) + "\n")
+	case len(mm.hbaseTables) == 0:
+		b.WriteString(lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color(ui.ColorHeading())).
+			Render(headerLine(specs, widths)) + "\n")
+		b.WriteString("  No tables reported by the HBase REST server.\n")
+	default:
+		b.WriteString(lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color(ui.ColorHeading())).
+			Render(headerLine(specs, widths)) + "\n")
+		visible := mm.height - 13
+		if visible < 3 {
+			visible = 3
+		}
+		start, end := visibleRange(mm.hbaseSel, len(mm.hbaseTables), visible)
+		for i := start; i < end; i++ {
+			t := mm.hbaseTables[i]
+			cells := []cell{
+				{text: t.Namespace},
+				{text: t.Name},
+				{text: t.State, color: hbaseStateColor(t.State)},
+				{text: itoa(t.Regions)},
+				{text: itoa(t.Online)},
+				{text: strings.Join(t.Families, ",")},
+			}
+			b.WriteString(renderRow(cells, widths, i == mm.hbaseSel) + "\n")
+		}
+		b.WriteString("\n  " + lipgloss.NewStyle().Foreground(lipgloss.Color(ui.ColorText())).
+			Render(fmt.Sprintf("%d tables · region counts are exact; row counts need a scan (not shown)", len(mm.hbaseTables))) + "\n")
+	}
+
+	return boxStyle(mm.width, mm.height-4).Render(b.String())
+}
+
+// hbaseStateColor colours the derived table state.
+func hbaseStateColor(state string) string {
+	switch state {
+	case "ENABLED":
+		return ui.ColorSuccess()
+	case "DISABLED":
+		return ui.ColorMuted()
+	case "PARTIAL":
+		return ui.ColorError()
+	default:
+		return ui.ColorText()
+	}
+}
+
+func hbasePort(d *emrconn.Dialer) int {
+	if d == nil {
+		return emrconn.DefaultHBasePort
+	}
+	return d.Port(emrconn.ServiceHBase)
+}
+
 // yarnPort returns the YARN daemon port for the connect helper (0 when no
 // dialer is configured).
 func yarnPort(d *emrconn.Dialer) int {
@@ -323,6 +404,9 @@ func (mm *m) statusLeft() string {
 	if mm.yarnActive {
 		return fmt.Sprintf("Cluster: %s  ·  YARN apps: %d", mm.yarnCluster.Name, len(mm.yarnApps))
 	}
+	if mm.hbaseActive {
+		return fmt.Sprintf("Cluster: %s  ·  HBase tables: %d", mm.hbaseCluster.Name, len(mm.hbaseTables))
+	}
 	regionLabel := mm.regions[0]
 	if len(mm.regions) != 1 {
 		regionLabel = fmt.Sprintf("all (%d regions)", len(mm.regions))
@@ -350,6 +434,15 @@ func (mm *m) helpHints() []ui.KeyHint {
 			ui.H("q", "quit"),
 		}
 	}
+	if mm.hbaseActive {
+		return []ui.KeyHint{
+			ui.H("↑/↓", "tables"),
+			ui.H("r", "refresh"),
+			ui.H("Esc", "back"),
+			ui.H("i", "about"),
+			ui.H("q", "quit"),
+		}
+	}
 	return []ui.KeyHint{
 		ui.H("↑/↓", "rows"),
 		ui.H("Enter", "steps"),
@@ -357,6 +450,7 @@ func (mm *m) helpHints() []ui.KeyHint {
 		ui.H("L", "logs"),
 		ui.H("u", "app UIs"),
 		ui.H("y", "yarn"),
+		ui.H("h", "hbase"),
 		ui.H("/", "filter"),
 		ui.H("o", "console"),
 		ui.H("r", "refresh"),
