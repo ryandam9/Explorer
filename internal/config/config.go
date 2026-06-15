@@ -41,17 +41,33 @@ type EMRConfig struct {
 type OnClusterConfig struct {
 	// Mode selects how the daemons are reached: "off" (default — features
 	// disabled), "direct" (tool runs inside the VPC; plain HTTP to the primary
-	// node), or "socks" (route through an existing SOCKS5 proxy, e.g. an
-	// `ssh -D 8157` dynamic tunnel — the pattern AWS documents for the web UIs).
+	// node), "socks" (route through an existing SOCKS5 proxy, e.g. an
+	// `ssh -D 8157` dynamic tunnel — the pattern AWS documents for the web UIs),
+	// or "tunnel" (the tool opens its own SSH connection to the primary node and
+	// dials the daemon through it, using the ssh settings below).
 	Mode string `mapstructure:"mode"`
 	// SocksProxy is the host:port of the SOCKS5 proxy used in "socks" mode.
 	SocksProxy string `mapstructure:"socksProxy"`
+	// SSH holds the credentials used in "tunnel" mode.
+	SSH OnClusterSSH `mapstructure:"ssh"`
 	// TimeoutSeconds bounds each on-cluster HTTP request. 0 uses the built-in
 	// default (5s).
 	TimeoutSeconds int `mapstructure:"timeoutSeconds"`
 	// Ports overrides the default daemon ports (yarn 8088, hbase 8080,
 	// oozie 11000); unset entries use the defaults.
 	Ports OnClusterPorts `mapstructure:"ports"`
+}
+
+// OnClusterSSH holds the SSH login used by "tunnel" mode to reach the primary
+// node. The tool connects to the cluster's primary DNS on the SSH port with this
+// user and private key, then dials the daemon through that session.
+type OnClusterSSH struct {
+	// User is the SSH login (EMR's default is "hadoop").
+	User string `mapstructure:"user"`
+	// KeyFile is the path to the private key; a leading "~" is expanded.
+	KeyFile string `mapstructure:"keyFile"`
+	// Port is the SSH port (0 = 22).
+	Port int `mapstructure:"port"`
 }
 
 // OnClusterPorts holds the per-daemon ports (0 = use the EMR default).

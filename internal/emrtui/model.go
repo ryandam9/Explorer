@@ -2,6 +2,7 @@ package emrtui
 
 import (
 	"context"
+	"fmt"
 	"log/slog"
 	"time"
 
@@ -71,12 +72,14 @@ type m struct {
 	yarnSel     int
 
 	// HBase table browser (h on a cluster).
-	hbaseActive  bool
-	hbaseCluster Cluster
-	hbaseTables  []HBaseTable
-	hbaseLoading bool
-	hbaseErr     error
-	hbaseSel     int
+	hbaseActive   bool
+	hbaseCluster  Cluster
+	hbaseTables   []HBaseTable
+	hbaseLoading  bool
+	hbaseErr      error
+	hbaseSel      int
+	hbaseConfirm  bool // row-count scan confirmation prompt
+	hbaseCounting bool
 
 	// Oozie workflow/coordinator browser (z on a cluster).
 	oozieActive  bool
@@ -128,6 +131,13 @@ type oozieMsg struct {
 	cluster   Cluster
 	workflows []OozieWorkflow
 	coords    []OozieCoordinator
+	err       error
+}
+
+type hbaseCountMsg struct {
+	qualified string
+	count     int
+	capped    bool
 	err       error
 }
 
@@ -221,6 +231,14 @@ func (mm *m) loadOozieCmd(cl Cluster) tea.Cmd {
 		slog.Info("Loading Oozie jobs", "cluster", cl.ID)
 		wf, coords, err := FetchOozie(mm.ctx, mm.dialer, cl.MasterDNS)
 		return oozieMsg{cluster: cl, workflows: wf, coords: coords, err: err}
+	}
+}
+
+func (mm *m) countHbaseRowsCmd(t HBaseTable) tea.Cmd {
+	return func() tea.Msg {
+		slog.Info("Counting HBase rows (full scan)", "table", t.Qualified)
+		count, capped, err := CountHBaseRows(mm.ctx, mm.dialer, mm.hbaseCluster.MasterDNS, t.Qualified)
+		return hbaseCountMsg{qualified: t.Qualified, count: count, capped: capped, err: err}
 	}
 }
 
@@ -322,6 +340,28 @@ func (mm *m) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		mm.oozieWF = msg.workflows
 		mm.oozieCoord = msg.coords
 		mm.oozieSel = 0
+
+	case hbaseCountMsg:
+		mm.hbaseCounting = false
+		if msg.err != nil {
+			mm.setToast("Row count failed: " + msg.err.Error())
+			cmds = append(cmds, toastCmd(5*time.Second))
+		} else {
+			for i := range mm.hbaseTables {
+				if mm.hbaseTables[i].Qualified == msg.qualified {
+					mm.hbaseTables[i].RowCount = msg.count
+					mm.hbaseTables[i].Counted = true
+					mm.hbaseTables[i].CountCapped = msg.capped
+					break
+				}
+			}
+			suffix := ""
+			if msg.capped {
+				suffix = "+ (capped)"
+			}
+			mm.setToast(fmt.Sprintf("Counted %d%s rows", msg.count, suffix))
+			cmds = append(cmds, toastCmd(4*time.Second))
+		}
 
 	case tea.KeyMsg:
 		cmds = append(cmds, mm.handleKey(msg)...)
@@ -468,6 +508,20 @@ func (mm *m) handleKey(msg tea.KeyMsg) []tea.Cmd {
 
 	// HBase table browser sub-view.
 	if mm.hbaseActive {
+		// Row-count confirmation prompt takes precedence (cost-stating gate).
+		if mm.hbaseConfirm {
+			switch msg.String() {
+			case "y", "Y", "enter":
+				mm.hbaseConfirm = false
+				if mm.hbaseSel < len(mm.hbaseTables) {
+					mm.hbaseCounting = true
+					cmds = append(cmds, mm.countHbaseRowsCmd(mm.hbaseTables[mm.hbaseSel]), mm.spinner.Tick)
+				}
+			default:
+				mm.hbaseConfirm = false
+			}
+			return cmds
+		}
 		switch msg.String() {
 		case "q", "ctrl+c":
 			return []tea.Cmd{tea.Quit}
@@ -480,6 +534,11 @@ func (mm *m) handleKey(msg tea.KeyMsg) []tea.Cmd {
 		case "down", "j":
 			if mm.hbaseSel < len(mm.hbaseTables)-1 {
 				mm.hbaseSel++
+			}
+		case "c":
+			// Ask before scanning — a full-table read is read-only but not free.
+			if !mm.hbaseCounting && mm.hbaseSel < len(mm.hbaseTables) {
+				mm.hbaseConfirm = true
 			}
 		case "r":
 			mm.hbaseLoading = true

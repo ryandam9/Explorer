@@ -74,3 +74,34 @@ func TestConnectHelp(t *testing.T) {
 		t.Error("no DNS should not produce an ssh command")
 	}
 }
+
+func TestNew_TunnelRequiresSSH(t *testing.T) {
+	// Missing user/key → error.
+	if _, err := New(config.OnClusterConfig{Mode: "tunnel"}); err == nil {
+		t.Error("tunnel mode without ssh settings should error")
+	}
+	// Nonexistent key file → error from key load.
+	_, err := New(config.OnClusterConfig{Mode: "tunnel", SSH: config.OnClusterSSH{User: "hadoop", KeyFile: "/no/such/key.pem"}})
+	if err == nil {
+		t.Error("tunnel mode with a missing key file should error")
+	}
+}
+
+func TestTunnelModeRecognized(t *testing.T) {
+	if normalizeMode("tunnel") != ModeTunnel || normalizeMode(" TUNNEL ") != ModeTunnel {
+		t.Error("tunnel mode not recognized")
+	}
+}
+
+func TestPathOf(t *testing.T) {
+	cases := map[string]string{
+		"http://host:8080/orders/scanner/123":     "/orders/scanner/123",
+		"http://host:8080/orders/scanner/123?x=1": "/orders/scanner/123?x=1",
+		"/already/a/path":                         "/already/a/path",
+	}
+	for in, want := range cases {
+		if got := PathOf(in); got != want {
+			t.Errorf("PathOf(%q) = %q, want %q", in, got, want)
+		}
+	}
+}
