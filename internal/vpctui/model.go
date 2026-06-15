@@ -880,11 +880,45 @@ func buildFullExport(c *VPCClient, vpc VPCInfo, getSnap func() (vpcSnapshot, err
 			fetch()
 		}()
 	}
+	// Subnet-ID set used to attribute resources that AWS exposes only by subnet
+	// (ECS awsvpc tasks, EMR cluster instances) to this VPC.
+	vpcSubnets := make(map[string]bool, len(snap.Subnets))
+	for _, s := range snap.Subnets {
+		vpcSubnets[s.ID] = true
+	}
+
 	run(func() { data.FlowLogs, _ = c.ListFlowLogs(vpc.ID) })
 	run(func() { data.EC2, _ = c.ListEC2Instances(vpc.ID) })
 	run(func() { data.Lambdas, _ = c.ListLambdaFunctions(vpc.ID) })
 	run(func() { data.RDS, _ = c.ListRDSInstances(vpc.ID) })
 	run(func() { data.LBs, _ = c.ListLoadBalancers(vpc.ID) })
+	run(func() { data.ECSServices, _ = c.ListECSServices(vpcSubnets) })
+	run(func() { data.EKSClusters, _ = c.ListEKSClusters(vpc.ID) })
+	run(func() { data.ElastiCache, _ = c.ListElastiCacheClusters(vpc.ID) })
+	run(func() { data.Redshift, _ = c.ListRedshiftClusters(vpc.ID) })
+	run(func() { data.EFS, _ = c.ListEFSFileSystems(vpc.ID) })
+	run(func() { data.EMR, _ = c.ListEMRClusters(vpcSubnets) })
+	run(func() { data.TransitGatewayAttachments, _ = c.ListTransitGatewayAttachments(vpc.ID) })
+	// VPN resources chain: gateways → connections → customer gateways.
+	run(func() {
+		vgws, _ := c.ListVPNGateways(vpc.ID)
+		data.VPNGateways = vgws
+		vgwIDs := make([]string, 0, len(vgws))
+		for _, g := range vgws {
+			vgwIDs = append(vgwIDs, g.ID)
+		}
+		conns, _ := c.ListVPNConnections(vgwIDs)
+		data.VPNConnections = conns
+		seen := map[string]bool{}
+		var cgwIDs []string
+		for _, cn := range conns {
+			if cn.CustomerGatewayID != "" && !seen[cn.CustomerGatewayID] {
+				seen[cn.CustomerGatewayID] = true
+				cgwIDs = append(cgwIDs, cn.CustomerGatewayID)
+			}
+		}
+		data.CustomerGateways, _ = c.ListCustomerGateways(cgwIDs)
+	})
 	wg.Wait()
 
 	return data, nil

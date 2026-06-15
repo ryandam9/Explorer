@@ -32,6 +32,20 @@ type fullExport struct {
 	Lambdas  []LambdaFunctionInfo
 	RDS      []RDSInstanceInfo
 	LBs      []LoadBalancerInfo
+
+	// Additional workload services running inside the VPC.
+	ECSServices []ECSServiceInfo
+	EKSClusters []EKSClusterInfo
+	ElastiCache []ElastiCacheClusterInfo
+	Redshift    []RedshiftClusterInfo
+	EFS         []EFSFileSystemInfo
+	EMR         []EMRClusterInfo
+
+	// EC2-native VPN / transit-gateway connectivity.
+	VPNGateways               []VPNGatewayInfo
+	VPNConnections            []VPNConnectionInfo
+	CustomerGateways          []CustomerGatewayInfo
+	TransitGatewayAttachments []TransitGatewayAttachmentInfo
 }
 
 // exportMarkdown builds the complete Markdown report for a VPC.
@@ -67,6 +81,16 @@ func exportMarkdown(data fullExport, findings []Finding, generatedAt time.Time) 
 		{"Lambda functions", itoa(len(data.Lambdas))},
 		{"RDS instances", itoa(len(data.RDS))},
 		{"Load balancers", itoa(len(data.LBs))},
+		{"ECS services", itoa(len(data.ECSServices))},
+		{"EKS clusters", itoa(len(data.EKSClusters))},
+		{"ElastiCache clusters", itoa(len(data.ElastiCache))},
+		{"Redshift clusters", itoa(len(data.Redshift))},
+		{"EFS file systems", itoa(len(data.EFS))},
+		{"EMR clusters", itoa(len(data.EMR))},
+		{"VPN gateways", itoa(len(data.VPNGateways))},
+		{"VPN connections", itoa(len(data.VPNConnections))},
+		{"Customer gateways", itoa(len(data.CustomerGateways))},
+		{"Transit gateway attachments", itoa(len(data.TransitGatewayAttachments))},
 	} {
 		b.WriteString("| " + row[0] + " | " + row[1] + " |\n")
 	}
@@ -98,6 +122,16 @@ func exportMarkdown(data fullExport, findings []Finding, generatedAt time.Time) 
 	writeLambdas(&b, data.Lambdas)
 	writeRDS(&b, data.RDS)
 	writeLoadBalancers(&b, data.LBs)
+	writeECSServices(&b, data.ECSServices)
+	writeEKSClusters(&b, data.EKSClusters)
+	writeElastiCache(&b, data.ElastiCache)
+	writeRedshift(&b, data.Redshift)
+	writeEFS(&b, data.EFS)
+	writeEMR(&b, data.EMR)
+	writeVPNGateways(&b, data.VPNGateways)
+	writeVPNConnections(&b, data.VPNConnections)
+	writeCustomerGateways(&b, data.CustomerGateways)
+	writeTransitGatewayAttachments(&b, data.TransitGatewayAttachments)
 
 	return b.String()
 }
@@ -463,6 +497,193 @@ func writeLoadBalancers(b *strings.Builder, items []LoadBalancerInfo) {
 			{"VPC ID", lb.VPCID},
 			{"Created at", lb.CreatedAt},
 		})
+	}
+}
+
+func writeECSServices(b *strings.Builder, items []ECSServiceInfo) {
+	if len(items) == 0 {
+		return
+	}
+	b.WriteString(fmt.Sprintf("## ECS services (%d)\n\n", len(items)))
+	for _, s := range items {
+		mdHeading(b, s.Name, s.Cluster)
+		mdKV(b, [][2]string{
+			{"Name", s.Name},
+			{"Cluster", s.Cluster},
+			{"Status", s.Status},
+			{"Launch type", s.LaunchType},
+			{"Desired count", itoa(int(s.DesiredCount))},
+			{"Running count", itoa(int(s.RunningCount))},
+			{"Subnets", strings.Join(s.SubnetIDs, ", ")},
+			{"Security groups", strings.Join(s.SGIDs, ", ")},
+		})
+	}
+}
+
+func writeEKSClusters(b *strings.Builder, items []EKSClusterInfo) {
+	if len(items) == 0 {
+		return
+	}
+	b.WriteString(fmt.Sprintf("## EKS clusters (%d)\n\n", len(items)))
+	for _, cl := range items {
+		mdHeading(b, cl.Name, "")
+		mdKV(b, [][2]string{
+			{"Name", cl.Name},
+			{"Status", cl.Status},
+			{"Version", cl.Version},
+			{"Endpoint", cl.Endpoint},
+			{"VPC ID", cl.VPCID},
+			{"Subnets", strings.Join(cl.SubnetIDs, ", ")},
+			{"Security groups", strings.Join(cl.SecurityGroups, ", ")},
+		})
+	}
+}
+
+func writeElastiCache(b *strings.Builder, items []ElastiCacheClusterInfo) {
+	if len(items) == 0 {
+		return
+	}
+	b.WriteString(fmt.Sprintf("## ElastiCache clusters (%d)\n\n", len(items)))
+	for _, cl := range items {
+		mdHeading(b, cl.ID, "")
+		mdKV(b, [][2]string{
+			{"ID", cl.ID},
+			{"Engine", strings.TrimSpace(cl.Engine + " " + cl.EngineVersion)},
+			{"Status", cl.Status},
+			{"Node type", cl.NodeType},
+			{"Nodes", itoa(int(cl.NumNodes))},
+			{"Subnet group", cl.SubnetGroup},
+			{"VPC ID", cl.VPCID},
+		})
+	}
+}
+
+func writeRedshift(b *strings.Builder, items []RedshiftClusterInfo) {
+	if len(items) == 0 {
+		return
+	}
+	b.WriteString(fmt.Sprintf("## Redshift clusters (%d)\n\n", len(items)))
+	for _, cl := range items {
+		mdHeading(b, cl.ID, "")
+		mdKV(b, [][2]string{
+			{"ID", cl.ID},
+			{"Status", cl.Status},
+			{"Node type", cl.NodeType},
+			{"Nodes", itoa(int(cl.NumNodes))},
+			{"Database", cl.DBName},
+			{"Endpoint", cl.Endpoint},
+			{"Subnet group", cl.SubnetGroup},
+			{"VPC ID", cl.VPCID},
+		})
+	}
+}
+
+func writeEFS(b *strings.Builder, items []EFSFileSystemInfo) {
+	if len(items) == 0 {
+		return
+	}
+	b.WriteString(fmt.Sprintf("## EFS file systems (%d)\n\n", len(items)))
+	for _, fs := range items {
+		mdHeading(b, fs.ID, fs.Name)
+		mdKV(b, [][2]string{
+			{"ID", fs.ID},
+			{"Name", fs.Name},
+			{"State", fs.State},
+			{"Performance mode", fs.PerformanceMode},
+			{"Encrypted", boolStr(fs.Encrypted)},
+			{"Mount targets (this VPC)", itoa(fs.MountTargets)},
+			{"Subnets", strings.Join(fs.SubnetIDs, ", ")},
+			{"VPC ID", fs.VPCID},
+		})
+	}
+}
+
+func writeEMR(b *strings.Builder, items []EMRClusterInfo) {
+	if len(items) == 0 {
+		return
+	}
+	b.WriteString(fmt.Sprintf("## EMR clusters (%d)\n\n", len(items)))
+	for _, cl := range items {
+		mdHeading(b, cl.ID, cl.Name)
+		mdKV(b, [][2]string{
+			{"ID", cl.ID},
+			{"Name", cl.Name},
+			{"State", cl.State},
+			{"Subnet ID", cl.SubnetID},
+		})
+	}
+}
+
+func writeVPNGateways(b *strings.Builder, items []VPNGatewayInfo) {
+	if len(items) == 0 {
+		return
+	}
+	b.WriteString(fmt.Sprintf("## VPN gateways (%d)\n\n", len(items)))
+	for _, g := range items {
+		mdHeading(b, g.ID, "")
+		mdKV(b, [][2]string{
+			{"ID", g.ID},
+			{"State", g.State},
+			{"Type", g.Type},
+			{"Amazon side ASN", g.AmazonSideASN},
+		})
+		mdTags(b, g.Tags)
+	}
+}
+
+func writeVPNConnections(b *strings.Builder, items []VPNConnectionInfo) {
+	if len(items) == 0 {
+		return
+	}
+	b.WriteString(fmt.Sprintf("## VPN connections (%d)\n\n", len(items)))
+	for _, v := range items {
+		mdHeading(b, v.ID, "")
+		mdKV(b, [][2]string{
+			{"ID", v.ID},
+			{"State", v.State},
+			{"Type", v.Type},
+			{"Category", v.Category},
+			{"Customer gateway", v.CustomerGatewayID},
+			{"VPN gateway", v.VPNGatewayID},
+			{"Transit gateway", v.TransitGatewayID},
+		})
+		mdTags(b, v.Tags)
+	}
+}
+
+func writeCustomerGateways(b *strings.Builder, items []CustomerGatewayInfo) {
+	if len(items) == 0 {
+		return
+	}
+	b.WriteString(fmt.Sprintf("## Customer gateways (%d)\n\n", len(items)))
+	for _, g := range items {
+		mdHeading(b, g.ID, "")
+		mdKV(b, [][2]string{
+			{"ID", g.ID},
+			{"State", g.State},
+			{"Type", g.Type},
+			{"IP address", g.IPAddress},
+			{"BGP ASN", g.BgpAsn},
+		})
+		mdTags(b, g.Tags)
+	}
+}
+
+func writeTransitGatewayAttachments(b *strings.Builder, items []TransitGatewayAttachmentInfo) {
+	if len(items) == 0 {
+		return
+	}
+	b.WriteString(fmt.Sprintf("## Transit gateway attachments (%d)\n\n", len(items)))
+	for _, a := range items {
+		mdHeading(b, a.ID, "")
+		mdKV(b, [][2]string{
+			{"ID", a.ID},
+			{"Transit gateway", a.TransitGatewayID},
+			{"State", a.State},
+			{"Resource type", a.ResourceType},
+			{"Resource ID", a.ResourceID},
+		})
+		mdTags(b, a.Tags)
 	}
 }
 

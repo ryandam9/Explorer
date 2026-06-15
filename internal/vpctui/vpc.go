@@ -12,9 +12,15 @@ import (
 	"github.com/aws/aws-sdk-go-v2/aws"
 	awsec2 "github.com/aws/aws-sdk-go-v2/service/ec2"
 	ec2types "github.com/aws/aws-sdk-go-v2/service/ec2/types"
+	"github.com/aws/aws-sdk-go-v2/service/ecs"
+	"github.com/aws/aws-sdk-go-v2/service/efs"
+	"github.com/aws/aws-sdk-go-v2/service/eks"
+	"github.com/aws/aws-sdk-go-v2/service/elasticache"
 	elbv2 "github.com/aws/aws-sdk-go-v2/service/elasticloadbalancingv2"
+	"github.com/aws/aws-sdk-go-v2/service/emr"
 	"github.com/aws/aws-sdk-go-v2/service/lambda"
 	"github.com/aws/aws-sdk-go-v2/service/rds"
+	"github.com/aws/aws-sdk-go-v2/service/redshift"
 	"github.com/aws/smithy-go"
 
 	"github.com/ryandam9/aws_explorer/internal/auth"
@@ -24,13 +30,22 @@ import (
 
 const awsRequestTimeout = 30 * time.Second
 
-// VPCClient wraps EC2, ELBv2, Lambda, and RDS clients for a single region.
+// VPCClient wraps the per-region service clients used to enumerate everything
+// in (and attached to) a VPC: EC2, ELBv2, Lambda, RDS, plus the workload
+// services surfaced in the full Markdown export (ECS, EKS, ElastiCache,
+// Redshift, EFS, EMR).
 type VPCClient struct {
-	ec2    *awsec2.Client
-	elbv2  *elbv2.Client
-	lambda *lambda.Client
-	rds    *rds.Client
-	ctx    context.Context
+	ec2         *awsec2.Client
+	elbv2       *elbv2.Client
+	lambda      *lambda.Client
+	rds         *rds.Client
+	ecs         *ecs.Client
+	eks         *eks.Client
+	elasticache *elasticache.Client
+	redshift    *redshift.Client
+	efs         *efs.Client
+	emr         *emr.Client
+	ctx         context.Context
 	// cfg is the resolved SDK config, kept for one-off clients (CloudTrail
 	// actor lookups) that don't warrant a permanent field.
 	cfg aws.Config
@@ -42,12 +57,18 @@ func NewVPCClient(ctx context.Context, awsCfg *config.AWSConfig, region string) 
 		return nil, fmt.Errorf("unable to load AWS SDK config: %w", err)
 	}
 	return &VPCClient{
-		ec2:    awsec2.NewFromConfig(cfg),
-		elbv2:  elbv2.NewFromConfig(cfg),
-		lambda: lambda.NewFromConfig(cfg),
-		rds:    rds.NewFromConfig(cfg),
-		ctx:    ctx,
-		cfg:    cfg,
+		ec2:         awsec2.NewFromConfig(cfg),
+		elbv2:       elbv2.NewFromConfig(cfg),
+		lambda:      lambda.NewFromConfig(cfg),
+		rds:         rds.NewFromConfig(cfg),
+		ecs:         ecs.NewFromConfig(cfg),
+		eks:         eks.NewFromConfig(cfg),
+		elasticache: elasticache.NewFromConfig(cfg),
+		redshift:    redshift.NewFromConfig(cfg),
+		efs:         efs.NewFromConfig(cfg),
+		emr:         emr.NewFromConfig(cfg),
+		ctx:         ctx,
+		cfg:         cfg,
 	}, nil
 }
 
