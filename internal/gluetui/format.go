@@ -2,6 +2,7 @@ package gluetui
 
 import (
 	"fmt"
+	"sort"
 	"strings"
 	"time"
 
@@ -132,6 +133,43 @@ func truncate(s string, width int) string {
 		return string(r[:width])
 	}
 	return string(r[:width-1]) + "…"
+}
+
+// redactArgs copies job default arguments, masking values whose key looks like
+// a secret so credentials passed as job arguments never reach the screen.
+func redactArgs(args map[string]string) map[string]string {
+	if len(args) == 0 {
+		return nil
+	}
+	out := make(map[string]string, len(args))
+	for k, v := range args {
+		if isSecretKey(k) {
+			out[k] = "***"
+		} else {
+			out[k] = v
+		}
+	}
+	return out
+}
+
+func isSecretKey(k string) bool {
+	k = strings.ToLower(k)
+	for _, needle := range []string{"secret", "password", "passwd", "token", "credential", "apikey", "api_key"} {
+		if strings.Contains(k, needle) {
+			return true
+		}
+	}
+	return false
+}
+
+// sortedKeys returns a map's keys in sorted order, for deterministic rendering.
+func sortedKeys(m map[string]string) []string {
+	keys := make([]string, 0, len(m))
+	for k := range m {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	return keys
 }
 
 // runsTotals sums the DPU-hours and estimated cost across a set of runs, for
