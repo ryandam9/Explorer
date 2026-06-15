@@ -90,9 +90,8 @@ func TestExportMarkdownStructure(t *testing.T) {
 		"### Critical", // sg-web exposes SSH to the internet
 		"sg-web",
 		"## Subnets (1)",
-		"### subnet-1",
-		"| CIDR | 10.0.0.0/24 |",
-		"| Available IPs | 200 |",
+		"| ID | Name | CIDR | IPv6 CIDRs | AZ | Available IPs | State | Public | Default for AZ | Auto-assign public IP | Tags |",
+		"| subnet-1 | - | 10.0.0.0/24 | - | a | 200 | - | Yes | No | No | - |",
 		"## Security groups (1)",
 		"### sg-web — web",
 		"**Inbound rules**",

@@ -162,23 +162,24 @@ func writeSubnets(b *strings.Builder, items []SubnetInfo) {
 		return
 	}
 	b.WriteString(fmt.Sprintf("## Subnets (%d)\n\n", len(items)))
+	b.WriteString("| ID | Name | CIDR | IPv6 CIDRs | AZ | Available IPs | State | Public | Default for AZ | Auto-assign public IP | Tags |\n")
+	b.WriteString("|---|---|---|---|---|---|---|---|---|---|---|\n")
 	for _, s := range items {
-		mdHeading(b, s.ID, s.Name)
-		mdKV(b, [][2]string{
-			{"ID", s.ID},
-			{"Name", s.Name},
-			{"VPC ID", s.VPCID},
-			{"CIDR", s.CIDR},
-			{"IPv6 CIDRs", strings.Join(s.Ipv6CIDRs, ", ")},
-			{"Availability zone", s.AZ},
-			{"Available IPs", itoa(int(s.AvailableIPs))},
-			{"State", s.State},
-			{"Public", boolStr(s.IsPublic)},
-			{"Default for AZ", boolStr(s.DefaultForAz)},
-			{"Auto-assign public IP", boolStr(s.MapPublicIPOnLaunch)},
-		})
-		mdTags(b, s.Tags)
+		b.WriteString("| " + strings.Join([]string{
+			mdCell(orDash(s.ID)),
+			mdCell(orDash(s.Name)),
+			mdCell(orDash(s.CIDR)),
+			mdCell(orDash(strings.Join(s.Ipv6CIDRs, ", "))),
+			mdCell(orDash(s.AZ)),
+			itoa(int(s.AvailableIPs)),
+			mdCell(orDash(s.State)),
+			boolStr(s.IsPublic),
+			boolStr(s.DefaultForAz),
+			boolStr(s.MapPublicIPOnLaunch),
+			mdCell(orDash(inlineTags(s.Tags))),
+		}, " | ") + " |\n")
 	}
+	b.WriteString("\n")
 }
 
 func writeSecurityGroups(b *strings.Builder, items []SGInfo) {
@@ -725,6 +726,24 @@ func mdTags(b *strings.Builder, tags map[string]string) {
 		b.WriteString("| " + mdCell(k) + " | " + mdCell(tags[k]) + " |\n")
 	}
 	b.WriteString("\n")
+}
+
+// inlineTags renders tags as a single "k=v; k2=v2" cell (sorted by key) for use
+// in row-per-resource tables where a nested tag table doesn't fit.
+func inlineTags(tags map[string]string) string {
+	if len(tags) == 0 {
+		return ""
+	}
+	keys := make([]string, 0, len(tags))
+	for k := range tags {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	parts := make([]string, 0, len(keys))
+	for _, k := range keys {
+		parts = append(parts, k+"="+tags[k])
+	}
+	return strings.Join(parts, "; ")
 }
 
 // mdCell escapes characters that would otherwise break a Markdown table cell.
