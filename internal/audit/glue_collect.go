@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
+	awsec2 "github.com/aws/aws-sdk-go-v2/service/ec2"
 	awsglue "github.com/aws/aws-sdk-go-v2/service/glue"
 	"golang.org/x/sync/errgroup"
 
@@ -16,6 +17,7 @@ import (
 const (
 	maxGlueJobs        = 200
 	maxGlueCrawlers    = 200
+	maxGlueConnections = 200
 	glueRunWindow      = 20 // recent runs fetched per job for the streak/cost checks
 	glueRunConcurrency = 8
 )
@@ -32,8 +34,96 @@ func collectGlueRegion(ctx context.Context, baseCfg aws.Config, region string, p
 
 	collectGlueJobs(ctx, cfg, &snap, rec, perCallTimeout)
 	collectGlueCrawlers(ctx, cfg, &snap, rec, perCallTimeout)
+	collectGlueConnections(ctx, cfg, &snap, rec, perCallTimeout)
+	collectGlueNetworkRefs(ctx, cfg, &snap, rec, perCallTimeout)
 
 	return snap, rec.errs
+}
+
+func collectGlueConnections(ctx context.Context, cfg aws.Config, snap *findings.GlueSnapshot, rec *errRecorder, timeout time.Duration) {
+	ctx, cancel := withTimeout(ctx, timeout)
+	defer cancel()
+	client := awsglue.NewFromConfig(cfg)
+
+	var token *string
+	for {
+		page, err := client.GetConnections(ctx, &awsglue.GetConnectionsInput{NextToken: token})
+		if err != nil {
+			rec.record("glue", err)
+			break
+		}
+		for _, c := range page.ConnectionList {
+			gc := findings.GlueConnection{
+				Name: aws.ToString(c.Name),
+				ARN:  glueARN(cfg.Region, "connection/"+aws.ToString(c.Name)),
+			}
+			if p := c.PhysicalConnectionRequirements; p != nil {
+				gc.SubnetID = aws.ToString(p.SubnetId)
+				gc.SecurityGroupIDs = p.SecurityGroupIdList
+			}
+			snap.Connections = append(snap.Connections, gc)
+			if len(snap.Connections) >= maxGlueConnections {
+				rec.recordTruncation("glue", "connections", maxGlueConnections)
+				break
+			}
+		}
+		if page.NextToken == nil || len(snap.Connections) >= maxGlueConnections {
+			break
+		}
+		token = page.NextToken
+	}
+}
+
+// collectGlueNetworkRefs inventories the region's subnets and security groups so
+// the connection check can tell a deleted reference from a live one. It runs
+// only when a connection actually has VPC requirements, and sets
+// NetworkRefsKnown only when both describes succeed — a partial inventory would
+// flag healthy references as missing, so on any error the check stays silent.
+func collectGlueNetworkRefs(ctx context.Context, cfg aws.Config, snap *findings.GlueSnapshot, rec *errRecorder, timeout time.Duration) {
+	need := false
+	for _, c := range snap.Connections {
+		if c.SubnetID != "" || len(c.SecurityGroupIDs) > 0 {
+			need = true
+			break
+		}
+	}
+	if !need {
+		return
+	}
+
+	ctx, cancel := withTimeout(ctx, timeout)
+	defer cancel()
+	client := awsec2.NewFromConfig(cfg)
+
+	subnets := map[string]bool{}
+	sp := awsec2.NewDescribeSubnetsPaginator(client, &awsec2.DescribeSubnetsInput{})
+	for sp.HasMorePages() {
+		page, err := sp.NextPage(ctx)
+		if err != nil {
+			rec.record("ec2", err)
+			return
+		}
+		for _, s := range page.Subnets {
+			subnets[aws.ToString(s.SubnetId)] = true
+		}
+	}
+
+	sgs := map[string]bool{}
+	gp := awsec2.NewDescribeSecurityGroupsPaginator(client, &awsec2.DescribeSecurityGroupsInput{})
+	for gp.HasMorePages() {
+		page, err := gp.NextPage(ctx)
+		if err != nil {
+			rec.record("ec2", err)
+			return
+		}
+		for _, g := range page.SecurityGroups {
+			sgs[aws.ToString(g.GroupId)] = true
+		}
+	}
+
+	snap.ExistingSubnets = subnets
+	snap.ExistingSGs = sgs
+	snap.NetworkRefsKnown = true
 }
 
 func collectGlueJobs(ctx context.Context, cfg aws.Config, snap *findings.GlueSnapshot, rec *errRecorder, timeout time.Duration) {
