@@ -41,6 +41,12 @@ type m struct {
 
 	sel int
 
+	// Column sort for the cluster list: sortCol -1 keeps the natural (name,
+	// region) order; otherwise it is an index into the cluster columns and
+	// sortAsc flips the direction.
+	sortCol int
+	sortAsc bool
+
 	filter       textinput.Model
 	filterActive bool
 
@@ -181,6 +187,7 @@ func NewModel(ctx context.Context, awsCfg *config.AWSConfig, regions []string, a
 		filter:     f,
 		spinner:    s,
 		loading:    true,
+		sortCol:    -1,
 	}, nil
 }
 
@@ -658,10 +665,31 @@ func (mm *m) handleKey(msg tea.KeyMsg) []tea.Cmd {
 		}
 	case "o":
 		mm.openConsole(&cmds)
+	case "S":
+		mm.cycleSort()
+	case "R":
+		if mm.sortCol >= 0 {
+			mm.sortAsc = !mm.sortAsc
+			mm.sel = 0
+		}
 	case ui.KeyAbout:
 		mm.showAbout = true
 	}
 	return cmds
+}
+
+// cycleSort advances the cluster-list sort: natural order → each column in
+// turn → back to natural order. Each column starts in its most useful
+// direction (descending for the numeric HRS column, ascending otherwise);
+// press R to flip it.
+func (mm *m) cycleSort() {
+	specs, _ := mm.specsAndRows()
+	mm.sortCol++
+	if mm.sortCol >= len(specs) {
+		mm.sortCol = -1
+	}
+	mm.sortAsc = mm.sortCol != colHRS
+	mm.sel = 0
 }
 
 // openConsole copies (and opens, when local) the console URL for the selected

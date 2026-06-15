@@ -1,9 +1,23 @@
 package emrtui
 
 import (
+	"sort"
 	"strings"
 
 	"github.com/ryandam9/aws_explorer/internal/model"
+)
+
+// Cluster column indices, matching the order built in specsAndRows. Used by the
+// column sort so the comparator and the "default direction" logic stay in step
+// with the rendered layout.
+const (
+	colName int = iota
+	colID
+	colState
+	colRelease
+	colApps
+	colHRS
+	colRegion
 )
 
 // cell is one table cell: its text and an optional theme colour role ("" =
@@ -90,20 +104,70 @@ func itoa(n int) string {
 	return string(b[i:])
 }
 
-// currentRows returns the filtered cluster rows.
+// currentRows returns the filtered, sorted cluster rows.
 func (mm *m) currentRows() []rowT {
 	_, rows := mm.specsAndRows()
 	term := strings.ToLower(strings.TrimSpace(mm.filter.Value()))
-	if term == "" {
-		return rows
-	}
-	var out []rowT
-	for _, r := range rows {
-		if rowMatches(r, term) {
-			out = append(out, r)
+	if term != "" {
+		var out []rowT
+		for _, r := range rows {
+			if rowMatches(r, term) {
+				out = append(out, r)
+			}
 		}
+		rows = out
 	}
-	return out
+	mm.sortRows(rows)
+	return rows
+}
+
+// sortRows orders rows in place by the selected column and direction. sortCol
+// -1 leaves the natural order (already name/region sorted by Inventory.sort)
+// untouched.
+func (mm *m) sortRows(rows []rowT) {
+	if mm.sortCol < 0 {
+		return
+	}
+	col := mm.sortCol
+	sort.SliceStable(rows, func(i, j int) bool {
+		c := clusterCmp(rows[i].cluster, rows[j].cluster, col)
+		if c == 0 {
+			// Stable tiebreak so equal keys keep a predictable name order.
+			c = strings.Compare(strings.ToLower(rows[i].cluster.Name), strings.ToLower(rows[j].cluster.Name))
+		}
+		if mm.sortAsc {
+			return c < 0
+		}
+		return c > 0
+	})
+}
+
+// clusterCmp compares two clusters by column, returning the usual -1/0/1. Text
+// columns compare case-insensitively; HRS compares numerically.
+func clusterCmp(a, b *Cluster, col int) int {
+	switch col {
+	case colID:
+		return strings.Compare(a.ID, b.ID)
+	case colState:
+		return strings.Compare(a.State, b.State)
+	case colRelease:
+		return strings.Compare(a.ReleaseLabel, b.ReleaseLabel)
+	case colApps:
+		return strings.Compare(strings.ToLower(a.Applications), strings.ToLower(b.Applications))
+	case colHRS:
+		switch {
+		case a.InstanceHours < b.InstanceHours:
+			return -1
+		case a.InstanceHours > b.InstanceHours:
+			return 1
+		default:
+			return 0
+		}
+	case colRegion:
+		return strings.Compare(a.Region, b.Region)
+	default: // colName
+		return strings.Compare(strings.ToLower(a.Name), strings.ToLower(b.Name))
+	}
 }
 
 // rowMatches reports whether any cell contains term.

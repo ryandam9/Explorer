@@ -66,7 +66,8 @@ const emrAboutText = "This is the Amazon EMR dashboard. Each row is a cluster, c
 	"Press y for the live YARN application browser, h for the HBase table browser and z for " +
 	"the Oozie workflow/coordinator browser; these read on-cluster REST daemons and need " +
 	"emr.onCluster configured (off by default).\n\n" +
-	"Press o on a cluster to open it in the AWS console, / to filter, and r to refresh."
+	"Press S to cycle the column the list is sorted by (R reverses the direction), " +
+	"o to open a cluster in the AWS console, / to filter, and r to refresh."
 
 // detailBody renders the cluster-detail overlay's contents.
 func (mm *m) detailBody() string {
@@ -126,6 +127,33 @@ func boolLabel(b bool) string {
 	return "disabled"
 }
 
+// sortedSpecs returns specs with a ↑/↓ marker appended to the title of the
+// column the list is currently sorted by, leaving widths untouched.
+func (mm *m) sortedSpecs(specs []colSpec) []colSpec {
+	if mm.sortCol < 0 || mm.sortCol >= len(specs) {
+		return specs
+	}
+	arrow := " ↑"
+	if !mm.sortAsc {
+		arrow = " ↓"
+	}
+	out := append([]colSpec(nil), specs...)
+	out[mm.sortCol].title += arrow
+	return out
+}
+
+// sortLabel describes the active sort for the status bar, e.g. "NAME ↑".
+func (mm *m) sortLabel(specs []colSpec) string {
+	if mm.sortCol < 0 || mm.sortCol >= len(specs) {
+		return ""
+	}
+	arrow := "↑"
+	if !mm.sortAsc {
+		arrow = "↓"
+	}
+	return specs[mm.sortCol].title + " " + arrow
+}
+
 func (mm *m) renderTable() string {
 	specs, _ := mm.specsAndRows()
 	rows := mm.currentRows()
@@ -149,9 +177,9 @@ func (mm *m) renderTable() string {
 	}
 	b.WriteString("\n")
 
-	// Header.
+	// Header (with a ↑/↓ marker on the sorted column).
 	b.WriteString(lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color(ui.ColorHeading())).
-		Render(headerLine(specs, widths)) + "\n")
+		Render(headerLine(mm.sortedSpecs(specs), widths)) + "\n")
 
 	if mm.loading {
 		b.WriteString(fmt.Sprintf("  %s Loading EMR clusters…\n", mm.spinner.View()))
@@ -560,7 +588,11 @@ func (mm *m) statusLeft() string {
 	if len(mm.regions) != 1 {
 		regionLabel = fmt.Sprintf("all (%d regions)", len(mm.regions))
 	}
-	return fmt.Sprintf("Region: %s  ·  Clusters: %d", regionLabel, mm.rowCount())
+	left := fmt.Sprintf("Region: %s  ·  Clusters: %d", regionLabel, mm.rowCount())
+	if specs, _ := mm.specsAndRows(); mm.sortLabel(specs) != "" {
+		left += "  ·  sort: " + mm.sortLabel(specs)
+	}
+	return left
 }
 
 func (mm *m) helpHints() []ui.KeyHint {
@@ -610,6 +642,7 @@ func (mm *m) helpHints() []ui.KeyHint {
 		ui.H("y", "yarn"),
 		ui.H("h", "hbase"),
 		ui.H("z", "oozie"),
+		ui.H("S", "sort"),
 		ui.H("/", "filter"),
 		ui.H("o", "console"),
 		ui.H("r", "refresh"),
