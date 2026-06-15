@@ -513,6 +513,7 @@ for AWS Glue jobs and crawlers:
 | `GLU-SEC-001` | Job without a security configuration (logs/output/bookmarks unencrypted) | 🟡 warning |
 | `GLU-CRAWL-001` | Crawler whose last crawl ended in `FAILED` (catalog may be stale) | 🟡 warning |
 | `GLU-CRAWL-002` | Crawler `RUNNING` for over 6 hours — likely stuck | 🟡 warning |
+| `GLU-CONN-001` | Connection referencing a subnet or security group that no longer exists | 🔵 info |
 
 Glue-category notes:
 
@@ -522,7 +523,12 @@ Glue-category notes:
 - `GLU-COST-001`'s estimate is the wasted spend across the **observed run
   window** (not a monthly figure), at the same `$0.44`/DPU-hour rate the `glue`
   dashboard uses.
-- Uses `glue:{GetJobs,GetJobRuns,GetCrawlers}`.
+- `GLU-CONN-001` cross-references each connection's VPC requirements against the
+  region's live subnets/security groups; it fires only from a **complete** EC2
+  inventory (a denied `DescribeSubnets`/`DescribeSecurityGroups` leaves it
+  silent), and the EC2 calls run only when a connection actually has VPC config.
+- Uses `glue:{GetJobs,GetJobRuns,GetCrawlers,GetConnections}` plus
+  `ec2:{DescribeSubnets,DescribeSecurityGroups}` (for `GLU-CONN-001`).
 
 † Traffic-based checks use CloudWatch metrics over a 14-day window and need
 `cloudwatch:GetMetricData`; without it they are skipped (with a note) while

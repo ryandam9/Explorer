@@ -113,6 +113,8 @@ var checkRegistry = []CheckMeta{
 		"Glue job with many workers but a very short successful run time", SevInfo},
 	{CheckGlueNoSecurityConf, "GlueJobNoSecurityConfiguration",
 		"Glue job without a security configuration (unencrypted logs/output/bookmarks)", SevWarning},
+	{CheckGlueConnMissingNet, "GlueConnectionMissingNetwork",
+		"Glue connection referencing a subnet or security group that no longer exists", SevInfo},
 
 	// CloudTrail configuration category (AXE-019).
 	{CheckTrailNotLogging, "NoMultiRegionTrailLogging",

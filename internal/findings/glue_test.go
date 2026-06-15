@@ -157,11 +157,35 @@ func TestGlueCrawlerChecks(t *testing.T) {
 	}
 }
 
+func TestGlueConnectionMissingNetwork(t *testing.T) {
+	base := GlueSnapshot{
+		Region: "us-east-1", Now: time.Now(), NetworkRefsKnown: true,
+		ExistingSubnets: map[string]bool{"subnet-live": true},
+		ExistingSGs:     map[string]bool{"sg-live": true},
+		Connections: []GlueConnection{
+			{Name: "broken", SubnetID: "subnet-gone", SecurityGroupIDs: []string{"sg-live", "sg-gone"}},
+			{Name: "healthy", SubnetID: "subnet-live", SecurityGroupIDs: []string{"sg-live"}},
+			{Name: "no-vpc"},
+		},
+	}
+	got := byID(AnalyzeGlue(base))
+	f, ok := got[CheckGlueConnMissingNet]
+	if !ok || f.Resource != "broken" {
+		t.Fatalf("expected GLU-CONN-001 on 'broken', got %+v", f)
+	}
+
+	// EC2 inventory unknown → check stays silent even with a dangling ref.
+	base.NetworkRefsKnown = false
+	if _, ok := byID(AnalyzeGlue(base))[CheckGlueConnMissingNet]; ok {
+		t.Error("GLU-CONN-001 should stay silent when NetworkRefsKnown is false")
+	}
+}
+
 func TestGlueChecksRegistered(t *testing.T) {
 	for _, id := range []string{
 		CheckGlueAllRunsFailed, CheckGlueJobStale, CheckGlueLastRunFailed,
 		CheckGlueCrawlerFailed, CheckGlueCrawlerStuck, CheckGlueFailedRunWaste,
-		CheckGlueOversizedWorker, CheckGlueNoSecurityConf,
+		CheckGlueOversizedWorker, CheckGlueNoSecurityConf, CheckGlueConnMissingNet,
 	} {
 		if _, ok := CheckByID(id); !ok {
 			t.Errorf("check %s is not registered in checks.go", id)

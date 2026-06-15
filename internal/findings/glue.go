@@ -18,6 +18,7 @@ const (
 	CheckGlueFailedRunWaste  = "GLU-COST-001"
 	CheckGlueOversizedWorker = "GLU-COST-002"
 	CheckGlueNoSecurityConf  = "GLU-SEC-001"
+	CheckGlueConnMissingNet  = "GLU-CONN-001"
 )
 
 // Thresholds for the Glue checks. Tunable here; deliberately conservative so
@@ -34,10 +35,28 @@ const (
 
 // GlueSnapshot is the per-region input to AnalyzeGlue.
 type GlueSnapshot struct {
-	Region   string
-	Now      time.Time
-	Jobs     []GlueJob
-	Crawlers []GlueCrawler
+	Region      string
+	Now         time.Time
+	Jobs        []GlueJob
+	Crawlers    []GlueCrawler
+	Connections []GlueConnection
+
+	// NetworkRefsKnown is true when the EC2 subnet/security-group inventory was
+	// gathered successfully. The connection network check (GLU-CONN-001) needs
+	// the complete set to call a reference "missing"; when EC2 describes are
+	// denied it stays false and the check stays silent (under-warn).
+	NetworkRefsKnown bool
+	ExistingSubnets  map[string]bool
+	ExistingSGs      map[string]bool
+}
+
+// GlueConnection is one connection's network posture, from its
+// PhysicalConnectionRequirements.
+type GlueConnection struct {
+	Name             string
+	ARN              string
+	SubnetID         string
+	SecurityGroupIDs []string
 }
 
 // GlueJob is one job's posture: its definition knobs the checks care about plus
@@ -79,6 +98,11 @@ func AnalyzeGlue(snap GlueSnapshot) []Finding {
 	}
 	for _, c := range snap.Crawlers {
 		checkGlueCrawler(snap, c, &out)
+	}
+	if snap.NetworkRefsKnown {
+		for _, conn := range snap.Connections {
+			checkGlueConnection(snap, conn, &out)
+		}
 	}
 	return out
 }
@@ -189,6 +213,31 @@ func checkGlueCrawler(snap GlueSnapshot, c GlueCrawler, out *[]Finding) {
 			Fix:    "Check progress; stop and investigate if it has hung.",
 		})
 	}
+}
+
+// checkGlueConnection flags a connection whose VPC network references no longer
+// resolve: a deleted subnet or security group leaves jobs using the connection
+// unable to start, with a confusing error at run time rather than at edit time.
+func checkGlueConnection(snap GlueSnapshot, c GlueConnection, out *[]Finding) {
+	var missing []string
+	if c.SubnetID != "" && !snap.ExistingSubnets[c.SubnetID] {
+		missing = append(missing, "subnet "+c.SubnetID)
+	}
+	for _, sg := range c.SecurityGroupIDs {
+		if sg != "" && !snap.ExistingSGs[sg] {
+			missing = append(missing, "security group "+sg)
+		}
+	}
+	if len(missing) == 0 {
+		return
+	}
+	*out = append(*out, Finding{
+		ID: CheckGlueConnMissingNet, Severity: SevInfo, Service: "glue", Region: snap.Region,
+		Resource: c.Name, ARN: c.ARN,
+		Title:  "Glue connection references a missing subnet/security group",
+		Detail: "The connection's network configuration points at " + strings.Join(missing, ", ") + ", which no longer exist — jobs using it will fail to start.",
+		Fix:    "Update the connection's PhysicalConnectionRequirements to an existing subnet and security group, or delete the connection.",
+	})
 }
 
 // --- pure helpers (fixture-tested) -----------------------------------------
