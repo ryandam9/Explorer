@@ -500,6 +500,30 @@ CloudTrail-category notes:
 - Uses `cloudtrail:{DescribeTrails,GetTrailStatus,GetEventSelectors}` — distinct
   from the `cloudtrail:LookupEvents` permission the `trail` command uses.
 
+**Glue category** (`--only glue`; check IDs `GLU-*`) — data-integration health
+for AWS Glue jobs and crawlers:
+
+| ID | Finding | Severity |
+|----|---------|----------|
+| `GLU-JOB-001` | Job whose last several runs (≥3) all ended in a failure state | 🔴 critical |
+| `GLU-JOB-002` | Job that has never run, or has not run in over 30 days | 🔵 info |
+| `GLU-JOB-003` | Job whose most recent run failed (without a sustained streak) | 🟡 warning |
+| `GLU-COST-001` | Job burning DPU-hours on failed runs (carries an estimated `$`) | 🟡 warning |
+| `GLU-COST-002` | Job with many workers but a very short successful run time (over-provisioned) | 🔵 info |
+| `GLU-SEC-001` | Job without a security configuration (logs/output/bookmarks unencrypted) | 🟡 warning |
+| `GLU-CRAWL-001` | Crawler whose last crawl ended in `FAILED` (catalog may be stale) | 🟡 warning |
+| `GLU-CRAWL-002` | Crawler `RUNNING` for over 6 hours — likely stuck | 🟡 warning |
+
+Glue-category notes:
+
+- The run-based checks (`GLU-JOB-*`, `GLU-COST-*`) read each job's recent run
+  history via `glue:GetJobRuns`; a denied call leaves run health unknown and
+  fires nothing for that job (under-warn). `GLU-SEC-001` only needs `GetJobs`.
+- `GLU-COST-001`'s estimate is the wasted spend across the **observed run
+  window** (not a monthly figure), at the same `$0.44`/DPU-hour rate the `glue`
+  dashboard uses.
+- Uses `glue:{GetJobs,GetJobRuns,GetCrawlers}`.
+
 † Traffic-based checks use CloudWatch metrics over a 14-day window and need
 `cloudwatch:GetMetricData`; without it they are skipped (with a note) while
 the rest of the audit runs. Resources younger than 14 days are never flagged

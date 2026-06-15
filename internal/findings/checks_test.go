@@ -23,6 +23,9 @@ func TestEveryCheckIDIsRegistered(t *testing.T) {
 		CheckSubPending, CheckTopicNoSubs,
 		CheckTrailNotLogging, CheckTrailLogValidationOff, CheckTrailNotKMSEncrypted,
 		CheckTrailNoCloudWatchLogs, CheckTrailMgmtEventsPartial,
+		CheckGlueAllRunsFailed, CheckGlueJobStale, CheckGlueLastRunFailed,
+		CheckGlueCrawlerFailed, CheckGlueCrawlerStuck, CheckGlueFailedRunWaste,
+		CheckGlueOversizedWorker, CheckGlueNoSecurityConf,
 	}
 	if len(Checks()) != len(ids) {
 		t.Errorf("registry has %d checks, constants list %d", len(Checks()), len(ids))
