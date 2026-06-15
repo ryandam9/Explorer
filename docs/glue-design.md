@@ -75,7 +75,7 @@ findings. This document closes that gap.
 | [AXE-027](#axe-027) | Job-run history view (state · duration · DPU-hours · error) | **P1** · ✅ shipped |
 | [AXE-028](#axe-028) | Jump from a job run to its CloudWatch logs | **P2** |
 | [AXE-029](#axe-029) | Job definition / settings detail panel | **P2** · ✅ shipped |
-| [AXE-030](#axe-030) | CLI twins (`glue jobs` / `runs` / `crawlers` / …) | **P2** |
+| [AXE-030](#axe-030) | CLI twins (`glue jobs` / `runs` / `crawlers` / …) | **P2** · ✅ shipped |
 | [AXE-031](#axe-031) | `glue` audit category (health & cost findings) | **P2** |
 | [AXE-032](#axe-032) | Glue console deep links | **P3** · ✅ shipped |
 
@@ -392,6 +392,13 @@ Fields from the `Job` object: `Role`, `GlueVersion`, `ExecutionClass`,
 ---
 
 ### AXE-030 — CLI twins {#axe-030}
+
+> **Status: ✅ shipped** — `glue jobs|crawlers|triggers|workflows` and
+> `glue runs <job> [--limit] [--status]`, each honouring `-o
+> table|json|ndjson|csv` and `--region`/`--all-regions`. Runs JSON exposes
+> `durationSeconds`/`dpuHours`/`estUsd` and ISO timestamps. `glue` with no
+> subcommand still launches the dashboard. Render + status-filter helpers are
+> fixture-tested (`render_test.go`).
 
 **Problem.** Everything the dashboard shows should be scriptable and pipeable —
 the tool's standing contract (every TUI has a CLI twin).

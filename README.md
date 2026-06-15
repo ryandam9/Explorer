@@ -769,6 +769,30 @@ The DPU-hour cost is an **estimate** (`$0.44`/DPU-hour, us-east-1 ETL rate);
 runs that report no `DPUSeconds` (still running, or legacy jobs) show no figure
 rather than `$0.00`.
 
+### Scriptable twins
+
+Every pane has a non-interactive command for pipelines and `jq`:
+
+```bash
+aws_explorer glue jobs       [--all-regions] [-o table|json|ndjson|csv]
+aws_explorer glue crawlers   [-o …]
+aws_explorer glue triggers   [-o …]
+aws_explorer glue workflows  [-o …]
+aws_explorer glue runs <job> [-r us-east-1] [--limit 20] [--status FAILED] [-o …]
+```
+
+```bash
+# Which jobs failed their last run?
+aws_explorer glue jobs -o json | jq '[.[] | select(.lastRunState=="FAILED") | .name]'
+
+# Failed runs of one job, with cost
+aws_explorer glue runs nightly-orders-etl --status FAILED -o json | jq '.[] | {started, estUsd}'
+```
+
+The runs JSON exposes machine-readable `durationSeconds`, `dpuHours`, `estUsd`
+and ISO-8601 `started`/`completed`. `runs` is region-specific: it uses
+`--region` when given, otherwise the first region in scope.
+
 **IAM permissions.** Read-only:
 `glue:{GetJobs,GetJob,GetJobRuns,GetCrawlers,GetTriggers,ListWorkflows,GetConnections,GetDatabases}`
 and `sts:GetCallerIdentity` (for ARN/console links). Per-region or per-listing
