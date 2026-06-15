@@ -78,7 +78,7 @@ func TestExportMarkdownStructure(t *testing.T) {
 
 	for _, want := range []string{
 		"# VPC Report: vpc-1 (ap-southeast-2)",
-		"_Generated 2026-06-09 12:00:00 UTC_",
+		"_Generated 2026-06-09 22:00:00 AEST_", // 12:00 UTC shown in Melbourne time
 		"## VPC",
 		"| CIDR | 10.0.0.0/16 |",
 		"| env | prod |", // VPC tags rendered
@@ -151,12 +151,12 @@ func TestExportHTMLStructure(t *testing.T) {
 		"<title>VPC Report: vpc-1</title>",
 		"VPC Report · vpc-1",
 		"<span class=\"badge\">ap-southeast-2</span>",
-		"Generated 2026-06-09 12:00:00 UTC",
+		"Generated 2026-06-09 22:00:00 AEST",
 		"<nav class=\"toc\">",
 		"<a href=\"#subnets-1\">Subnets (1)</a>", // TOC anchor matches blackfriday's heading id
-		"<table>",
-		"cdn.datatables.net", // DataTables stylesheet/script loaded
-		"new DataTable(t,",   // resource tables initialized as DataTables
+		"<div class=\"dt-wrap\"><table>",         // tables wrapped for full-width fill + scroll
+		"cdn.datatables.net",                     // DataTables stylesheet/script loaded
+		"new DataTable(t,",                       // resource tables initialized as DataTables
 	} {
 		if !strings.Contains(html, want) {
 			t.Errorf("export HTML missing %q", want)
@@ -200,10 +200,10 @@ func TestWriteExportRoundTrip(t *testing.T) {
 	if err != nil {
 		t.Fatalf("writeExport: %v", err)
 	}
-	if !strings.HasSuffix(mdPath, "vpc-1-20260609-120000.md") {
+	if !strings.HasSuffix(mdPath, "vpc-1-20260609-220000.md") { // 12:00 UTC → 22:00 Melbourne (AEST)
 		t.Errorf("unexpected markdown export path: %s", mdPath)
 	}
-	if !strings.HasSuffix(htmlPath, "vpc-1-20260609-120000.html") {
+	if !strings.HasSuffix(htmlPath, "vpc-1-20260609-220000.html") {
 		t.Errorf("unexpected html export path: %s", htmlPath)
 	}
 }

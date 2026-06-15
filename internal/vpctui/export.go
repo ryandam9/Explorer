@@ -7,9 +7,28 @@ import (
 	"sort"
 	"strings"
 	"time"
+	_ "time/tzdata" // embed the zone database so Australia/Melbourne always resolves
 
 	"github.com/ryandam9/aws_explorer/internal/csvexport"
 )
+
+// reportLoc is the timezone report timestamps are shown in. Melbourne observes
+// AEST (UTC+10) and AEDT (UTC+11, during daylight saving); formatting with the
+// "MST" layout token emits whichever abbreviation applies. Falls back to UTC if
+// the zone can't be loaded.
+var reportLoc = func() *time.Location {
+	loc, err := time.LoadLocation("Australia/Melbourne")
+	if err != nil {
+		return time.UTC
+	}
+	return loc
+}()
+
+// reportTime formats t for display in the report: Melbourne local time with the
+// zone abbreviation, e.g. "2026-06-15 16:53:00 AEST".
+func reportTime(t time.Time) string {
+	return t.In(reportLoc).Format("2006-01-02 15:04:05 MST")
+}
 
 // ---------------------------------------------------------------------------
 // Export for case notes
@@ -59,7 +78,7 @@ func exportMarkdown(data fullExport, findings []Finding, generatedAt time.Time) 
 		title += " (" + region + ")"
 	}
 	b.WriteString("# " + title + "\n\n")
-	b.WriteString("_Generated " + generatedAt.UTC().Format("2006-01-02 15:04:05 UTC") + "_\n\n")
+	b.WriteString("_Generated " + reportTime(generatedAt) + "_\n\n")
 
 	// VPC attributes.
 	writeVPCSection(&b, data.VPC)
@@ -640,7 +659,7 @@ func writeExport(data fullExport, findings []Finding, now time.Time) (mdPath, ht
 	if err != nil {
 		return "", "", err
 	}
-	base := fmt.Sprintf("%s-%s", data.VPC.ID, now.Format("20060102-150405"))
+	base := fmt.Sprintf("%s-%s", data.VPC.ID, now.In(reportLoc).Format("20060102-150405"))
 	mdPath = filepath.Join(dir, base+".md")
 	if err := os.WriteFile(mdPath, []byte(exportMarkdown(data, findings, now)), 0o644); err != nil {
 		return "", "", err
