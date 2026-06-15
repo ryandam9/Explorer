@@ -29,6 +29,8 @@ Discover, monitor, and display AWS resources across accounts and regions via CLI
 - **Resilient**: Best-effort collection — a throttle, timeout, or denied call mid-scan keeps everything already gathered (flagged as partial) instead of dropping the service/region, with configurable retry attempts and adaptive backoff
 - **Themes**: 12 built-in bird-themed color schemes with 24 individually customizable color roles (table header, borders, status bar, alerts, …) — editable live in the in-app settings panel
 - **Context-aware shortcuts**: the status bar in every TUI shows only the keys that work on the current screen
+- **About every page** (`i`): a short overlay in each TUI explaining what the screen is for, so a newcomer who opens it cold knows what they are looking at before reaching for `?` help
+- **Color-coded logs**: the CloudWatch Logs viewer and the debug activity overlay tint each line by severity (error/warn/info/debug), so errors jump out at a glance
 - **Unique page titles**: every screen names itself in the terminal window/tab title (e.g. `VPC Explorer › my-vpc › Subnets`), so "which page are you on?" has one answer when several people use or discuss the tool
 - **Uniform tables**: every table shares one theme and scrolls horizontally (`<` / `>`) when columns don't fit
 
@@ -199,6 +201,7 @@ what you see in the bar is always what works right now.
 | `e` | Open the scan-errors overlay (services with errors also carry a `⚠n` badge in the sidebar) |
 | `~` | **Debug activity overlay**: a live, scrollable view of what the tool is doing — regions, services, API calls and access errors — so you can see progress instead of a blank screen (available during the initial scan too) |
 | `S` | Settings panel (themes & colors) |
+| `i` | **About this page**: a short overlay explaining what the screen is for (every TUI has one) |
 | `?` | Help overlay |
 | `Esc` | Close detail panel / overlay |
 | `q` / `Ctrl+C` | Quit |
@@ -1166,6 +1169,7 @@ type in `config.yaml` — see [Customizing displayed columns](#customizing-displ
 | `r` | Refresh the VPC list or the current resource list |
 | `Esc` | Go back one level (overlay → table → sidebar → VPC list) |
 | `S` | Open the settings panel (themes & colors) |
+| `i` | About this page — a short overlay explaining what the VPC Explorer does |
 | `?` | Toggle the help overlay |
 | `q` / `Ctrl+C` | Quit |
 
@@ -1182,6 +1186,7 @@ type in `config.yaml` — see [Customizing displayed columns](#customizing-displ
 | `w` | **What changed** — baseline the VPC, then diff against it later | free |
 | `E` | **Export** — write a Markdown report of resources + findings | free |
 | `A` | **Reachability Analyzer** — list AWS Network Insights analyses; create new ones | listing free; creating ~$0.10/analysis |
+| `L` | **Logs** — jump to the CloudWatch Logs explorer for the selected Lambda function or RDS instance | free |
 
 Inside any overlay, `↑` / `↓` scroll and `Esc` (or the same trigger key) closes it.
 
@@ -1547,7 +1552,9 @@ browser opened when the session is local).
 Pressing `Enter` on a log event opens the **full log viewer**: a full-screen
 page with the entire log (24-hour lookback, most recent 2000 events) for the
 selected stream — or the whole group in group-level search — that streams new
-events live as they arrive.
+events live as they arrive. Each line is tinted by severity (error/fail/panic
+in red, warnings amber, info/notice in the info color, debug/trace muted) so
+errors stand out while you scroll.
 
 | Key | Action |
 |-----|--------|

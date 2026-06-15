@@ -44,6 +44,8 @@ func (m Model) View() string {
 		view = ui.OverlayCenter(view, m.detailOverlay(), m.width, m.height)
 	case overlayHelp:
 		view = ui.OverlayCenter(view, m.helpOverlay(), m.width, m.height)
+	case overlayAbout:
+		view = ui.OverlayCenter(view, ui.AboutView("About — CloudTrail Feed", trailAboutText, ui.AboutWidth(m.width)), m.width, m.height)
 	}
 	// The debug pane floats above any other overlay so it stays reachable.
 	return m.debug.Overlay(view, m.width, m.height)
@@ -163,17 +165,30 @@ func (m Model) keyHints() []ui.KeyHint {
 		ui.H("y", "copy"),
 		ui.H("C", "csv"),
 		ui.H("~", "debug"),
+		ui.H("i", "about"),
 		ui.H("?", "help"),
 		ui.H("q", "quit"),
 	)
 	return hints
 }
 
+// trailAboutText explains what the CloudTrail feed TUI is for, shown in the
+// About overlay ("i").
+const trailAboutText = "This is the CloudTrail activity feed. It answers \"who changed this, and " +
+	"when?\" and \"what has been happening in this account?\" — each row is an API " +
+	"call with its time, principal, source IP and whether it failed, newest first.\n\n" +
+	"The scope (a resource, a principal, an API, a service, or the whole account) " +
+	"and region are set by the command's flags; this screen makes that feed " +
+	"navigable. Press Enter for a per-event detail overlay, / to filter, x to show " +
+	"only failed/denied calls, and C to export.\n\n" +
+	"It uses the zero-setup 90-day LookupEvents window. Press ? for the full list " +
+	"of keyboard shortcuts."
+
 // overlayStyle is the shared frame for the detail and help overlays.
 func (m Model) overlayStyle() lipgloss.Style {
 	w := m.width - 8
-	if w > 84 {
-		w = 84
+	if w > 96 {
+		w = 96
 	}
 	if w < 30 {
 		w = 30
@@ -297,6 +312,7 @@ func (m Model) helpOverlay() string {
 		{"y", "Copy the event name (or the whole detail panel when it's open)"},
 		{"C", "Export the current view to CSV under ~/.aws_explorer/exports/"},
 		{"~", "Debug: live view of what the tool is doing"},
+		{"i", "About this page (what it does)"},
 		{"?", "Toggle this help"},
 		{"q / Ctrl+C", "Quit"},
 	}

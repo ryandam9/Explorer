@@ -193,6 +193,7 @@ type Model struct {
 	objectsNextToken  *string
 	detailsLoading    bool
 	showHelp          bool
+	showAbout         bool
 	showPreview       bool
 	previewKey        string
 	previewContent    string
@@ -1053,6 +1054,9 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			case ui.KeyHelp:
 				m.showHelp = !m.showHelp
 				return m, nil
+			case ui.KeyAbout:
+				m.showAbout = !m.showAbout
+				return m, nil
 			case ui.KeySettings:
 				m.settings = ui.NewSettingsModel(m.width, m.height, m.configPath, m.cfg)
 				m.showSettings = true
@@ -1066,6 +1070,12 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if m.showHelp {
 			if msg.String() == "esc" || msg.String() == "?" {
 				m.showHelp = false
+			}
+			return m, nil
+		}
+		if m.showAbout {
+			if msg.String() == "esc" || msg.String() == ui.KeyAbout {
+				m.showAbout = false
 			}
 			return m, nil
 		}
@@ -1792,6 +1802,9 @@ func (m *Model) View() string {
 	// below, so the live app stays visible around it.)
 	if m.showHelp {
 		content = lipgloss.Place(m.width-4, max(8, m.height-8), lipgloss.Center, lipgloss.Center, m.helpView())
+	} else if m.showAbout {
+		about := ui.AboutView("About — S3 Browser", s3AboutText, ui.AboutWidth(m.width))
+		content = lipgloss.Place(m.width-4, max(8, m.height-8), lipgloss.Center, lipgloss.Center, about)
 	} else if m.showPreview {
 		content = lipgloss.Place(m.width-4, max(8, m.height-8), lipgloss.Center, lipgloss.Center, m.previewView())
 	} else if m.copyMenuActive {
@@ -1917,6 +1930,8 @@ func (m *Model) statusHints() []ui.KeyHint {
 		return []ui.KeyHint{ui.H("y/Esc", "close")}
 	case m.showHelp:
 		return []ui.KeyHint{ui.H("?/Esc", "close help")}
+	case m.showAbout:
+		return []ui.KeyHint{ui.H("i/Esc", "close about")}
 	case m.showPreview:
 		return []ui.KeyHint{ui.H("↑/↓", "scroll"), ui.H("PgUp/PgDn", "page"), ui.H("Esc", "close")}
 	case m.inBucketSearch:
@@ -1942,7 +1957,7 @@ func (m *Model) statusHints() []ui.KeyHint {
 			ui.H("/", "search"),
 		}
 		hints = append(hints, colScrollHints(&m.bucketTable)...)
-		return append(hints, ui.H("r", "refresh"), ui.H("S", "theme"), ui.H("~", "debug"), ui.H("q", "quit"), ui.H("?", "help"))
+		return append(hints, ui.H("r", "refresh"), ui.H("S", "theme"), ui.H("~", "debug"), ui.H("i", "about"), ui.H("q", "quit"), ui.H("?", "help"))
 	case stateObjectList:
 		hints := []ui.KeyHint{
 			ui.H("↑/↓", "navigate"),
@@ -1970,7 +1985,7 @@ func (m *Model) statusHints() []ui.KeyHint {
 			ui.H("r", "refresh"),
 			ui.H("Esc", "back"),
 		)
-		return append(hints, ui.H("~", "debug"), ui.H("?", "help"))
+		return append(hints, ui.H("~", "debug"), ui.H("i", "about"), ui.H("?", "help"))
 	}
 	return []ui.KeyHint{ui.H("q", "quit")}
 }
@@ -2414,6 +2429,17 @@ func (m *Model) deleteConfirmView() string {
 	return ui.ModalStyle(width, h).Render(content)
 }
 
+// s3AboutText explains what the S3 browser is for, shown in the About overlay
+// ("i").
+const s3AboutText = "This is the dedicated S3 browser. The first screen lists your buckets " +
+	"(with details on d); Enter opens a bucket and you navigate its prefixes like " +
+	"folders, drilling into objects.\n\n" +
+	"On an object you can preview its contents (p), copy its S3 URI (y), open it " +
+	"in the AWS console (o), generate a 1-hour presigned URL (g) and download it " +
+	"(D). Use / to jump to a prefix, f to flatten the listing, s to sort, and L to " +
+	"load more when a listing is truncated.\n\n" +
+	"Press ? for the full, context-aware list of keyboard shortcuts."
+
 // helpView renders the help overlay. It is context-aware: only the sections
 // that apply to the current screen are shown, so the bucket list never
 // advertises object shortcuts and vice versa.
@@ -2468,11 +2494,12 @@ func (m *Model) helpView() string {
 		"Utility",
 		"  S                  Settings (theme & colors)",
 		"  ~                  Debug: live view of what the tool is doing",
+		"  i                  About this page (what it does)",
 		"  ?                  Toggle this help",
 		"  q, Ctrl+C          Quit",
 	)
 	body := lipgloss.JoinVertical(lipgloss.Left, sections...)
-	return ui.HelpView(title, body, min(72, max(32, m.width-12)))
+	return ui.HelpView(title, body, min(88, max(32, m.width-12)))
 }
 
 func (m *Model) previewView() string {

@@ -217,6 +217,7 @@ type tuiModel struct {
 	// Help & settings overlays
 	showHelp     bool
 	helpViewport viewport.Model // scrolls the help body when it is taller than the screen
+	showAbout    bool           // "i" — what this page is for
 	showSettings bool
 	settings     ui.SettingsModel
 
@@ -460,6 +461,18 @@ func (m tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		// Non-input messages fall through to the normal update path below.
+	}
+
+	// The About overlay is static text; any key closes it (and a fresh key
+	// re-issues nothing), so swallow input while it is open.
+	if m.showAbout {
+		if msg, ok := msg.(tea.KeyMsg); ok {
+			switch msg.String() {
+			case "esc", ui.KeyAbout, "q":
+				m.showAbout = false
+			}
+			return m, nil
+		}
 	}
 
 	// While the debug overlay is open, intercept only key and mouse events
@@ -910,6 +923,10 @@ func (m tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 		case ui.KeyHelp:
 			m.openHelpOverlay()
+			return m, tea.Batch(cmds...)
+
+		case ui.KeyAbout:
+			m.showAbout = true
 			return m, tea.Batch(cmds...)
 
 		case "e":
@@ -2205,6 +2222,21 @@ func (m *tuiModel) syncDetailViewport() {
 // helpBody returns the full keybinding reference as a single block. It is
 // taller than most terminals, so it is shown inside a scrollable viewport
 // rather than rendered as one fixed block (which would clip the bottom rows).
+// summaryAboutText explains, in plain prose, what the summary TUI is for. Shown
+// in the About overlay ("i") so a newcomer who opens the screen cold knows what
+// they are looking at before reaching for the keyboard-shortcut help ("?").
+const summaryAboutText = "This is the interactive account inventory. It lists every resource " +
+	"discovered across your configured regions — from the 29 typed collectors " +
+	"(EC2, S3, RDS, Lambda, …) merged with a universal Resource Groups Tagging " +
+	"API sweep, so the long tail of services shows up too.\n\n" +
+	"Pick a service in the left sidebar, browse its resources in the table, and " +
+	"press Enter to open a detail panel. From there you can trace CloudTrail " +
+	"activity (t), view recent logs (l/L), plot a metric sparkline (g) and find " +
+	"cross-references (x).\n\n" +
+	"Use Ctrl+P to jump to any resource by name/ID, / to filter, f for advanced " +
+	"filters, and D to see what changed since a saved baseline.\n\n" +
+	"Press ? for the full list of keyboard shortcuts."
+
 func (m tuiModel) helpBody() string {
 	// The coverage shortcut only does something in the summary view, so it is
 	// listed only there to avoid advertising a no-op key in the plain TUI.
@@ -2247,6 +2279,7 @@ func (m tuiModel) helpBody() string {
 		"  e                  View access / scan errors",
 		"  ~                  Debug: live view of what the tool is doing",
 		"  S                  Settings (theme & colors)",
+		"  i                  About this page (what it does)",
 		"  ?                  Toggle this help",
 		"  q, Ctrl+C          Quit",
 	}
@@ -2276,8 +2309,10 @@ func insertAfter(lines []string, anchor, extra string) []string {
 // taller than the screen.
 func (m *tuiModel) openHelpOverlay() {
 	w := m.width - 12
-	if w > 72 {
-		w = 72
+	// Wide enough that the longest shortcut description fits on one line on a
+	// roomy terminal; it still narrows (and wraps) gracefully on small ones.
+	if w > 100 {
+		w = 100
 	}
 	if w < 32 {
 		w = 32
@@ -2353,7 +2388,11 @@ func (m tuiModel) View() string {
 	header := m.renderHeader()
 	status := m.statusBar()
 
-	if m.showHelp {
+	if m.showAbout {
+		about := ui.AboutView("About — AWS Explorer (Summary)", summaryAboutText, ui.AboutWidth(m.width))
+		centered := lipgloss.Place(m.width, m.height-4, lipgloss.Center, lipgloss.Center, about)
+		output = lipgloss.JoinVertical(lipgloss.Left, header, centered, status)
+	} else if m.showHelp {
 		centered := lipgloss.Place(m.width, m.height-4, lipgloss.Center, lipgloss.Center, m.helpView())
 		output = lipgloss.JoinVertical(lipgloss.Left, header, centered, status)
 	} else if m.showErrors {
@@ -2793,6 +2832,7 @@ func (m tuiModel) statusHints() []ui.KeyHint {
 			ui.H("P", "profile"),
 			ui.H("Tab", "panel"),
 			ui.H("S", "theme"),
+			ui.H("i", "about"),
 			ui.H("q", "quit"),
 			ui.H("?", "help"),
 		)

@@ -36,6 +36,8 @@ func (m Model) View() string {
 		view = ui.OverlayCenter(view, m.detailOverlay(), m.width, m.height)
 	case overlayHelp:
 		view = ui.OverlayCenter(view, m.helpOverlay(), m.width, m.height)
+	case overlayAbout:
+		view = ui.OverlayCenter(view, ui.AboutView("About — CloudTrail Lake", lakeAboutText, ui.AboutWidth(m.width)), m.width, m.height)
 	}
 	return m.debug.Overlay(view, m.width, m.height)
 }
@@ -123,16 +125,29 @@ func (m Model) keyHints() []ui.KeyHint {
 		ui.H("y", "copy"),
 		ui.H("C", "csv"),
 		ui.H("~", "debug"),
+		ui.H("i", "about"),
 		ui.H("?", "help"),
 		ui.H("q", "quit"),
 	)
 	return hints
 }
 
+// lakeAboutText explains what the CloudTrail Lake TUI is for, shown in the
+// About overlay ("i").
+const lakeAboutText = "This explores the results of a CloudTrail Lake SQL query. Where the trail " +
+	"feed covers 90 days of management events, a Lake event data store can hold " +
+	"years of history and data events (S3 object access, Lambda invokes, …) and " +
+	"supports aggregation.\n\n" +
+	"The query (a built-in --top-principals/--top-events, or your own --sql) and " +
+	"store are set by the command's flags; this screen makes the returned rows " +
+	"navigable. Press Enter for a labelled per-row detail overlay, / to filter, " +
+	"s/R for numeric-aware sort, y to copy and C to export.\n\n" +
+	"Press ? for the full list of keyboard shortcuts."
+
 func (m Model) overlayStyle() lipgloss.Style {
 	w := m.width - 8
-	if w > 84 {
-		w = 84
+	if w > 96 {
+		w = 96
 	}
 	if w < 30 {
 		w = 30
@@ -210,6 +225,7 @@ func (m Model) helpOverlay() string {
 		{"y", "Copy the selected row (tab-separated, or the labelled detail panel when it's open)"},
 		{"C", "Export the current view to CSV under ~/.aws_explorer/exports/"},
 		{"~", "Debug: live view of what the tool is doing"},
+		{"i", "About this page (what it does)"},
 		{"?", "Toggle this help"},
 		{"q / Ctrl+C", "Quit"},
 	}

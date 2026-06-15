@@ -692,15 +692,39 @@ func (m *model) renderViewer() string {
 	return box + "\n" + ui.StatusBar(m.width, statusText, m.getHelpHints())
 }
 
+// Log-level tokens recognised in a log line, matched as whole words so a
+// substring like "info" inside "reinforcement" doesn't tint the line. Error
+// keywords are checked first, so a line mentioning an error stands out even
+// when it also carries a lower level (e.g. "INFO retry failed").
+var (
+	logErrorRe = regexp.MustCompile(`(?i)\b(error|errors|err|fatal|panic|exception|fail|failed|failure|critical|crit|alert|emerg)\b`)
+	logWarnRe  = regexp.MustCompile(`(?i)\b(warn|warning|deprecated|deprecation)\b`)
+	logInfoRe  = regexp.MustCompile(`(?i)\b(info|notice)\b`)
+	logDebugRe = regexp.MustCompile(`(?i)\b(debug|trace|verbose)\b`)
+)
+
+// logLineColor returns the theme color a log line should be tinted with, based
+// on the highest-severity log-level token it contains. Lines with no
+// recognisable level render in the normal text color. Pulled out as a pure
+// function so the severity mapping is unit-testable without rendering.
+func logLineColor(line string) string {
+	switch {
+	case logErrorRe.MatchString(line):
+		return ui.ColorError()
+	case logWarnRe.MatchString(line):
+		return ui.ColorWarning()
+	case logInfoRe.MatchString(line):
+		return ui.ColorInfo()
+	case logDebugRe.MatchString(line):
+		return ui.ColorMuted()
+	default:
+		return ui.ColorText()
+	}
+}
+
 // styleViewerLine colors a log line by severity and highlights search matches.
 func (m *model) styleViewerLine(line, term string) string {
-	base := lipgloss.NewStyle().Foreground(lipgloss.Color(ui.ColorText()))
-	low := strings.ToLower(line)
-	if strings.Contains(low, "error") || strings.Contains(low, "fail") || strings.Contains(low, "panic") {
-		base = base.Foreground(lipgloss.Color(ui.ColorError()))
-	} else if strings.Contains(low, "warn") {
-		base = base.Foreground(lipgloss.Color(ui.ColorWarning()))
-	}
+	base := lipgloss.NewStyle().Foreground(lipgloss.Color(logLineColor(line)))
 
 	if term == "" {
 		return base.Render(line)
