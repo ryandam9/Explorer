@@ -37,6 +37,36 @@ func exportSnap() fullExport {
 		EC2: []EC2InstanceInfo{
 			{ID: "i-1", Name: "app", State: "running", Type: "t3.micro", PrivateIP: "10.0.0.5"},
 		},
+		ECSServices: []ECSServiceInfo{
+			{Cluster: "prod", Name: "api", Status: "ACTIVE", LaunchType: "FARGATE", DesiredCount: 2, RunningCount: 2, SubnetIDs: []string{"subnet-1"}},
+		},
+		EKSClusters: []EKSClusterInfo{
+			{Name: "eks-prod", Status: "ACTIVE", Version: "1.29", VPCID: "vpc-1", SubnetIDs: []string{"subnet-1"}},
+		},
+		ElastiCache: []ElastiCacheClusterInfo{
+			{ID: "cache-1", Engine: "redis", EngineVersion: "7.1", Status: "available", NodeType: "cache.t3.micro", NumNodes: 1, SubnetGroup: "cache-subnets", VPCID: "vpc-1"},
+		},
+		Redshift: []RedshiftClusterInfo{
+			{ID: "rs-1", Status: "available", NodeType: "ra3.xlplus", NumNodes: 2, DBName: "analytics", Endpoint: "rs-1.abc.redshift.amazonaws.com:5439", SubnetGroup: "rs-subnets", VPCID: "vpc-1"},
+		},
+		EFS: []EFSFileSystemInfo{
+			{ID: "fs-1", Name: "shared", State: "available", PerformanceMode: "generalPurpose", Encrypted: true, MountTargets: 1, SubnetIDs: []string{"subnet-1"}, VPCID: "vpc-1"},
+		},
+		EMR: []EMRClusterInfo{
+			{ID: "j-1", Name: "spark", State: "WAITING", SubnetID: "subnet-1"},
+		},
+		VPNGateways: []VPNGatewayInfo{
+			{ID: "vgw-1", State: "available", Type: "ipsec.1", AmazonSideASN: "64512"},
+		},
+		VPNConnections: []VPNConnectionInfo{
+			{ID: "vpn-1", State: "available", Type: "ipsec.1", CustomerGatewayID: "cgw-1", VPNGatewayID: "vgw-1"},
+		},
+		CustomerGateways: []CustomerGatewayInfo{
+			{ID: "cgw-1", State: "available", Type: "ipsec.1", IPAddress: "203.0.113.10", BgpAsn: "65000"},
+		},
+		TransitGatewayAttachments: []TransitGatewayAttachmentInfo{
+			{ID: "tgw-attach-1", TransitGatewayID: "tgw-1", State: "available", ResourceType: "vpc", ResourceID: "vpc-1"},
+		},
 	}
 }
 
@@ -76,6 +106,44 @@ func TestExportMarkdownStructure(t *testing.T) {
 		"## EC2 instances (1)",
 		"### i-1 — app",
 		"| Type | t3.micro |",
+		// Workload services.
+		"| ECS services | 1 |",
+		"## ECS services (1)",
+		"### api — prod",
+		"| Launch type | FARGATE |",
+		"| EKS clusters | 1 |",
+		"## EKS clusters (1)",
+		"### eks-prod",
+		"| Version | 1.29 |",
+		"| ElastiCache clusters | 1 |",
+		"## ElastiCache clusters (1)",
+		"### cache-1",
+		"| Engine | redis 7.1 |",
+		"| Redshift clusters | 1 |",
+		"## Redshift clusters (1)",
+		"### rs-1",
+		"| Database | analytics |",
+		"| EFS file systems | 1 |",
+		"## EFS file systems (1)",
+		"### fs-1 — shared",
+		"| Encrypted | Yes |",
+		"| EMR clusters | 1 |",
+		"## EMR clusters (1)",
+		"### j-1 — spark",
+		// VPN / transit gateway.
+		"| VPN gateways | 1 |",
+		"## VPN gateways (1)",
+		"### vgw-1",
+		"| Amazon side ASN | 64512 |",
+		"## VPN connections (1)",
+		"### vpn-1",
+		"| Customer gateway | cgw-1 |",
+		"## Customer gateways (1)",
+		"### cgw-1",
+		"| IP address | 203.0.113.10 |",
+		"## Transit gateway attachments (1)",
+		"### tgw-attach-1",
+		"| Transit gateway | tgw-1 |",
 	} {
 		if !strings.Contains(md, want) {
 			t.Errorf("export markdown missing %q", want)
