@@ -12,6 +12,53 @@ type Config struct {
 	Display  DisplayConfig            `mapstructure:"display"`
 	Trail    TrailConfig              `mapstructure:"trail"`
 	Summary  SummaryConfig            `mapstructure:"summary"`
+	EMR      EMRConfig                `mapstructure:"emr"`
+}
+
+// EMRConfig configures the `emr` dashboard's optional on-cluster features
+// (AXE-039) — reaching the YARN / HBase / Oozie REST daemons that run on a
+// cluster's primary node and have no AWS API.
+type EMRConfig struct {
+	OnCluster OnClusterConfig `mapstructure:"onCluster"`
+}
+
+// OnClusterConfig controls how (and whether) the tool reaches a cluster's
+// on-cluster REST daemons. It is OFF by default: the live browsers stay dark
+// until the user opts in, because this is the one place the tool reaches outside
+// the AWS API surface into a private VPC.
+//
+// Example config.yaml:
+//
+//	emr:
+//	  onCluster:
+//	    mode: socks            # off | direct | socks
+//	    socksProxy: 127.0.0.1:8157
+//	    timeoutSeconds: 5
+//	    ports:
+//	      yarn:  8088
+//	      hbase: 8080
+//	      oozie: 11000
+type OnClusterConfig struct {
+	// Mode selects how the daemons are reached: "off" (default — features
+	// disabled), "direct" (tool runs inside the VPC; plain HTTP to the primary
+	// node), or "socks" (route through an existing SOCKS5 proxy, e.g. an
+	// `ssh -D 8157` dynamic tunnel — the pattern AWS documents for the web UIs).
+	Mode string `mapstructure:"mode"`
+	// SocksProxy is the host:port of the SOCKS5 proxy used in "socks" mode.
+	SocksProxy string `mapstructure:"socksProxy"`
+	// TimeoutSeconds bounds each on-cluster HTTP request. 0 uses the built-in
+	// default (5s).
+	TimeoutSeconds int `mapstructure:"timeoutSeconds"`
+	// Ports overrides the default daemon ports (yarn 8088, hbase 8080,
+	// oozie 11000); unset entries use the defaults.
+	Ports OnClusterPorts `mapstructure:"ports"`
+}
+
+// OnClusterPorts holds the per-daemon ports (0 = use the EMR default).
+type OnClusterPorts struct {
+	YARN  int `mapstructure:"yarn"`
+	HBase int `mapstructure:"hbase"`
+	Oozie int `mapstructure:"oozie"`
 }
 
 // SummaryConfig configures the `summary` command.

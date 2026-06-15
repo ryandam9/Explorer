@@ -893,11 +893,13 @@ Step history (Enter on a cluster):
 | `d` | Show the selected cluster's detail (release, log URI, role, EC2 attributes) |
 | `L` | Open the cluster's (or selected step's) logs in the S3 browser |
 | `u` | Open a persistent application UI (Spark History / YARN Timeline / Tez) |
+| `y` | Open the live **YARN application browser** (requires on-cluster access) |
 | `/` | Filter the cluster list |
 | `o` | Open the selected cluster in the AWS console |
 | `r` | Refresh |
-| `y` | (step history) copy the selected step's failure reason |
 | `i` | About this page · `q` quit |
+
+(In the step history, `y` copies the selected step's failure reason.)
 
 `L` opens the [S3 browser](#s3-tui-usage) rooted at the cluster's log archive
 (`<LogUri>/<cluster-id>/`), or at a specific step's folder
@@ -909,10 +911,37 @@ Spark History Server, YARN Timeline Server or Tez UI — and opens a presigned
 link to the chosen one. These are hosted **off-cluster**, so the link needs no
 SSH tunnel and stays valid for 30 days after the application terminates.
 
-> **Scope note.** This dashboard covers the EMR **control plane** (clusters,
-> steps) via the AWS API. The on-cluster services — live YARN apps, HBase
-> tables, Oozie workflows — have no AWS API and are a later, opt-in phase; see
-> [`docs/emr-design.md`](docs/emr-design.md) for the full design.
+### On-cluster access (live YARN)
+
+The live YARN application browser (`y`) reads from the **ResourceManager REST
+API** on the cluster's primary node. YARN has **no AWS API** — it's reachable
+only from inside the cluster's VPC — so this is **opt-in** and **off by
+default**. Enable it under `emr.onCluster` in `config.yaml`:
+
+```yaml
+emr:
+  onCluster:
+    mode: socks            # off (default) | direct | socks
+    socksProxy: 127.0.0.1:8157
+```
+
+- **`direct`** — the tool is already inside the VPC (bastion / in-VPC CloudShell
+  / peered network); plain HTTP to the primary node.
+- **`socks`** — route through a SOCKS5 proxy, e.g. an SSH dynamic tunnel you
+  already run (the pattern AWS documents for the cluster web UIs):
+
+  ```bash
+  ssh -i <key.pem> -N -D 8157 hadoop@<primary-dns>
+  ```
+
+When access is off or the daemon can't be reached, the browser shows a "how to
+connect" helper (including the exact tunnel command) instead of an error — every
+on-cluster request is a read-only `GET` with a timeout. HBase and Oozie browsers
+will follow the same opt-in layer; see [`docs/emr-design.md`](docs/emr-design.md).
+
+> **Scope note.** Everything else in this dashboard covers the EMR **control
+> plane** (clusters, steps) and **history plane** (logs, persistent UIs) via the
+> AWS API and needs no on-cluster access.
 
 ### Scriptable twins
 
@@ -921,6 +950,7 @@ aws_explorer emr clusters       [--all-regions] [--state RUNNING,WAITING] [-o ta
 aws_explorer emr steps <id>     [-r us-east-1] [--limit 50] [--status FAILED] [-o …]
 aws_explorer emr instances <id> [-r us-east-1] [--limit N] [-o …]
 aws_explorer emr apps <id>      [-r us-east-1] [-o …]
+aws_explorer emr yarn <id>      [-r us-east-1] [-o …]   # live YARN apps (on-cluster)
 ```
 
 ```bash
@@ -942,7 +972,9 @@ region in scope.
 `elasticmapreduce:{CreatePersistentAppUI,DescribePersistentAppUI,GetPersistentAppUIPresignedURL}`
 for the `u` application-UI links, and the [S3 browser](#s3-tui-usage)'s `s3:*`
 read actions for the `L` log jump. Per-region or per-cluster denials degrade
-that part of the dashboard with a logged note and never abort the session.
+that part of the dashboard with a logged note and never abort the session. The
+`y` YARN browser uses no IAM (it talks to the on-cluster ResourceManager) but
+needs `emr.onCluster` configured and network reachability into the VPC.
 
 ## Bill Usage
 
