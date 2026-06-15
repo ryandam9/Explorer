@@ -45,6 +45,8 @@ cares about lives in **two different planes**:
 | **History plane** (off-cluster, AWS-mediated) | Spark History Server, YARN Timeline Server, Tez UI; archived step/container/daemon logs | `emr:GetPersistentAppUIPresignedURL` (returns a browser link), and the S3 / CloudWatch **log archive** | always (IAM + S3 read) |
 | **On-cluster plane** (live daemons) | **live YARN apps**, **HBase tables / row counts / region status**, **Oozie workflows & coordinators** | HTTP REST against daemons on the primary node — YARN RM `:8088`, HBase REST `:8080` / Master UI `:16010`, Oozie `:11000` | **only with network reachability** into the cluster's VPC (SSH tunnel / SOCKS proxy / VPN / direct) |
 
+![The three planes of EMR access](emr-planes.svg)
+
 The first two planes fit the tool's existing "pure AWS-API, read-only, runs from
 anywhere" model perfectly. The third plane — which is exactly where the user's
 "see what HBase tables exist, browse them, record counts, status" request lands —
@@ -479,6 +481,8 @@ have **no AWS API** — they live on REST daemons on the cluster's primary node,
 reachable only from inside the VPC. To browse them (AXE-040/041/042) the tool
 needs a way to reach those daemons. This is the one place the tool steps outside
 the pure AWS-API model, so it is **opt-in, explicit, and read-only**.
+
+![On-cluster connection modes](emr-connection-modes.svg)
 
 **Design.** A new `internal/emrconn` package: a thin HTTP client that resolves a
 cluster's primary-node private DNS (from `DescribeCluster`) and reaches the

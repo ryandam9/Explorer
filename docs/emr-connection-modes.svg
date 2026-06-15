@@ -1,0 +1,71 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 980 700" font-family="-apple-system, Segoe UI, Helvetica, Arial, sans-serif">
+  <defs>
+    <marker id="ar" markerWidth="10" markerHeight="10" refX="8" refY="3" orient="auto" markerUnits="strokeWidth">
+      <path d="M0,0 L8,3 L0,6 Z" fill="#5b6470"/>
+    </marker>
+  </defs>
+
+  <rect x="0" y="0" width="980" height="700" fill="#ffffff"/>
+  <text x="490" y="38" text-anchor="middle" font-size="22" font-weight="700" fill="#1b1f24">On-cluster connection modes (AXE-039)</text>
+  <text x="490" y="62" text-anchor="middle" font-size="13" fill="#5b6470">Three opt-in, read-only (HTTP GET) ways to reach the primary node's daemons — default is off</text>
+
+  <!-- VPC boundary around primary node (right) -->
+  <rect x="700" y="95" width="250" height="540" rx="12" fill="#f4f8fb" stroke="#90a4b4" stroke-width="1.5" stroke-dasharray="6 5"/>
+  <text x="825" y="120" text-anchor="middle" font-size="12.5" font-weight="700" fill="#5e7081">Cluster VPC (private)</text>
+
+  <!-- primary node box -->
+  <rect x="722" y="270" width="206" height="190" rx="10" fill="#1b2733" stroke="#0f1620" stroke-width="1.5"/>
+  <text x="825" y="298" text-anchor="middle" font-size="14" font-weight="700" fill="#ffffff">EMR primary node</text>
+  <line x1="740" y1="312" x2="910" y2="312" stroke="#34404d" stroke-width="1"/>
+  <text x="740" y="338" font-size="12" fill="#cfe3f3">YARN RM</text>
+  <text x="910" y="338" text-anchor="end" font-size="12" font-weight="700" fill="#7fd1c3">:8088</text>
+  <text x="740" y="366" font-size="12" fill="#cfe3f3">HBase REST</text>
+  <text x="910" y="366" text-anchor="end" font-size="12" font-weight="700" fill="#7fd1c3">:8080</text>
+  <text x="740" y="394" font-size="12" fill="#cfe3f3">HBase Master UI</text>
+  <text x="910" y="394" text-anchor="end" font-size="12" font-weight="700" fill="#7fd1c3">:16010</text>
+  <text x="740" y="422" font-size="12" fill="#cfe3f3">Oozie REST</text>
+  <text x="910" y="422" text-anchor="end" font-size="12" font-weight="700" fill="#7fd1c3">:11000</text>
+  <text x="740" y="448" font-size="10.5" font-style="italic" fill="#8aa0b3">security group must allow these ports</text>
+
+  <!-- tool box (left) -->
+  <rect x="30" y="310" width="150" height="110" rx="10" fill="#1b2733" stroke="#0f1620" stroke-width="1.5"/>
+  <text x="105" y="352" text-anchor="middle" font-size="14" font-weight="700" fill="#ffffff">aws_explorer</text>
+  <text x="105" y="372" text-anchor="middle" font-size="11" fill="#aeb9c4">emrconn.Dialer</text>
+  <text x="105" y="392" text-anchor="middle" font-size="11" fill="#aeb9c4">builds http.Client</text>
+
+  <!-- ===== Mode A: direct ===== -->
+  <rect x="220" y="110" width="460" height="120" rx="10" fill="#ebf3fb" stroke="#3182ce" stroke-width="1.4"/>
+  <text x="240" y="136" font-size="14" font-weight="700" fill="#1f5a8c">direct</text>
+  <text x="300" y="136" font-size="11.5" fill="#33597a">tool already runs inside the VPC (bastion / peered network)</text>
+  <text x="240" y="172" font-size="12" fill="#1b1f24">HTTP straight to http://&lt;primary-dns&gt;:&lt;port&gt;</text>
+  <rect x="240" y="186" width="120" height="30" rx="6" fill="#ffffff" stroke="#3182ce"/>
+  <text x="300" y="206" text-anchor="middle" font-size="11.5" font-weight="700" fill="#1f5a8c">no proxy</text>
+  <!-- arrow from tool up-in to mode A, then to node -->
+  <path d="M180 330 C 200 250, 205 175, 218 170" fill="none" stroke="#5b6470" stroke-width="1.5" marker-end="url(#ar)"/>
+  <path d="M680 170 C 705 175, 712 240, 730 285" fill="none" stroke="#5b6470" stroke-width="1.5" marker-end="url(#ar)"/>
+
+  <!-- ===== Mode B: socks ===== -->
+  <rect x="220" y="305" width="460" height="120" rx="10" fill="#e6f6f4" stroke="#2c9d8f" stroke-width="1.4"/>
+  <text x="240" y="331" font-size="14" font-weight="700" fill="#1c6b62">socks</text>
+  <text x="295" y="331" font-size="11.5" fill="#22796f">reuse an SSH dynamic tunnel you already run</text>
+  <text x="240" y="367" font-size="12" fill="#1b1f24">$ ssh -i key.pem -N -D 8157 hadoop@&lt;primary-dns&gt;</text>
+  <rect x="240" y="381" width="200" height="30" rx="6" fill="#ffffff" stroke="#2c9d8f"/>
+  <text x="340" y="401" text-anchor="middle" font-size="11.5" font-weight="700" fill="#1c6b62">SOCKS5 127.0.0.1:8157</text>
+  <!-- arrows -->
+  <path d="M180 365 L 218 365" fill="none" stroke="#5b6470" stroke-width="1.5" marker-end="url(#ar)"/>
+  <path d="M680 365 L 718 365" fill="none" stroke="#5b6470" stroke-width="1.5" marker-end="url(#ar)"/>
+
+  <!-- ===== Mode C: tunnel ===== -->
+  <rect x="220" y="500" width="460" height="130" rx="10" fill="#fdf3e3" stroke="#dd9b34" stroke-width="1.4"/>
+  <text x="240" y="526" font-size="14" font-weight="700" fill="#9a6512">tunnel</text>
+  <text x="300" y="526" font-size="11.5" fill="#a8741f">tool opens an SSH local-forward, torn down on exit</text>
+  <text x="240" y="562" font-size="12" fill="#1b1f24">x/crypto/ssh local-forward  localhost:NNNN → primary:&lt;port&gt;</text>
+  <rect x="240" y="576" width="240" height="30" rx="6" fill="#ffffff" stroke="#dd9b34"/>
+  <text x="360" y="596" text-anchor="middle" font-size="11.5" font-weight="700" fill="#9a6512">key.pem · user · bastion/primary host</text>
+  <!-- arrows -->
+  <path d="M180 400 C 195 470, 200 555, 218 560" fill="none" stroke="#5b6470" stroke-width="1.5" marker-end="url(#ar)"/>
+  <path d="M680 560 C 705 555, 712 480, 730 450" fill="none" stroke="#5b6470" stroke-width="1.5" marker-end="url(#ar)"/>
+
+  <!-- footer note -->
+  <text x="490" y="668" text-anchor="middle" font-size="11.5" fill="#5b6470">Every request is an HTTP GET with a timeout; an unreachable daemon degrades to a "how to connect" helper, never a crash.</text>
+</svg>
