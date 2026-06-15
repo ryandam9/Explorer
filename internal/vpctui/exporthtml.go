@@ -3,6 +3,7 @@ package vpctui
 import (
 	"bytes"
 	"html/template"
+	"regexp"
 	"strings"
 	"time"
 	"unicode"
@@ -40,14 +41,15 @@ func exportHTML(data fullExport, findings []Finding, generatedAt time.Time) stri
 	md := exportMarkdown(data, findings, generatedAt)
 	rendered := blackfriday.Run([]byte(md),
 		blackfriday.WithExtensions(blackfriday.CommonExtensions|blackfriday.AutoHeadingIDs))
+	wrapped := tableWrapRe.ReplaceAllString(string(rendered), `<div class="dt-wrap"><table>$1</table></div>`)
 
 	d := reportHTMLData{
 		Title:       "VPC Report: " + data.VPC.ID,
 		VPCID:       data.VPC.ID,
 		Region:      data.VPC.Region,
-		GeneratedAt: generatedAt.UTC().Format("2006-01-02 15:04:05 UTC"),
+		GeneratedAt: reportTime(generatedAt),
 		TOC:         buildTOC(md),
-		Content:     template.HTML(rendered), //nolint:gosec // generated from our own report
+		Content:     template.HTML(wrapped), //nolint:gosec // generated from our own report
 	}
 	var buf bytes.Buffer
 	if err := reportTmpl.Execute(&buf, d); err != nil {
@@ -90,6 +92,12 @@ func sanitizedAnchorName(text string) string {
 	}
 	return string(anchor)
 }
+
+// tableWrapRe matches blackfriday's bare <table>…</table> blocks so each can be
+// wrapped in a horizontally scrollable container. A block-level table shrinks
+// to its content width, which leaves a gap after the last column; wrapping lets
+// the table use width:100% (filling the row) while the wrapper handles overflow.
+var tableWrapRe = regexp.MustCompile(`(?s)<table>(.*?)</table>`)
 
 var reportTmpl = template.Must(template.New("report").Parse(reportHTMLTemplate))
 
@@ -140,12 +148,14 @@ ul { padding-left:1.2rem; }
 li { margin:.25rem 0; }
 blockquote { margin:1rem 0; padding:.6rem 1rem; background:var(--panel); border:3px solid var(--ink); border-left:9px solid var(--pink); box-shadow:var(--shadow-sm); }
 hr { border:none; border-top:3px solid var(--ink); margin:2rem 0; }
-/* Tables */
-table { border-collapse:separate; border-spacing:0; width:100%; margin:.4rem 0 1.4rem; display:block; overflow-x:auto; background:var(--panel); border:3px solid var(--ink); box-shadow:var(--shadow); font-size:.86rem; }
-th, td { border-right:2px solid var(--ink); border-bottom:2px solid var(--ink); padding:.5rem .7rem; text-align:left; vertical-align:top; }
+/* Tables — wrapper scrolls horizontally; table fills the row so column
+   backgrounds (e.g. the header) always reach the right edge. */
+.dt-wrap { overflow-x:auto; margin:.4rem 0 1.4rem; background:var(--panel); border:3px solid var(--ink); box-shadow:var(--shadow); }
+table { border-collapse:separate; border-spacing:0; width:100%; margin:0; background:var(--panel); font-size:.86rem; }
+th, td { border-right:2px solid var(--ink); border-bottom:2px solid var(--ink); padding:.5rem .7rem; text-align:left; vertical-align:top; white-space:nowrap; }
 th:last-child, td:last-child { border-right:none; }
-th { background:var(--blue); font-weight:700; text-transform:uppercase; font-size:.76rem; letter-spacing:.02em; white-space:nowrap; }
-td { white-space:normal; }
+tbody tr:last-child td { border-bottom:none; }
+th { background:var(--blue); font-weight:700; text-transform:uppercase; font-size:.76rem; letter-spacing:.02em; }
 tbody tr:nth-child(even) { background:#fff7d6; }
 tbody tr:hover { background:var(--yellow); }
 /* DataTables controls, restyled to match */
