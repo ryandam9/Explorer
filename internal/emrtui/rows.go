@@ -30,8 +30,11 @@ type rowT struct {
 // specsAndRows returns the column layout and the unfiltered cluster rows.
 func (mm *m) specsAndRows() ([]colSpec, []rowT) {
 	multi := len(mm.regions) > 1
+	// NAME is capped (not flexible) so the more important ID/STATE columns sit
+	// close to it instead of being pushed right by a name-hogging column; the
+	// variable-length APPLICATIONS list absorbs any leftover width instead.
 	specs := []colSpec{
-		{"NAME", 0}, {"ID", 14}, {"STATE", 22}, {"RELEASE", 11}, {"APPLICATIONS", 24}, {"HRS", 5},
+		{"NAME", 25}, {"ID", 14}, {"STATE", 22}, {"RELEASE", 11}, {"APPLICATIONS", 0}, {"HRS", 5},
 	}
 	rows := make([]rowT, 0, len(mm.inv.Clusters))
 	for i := range mm.inv.Clusters {

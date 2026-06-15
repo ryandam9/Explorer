@@ -693,7 +693,7 @@ func resolveWidths(specs []colSpec, total int) []int {
 func headerLine(specs []colSpec, widths []int) string {
 	parts := make([]string, len(specs))
 	for i, s := range specs {
-		parts[i] = pad(s.title, widths[i])
+		parts[i] = pad(truncate(s.title, widths[i]), widths[i])
 	}
 	return " " + strings.Join(parts, " ")
 }
