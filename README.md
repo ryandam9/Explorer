@@ -894,6 +894,7 @@ Step history (Enter on a cluster):
 | `L` | Open the cluster's (or selected step's) logs in the S3 browser |
 | `u` | Open a persistent application UI (Spark History / YARN Timeline / Tez) |
 | `y` | Open the live **YARN application browser** (requires on-cluster access) |
+| `h` | Open the **HBase table browser** (requires on-cluster access) |
 | `/` | Filter the cluster list |
 | `o` | Open the selected cluster in the AWS console |
 | `r` | Refresh |
@@ -911,12 +912,13 @@ Spark History Server, YARN Timeline Server or Tez UI — and opens a presigned
 link to the chosen one. These are hosted **off-cluster**, so the link needs no
 SSH tunnel and stays valid for 30 days after the application terminates.
 
-### On-cluster access (live YARN)
+### On-cluster access (live YARN & HBase)
 
-The live YARN application browser (`y`) reads from the **ResourceManager REST
-API** on the cluster's primary node. YARN has **no AWS API** — it's reachable
-only from inside the cluster's VPC — so this is **opt-in** and **off by
-default**. Enable it under `emr.onCluster` in `config.yaml`:
+The live **YARN** application browser (`y`, ResourceManager REST API) and the
+**HBase** table browser (`h`, HBase REST server) read daemons that run on the
+cluster's primary node. These have **no AWS API** — they're reachable only from
+inside the cluster's VPC — so this is **opt-in** and **off by default**. Enable
+it under `emr.onCluster` in `config.yaml`:
 
 ```yaml
 emr:
@@ -936,8 +938,15 @@ emr:
 
 When access is off or the daemon can't be reached, the browser shows a "how to
 connect" helper (including the exact tunnel command) instead of an error — every
-on-cluster request is a read-only `GET` with a timeout. HBase and Oozie browsers
-will follow the same opt-in layer; see [`docs/emr-design.md`](docs/emr-design.md).
+on-cluster request is a read-only `GET` with a timeout.
+
+The **HBase browser** lists namespaces → tables with a derived **state**
+(`ENABLED` / `DISABLED` / `PARTIAL`, inferred from how many of a table's regions
+are assigned), the **region count**, **online regions**, and **column
+families**. Region counts are exact; *row* counts are deliberately not shown —
+HBase has no cheap count, so an exact count needs a full table scan (a future,
+explicitly-confirmed action). The **Oozie** browser will follow the same opt-in
+layer; see [`docs/emr-design.md`](docs/emr-design.md).
 
 > **Scope note.** Everything else in this dashboard covers the EMR **control
 > plane** (clusters, steps) and **history plane** (logs, persistent UIs) via the
@@ -951,6 +960,7 @@ aws_explorer emr steps <id>     [-r us-east-1] [--limit 50] [--status FAILED] [-
 aws_explorer emr instances <id> [-r us-east-1] [--limit N] [-o …]
 aws_explorer emr apps <id>      [-r us-east-1] [-o …]
 aws_explorer emr yarn <id>      [-r us-east-1] [-o …]   # live YARN apps (on-cluster)
+aws_explorer emr hbase <id>     [-r us-east-1] [-o …]   # HBase tables (on-cluster)
 ```
 
 ```bash
@@ -973,8 +983,10 @@ region in scope.
 for the `u` application-UI links, and the [S3 browser](#s3-tui-usage)'s `s3:*`
 read actions for the `L` log jump. Per-region or per-cluster denials degrade
 that part of the dashboard with a logged note and never abort the session. The
-`y` YARN browser uses no IAM (it talks to the on-cluster ResourceManager) but
-needs `emr.onCluster` configured and network reachability into the VPC.
+`y` (YARN) and `h` (HBase) browsers use no IAM — they talk to the on-cluster
+ResourceManager / HBase REST server — but need `emr.onCluster` configured and
+network reachability into the VPC (and the security group must allow the daemon
+ports: YARN 8088, HBase REST 8080).
 
 ## Bill Usage
 

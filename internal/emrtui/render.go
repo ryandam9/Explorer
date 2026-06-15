@@ -326,6 +326,68 @@ func RenderYARNApps(w io.Writer, apps []YarnApp, format string, noHeader bool) e
 	}
 }
 
+// --- HBase tables ----------------------------------------------------------
+
+type hbaseJSON struct {
+	Namespace string   `json:"namespace"`
+	Table     string   `json:"table"`
+	Qualified string   `json:"qualified"`
+	State     string   `json:"state"`
+	Regions   int      `json:"regions"`
+	Online    int      `json:"online"`
+	Families  []string `json:"families"`
+}
+
+func hbaseToJSON(tables []HBaseTable) []hbaseJSON {
+	out := make([]hbaseJSON, 0, len(tables))
+	for _, t := range tables {
+		out = append(out, hbaseJSON{
+			Namespace: t.Namespace, Table: t.Name, Qualified: t.Qualified, State: t.State,
+			Regions: t.Regions, Online: t.Online, Families: t.Families,
+		})
+	}
+	return out
+}
+
+// RenderHBaseTables writes a cluster's HBase tables in the requested format.
+func RenderHBaseTables(w io.Writer, tables []HBaseTable, format string, noHeader bool) error {
+	switch strings.ToLower(format) {
+	case "json":
+		return writeJSON(w, hbaseToJSON(tables))
+	case "ndjson":
+		enc := json.NewEncoder(w)
+		for _, t := range hbaseToJSON(tables) {
+			if err := enc.Encode(t); err != nil {
+				return err
+			}
+		}
+		return nil
+	case "csv":
+		cw := csv.NewWriter(w)
+		if !noHeader {
+			_ = cw.Write([]string{"Namespace", "Table", "State", "Regions", "Online", "Families"})
+		}
+		for _, t := range tables {
+			_ = cw.Write([]string{
+				t.Namespace, t.Name, t.State, strconv.Itoa(t.Regions), strconv.Itoa(t.Online),
+				strings.Join(t.Families, " "),
+			})
+		}
+		cw.Flush()
+		return cw.Error()
+	default:
+		tw := tabwriter.NewWriter(w, 0, 0, 2, ' ', 0)
+		if !noHeader {
+			fmt.Fprintln(tw, "NAMESPACE\tTABLE\tSTATE\tREGIONS\tONLINE\tFAMILIES")
+		}
+		for _, t := range tables {
+			fmt.Fprintf(tw, "%s\t%s\t%s\t%d\t%d\t%s\n",
+				t.Namespace, t.Name, dash(t.State), t.Regions, t.Online, strings.Join(t.Families, ","))
+		}
+		return tw.Flush()
+	}
+}
+
 // FilterStepsByStatus returns only the steps whose state matches status
 // (case-insensitive); an empty status returns all steps.
 func FilterStepsByStatus(steps []Step, status string) []Step {
