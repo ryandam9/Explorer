@@ -51,6 +51,14 @@ func TestURL_DeepLinks(t *testing.T) {
 			"route53/v2/hostedzones#ListRecordSets/Z123"},
 		{"emr", model.Resource{Service: "emr", Type: "cluster", Region: "us-east-1", ID: "j-ABC"},
 			"/emr/home?region=us-east-1#/clusterDetails/j-ABC"},
+		{"glue job", model.Resource{Service: "glue", Type: "job", Region: "us-east-1", ID: "nightly-etl"},
+			"gluestudio/home?region=us-east-1#/editor/job/nightly-etl/details"},
+		{"glue crawler", model.Resource{Service: "glue", Type: "crawler", Region: "eu-west-1", ID: "orders-crawler"},
+			"/glue/home?region=eu-west-1#/v2/data-catalog/crawlers/view/orders-crawler"},
+		{"glue database", model.Resource{Service: "glue", Type: "database", Region: "us-east-1", ID: "sales"},
+			"#/v2/data-catalog/databases/view/sales"},
+		{"glue workflow", model.Resource{Service: "glue", Type: "workflow", Region: "us-east-1", ID: "orders-wf"},
+			"#/v2/etl-configuration/workflows/view/orders-wf"},
 	}
 	for _, c := range cases {
 		got, specific := URL(c.r)

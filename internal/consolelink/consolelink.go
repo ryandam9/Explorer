@@ -297,6 +297,26 @@ func deepLink(n linkInput) (string, bool) {
 	case "acm":
 		return fmt.Sprintf("https://%s.console.aws.amazon.com/acm/home?region=%s#/certificates/%s",
 			n.region, n.region, q(lastSegment(n.id))), true
+
+	case "glue":
+		glueHome := fmt.Sprintf("https://%s.console.aws.amazon.com/glue/home?region=%s", n.region, n.region)
+		name := lastSegment(n.id)
+		switch n.typ {
+		case "job":
+			// Jobs open in the Glue Studio visual/script editor.
+			return fmt.Sprintf("https://%s.console.aws.amazon.com/gluestudio/home?region=%s#/editor/job/%s/details",
+				n.region, n.region, q(name)), true
+		case "crawler":
+			return glueHome + "#/v2/data-catalog/crawlers/view/" + q(name), true
+		case "database":
+			return glueHome + "#/v2/data-catalog/databases/view/" + q(name), true
+		case "trigger":
+			return glueHome + "#/v2/etl-configuration/triggers/view/" + q(name), true
+		case "workflow":
+			return glueHome + "#/v2/etl-configuration/workflows/view/" + q(name), true
+		case "connection":
+			return glueHome + "#/v2/data-catalog/connections/view/" + q(name), true
+		}
 	}
 
 	return "", false

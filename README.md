@@ -1831,7 +1831,7 @@ Or via CLI flag:
 | `ecr` | Repositories | Regional |
 | `acm` | Certificates | Regional |
 | `cloudformation` | Stacks | Regional |
-| `glue` | Databases, jobs, crawlers | Regional |
+| `glue` | Jobs (with last-run state), crawlers, databases, triggers, workflows, connections | Regional |
 | `athena` | Workgroups | Regional |
 
 Global services (S3, IAM, CloudFront, Route53) are collected once regardless of the regions list.
