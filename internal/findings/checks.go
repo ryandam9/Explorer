@@ -96,6 +96,24 @@ var checkRegistry = []CheckMeta{
 	{CheckTopicNoSubs, "TopicZeroSubscriptions",
 		"SNS topic with no subscriptions — published messages are discarded", SevInfo},
 
+	// Glue data-integration category (AXE-031).
+	{CheckGlueAllRunsFailed, "GlueJobAllRecentRunsFailed",
+		"Glue job whose last several runs all ended in a failure state", SevCritical},
+	{CheckGlueJobStale, "GlueJobNeverOrStale",
+		"Glue job that has never run, or has not run in over 30 days", SevInfo},
+	{CheckGlueLastRunFailed, "GlueJobLatestRunFailed",
+		"Glue job whose most recent run failed", SevWarning},
+	{CheckGlueCrawlerFailed, "GlueCrawlerLastCrawlFailed",
+		"Glue crawler whose last crawl ended in FAILED, leaving the catalog stale", SevWarning},
+	{CheckGlueCrawlerStuck, "GlueCrawlerStuckRunning",
+		"Glue crawler RUNNING for over 6 hours — likely stuck", SevWarning},
+	{CheckGlueFailedRunWaste, "GlueFailedRunDPUWaste",
+		"Glue job burning DPU-hours on failed runs", SevWarning},
+	{CheckGlueOversizedWorker, "GlueJobOverProvisioned",
+		"Glue job with many workers but a very short successful run time", SevInfo},
+	{CheckGlueNoSecurityConf, "GlueJobNoSecurityConfiguration",
+		"Glue job without a security configuration (unencrypted logs/output/bookmarks)", SevWarning},
+
 	// CloudTrail configuration category (AXE-019).
 	{CheckTrailNotLogging, "NoMultiRegionTrailLogging",
 		"no multi-region CloudTrail is actively logging — the account has no audit trail", SevCritical},

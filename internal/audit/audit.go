@@ -45,7 +45,7 @@ func Stream(ctx context.Context, baseCfg aws.Config, regions []string, categorie
 	if len(regions) == 0 {
 		regions = []string{"us-east-1"}
 	}
-	wantCost, wantSecurity, wantIAM, wantMessaging, wantCloudTrail := false, false, false, false, false
+	wantCost, wantSecurity, wantIAM, wantMessaging, wantCloudTrail, wantGlue := false, false, false, false, false, false
 	for _, c := range categories {
 		switch c {
 		case "cost":
@@ -58,6 +58,8 @@ func Stream(ctx context.Context, baseCfg aws.Config, regions []string, categorie
 			wantMessaging = true
 		case "cloudtrail":
 			wantCloudTrail = true
+		case "glue":
+			wantGlue = true
 		}
 	}
 
@@ -85,6 +87,11 @@ func Stream(ctx context.Context, baseCfg aws.Config, regions []string, categorie
 			if wantMessaging {
 				snap, e := collectMessagingRegion(gctx, baseCfg, region, perCallTimeout)
 				fs = append(fs, findings.AnalyzeMessaging(snap)...)
+				errs = append(errs, e...)
+			}
+			if wantGlue {
+				snap, e := collectGlueRegion(gctx, baseCfg, region, perCallTimeout)
+				fs = append(fs, findings.AnalyzeGlue(snap)...)
 				errs = append(errs, e...)
 			}
 			// IAM is account-global: collected once, in the first region's

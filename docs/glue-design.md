@@ -76,7 +76,7 @@ findings. This document closes that gap.
 | [AXE-028](#axe-028) | Jump from a job run to its CloudWatch logs | **P2** |
 | [AXE-029](#axe-029) | Job definition / settings detail panel | **P2** · ✅ shipped |
 | [AXE-030](#axe-030) | CLI twins (`glue jobs` / `runs` / `crawlers` / …) | **P2** · ✅ shipped |
-| [AXE-031](#axe-031) | `glue` audit category (health & cost findings) | **P2** |
+| [AXE-031](#axe-031) | `glue` audit category (health & cost findings) | **P2** · ✅ shipped (8/9 checks) |
 | [AXE-032](#axe-032) | Glue console deep links | **P3** · ✅ shipped |
 
 Priorities: **P1** = build first, **P2** = next, **P3** = deferrable. A suggested
@@ -436,6 +436,14 @@ STARTED              STATE       DURATION  DPU-HRS  EST     ERROR
 ---
 
 ### AXE-031 — `glue` audit category {#axe-031}
+
+> **Status: ✅ shipped (8 of 9 checks)** — `aws_explorer audit --only glue`
+> (`internal/findings/glue.go` + `internal/audit/glue_collect.go`), wired into
+> the category list so `--fail-on`/`--ignore`/SARIF all apply. Checks
+> `GLU-JOB-001/002/003`, `GLU-CRAWL-001/002`, `GLU-COST-001/002`,
+> `GLU-SEC-001` land, each a pure function with positive+negative fixtures.
+> `GLU-CONN-001` (connection refs missing subnet/SG) is **deferred** — it needs
+> an EC2 cross-reference to resolve subnet/SG existence; tracked as a follow-up.
 
 **Problem.** Broken or wasteful Glue is silent: a nightly job that's failed for a
 week, a crawler stuck for hours, a job whose oversized worker config burns
