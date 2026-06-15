@@ -78,6 +78,16 @@ type m struct {
 	hbaseErr     error
 	hbaseSel     int
 
+	// Oozie workflow/coordinator browser (z on a cluster).
+	oozieActive  bool
+	oozieCluster Cluster
+	oozieWF      []OozieWorkflow
+	oozieCoord   []OozieCoordinator
+	oozieCoords  bool // false = workflows tab, true = coordinators tab
+	oozieLoading bool
+	oozieErr     error
+	oozieSel     int
+
 	spinner   spinner.Model
 	toast     string
 	toastExp  time.Time
@@ -112,6 +122,13 @@ type hbaseMsg struct {
 	cluster Cluster
 	tables  []HBaseTable
 	err     error
+}
+
+type oozieMsg struct {
+	cluster   Cluster
+	workflows []OozieWorkflow
+	coords    []OozieCoordinator
+	err       error
 }
 
 type clearToastMsg struct{}
@@ -189,6 +206,21 @@ func (mm *m) loadYarnCmd(cl Cluster) tea.Cmd {
 		slog.Info("Loading YARN applications", "cluster", cl.ID)
 		apps, metrics, err := FetchYARN(mm.ctx, mm.dialer, cl.MasterDNS)
 		return yarnMsg{cluster: cl, apps: apps, metrics: metrics, err: err}
+	}
+}
+
+func (mm *m) loadOozieCmd(cl Cluster) tea.Cmd {
+	return func() tea.Msg {
+		if mm.dialer == nil {
+			err := mm.dialerErr
+			if err == nil {
+				err = emrconn.ErrDisabled
+			}
+			return oozieMsg{cluster: cl, err: err}
+		}
+		slog.Info("Loading Oozie jobs", "cluster", cl.ID)
+		wf, coords, err := FetchOozie(mm.ctx, mm.dialer, cl.MasterDNS)
+		return oozieMsg{cluster: cl, workflows: wf, coords: coords, err: err}
 	}
 }
 
@@ -283,6 +315,13 @@ func (mm *m) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		mm.hbaseErr = msg.err
 		mm.hbaseTables = msg.tables
 		mm.hbaseSel = 0
+
+	case oozieMsg:
+		mm.oozieLoading = false
+		mm.oozieErr = msg.err
+		mm.oozieWF = msg.workflows
+		mm.oozieCoord = msg.coords
+		mm.oozieSel = 0
 
 	case tea.KeyMsg:
 		cmds = append(cmds, mm.handleKey(msg)...)
@@ -452,6 +491,34 @@ func (mm *m) handleKey(msg tea.KeyMsg) []tea.Cmd {
 		return cmds
 	}
 
+	// Oozie workflow/coordinator browser sub-view.
+	if mm.oozieActive {
+		switch msg.String() {
+		case "q", "ctrl+c":
+			return []tea.Cmd{tea.Quit}
+		case "esc", "backspace", "left":
+			mm.oozieActive = false
+		case "tab", "right":
+			mm.oozieCoords = !mm.oozieCoords
+			mm.oozieSel = 0
+		case "up", "k":
+			if mm.oozieSel > 0 {
+				mm.oozieSel--
+			}
+		case "down", "j":
+			if mm.oozieSel < mm.oozieRowCount()-1 {
+				mm.oozieSel++
+			}
+		case "r":
+			mm.oozieLoading = true
+			mm.oozieErr = nil
+			cmds = append(cmds, mm.loadOozieCmd(mm.oozieCluster), mm.spinner.Tick)
+		case ui.KeyAbout:
+			mm.showAbout = true
+		}
+		return cmds
+	}
+
 	// Cluster list.
 	switch msg.String() {
 	case "q", "ctrl+c":
@@ -519,6 +586,17 @@ func (mm *m) handleKey(msg tea.KeyMsg) []tea.Cmd {
 			mm.hbaseErr = nil
 			cmds = append(cmds, mm.loadHbaseCmd(cl), mm.spinner.Tick)
 		}
+	case "z":
+		if cl, ok := mm.selectedCluster(); ok {
+			mm.oozieActive = true
+			mm.oozieCluster = cl
+			mm.oozieCoords = false
+			mm.oozieLoading = true
+			mm.oozieWF = nil
+			mm.oozieCoord = nil
+			mm.oozieErr = nil
+			cmds = append(cmds, mm.loadOozieCmd(cl), mm.spinner.Tick)
+		}
 	case "o":
 		mm.openConsole(&cmds)
 	case ui.KeyAbout:
@@ -553,6 +631,14 @@ func (mm *m) openURL(url, what string, cmds *[]tea.Cmd) {
 	*cmds = append(*cmds, toastCmd(3*time.Second))
 }
 
+// oozieRowCount returns the row count of the active Oozie tab.
+func (mm *m) oozieRowCount() int {
+	if mm.oozieCoords {
+		return len(mm.oozieCoord)
+	}
+	return len(mm.oozieWF)
+}
+
 func (mm *m) clamp() {
 	if mm.sel >= mm.rowCount() {
 		mm.sel = max(0, mm.rowCount()-1)
@@ -576,6 +662,9 @@ func (mm *m) PageTitle() string {
 	}
 	if mm.hbaseActive {
 		return base + " › " + mm.hbaseCluster.Name + " › HBase"
+	}
+	if mm.oozieActive {
+		return base + " › " + mm.oozieCluster.Name + " › Oozie"
 	}
 	return base + " › Clusters"
 }

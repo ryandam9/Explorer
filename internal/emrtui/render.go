@@ -388,6 +388,78 @@ func RenderHBaseTables(w io.Writer, tables []HBaseTable, format string, noHeader
 	}
 }
 
+// --- Oozie jobs ------------------------------------------------------------
+
+// RenderOozieWorkflows writes a cluster's Oozie workflow jobs in the requested format.
+func RenderOozieWorkflows(w io.Writer, wf []OozieWorkflow, format string, noHeader bool) error {
+	switch strings.ToLower(format) {
+	case "json":
+		return writeJSON(w, wf)
+	case "ndjson":
+		enc := json.NewEncoder(w)
+		for _, x := range wf {
+			if err := enc.Encode(x); err != nil {
+				return err
+			}
+		}
+		return nil
+	case "csv":
+		cw := csv.NewWriter(w)
+		if !noHeader {
+			_ = cw.Write([]string{"ID", "AppName", "Status", "User", "StartTime", "EndTime"})
+		}
+		for _, x := range wf {
+			_ = cw.Write([]string{x.ID, x.AppName, x.Status, x.User, x.StartTime, x.EndTime})
+		}
+		cw.Flush()
+		return cw.Error()
+	default:
+		tw := tabwriter.NewWriter(w, 0, 0, 2, ' ', 0)
+		if !noHeader {
+			fmt.Fprintln(tw, "NAME\tSTATUS\tUSER\tSTARTED\tID")
+		}
+		for _, x := range wf {
+			fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%s\n", x.AppName, dash(x.Status), dash(x.User), dash(x.StartTime), x.ID)
+		}
+		return tw.Flush()
+	}
+}
+
+// RenderOozieCoordinators writes a cluster's Oozie coordinator jobs in the requested format.
+func RenderOozieCoordinators(w io.Writer, coords []OozieCoordinator, format string, noHeader bool) error {
+	switch strings.ToLower(format) {
+	case "json":
+		return writeJSON(w, coords)
+	case "ndjson":
+		enc := json.NewEncoder(w)
+		for _, x := range coords {
+			if err := enc.Encode(x); err != nil {
+				return err
+			}
+		}
+		return nil
+	case "csv":
+		cw := csv.NewWriter(w)
+		if !noHeader {
+			_ = cw.Write([]string{"ID", "Name", "Status", "Frequency", "TimeUnit", "NextMaterialized", "User"})
+		}
+		for _, x := range coords {
+			_ = cw.Write([]string{x.ID, x.Name, x.Status, x.Frequency, x.TimeUnit, x.NextMaterialized, x.User})
+		}
+		cw.Flush()
+		return cw.Error()
+	default:
+		tw := tabwriter.NewWriter(w, 0, 0, 2, ' ', 0)
+		if !noHeader {
+			fmt.Fprintln(tw, "NAME\tSTATUS\tFREQUENCY\tNEXT MATERIALIZED\tID")
+		}
+		for _, x := range coords {
+			fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%s\n", x.Name, dash(x.Status), dash(x.frequency()), dash(x.NextMaterialized), x.ID)
+		}
+		return tw.Flush()
+	}
+}
+
 // FilterStepsByStatus returns only the steps whose state matches status
 // (case-insensitive); an empty status returns all steps.
 func FilterStepsByStatus(steps []Step, status string) []Step {

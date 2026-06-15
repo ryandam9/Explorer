@@ -26,6 +26,8 @@ func (mm *m) View() string {
 		sb.WriteString(mm.renderYARN())
 	} else if mm.hbaseActive {
 		sb.WriteString(mm.renderHBase())
+	} else if mm.oozieActive {
+		sb.WriteString(mm.renderOozie())
 	} else {
 		sb.WriteString(mm.renderTable())
 	}
@@ -54,8 +56,9 @@ const emrAboutText = "This is the Amazon EMR dashboard. Each row is a cluster, c
 	"Press L to open the cluster's (or a step's) logs in the S3 browser, and u to open " +
 	"a persistent application UI (Spark History, YARN Timeline, Tez) — hosted off-cluster, " +
 	"so no SSH tunnel is needed.\n\n" +
-	"Press y for the live YARN application browser and h for the HBase table browser; both " +
-	"read on-cluster REST daemons and need emr.onCluster configured (off by default).\n\n" +
+	"Press y for the live YARN application browser, h for the HBase table browser and z for " +
+	"the Oozie workflow/coordinator browser; these read on-cluster REST daemons and need " +
+	"emr.onCluster configured (off by default).\n\n" +
 	"Press o on a cluster to open it in the AWS console, / to filter, and r to refresh."
 
 // detailBody renders the cluster-detail overlay's contents.
@@ -339,6 +342,124 @@ func (mm *m) renderHBase() string {
 	return boxStyle(mm.width, mm.height-4).Render(b.String())
 }
 
+func (mm *m) renderOozie() string {
+	contentW := mm.width - 4
+	if contentW < 20 {
+		contentW = 20
+	}
+
+	var b strings.Builder
+	tabLabel := "Workflows"
+	if mm.oozieCoords {
+		tabLabel = "Coordinators"
+	}
+	b.WriteString(lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color(ui.ColorHeading())).
+		Render(fmt.Sprintf(" Oozie ▸ %s — %s [%s]", tabLabel, mm.oozieCluster.Name, mm.oozieCluster.Region)) + "\n")
+	via := ""
+	if mm.dialer != nil {
+		via = fmt.Sprintf("via %s · ", mm.dialer.Mode())
+	}
+	b.WriteString(lipgloss.NewStyle().Foreground(lipgloss.Color(ui.ColorMuted())).
+		Render("  "+via+"tab switches Workflows / Coordinators") + "\n\n")
+
+	switch {
+	case mm.oozieLoading:
+		b.WriteString(fmt.Sprintf("  %s Querying the Oozie server…\n", mm.spinner.View()))
+	case mm.oozieErr != nil && emrconn.IsUnreachable(mm.oozieErr):
+		b.WriteString(emrconn.ConnectHelp(mm.oozieCluster.MasterDNS, ooziePort(mm.dialer)) + "\n")
+	case mm.oozieErr != nil:
+		b.WriteString("  " + lipgloss.NewStyle().Foreground(lipgloss.Color(ui.ColorError())).
+			Render("Could not load Oozie jobs: "+mm.oozieErr.Error()) + "\n")
+	case mm.oozieCoords:
+		b.WriteString(mm.renderOozieCoordinators(contentW))
+	default:
+		b.WriteString(mm.renderOozieWorkflows(contentW))
+	}
+
+	return boxStyle(mm.width, mm.height-4).Render(b.String())
+}
+
+func (mm *m) renderOozieWorkflows(contentW int) string {
+	specs := []colSpec{{"NAME", 0}, {"STATUS", 14}, {"USER", 12}, {"STARTED", 22}}
+	widths := resolveWidths(specs, contentW)
+	var b strings.Builder
+	b.WriteString(lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color(ui.ColorHeading())).
+		Render(headerLine(specs, widths)) + "\n")
+	if len(mm.oozieWF) == 0 {
+		b.WriteString("  No workflow jobs reported by Oozie.\n")
+		return b.String()
+	}
+	visible := mm.height - 14
+	if visible < 3 {
+		visible = 3
+	}
+	start, end := visibleRange(mm.oozieSel, len(mm.oozieWF), visible)
+	for i := start; i < end; i++ {
+		w := mm.oozieWF[i]
+		cells := []cell{
+			{text: w.AppName},
+			{text: w.Status, color: oozieStateColor(w.Status)},
+			{text: w.User},
+			{text: w.StartTime},
+		}
+		b.WriteString(renderRow(cells, widths, i == mm.oozieSel) + "\n")
+	}
+	return b.String()
+}
+
+func (mm *m) renderOozieCoordinators(contentW int) string {
+	specs := []colSpec{{"NAME", 0}, {"STATUS", 14}, {"FREQUENCY", 14}, {"NEXT MATERIALIZED", 22}}
+	widths := resolveWidths(specs, contentW)
+	var b strings.Builder
+	b.WriteString(lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color(ui.ColorHeading())).
+		Render(headerLine(specs, widths)) + "\n")
+	if len(mm.oozieCoord) == 0 {
+		b.WriteString("  No coordinator jobs reported by Oozie.\n")
+		return b.String()
+	}
+	visible := mm.height - 14
+	if visible < 3 {
+		visible = 3
+	}
+	start, end := visibleRange(mm.oozieSel, len(mm.oozieCoord), visible)
+	for i := start; i < end; i++ {
+		c := mm.oozieCoord[i]
+		next := c.NextMaterialized
+		if next == "" {
+			next = "—"
+		}
+		cells := []cell{
+			{text: c.Name},
+			{text: c.Status, color: oozieStateColor(c.Status)},
+			{text: c.frequency()},
+			{text: next},
+		}
+		b.WriteString(renderRow(cells, widths, i == mm.oozieSel) + "\n")
+	}
+	return b.String()
+}
+
+// oozieStateColor colours an Oozie job status.
+func oozieStateColor(status string) string {
+	switch strings.ToUpper(status) {
+	case "SUCCEEDED":
+		return ui.ColorSuccess()
+	case "RUNNING", "PREP", "PAUSED", "PREPPAUSED", "RUNNINGWITHERROR":
+		return ui.ColorAccent()
+	case "FAILED", "KILLED", "SUSPENDED", "DONEWITHERROR", "PREPSUSPENDED", "SUSPENDEDWITHERROR":
+		return ui.ColorError()
+	default:
+		return ui.ColorText()
+	}
+}
+
+func ooziePort(d *emrconn.Dialer) int {
+	if d == nil {
+		return emrconn.DefaultOoziePort
+	}
+	return d.Port(emrconn.ServiceOozie)
+}
+
 // hbaseStateColor colours the derived table state.
 func hbaseStateColor(state string) string {
 	switch state {
@@ -407,6 +528,9 @@ func (mm *m) statusLeft() string {
 	if mm.hbaseActive {
 		return fmt.Sprintf("Cluster: %s  ·  HBase tables: %d", mm.hbaseCluster.Name, len(mm.hbaseTables))
 	}
+	if mm.oozieActive {
+		return fmt.Sprintf("Cluster: %s  ·  Workflows: %d · Coordinators: %d", mm.oozieCluster.Name, len(mm.oozieWF), len(mm.oozieCoord))
+	}
 	regionLabel := mm.regions[0]
 	if len(mm.regions) != 1 {
 		regionLabel = fmt.Sprintf("all (%d regions)", len(mm.regions))
@@ -443,6 +567,15 @@ func (mm *m) helpHints() []ui.KeyHint {
 			ui.H("q", "quit"),
 		}
 	}
+	if mm.oozieActive {
+		return []ui.KeyHint{
+			ui.H("↑/↓", "jobs"),
+			ui.H("Tab", "wf/coord"),
+			ui.H("r", "refresh"),
+			ui.H("Esc", "back"),
+			ui.H("q", "quit"),
+		}
+	}
 	return []ui.KeyHint{
 		ui.H("↑/↓", "rows"),
 		ui.H("Enter", "steps"),
@@ -451,6 +584,7 @@ func (mm *m) helpHints() []ui.KeyHint {
 		ui.H("u", "app UIs"),
 		ui.H("y", "yarn"),
 		ui.H("h", "hbase"),
+		ui.H("z", "oozie"),
 		ui.H("/", "filter"),
 		ui.H("o", "console"),
 		ui.H("r", "refresh"),
