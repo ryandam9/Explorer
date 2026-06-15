@@ -54,6 +54,27 @@ const (
 	DynamoDBWCUMonth = 0.00065 * HoursPerMonth
 )
 
+// GluePerDPUHourUSD is the price of one DPU-hour for an AWS Glue ETL
+// (Apache Spark) job. A Glue job run reports DPUSeconds (executor-seconds
+// times a per-worker DPU factor); dividing by 3600 gives DPU-hours.
+// Source: https://aws.amazon.com/glue/pricing/ (us-east-1, ETL jobs).
+const GluePerDPUHourUSD = 0.44
+
+// GlueRunDPUHours converts a job run's reported DPUSeconds to DPU-hours.
+func GlueRunDPUHours(dpuSeconds float64) float64 {
+	if dpuSeconds <= 0 {
+		return 0
+	}
+	return dpuSeconds / 3600.0
+}
+
+// GlueRunCostUSD estimates the cost of a single Glue job run from its
+// DPUSeconds. Returns 0 when DPUSeconds is absent (e.g. a still-running or
+// legacy run), so callers can omit an estimate rather than show $0.00.
+func GlueRunCostUSD(dpuSeconds float64) float64 {
+	return GlueRunDPUHours(dpuSeconds) * GluePerDPUHourUSD
+}
+
 // EBSPerGiBMonth returns the monthly storage price for an EBS volume type.
 // Unknown/future types fall back to the gp3 rate, the cheapest general
 // purpose tier, so estimates stay conservative.

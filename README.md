@@ -720,6 +720,60 @@ are listed with their limit but no percentage (visible only with
 and `cloudwatch:GetMetricStatistics`. Any denial skips that quota with a note
 on stderr and never aborts the run.
 
+## AWS Glue dashboard
+
+`glue` opens an interactive dashboard for AWS Glue. Tab across **Jobs**,
+**Crawlers**, **Triggers**, **Workflows**, **Connections** and the **Catalog**
+(databases); each row shows health at a glance — a job's last run state and
+duration, a crawler's last-crawl status. Press **Enter** on a job to drill into
+its **run history**: state, duration, DPU-hours and an estimated cost per run,
+with the error message inline on failures.
+
+```bash
+./bin/aws_explorer glue [--region us-east-1 | --all-regions] [--theme <name>]
+```
+
+```
+ Glue ▸ Jobs (4)  Crawlers (2)  Triggers (3)  Workflows (1)  Connections (2)  Catalog (5)
+
+ NAME                  LAST RUN          STATE         DURATION   WORKER      VERSION
+ nightly-orders-etl    2026-06-15 01:14  ✓ SUCCEEDED   12m 22s    G.1X ×10    4.0
+ customer-dedupe       2026-06-15 01:14  ✗ FAILED      2m 41s     G.2X ×5     4.0
+ clickstream-flatten   2026-06-14 22:00  ● RUNNING     —          G.1X ×20    4.0
+```
+
+Run history (Enter on a job):
+
+```
+ Runs — nightly-orders-etl [us-east-1]
+ STARTED           STATE         DURATION   DPU-HRS  EST     WORKER      ATTEMPT
+ 2026-06-15 01:14  ✓ SUCCEEDED   12m 22s    2.06     $0.91   G.1X ×10    1
+ 2026-06-14 01:14  ✗ FAILED      2m 41s     0.45     $0.20   G.1X ×10    1
+   ✗ AnalysisException: Table or view not found: orders_raw
+                                          3 runs · 4.50 DPU-hrs ≈ $1.99 (estimate)
+```
+
+| Key | Action |
+|-----|--------|
+| `Tab` / `Shift+Tab` | Switch pane |
+| `↑/↓` (`j/k`) | Move selection |
+| `Enter` | Open the selected job's run history |
+| `/` | Filter the current pane |
+| `o` | Open the selected resource in the AWS console |
+| `r` | Refresh |
+| `y` | (run history) copy the selected run's error |
+| `i` | About this page · `q` quit |
+
+The DPU-hour cost is an **estimate** (`$0.44`/DPU-hour, us-east-1 ETL rate);
+runs that report no `DPUSeconds` (still running, or legacy jobs) show no figure
+rather than `$0.00`.
+
+**IAM permissions.** Read-only:
+`glue:{GetJobs,GetJobRuns,GetCrawlers,GetTriggers,ListWorkflows,GetConnections,GetDatabases}`
+and `sts:GetCallerIdentity` (for ARN/console links). Per-region or per-listing
+denials degrade that part of the dashboard with a logged note and never abort
+the session.
+
 ## Bill Usage
 
 `bill` shows the account's actual cost from the AWS Cost Explorer API, grouped
