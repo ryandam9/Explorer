@@ -112,8 +112,9 @@ type diffDoneMsg struct {
 }
 
 type exportDoneMsg struct {
-	path string
-	err  error
+	mdPath   string
+	htmlPath string
+	err      error
 }
 
 type exposureDoneMsg struct {
@@ -727,8 +728,8 @@ func (m *Model) exportReport() tea.Cmd {
 		if err != nil {
 			return exportDoneMsg{err: err}
 		}
-		path, err := writeExport(data, analyzeVPC(data.Snap), time.Now())
-		return exportDoneMsg{path: path, err: err}
+		mdPath, htmlPath, err := writeExport(data, analyzeVPC(data.Snap), time.Now())
+		return exportDoneMsg{mdPath: mdPath, htmlPath: htmlPath, err: err}
 	}
 }
 
@@ -1120,7 +1121,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if msg.err != nil {
 			m.statusMsg = "Export failed: " + msg.err.Error()
 		} else {
-			m.statusMsg = "Exported VPC report to " + msg.path
+			m.statusMsg = "Exported VPC report (Markdown + HTML) to " + msg.mdPath + " and " + msg.htmlPath
 		}
 
 	case exposureDoneMsg:

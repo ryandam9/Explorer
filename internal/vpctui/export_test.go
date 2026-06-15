@@ -89,63 +89,88 @@ func TestExportMarkdownStructure(t *testing.T) {
 		"## Findings (",
 		"### Critical", // sg-web exposes SSH to the internet
 		"sg-web",
+		// Every resource type renders as a single table with a leading "#" column.
 		"## Subnets (1)",
-		"| ID | Name | CIDR | IPv6 CIDRs | AZ | Available IPs | State | Public | Default for AZ | Auto-assign public IP | Tags |",
-		"| subnet-1 | - | 10.0.0.0/24 | - | a | 200 | - | Yes | No | No | - |",
+		"| # | ID | Name | CIDR | IPv6 CIDRs | AZ | Available IPs | State | Public | Default for AZ | Auto-assign public IP | Tags |",
+		"| 1 | subnet-1 | - | 10.0.0.0/24 | - | a | 200 | - | Yes | No | No | - |",
 		"## Security groups (1)",
-		"### sg-web — web",
-		"**Inbound rules**",
-		"| TCP | 22 | 0.0.0.0/0 | - |",
+		"| # | ID | Name | Description | VPC ID | Inbound rules | Outbound rules | Tags |",
+		"| 1 | sg-web | web |", // rules packed into a cell
+		"TCP 22 0.0.0.0/0",
 		"## Route tables (1)",
-		"**Routes**",
-		"| 0.0.0.0/0 | igw-1 | active |",
+		"0.0.0.0/0 → igw-1 (active)",
 		"## Network interfaces (1)",
-		"### eni-1",
-		"| Attached to | i-1 |",
+		"| # | ID | Description | Type | Status | Private IP | Public IP | Subnet ID | VPC ID | Availability zone | Attached to | Security groups | Source/dest check | Tags |",
+		"| 1 | eni-1 |",
 		"## EC2 instances (1)",
-		"### i-1 — app",
-		"| Type | t3.micro |",
+		"| 1 | i-1 | app | running | t3.micro |",
 		// Workload services.
 		"| ECS services | 1 |",
 		"## ECS services (1)",
-		"### api — prod",
-		"| Launch type | FARGATE |",
+		"| 1 | api | prod | ACTIVE | FARGATE |",
 		"| EKS clusters | 1 |",
 		"## EKS clusters (1)",
-		"### eks-prod",
-		"| Version | 1.29 |",
+		"| 1 | eks-prod | ACTIVE | 1.29 |",
 		"| ElastiCache clusters | 1 |",
 		"## ElastiCache clusters (1)",
-		"### cache-1",
-		"| Engine | redis 7.1 |",
+		"| 1 | cache-1 | redis 7.1 |",
 		"| Redshift clusters | 1 |",
 		"## Redshift clusters (1)",
-		"### rs-1",
-		"| Database | analytics |",
+		"| 1 | rs-1 | available |",
 		"| EFS file systems | 1 |",
 		"## EFS file systems (1)",
-		"### fs-1 — shared",
-		"| Encrypted | Yes |",
+		"| 1 | fs-1 | shared |",
 		"| EMR clusters | 1 |",
 		"## EMR clusters (1)",
-		"### j-1 — spark",
+		"| 1 | j-1 | spark | WAITING | subnet-1 |",
 		// VPN / transit gateway.
 		"| VPN gateways | 1 |",
 		"## VPN gateways (1)",
-		"### vgw-1",
-		"| Amazon side ASN | 64512 |",
+		"| 1 | vgw-1 | available | ipsec.1 | 64512 |",
 		"## VPN connections (1)",
-		"### vpn-1",
-		"| Customer gateway | cgw-1 |",
+		"| 1 | vpn-1 | available | ipsec.1 |",
 		"## Customer gateways (1)",
-		"### cgw-1",
-		"| IP address | 203.0.113.10 |",
+		"| 1 | cgw-1 | available | ipsec.1 | 203.0.113.10 |",
 		"## Transit gateway attachments (1)",
-		"### tgw-attach-1",
-		"| Transit gateway | tgw-1 |",
+		"| 1 | tgw-attach-1 | tgw-1 | available | vpc | vpc-1 |",
 	} {
 		if !strings.Contains(md, want) {
 			t.Errorf("export markdown missing %q", want)
+		}
+	}
+}
+
+func TestExportHTMLStructure(t *testing.T) {
+	data := exportSnap()
+	findings := analyzeVPC(data.Snap)
+	at := time.Date(2026, 6, 9, 12, 0, 0, 0, time.UTC)
+	html := exportHTML(data, findings, at)
+
+	for _, want := range []string{
+		"<!DOCTYPE html>",
+		"<title>VPC Report: vpc-1</title>",
+		"VPC Report · vpc-1",
+		"<span class=\"badge\">ap-southeast-2</span>",
+		"Generated 2026-06-09 12:00:00 UTC",
+		"<nav class=\"toc\">",
+		"<a href=\"#subnets-1\">Subnets (1)</a>", // TOC anchor matches blackfriday's heading id
+		"<table>",
+	} {
+		if !strings.Contains(html, want) {
+			t.Errorf("export HTML missing %q", want)
+		}
+	}
+}
+
+func TestSanitizedAnchorNameMatchesHeadings(t *testing.T) {
+	cases := map[string]string{
+		"Subnets (1)":         "subnets-1",
+		"VPC endpoints (2)":   "vpc-endpoints-2",
+		"Security groups (1)": "security-groups-1",
+	}
+	for in, want := range cases {
+		if got := sanitizedAnchorName(in); got != want {
+			t.Errorf("sanitizedAnchorName(%q) = %q, want %q", in, got, want)
 		}
 	}
 }
@@ -169,11 +194,14 @@ func TestWriteExportRoundTrip(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
 	data := exportSnap()
 	at := time.Date(2026, 6, 9, 12, 0, 0, 0, time.UTC)
-	path, err := writeExport(data, analyzeVPC(data.Snap), at)
+	mdPath, htmlPath, err := writeExport(data, analyzeVPC(data.Snap), at)
 	if err != nil {
 		t.Fatalf("writeExport: %v", err)
 	}
-	if !strings.HasSuffix(path, "vpc-1-20260609-120000.md") {
-		t.Errorf("unexpected export path: %s", path)
+	if !strings.HasSuffix(mdPath, "vpc-1-20260609-120000.md") {
+		t.Errorf("unexpected markdown export path: %s", mdPath)
+	}
+	if !strings.HasSuffix(htmlPath, "vpc-1-20260609-120000.html") {
+		t.Errorf("unexpected html export path: %s", htmlPath)
 	}
 }

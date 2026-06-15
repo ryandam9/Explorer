@@ -158,548 +158,408 @@ func writeVPCSection(b *strings.Builder, v VPCInfo) {
 }
 
 func writeSubnets(b *strings.Builder, items []SubnetInfo) {
-	if len(items) == 0 {
-		return
+	rows := make([][]string, len(items))
+	for i, s := range items {
+		rows[i] = []string{
+			s.ID, s.Name, s.CIDR, strings.Join(s.Ipv6CIDRs, ", "), s.AZ,
+			itoa(int(s.AvailableIPs)), s.State, boolStr(s.IsPublic),
+			boolStr(s.DefaultForAz), boolStr(s.MapPublicIPOnLaunch), tagsList(s.Tags),
+		}
 	}
-	b.WriteString(fmt.Sprintf("## Subnets (%d)\n\n", len(items)))
-	b.WriteString("| ID | Name | CIDR | IPv6 CIDRs | AZ | Available IPs | State | Public | Default for AZ | Auto-assign public IP | Tags |\n")
-	b.WriteString("|---|---|---|---|---|---|---|---|---|---|---|\n")
-	for _, s := range items {
-		b.WriteString("| " + strings.Join([]string{
-			mdCell(orDash(s.ID)),
-			mdCell(orDash(s.Name)),
-			mdCell(orDash(s.CIDR)),
-			mdCell(orDash(strings.Join(s.Ipv6CIDRs, ", "))),
-			mdCell(orDash(s.AZ)),
-			itoa(int(s.AvailableIPs)),
-			mdCell(orDash(s.State)),
-			boolStr(s.IsPublic),
-			boolStr(s.DefaultForAz),
-			boolStr(s.MapPublicIPOnLaunch),
-			mdCell(orDash(inlineTags(s.Tags))),
-		}, " | ") + " |\n")
-	}
-	b.WriteString("\n")
+	writeTable(b, "Subnets", []string{
+		"ID", "Name", "CIDR", "IPv6 CIDRs", "AZ", "Available IPs", "State",
+		"Public", "Default for AZ", "Auto-assign public IP", "Tags",
+	}, rows)
 }
 
 func writeSecurityGroups(b *strings.Builder, items []SGInfo) {
-	if len(items) == 0 {
-		return
-	}
-	b.WriteString(fmt.Sprintf("## Security groups (%d)\n\n", len(items)))
-	for _, sg := range items {
-		mdHeading(b, sg.ID, sg.Name)
-		mdKV(b, [][2]string{
-			{"ID", sg.ID},
-			{"Name", sg.Name},
-			{"Description", sg.Description},
-			{"VPC ID", sg.VPCID},
-		})
-		writeSGRules(b, "Inbound rules", "Inbound", sg.Rules)
-		writeSGRules(b, "Outbound rules", "Outbound", sg.Rules)
-		mdTags(b, sg.Tags)
-	}
-}
-
-func writeSGRules(b *strings.Builder, label, dir string, rules []SGRule) {
-	var group []SGRule
-	for _, r := range rules {
-		if strings.EqualFold(r.Direction, dir) {
-			group = append(group, r)
+	rows := make([][]string, len(items))
+	for i, sg := range items {
+		rows[i] = []string{
+			sg.ID, sg.Name, sg.Description, sg.VPCID,
+			sgRulesCell(sg.Rules, "Inbound"), sgRulesCell(sg.Rules, "Outbound"),
+			tagsList(sg.Tags),
 		}
 	}
-	if len(group) == 0 {
-		return
-	}
-	b.WriteString("**" + label + "**\n\n")
-	b.WriteString("| Protocol | Ports | Source/Dest | Description |\n|---|---|---|---|\n")
-	for _, r := range group {
-		b.WriteString(fmt.Sprintf("| %s | %s | %s | %s |\n",
-			mdCell(r.Protocol), mdCell(r.PortRange), mdCell(r.Source), mdCell(orDash(r.Description))))
-	}
-	b.WriteString("\n")
+	writeTable(b, "Security groups", []string{
+		"ID", "Name", "Description", "VPC ID", "Inbound rules", "Outbound rules", "Tags",
+	}, rows)
 }
 
 func writeRouteTables(b *strings.Builder, items []RouteTableInfo) {
-	if len(items) == 0 {
-		return
-	}
-	b.WriteString(fmt.Sprintf("## Route tables (%d)\n\n", len(items)))
-	for _, rt := range items {
-		mdHeading(b, rt.ID, rt.Name)
-		mdKV(b, [][2]string{
-			{"ID", rt.ID},
-			{"Name", rt.Name},
-			{"VPC ID", rt.VPCID},
-			{"Main", boolStr(rt.IsMain)},
-			{"Associated subnets", strings.Join(rt.Associations, ", ")},
-		})
-		if len(rt.Routes) > 0 {
-			b.WriteString("**Routes**\n\n| Destination | Target | State |\n|---|---|---|\n")
-			for _, r := range rt.Routes {
-				b.WriteString(fmt.Sprintf("| %s | %s | %s |\n",
-					mdCell(r.Destination), mdCell(r.Target), mdCell(r.State)))
-			}
-			b.WriteString("\n")
+	rows := make([][]string, len(items))
+	for i, rt := range items {
+		rows[i] = []string{
+			rt.ID, rt.Name, rt.VPCID, boolStr(rt.IsMain),
+			listCell(rt.Associations), routesCell(rt.Routes), tagsList(rt.Tags),
 		}
-		mdTags(b, rt.Tags)
 	}
+	writeTable(b, "Route tables", []string{
+		"ID", "Name", "VPC ID", "Main", "Associated subnets", "Routes", "Tags",
+	}, rows)
 }
 
 func writeInternetGateways(b *strings.Builder, items []IGWInfo) {
-	if len(items) == 0 {
-		return
+	rows := make([][]string, len(items))
+	for i, igw := range items {
+		rows[i] = []string{igw.ID, igw.Name, igw.State, igw.VPCID, tagsList(igw.Tags)}
 	}
-	b.WriteString(fmt.Sprintf("## Internet gateways (%d)\n\n", len(items)))
-	for _, igw := range items {
-		mdHeading(b, igw.ID, igw.Name)
-		mdKV(b, [][2]string{
-			{"ID", igw.ID},
-			{"Name", igw.Name},
-			{"State", igw.State},
-			{"VPC ID", igw.VPCID},
-		})
-		mdTags(b, igw.Tags)
-	}
+	writeTable(b, "Internet gateways", []string{"ID", "Name", "State", "VPC ID", "Tags"}, rows)
 }
 
 func writeNatGateways(b *strings.Builder, items []NatGWInfo) {
-	if len(items) == 0 {
-		return
+	rows := make([][]string, len(items))
+	for i, n := range items {
+		rows[i] = []string{
+			n.ID, n.Name, n.Type, n.State, n.SubnetID, n.VPCID,
+			n.PublicIP, n.PrivateIP, tagsList(n.Tags),
+		}
 	}
-	b.WriteString(fmt.Sprintf("## NAT gateways (%d)\n\n", len(items)))
-	for _, n := range items {
-		mdHeading(b, n.ID, n.Name)
-		mdKV(b, [][2]string{
-			{"ID", n.ID},
-			{"Name", n.Name},
-			{"Type", n.Type},
-			{"State", n.State},
-			{"Subnet ID", n.SubnetID},
-			{"VPC ID", n.VPCID},
-			{"Public IP", n.PublicIP},
-			{"Private IP", n.PrivateIP},
-		})
-		mdTags(b, n.Tags)
-	}
+	writeTable(b, "NAT gateways", []string{
+		"ID", "Name", "Type", "State", "Subnet ID", "VPC ID", "Public IP", "Private IP", "Tags",
+	}, rows)
 }
 
 func writeNACLs(b *strings.Builder, items []NACLInfo) {
-	if len(items) == 0 {
-		return
-	}
-	b.WriteString(fmt.Sprintf("## Network ACLs (%d)\n\n", len(items)))
-	for _, nacl := range items {
-		mdHeading(b, nacl.ID, nacl.Name)
-		mdKV(b, [][2]string{
-			{"ID", nacl.ID},
-			{"Name", nacl.Name},
-			{"VPC ID", nacl.VPCID},
-			{"Default", boolStr(nacl.IsDefault)},
-			{"Associated subnets", strings.Join(nacl.Associations, ", ")},
-		})
-		writeNACLRules(b, "Inbound rules", "Inbound", nacl.Rules)
-		writeNACLRules(b, "Outbound rules", "Outbound", nacl.Rules)
-		mdTags(b, nacl.Tags)
-	}
-}
-
-func writeNACLRules(b *strings.Builder, label, dir string, rules []NACLRule) {
-	var group []NACLRule
-	for _, r := range rules {
-		if strings.EqualFold(r.Direction, dir) {
-			group = append(group, r)
+	rows := make([][]string, len(items))
+	for i, nacl := range items {
+		rows[i] = []string{
+			nacl.ID, nacl.Name, nacl.VPCID, boolStr(nacl.IsDefault),
+			listCell(nacl.Associations), naclRulesCell(nacl.Rules, "Inbound"),
+			naclRulesCell(nacl.Rules, "Outbound"), tagsList(nacl.Tags),
 		}
 	}
-	if len(group) == 0 {
-		return
-	}
-	sort.SliceStable(group, func(i, j int) bool { return group[i].RuleNumber < group[j].RuleNumber })
-	b.WriteString("**" + label + "**\n\n")
-	b.WriteString("| Rule # | Protocol | Ports | CIDR | Action |\n|---|---|---|---|---|\n")
-	for _, r := range group {
-		b.WriteString(fmt.Sprintf("| %d | %s | %s | %s | %s |\n",
-			r.RuleNumber, mdCell(r.Protocol), mdCell(r.PortRange), mdCell(r.CIDR), mdCell(r.Action)))
-	}
-	b.WriteString("\n")
+	writeTable(b, "Network ACLs", []string{
+		"ID", "Name", "VPC ID", "Default", "Associated subnets", "Inbound rules", "Outbound rules", "Tags",
+	}, rows)
 }
 
 func writeEndpoints(b *strings.Builder, items []EndpointInfo) {
-	if len(items) == 0 {
-		return
+	rows := make([][]string, len(items))
+	for i, e := range items {
+		rows[i] = []string{
+			e.ID, e.ServiceName, e.Type, e.State, e.VPCID,
+			listCell(e.RouteTableIDs), listCell(e.SubnetIDs), listCell(e.SecurityGroups),
+			boolStr(e.PrivateDNSEnabled), tagsList(e.Tags),
+		}
 	}
-	b.WriteString(fmt.Sprintf("## VPC endpoints (%d)\n\n", len(items)))
-	for _, e := range items {
-		mdHeading(b, e.ID, e.ServiceName)
-		mdKV(b, [][2]string{
-			{"ID", e.ID},
-			{"Service", e.ServiceName},
-			{"Type", e.Type},
-			{"State", e.State},
-			{"VPC ID", e.VPCID},
-			{"Route tables", strings.Join(e.RouteTableIDs, ", ")},
-			{"Subnets", strings.Join(e.SubnetIDs, ", ")},
-			{"Security groups", strings.Join(e.SecurityGroups, ", ")},
-			{"Private DNS", boolStr(e.PrivateDNSEnabled)},
-		})
-		mdTags(b, e.Tags)
-	}
+	writeTable(b, "VPC endpoints", []string{
+		"ID", "Service", "Type", "State", "VPC ID", "Route tables", "Subnets",
+		"Security groups", "Private DNS", "Tags",
+	}, rows)
 }
 
 func writePeerings(b *strings.Builder, items []PeeringInfo) {
-	if len(items) == 0 {
-		return
+	rows := make([][]string, len(items))
+	for i, p := range items {
+		rows[i] = []string{
+			p.ID, p.Status, p.RequesterVPCID, p.RequesterRegion, p.RequesterCIDR,
+			p.AccepterVPCID, p.AccepterRegion, p.AccepterCIDR, tagsList(p.Tags),
+		}
 	}
-	b.WriteString(fmt.Sprintf("## Peering connections (%d)\n\n", len(items)))
-	for _, p := range items {
-		mdHeading(b, p.ID, "")
-		mdKV(b, [][2]string{
-			{"ID", p.ID},
-			{"Status", p.Status},
-			{"Requester VPC", p.RequesterVPCID},
-			{"Requester region", p.RequesterRegion},
-			{"Requester CIDR", p.RequesterCIDR},
-			{"Accepter VPC", p.AccepterVPCID},
-			{"Accepter region", p.AccepterRegion},
-			{"Accepter CIDR", p.AccepterCIDR},
-		})
-		mdTags(b, p.Tags)
-	}
+	writeTable(b, "Peering connections", []string{
+		"ID", "Status", "Requester VPC", "Requester region", "Requester CIDR",
+		"Accepter VPC", "Accepter region", "Accepter CIDR", "Tags",
+	}, rows)
 }
 
 func writeFlowLogs(b *strings.Builder, items []FlowLogInfo) {
-	if len(items) == 0 {
-		return
+	rows := make([][]string, len(items))
+	for i, fl := range items {
+		rows[i] = []string{
+			fl.ID, fl.ResourceID, fl.TrafficType, fl.Status, fl.LogDestination,
+			fl.LogFormat, tagsList(fl.Tags),
+		}
 	}
-	b.WriteString(fmt.Sprintf("## Flow logs (%d)\n\n", len(items)))
-	for _, fl := range items {
-		mdHeading(b, fl.ID, "")
-		mdKV(b, [][2]string{
-			{"ID", fl.ID},
-			{"Resource ID", fl.ResourceID},
-			{"Traffic type", fl.TrafficType},
-			{"Status", fl.Status},
-			{"Destination", fl.LogDestination},
-			{"Log format", fl.LogFormat},
-		})
-		mdTags(b, fl.Tags)
-	}
+	writeTable(b, "Flow logs", []string{
+		"ID", "Resource ID", "Traffic type", "Status", "Destination", "Log format", "Tags",
+	}, rows)
 }
 
 func writeNetworkInterfaces(b *strings.Builder, items []ENIInfo) {
-	if len(items) == 0 {
-		return
+	rows := make([][]string, len(items))
+	for i, e := range items {
+		rows[i] = []string{
+			e.ID, e.Description, e.Type, e.Status, e.PrivateIP, e.PublicIP,
+			e.SubnetID, e.VPCID, e.AZ, e.AttachedTo, listCell(e.SecurityGroups),
+			boolStr(e.SourceDestCheck), tagsList(e.Tags),
+		}
 	}
-	b.WriteString(fmt.Sprintf("## Network interfaces (%d)\n\n", len(items)))
-	for _, e := range items {
-		mdHeading(b, e.ID, e.Description)
-		mdKV(b, [][2]string{
-			{"ID", e.ID},
-			{"Description", e.Description},
-			{"Type", e.Type},
-			{"Status", e.Status},
-			{"Private IP", e.PrivateIP},
-			{"Public IP", e.PublicIP},
-			{"Subnet ID", e.SubnetID},
-			{"VPC ID", e.VPCID},
-			{"Availability zone", e.AZ},
-			{"Attached to", e.AttachedTo},
-			{"Security groups", strings.Join(e.SecurityGroups, ", ")},
-			{"Source/dest check", boolStr(e.SourceDestCheck)},
-		})
-		mdTags(b, e.Tags)
-	}
+	writeTable(b, "Network interfaces", []string{
+		"ID", "Description", "Type", "Status", "Private IP", "Public IP", "Subnet ID",
+		"VPC ID", "Availability zone", "Attached to", "Security groups", "Source/dest check", "Tags",
+	}, rows)
 }
 
 func writeEC2(b *strings.Builder, items []EC2InstanceInfo) {
-	if len(items) == 0 {
-		return
+	rows := make([][]string, len(items))
+	for i, in := range items {
+		rows[i] = []string{
+			in.ID, in.Name, in.State, in.Type, in.PrivateIP, in.PublicIP, in.VPCID,
+			in.SubnetID, in.AZ, in.Platform, in.LaunchTime, in.IamRole, in.AMIID,
+			in.KeyPair, tagsList(in.Tags),
+		}
 	}
-	b.WriteString(fmt.Sprintf("## EC2 instances (%d)\n\n", len(items)))
-	for _, in := range items {
-		mdHeading(b, in.ID, in.Name)
-		mdKV(b, [][2]string{
-			{"ID", in.ID},
-			{"Name", in.Name},
-			{"State", in.State},
-			{"Type", in.Type},
-			{"Private IP", in.PrivateIP},
-			{"Public IP", in.PublicIP},
-			{"VPC ID", in.VPCID},
-			{"Subnet ID", in.SubnetID},
-			{"Availability zone", in.AZ},
-			{"Platform", in.Platform},
-			{"Launch time", in.LaunchTime},
-			{"IAM role", in.IamRole},
-			{"AMI ID", in.AMIID},
-			{"Key pair", in.KeyPair},
-		})
-		mdTags(b, in.Tags)
-	}
+	writeTable(b, "EC2 instances", []string{
+		"ID", "Name", "State", "Type", "Private IP", "Public IP", "VPC ID", "Subnet ID",
+		"Availability zone", "Platform", "Launch time", "IAM role", "AMI ID", "Key pair", "Tags",
+	}, rows)
 }
 
 func writeLambdas(b *strings.Builder, items []LambdaFunctionInfo) {
-	if len(items) == 0 {
-		return
+	rows := make([][]string, len(items))
+	for i, fn := range items {
+		rows[i] = []string{
+			fn.Name, fn.Runtime, fn.State, fn.Handler,
+			fmt.Sprintf("%d MB", fn.MemoryMB), fmt.Sprintf("%ds", fn.TimeoutSec),
+			fn.LastModified, fn.VPCID, listCell(fn.SubnetIDs), listCell(fn.SGIDs),
+		}
 	}
-	b.WriteString(fmt.Sprintf("## Lambda functions (%d)\n\n", len(items)))
-	for _, fn := range items {
-		mdHeading(b, fn.Name, "")
-		mdKV(b, [][2]string{
-			{"Name", fn.Name},
-			{"Runtime", fn.Runtime},
-			{"State", fn.State},
-			{"Handler", fn.Handler},
-			{"Memory", fmt.Sprintf("%d MB", fn.MemoryMB)},
-			{"Timeout", fmt.Sprintf("%ds", fn.TimeoutSec)},
-			{"Last modified", fn.LastModified},
-			{"VPC ID", fn.VPCID},
-			{"Subnets", strings.Join(fn.SubnetIDs, ", ")},
-			{"Security groups", strings.Join(fn.SGIDs, ", ")},
-		})
-	}
+	writeTable(b, "Lambda functions", []string{
+		"Name", "Runtime", "State", "Handler", "Memory", "Timeout", "Last modified",
+		"VPC ID", "Subnets", "Security groups",
+	}, rows)
 }
 
 func writeRDS(b *strings.Builder, items []RDSInstanceInfo) {
-	if len(items) == 0 {
-		return
+	rows := make([][]string, len(items))
+	for i, db := range items {
+		rows[i] = []string{
+			db.ID, db.Engine, db.Class, db.Status, db.Endpoint, db.VPCID, db.AZ,
+			boolStr(db.MultiAZ), itoa(int(db.Storage)),
+		}
 	}
-	b.WriteString(fmt.Sprintf("## RDS instances (%d)\n\n", len(items)))
-	for _, db := range items {
-		mdHeading(b, db.ID, "")
-		mdKV(b, [][2]string{
-			{"ID", db.ID},
-			{"Engine", db.Engine},
-			{"Class", db.Class},
-			{"Status", db.Status},
-			{"Endpoint", db.Endpoint},
-			{"VPC ID", db.VPCID},
-			{"Availability zone", db.AZ},
-			{"Multi-AZ", boolStr(db.MultiAZ)},
-			{"Storage (GB)", itoa(int(db.Storage))},
-		})
-	}
+	writeTable(b, "RDS instances", []string{
+		"ID", "Engine", "Class", "Status", "Endpoint", "VPC ID", "Availability zone",
+		"Multi-AZ", "Storage (GB)",
+	}, rows)
 }
 
 func writeLoadBalancers(b *strings.Builder, items []LoadBalancerInfo) {
-	if len(items) == 0 {
-		return
+	rows := make([][]string, len(items))
+	for i, lb := range items {
+		rows[i] = []string{
+			lb.Name, lb.ARN, lb.Type, lb.Scheme, lb.State, lb.DNSName, lb.VPCID, lb.CreatedAt,
+		}
 	}
-	b.WriteString(fmt.Sprintf("## Load balancers (%d)\n\n", len(items)))
-	for _, lb := range items {
-		mdHeading(b, lb.Name, "")
-		mdKV(b, [][2]string{
-			{"Name", lb.Name},
-			{"ARN", lb.ARN},
-			{"Type", lb.Type},
-			{"Scheme", lb.Scheme},
-			{"State", lb.State},
-			{"DNS name", lb.DNSName},
-			{"VPC ID", lb.VPCID},
-			{"Created at", lb.CreatedAt},
-		})
-	}
+	writeTable(b, "Load balancers", []string{
+		"Name", "ARN", "Type", "Scheme", "State", "DNS name", "VPC ID", "Created at",
+	}, rows)
 }
 
 func writeECSServices(b *strings.Builder, items []ECSServiceInfo) {
-	if len(items) == 0 {
-		return
+	rows := make([][]string, len(items))
+	for i, s := range items {
+		rows[i] = []string{
+			s.Name, s.Cluster, s.Status, s.LaunchType,
+			itoa(int(s.DesiredCount)), itoa(int(s.RunningCount)),
+			listCell(s.SubnetIDs), listCell(s.SGIDs),
+		}
 	}
-	b.WriteString(fmt.Sprintf("## ECS services (%d)\n\n", len(items)))
-	for _, s := range items {
-		mdHeading(b, s.Name, s.Cluster)
-		mdKV(b, [][2]string{
-			{"Name", s.Name},
-			{"Cluster", s.Cluster},
-			{"Status", s.Status},
-			{"Launch type", s.LaunchType},
-			{"Desired count", itoa(int(s.DesiredCount))},
-			{"Running count", itoa(int(s.RunningCount))},
-			{"Subnets", strings.Join(s.SubnetIDs, ", ")},
-			{"Security groups", strings.Join(s.SGIDs, ", ")},
-		})
-	}
+	writeTable(b, "ECS services", []string{
+		"Name", "Cluster", "Status", "Launch type", "Desired count", "Running count",
+		"Subnets", "Security groups",
+	}, rows)
 }
 
 func writeEKSClusters(b *strings.Builder, items []EKSClusterInfo) {
-	if len(items) == 0 {
-		return
+	rows := make([][]string, len(items))
+	for i, cl := range items {
+		rows[i] = []string{
+			cl.Name, cl.Status, cl.Version, cl.Endpoint, cl.VPCID,
+			listCell(cl.SubnetIDs), listCell(cl.SecurityGroups),
+		}
 	}
-	b.WriteString(fmt.Sprintf("## EKS clusters (%d)\n\n", len(items)))
-	for _, cl := range items {
-		mdHeading(b, cl.Name, "")
-		mdKV(b, [][2]string{
-			{"Name", cl.Name},
-			{"Status", cl.Status},
-			{"Version", cl.Version},
-			{"Endpoint", cl.Endpoint},
-			{"VPC ID", cl.VPCID},
-			{"Subnets", strings.Join(cl.SubnetIDs, ", ")},
-			{"Security groups", strings.Join(cl.SecurityGroups, ", ")},
-		})
-	}
+	writeTable(b, "EKS clusters", []string{
+		"Name", "Status", "Version", "Endpoint", "VPC ID", "Subnets", "Security groups",
+	}, rows)
 }
 
 func writeElastiCache(b *strings.Builder, items []ElastiCacheClusterInfo) {
-	if len(items) == 0 {
-		return
+	rows := make([][]string, len(items))
+	for i, cl := range items {
+		rows[i] = []string{
+			cl.ID, strings.TrimSpace(cl.Engine + " " + cl.EngineVersion), cl.Status,
+			cl.NodeType, itoa(int(cl.NumNodes)), cl.SubnetGroup, cl.VPCID,
+		}
 	}
-	b.WriteString(fmt.Sprintf("## ElastiCache clusters (%d)\n\n", len(items)))
-	for _, cl := range items {
-		mdHeading(b, cl.ID, "")
-		mdKV(b, [][2]string{
-			{"ID", cl.ID},
-			{"Engine", strings.TrimSpace(cl.Engine + " " + cl.EngineVersion)},
-			{"Status", cl.Status},
-			{"Node type", cl.NodeType},
-			{"Nodes", itoa(int(cl.NumNodes))},
-			{"Subnet group", cl.SubnetGroup},
-			{"VPC ID", cl.VPCID},
-		})
-	}
+	writeTable(b, "ElastiCache clusters", []string{
+		"ID", "Engine", "Status", "Node type", "Nodes", "Subnet group", "VPC ID",
+	}, rows)
 }
 
 func writeRedshift(b *strings.Builder, items []RedshiftClusterInfo) {
-	if len(items) == 0 {
-		return
+	rows := make([][]string, len(items))
+	for i, cl := range items {
+		rows[i] = []string{
+			cl.ID, cl.Status, cl.NodeType, itoa(int(cl.NumNodes)), cl.DBName,
+			cl.Endpoint, cl.SubnetGroup, cl.VPCID,
+		}
 	}
-	b.WriteString(fmt.Sprintf("## Redshift clusters (%d)\n\n", len(items)))
-	for _, cl := range items {
-		mdHeading(b, cl.ID, "")
-		mdKV(b, [][2]string{
-			{"ID", cl.ID},
-			{"Status", cl.Status},
-			{"Node type", cl.NodeType},
-			{"Nodes", itoa(int(cl.NumNodes))},
-			{"Database", cl.DBName},
-			{"Endpoint", cl.Endpoint},
-			{"Subnet group", cl.SubnetGroup},
-			{"VPC ID", cl.VPCID},
-		})
-	}
+	writeTable(b, "Redshift clusters", []string{
+		"ID", "Status", "Node type", "Nodes", "Database", "Endpoint", "Subnet group", "VPC ID",
+	}, rows)
 }
 
 func writeEFS(b *strings.Builder, items []EFSFileSystemInfo) {
-	if len(items) == 0 {
-		return
+	rows := make([][]string, len(items))
+	for i, fs := range items {
+		rows[i] = []string{
+			fs.ID, fs.Name, fs.State, fs.PerformanceMode, boolStr(fs.Encrypted),
+			itoa(fs.MountTargets), listCell(fs.SubnetIDs), fs.VPCID,
+		}
 	}
-	b.WriteString(fmt.Sprintf("## EFS file systems (%d)\n\n", len(items)))
-	for _, fs := range items {
-		mdHeading(b, fs.ID, fs.Name)
-		mdKV(b, [][2]string{
-			{"ID", fs.ID},
-			{"Name", fs.Name},
-			{"State", fs.State},
-			{"Performance mode", fs.PerformanceMode},
-			{"Encrypted", boolStr(fs.Encrypted)},
-			{"Mount targets (this VPC)", itoa(fs.MountTargets)},
-			{"Subnets", strings.Join(fs.SubnetIDs, ", ")},
-			{"VPC ID", fs.VPCID},
-		})
-	}
+	writeTable(b, "EFS file systems", []string{
+		"ID", "Name", "State", "Performance mode", "Encrypted", "Mount targets (this VPC)",
+		"Subnets", "VPC ID",
+	}, rows)
 }
 
 func writeEMR(b *strings.Builder, items []EMRClusterInfo) {
-	if len(items) == 0 {
-		return
+	rows := make([][]string, len(items))
+	for i, cl := range items {
+		rows[i] = []string{cl.ID, cl.Name, cl.State, cl.SubnetID}
 	}
-	b.WriteString(fmt.Sprintf("## EMR clusters (%d)\n\n", len(items)))
-	for _, cl := range items {
-		mdHeading(b, cl.ID, cl.Name)
-		mdKV(b, [][2]string{
-			{"ID", cl.ID},
-			{"Name", cl.Name},
-			{"State", cl.State},
-			{"Subnet ID", cl.SubnetID},
-		})
-	}
+	writeTable(b, "EMR clusters", []string{"ID", "Name", "State", "Subnet ID"}, rows)
 }
 
 func writeVPNGateways(b *strings.Builder, items []VPNGatewayInfo) {
-	if len(items) == 0 {
-		return
+	rows := make([][]string, len(items))
+	for i, g := range items {
+		rows[i] = []string{g.ID, g.State, g.Type, g.AmazonSideASN, tagsList(g.Tags)}
 	}
-	b.WriteString(fmt.Sprintf("## VPN gateways (%d)\n\n", len(items)))
-	for _, g := range items {
-		mdHeading(b, g.ID, "")
-		mdKV(b, [][2]string{
-			{"ID", g.ID},
-			{"State", g.State},
-			{"Type", g.Type},
-			{"Amazon side ASN", g.AmazonSideASN},
-		})
-		mdTags(b, g.Tags)
-	}
+	writeTable(b, "VPN gateways", []string{"ID", "State", "Type", "Amazon side ASN", "Tags"}, rows)
 }
 
 func writeVPNConnections(b *strings.Builder, items []VPNConnectionInfo) {
-	if len(items) == 0 {
-		return
+	rows := make([][]string, len(items))
+	for i, v := range items {
+		rows[i] = []string{
+			v.ID, v.State, v.Type, v.Category, v.CustomerGatewayID,
+			v.VPNGatewayID, v.TransitGatewayID, tagsList(v.Tags),
+		}
 	}
-	b.WriteString(fmt.Sprintf("## VPN connections (%d)\n\n", len(items)))
-	for _, v := range items {
-		mdHeading(b, v.ID, "")
-		mdKV(b, [][2]string{
-			{"ID", v.ID},
-			{"State", v.State},
-			{"Type", v.Type},
-			{"Category", v.Category},
-			{"Customer gateway", v.CustomerGatewayID},
-			{"VPN gateway", v.VPNGatewayID},
-			{"Transit gateway", v.TransitGatewayID},
-		})
-		mdTags(b, v.Tags)
-	}
+	writeTable(b, "VPN connections", []string{
+		"ID", "State", "Type", "Category", "Customer gateway", "VPN gateway", "Transit gateway", "Tags",
+	}, rows)
 }
 
 func writeCustomerGateways(b *strings.Builder, items []CustomerGatewayInfo) {
-	if len(items) == 0 {
-		return
+	rows := make([][]string, len(items))
+	for i, g := range items {
+		rows[i] = []string{g.ID, g.State, g.Type, g.IPAddress, g.BgpAsn, tagsList(g.Tags)}
 	}
-	b.WriteString(fmt.Sprintf("## Customer gateways (%d)\n\n", len(items)))
-	for _, g := range items {
-		mdHeading(b, g.ID, "")
-		mdKV(b, [][2]string{
-			{"ID", g.ID},
-			{"State", g.State},
-			{"Type", g.Type},
-			{"IP address", g.IPAddress},
-			{"BGP ASN", g.BgpAsn},
-		})
-		mdTags(b, g.Tags)
-	}
+	writeTable(b, "Customer gateways", []string{
+		"ID", "State", "Type", "IP address", "BGP ASN", "Tags",
+	}, rows)
 }
 
 func writeTransitGatewayAttachments(b *strings.Builder, items []TransitGatewayAttachmentInfo) {
-	if len(items) == 0 {
-		return
+	rows := make([][]string, len(items))
+	for i, a := range items {
+		rows[i] = []string{
+			a.ID, a.TransitGatewayID, a.State, a.ResourceType, a.ResourceID, tagsList(a.Tags),
+		}
 	}
-	b.WriteString(fmt.Sprintf("## Transit gateway attachments (%d)\n\n", len(items)))
-	for _, a := range items {
-		mdHeading(b, a.ID, "")
-		mdKV(b, [][2]string{
-			{"ID", a.ID},
-			{"Transit gateway", a.TransitGatewayID},
-			{"State", a.State},
-			{"Resource type", a.ResourceType},
-			{"Resource ID", a.ResourceID},
-		})
-		mdTags(b, a.Tags)
-	}
+	writeTable(b, "Transit gateway attachments", []string{
+		"ID", "Transit gateway", "State", "Resource type", "Resource ID", "Tags",
+	}, rows)
 }
 
 // ---------------------------------------------------------------------------
 // Markdown render helpers
 // ---------------------------------------------------------------------------
 
-// mdHeading writes a per-resource "### id — name" subsection heading. The name
-// is omitted when empty.
-func mdHeading(b *strings.Builder, id, name string) {
-	if name != "" {
-		b.WriteString("### " + id + " — " + name + "\n\n")
-	} else {
-		b.WriteString("### " + id + "\n\n")
+// writeTable renders a whole resource section as one table: a leading "#"
+// sequence column (the per-section ordinal), the given headers, and one row per
+// item. Cells are escaped; empty cells become "-". The section header carries
+// the count. An empty section renders nothing.
+func writeTable(b *strings.Builder, title string, headers []string, rows [][]string) {
+	if len(rows) == 0 {
+		return
 	}
+	b.WriteString(fmt.Sprintf("## %s (%d)\n\n", title, len(rows)))
+	b.WriteString("| # | " + strings.Join(headers, " | ") + " |\n")
+	sep := "| --- |"
+	for range headers {
+		sep += " --- |"
+	}
+	b.WriteString(sep + "\n")
+	for i, r := range rows {
+		cells := make([]string, len(r))
+		for j, c := range r {
+			cells[j] = mdCell(orDash(c))
+		}
+		b.WriteString(fmt.Sprintf("| %d | %s |\n", i+1, strings.Join(cells, " | ")))
+	}
+	b.WriteString("\n")
+}
+
+// tagsList renders tags as a sorted "key = value" list joined by <br> so the
+// HTML report stacks them inside a single cell. Empty when there are no tags.
+func tagsList(tags map[string]string) string {
+	if len(tags) == 0 {
+		return ""
+	}
+	keys := make([]string, 0, len(tags))
+	for k := range tags {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	parts := make([]string, 0, len(keys))
+	for _, k := range keys {
+		parts = append(parts, k+" = "+tags[k])
+	}
+	return strings.Join(parts, "<br>")
+}
+
+// listCell joins multiple IDs/values into one cell, one per line (via <br>).
+func listCell(items []string) string {
+	return strings.Join(items, "<br>")
+}
+
+// sgRulesCell renders a security group's rules for one direction as a stacked
+// "proto ports source (description)" list inside a single cell.
+func sgRulesCell(rules []SGRule, dir string) string {
+	var lines []string
+	for _, r := range rules {
+		if !strings.EqualFold(r.Direction, dir) {
+			continue
+		}
+		line := fmt.Sprintf("%s %s %s", r.Protocol, r.PortRange, r.Source)
+		if r.Description != "" {
+			line += " (" + r.Description + ")"
+		}
+		lines = append(lines, line)
+	}
+	return strings.Join(lines, "<br>")
+}
+
+// naclRulesCell renders a network ACL's rules for one direction as a stacked
+// "rule#: proto ports cidr action" list, sorted by rule number.
+func naclRulesCell(rules []NACLRule, dir string) string {
+	var group []NACLRule
+	for _, r := range rules {
+		if strings.EqualFold(r.Direction, dir) {
+			group = append(group, r)
+		}
+	}
+	sort.SliceStable(group, func(i, j int) bool { return group[i].RuleNumber < group[j].RuleNumber })
+	lines := make([]string, 0, len(group))
+	for _, r := range group {
+		lines = append(lines, fmt.Sprintf("%d: %s %s %s %s", r.RuleNumber, r.Protocol, r.PortRange, r.CIDR, r.Action))
+	}
+	return strings.Join(lines, "<br>")
+}
+
+// routesCell renders a route table's routes as a stacked "dest → target (state)"
+// list inside a single cell.
+func routesCell(routes []Route) string {
+	lines := make([]string, 0, len(routes))
+	for _, r := range routes {
+		lines = append(lines, fmt.Sprintf("%s → %s (%s)", r.Destination, r.Target, r.State))
+	}
+	return strings.Join(lines, "<br>")
 }
 
 // mdKV writes a two-column Field/Value table, dashing out empty values.
@@ -726,24 +586,6 @@ func mdTags(b *strings.Builder, tags map[string]string) {
 		b.WriteString("| " + mdCell(k) + " | " + mdCell(tags[k]) + " |\n")
 	}
 	b.WriteString("\n")
-}
-
-// inlineTags renders tags as a single "k=v; k2=v2" cell (sorted by key) for use
-// in row-per-resource tables where a nested tag table doesn't fit.
-func inlineTags(tags map[string]string) string {
-	if len(tags) == 0 {
-		return ""
-	}
-	keys := make([]string, 0, len(tags))
-	for k := range tags {
-		keys = append(keys, k)
-	}
-	sort.Strings(keys)
-	parts := make([]string, 0, len(keys))
-	for _, k := range keys {
-		parts = append(parts, k+"="+tags[k])
-	}
-	return strings.Join(parts, "; ")
 }
 
 // mdCell escapes characters that would otherwise break a Markdown table cell.
@@ -791,18 +633,23 @@ func exportDir() (string, error) {
 	return dir, nil
 }
 
-// writeExport writes the report to a timestamped file and returns its path.
-func writeExport(data fullExport, findings []Finding, now time.Time) (string, error) {
+// writeExport writes the Markdown and HTML reports to timestamped files sharing
+// a basename and returns both paths.
+func writeExport(data fullExport, findings []Finding, now time.Time) (mdPath, htmlPath string, err error) {
 	dir, err := exportDir()
 	if err != nil {
-		return "", err
+		return "", "", err
 	}
-	name := fmt.Sprintf("%s-%s.md", data.VPC.ID, now.Format("20060102-150405"))
-	path := filepath.Join(dir, name)
-	if err := os.WriteFile(path, []byte(exportMarkdown(data, findings, now)), 0o644); err != nil {
-		return "", err
+	base := fmt.Sprintf("%s-%s", data.VPC.ID, now.Format("20060102-150405"))
+	mdPath = filepath.Join(dir, base+".md")
+	if err := os.WriteFile(mdPath, []byte(exportMarkdown(data, findings, now)), 0o644); err != nil {
+		return "", "", err
 	}
-	return path, nil
+	htmlPath = filepath.Join(dir, base+".html")
+	if err := os.WriteFile(htmlPath, []byte(exportHTML(data, findings, now)), 0o644); err != nil {
+		return mdPath, "", err
+	}
+	return mdPath, htmlPath, nil
 }
 
 // exportResourceCSV writes the currently displayed resource table (full
