@@ -1,7 +1,7 @@
 # AWS Glue Support — Design Specification
 
 Status: **Proposed** · Theme J of the [enhancement roadmap](enhancement-roadmap.md)
-(`AXE-001 … AXE-024`) · Tracking issue: _to be filed_
+(`AXE-001 … AXE-024`) · Tracking issue: [#194](https://github.com/ryandam9/aws_explorer/issues/194)
 
 This document specifies a first-class AWS Glue feature set for `aws_explorer`.
 It continues the roadmap's stable-ID scheme (`AXE-NNN`) under a new theme so the
