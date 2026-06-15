@@ -30,7 +30,7 @@ Discover, monitor, and display AWS resources across accounts and regions via CLI
 - **Themes**: 12 built-in bird-themed color schemes with 24 individually customizable color roles (table header, borders, status bar, alerts, …) — editable live in the in-app settings panel
 - **Context-aware shortcuts**: the status bar in every TUI shows only the keys that work on the current screen
 - **About every page** (`i`): a short overlay in each TUI explaining what the screen is for, so a newcomer who opens it cold knows what they are looking at before reaching for `?` help
-- **Color-coded logs**: the CloudWatch Logs viewer and the debug activity overlay tint each line by severity (error/warn/info/debug), so errors jump out at a glance
+- **Color-coded logs**: the CLI's own stderr logs (`level=INFO`/`WARN`/`ERROR`) are tinted by level on a terminal — WARN/ERROR lines in full color, INFO/DEBUG with just their level token — and so are the CloudWatch Logs viewer and the in-app debug activity overlay; errors jump out at a glance (disabled by [`NO_COLOR`](https://no-color.org/) or when piped)
 - **Unique page titles**: every screen names itself in the terminal window/tab title (e.g. `VPC Explorer › my-vpc › Subnets`), so "which page are you on?" has one answer when several people use or discuss the tool
 - **Uniform tables**: every table shares one theme and scrolls horizontally (`<` / `>`) when columns don't fit
 
