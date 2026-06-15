@@ -83,8 +83,9 @@ const glueAboutText = "This is the AWS Glue dashboard. Tab across Jobs, Crawlers
 	"at a glance — a job's last run state and duration, a crawler's last-crawl " +
 	"status.\n\n" +
 	"Press Enter on a job to see its run history: state, duration, DPU-hours and " +
-	"an estimated cost per run, with the error message inline on failures. Press " +
-	"o on any row to open it in the AWS console, / to filter, and r to refresh."
+	"an estimated cost per run, with the error message inline on failures. In the " +
+	"run history, L opens that run's CloudWatch logs.\n\n" +
+	"Press o on any row to open it in the AWS console, / to filter, and r to refresh."
 
 func (mm *m) renderTabBar() string {
 	var parts []string
@@ -240,6 +241,7 @@ func (mm *m) helpHints() []ui.KeyHint {
 	if mm.runsActive {
 		return []ui.KeyHint{
 			ui.H("↑/↓", "runs"),
+			ui.H("L", "logs"),
 			ui.H("y", "copy error"),
 			ui.H("Esc", "back"),
 			ui.H("i", "about"),

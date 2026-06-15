@@ -48,7 +48,7 @@ config's aws.regions list is used.`,
 
 		regions, scanAll := glueRegionScope()
 
-		model, err := gluetui.NewModel(ctx, glueCfg, regions, scanAll, AppConfig)
+		model, err := gluetui.NewModel(ctx, glueCfg, regions, scanAll, AppConfig, configFilePath())
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "Error initializing Glue dashboard: %v\n", err)
 			os.Exit(1)

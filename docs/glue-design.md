@@ -73,7 +73,7 @@ findings. This document closes that gap.
 | [AXE-025](#axe-025) | Glue collector enrichment (run state, definition, last crawl) | **P1** · ✅ shipped |
 | [AXE-026](#axe-026) | `glue` interactive dashboard TUI | **P1** · ✅ shipped |
 | [AXE-027](#axe-027) | Job-run history view (state · duration · DPU-hours · error) | **P1** · ✅ shipped |
-| [AXE-028](#axe-028) | Jump from a job run to its CloudWatch logs | **P2** |
+| [AXE-028](#axe-028) | Jump from a job run to its CloudWatch logs | **P2** · ✅ shipped |
 | [AXE-029](#axe-029) | Job definition / settings detail panel | **P2** · ✅ shipped |
 | [AXE-030](#axe-030) | CLI twins (`glue jobs` / `runs` / `crawlers` / …) | **P2** · ✅ shipped |
 | [AXE-031](#axe-031) | `glue` audit category (health & cost findings) | **P2** · ✅ shipped (8/9 checks) |
@@ -307,6 +307,14 @@ window.
 ---
 
 ### AXE-028 — Jump from a job run to its CloudWatch logs {#axe-028}
+
+> **Status: ✅ shipped** — `L` in the run-history view suspends the dashboard
+> and runs `aws_explorer cw --group <run log group> --stream <JobRunId>` as a
+> child (the AXE-011 `tea.ExecProcess` pattern), inheriting `--region`/
+> `--profile`/`--config`. The run's `LogGroupName` is used when present, else
+> the `/aws-glue/jobs` base prefix (matching output/error/logs-v2); the run-ID
+> stream filter matches both legacy and continuous-logging streams. Arg
+> construction is pure and table-tested (`jump_test.go`).
 
 **Problem.** The next click after "it failed" is always "show me the logs".
 Glue writes them to predictable CloudWatch groups keyed by the run ID.

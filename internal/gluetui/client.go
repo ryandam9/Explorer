@@ -89,6 +89,7 @@ type JobRun struct {
 	DPUSeconds float64
 	Worker     string
 	Attempt    int32
+	LogGroup   string // the run's CloudWatch log group (for the logs jump)
 }
 
 // JobDef is a job's configuration, flattened for the definition detail panel
@@ -420,6 +421,7 @@ func (c *Client) JobRuns(ctx context.Context, region, jobName string, limit int3
 			DPUSeconds: aws.ToFloat64(r.DPUSeconds),
 			Worker:     runWorker(r),
 			Attempt:    r.Attempt,
+			LogGroup:   aws.ToString(r.LogGroupName),
 		}
 		if r.StartedOn != nil {
 			jr.Started = *r.StartedOn

@@ -3,6 +3,8 @@ package gluetui
 import (
 	"context"
 	"log/slog"
+	"os"
+	"os/exec"
 	"time"
 
 	"github.com/atotto/clipboard"
@@ -15,6 +17,11 @@ import (
 	"github.com/ryandam9/aws_explorer/internal/consolelink"
 	"github.com/ryandam9/aws_explorer/internal/ui"
 )
+
+// defaultGlueLogGroup is the base CloudWatch log group Glue jobs write to when
+// a run reports no explicit group; as a cw --group prefix it matches the
+// output/error/logs-v2 children.
+const defaultGlueLogGroup = "/aws-glue/jobs"
 
 type tab int
 
@@ -39,6 +46,7 @@ type m struct {
 	regions    []string
 	allRegions bool
 	appCfg     *config.Config
+	configPath string
 
 	width, height int
 
@@ -88,10 +96,14 @@ type defMsg struct {
 	err error
 }
 
+// cwJumpDoneMsg is delivered after the suspended cw TUI exits.
+type cwJumpDoneMsg struct{ err error }
+
 type clearToastMsg struct{}
 
-// NewModel builds the Glue dashboard over one or more regions.
-func NewModel(ctx context.Context, awsCfg *config.AWSConfig, regions []string, allRegions bool, appCfg *config.Config) (tea.Model, error) {
+// NewModel builds the Glue dashboard over one or more regions. configPath is
+// passed through to the child cw process for the run-logs jump (AXE-028).
+func NewModel(ctx context.Context, awsCfg *config.AWSConfig, regions []string, allRegions bool, appCfg *config.Config, configPath string) (tea.Model, error) {
 	client, err := NewClient(ctx, awsCfg, regions, allRegions)
 	if err != nil {
 		return nil, err
@@ -111,6 +123,7 @@ func NewModel(ctx context.Context, awsCfg *config.AWSConfig, regions []string, a
 		regions:    client.Regions(),
 		allRegions: allRegions,
 		appCfg:     appCfg,
+		configPath: configPath,
 		filter:     f,
 		spinner:    s,
 		loading:    true,
@@ -145,6 +158,50 @@ func (mm *m) loadDefCmd(job Job) tea.Cmd {
 	}
 }
 
+// jumpToRunLogsCmd suspends the dashboard and runs the cw Logs TUI as a child
+// of this same binary, pre-filtered to the run's Glue log group and its
+// JobRunId stream (AXE-028). Continuous logging writes "<runId>" and
+// "<runId>-driver" streams under /aws-glue/jobs/logs-v2; legacy logging writes
+// the run ID under /aws-glue/jobs/{output,error}. The group prefix + run-ID
+// stream filter match either layout.
+func (mm *m) jumpToRunLogsCmd(run JobRun) tea.Cmd {
+	self, err := os.Executable()
+	if err != nil {
+		return func() tea.Msg { return cwJumpDoneMsg{err: err} }
+	}
+	var profile string
+	if mm.appCfg != nil {
+		profile = mm.appCfg.AWS.Profile
+	}
+	args := cwJumpArgs(run.LogGroup, run.ID, mm.runsJob.Region, profile, mm.configPath)
+	return tea.ExecProcess(exec.Command(self, args...), func(err error) tea.Msg {
+		return cwJumpDoneMsg{err: err}
+	})
+}
+
+// cwJumpArgs builds the argv for the child `cw` invocation that opens a Glue
+// run's logs. Pure, so it is table-tested. An empty group falls back to the
+// Glue base group (a cw --group prefix matching output/error/logs-v2).
+func cwJumpArgs(group, runID, region, profile, configPath string) []string {
+	if group == "" {
+		group = defaultGlueLogGroup
+	}
+	args := []string{"cw", "--group", group}
+	if runID != "" {
+		args = append(args, "--stream", runID)
+	}
+	if region != "" && region != "global" {
+		args = append(args, "--region", region)
+	}
+	if profile != "" {
+		args = append(args, "--profile", profile)
+	}
+	if configPath != "" {
+		args = append(args, "--config", configPath)
+	}
+	return args
+}
+
 func toastCmd(d time.Duration) tea.Cmd {
 	return tea.Tick(d, func(time.Time) tea.Msg { return clearToastMsg{} })
 }
@@ -169,6 +226,12 @@ func (mm *m) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case clearToastMsg:
 		mm.toast = ""
+
+	case cwJumpDoneMsg:
+		if msg.err != nil {
+			mm.setToast("Could not open logs: " + msg.err.Error())
+			cmds = append(cmds, toastCmd(4*time.Second))
+		}
 
 	case invMsg:
 		mm.loading = false
@@ -269,6 +332,10 @@ func (mm *m) handleKey(msg tea.KeyMsg) []tea.Cmd {
 				_ = clipboard.WriteAll(mm.runs[mm.runsSel].Error)
 				mm.setToast("Copied error message")
 				cmds = append(cmds, toastCmd(3*time.Second))
+			}
+		case "L":
+			if mm.runsSel < len(mm.runs) {
+				cmds = append(cmds, mm.jumpToRunLogsCmd(mm.runs[mm.runsSel]))
 			}
 		case ui.KeyAbout:
 			mm.showAbout = true

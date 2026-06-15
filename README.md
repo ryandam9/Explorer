@@ -786,6 +786,7 @@ Run history (Enter on a job):
 | `/` | Filter the current pane |
 | `o` | Open the selected resource in the AWS console |
 | `r` | Refresh |
+| `L` | (run history) open the selected run's CloudWatch logs (`/aws-glue/jobs/*`, stream = run ID) |
 | `y` | (run history) copy the selected run's error |
 | `i` | About this page · `q` quit |
 
