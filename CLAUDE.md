@@ -1,9 +1,29 @@
-# AWS Explorer — Recurring Mistakes & Coding Guidelines
+# CLAUDE.md — AWS Explorer
 
-> **Purpose.** This file distills the *common, repeated* problems found across this
-> project's issues and pull requests into a checklist of rules. Feed it to any LLM
-> (or human) before they touch this codebase so the same mistakes are not made
-> again. Each rule is backed by the real issue/PR where it actually bit us.
+Guidance for Claude Code (and any LLM/human) working in this repository.
+
+## Project at a glance
+
+- **What it is:** `aws_explorer` — a read-only Go CLI + TUI for exploring,
+  auditing, and cost-analyzing AWS accounts. Built on the AWS SDK for Go v2 and
+  Bubble Tea / lipgloss for the TUIs.
+- **Build/test:** `make fmt vet test build` (Go 1.26). CI runs `gofmt -l`,
+  `go vet`, and the full `go test ./...`. Run `make fmt vet test` before every
+  commit.
+- **Layout:** commands in `cmd/`; everything else under `internal/` (collectors
+  in `internal/services/*`, the scan engine in `internal/engine`, shared TUI
+  widgets in `internal/ui` + `internal/table`, pure analysis in
+  `internal/findings` / `internal/vpctui`).
+- **Default branch:** `master`.
+
+---
+
+## Recurring mistakes & coding guidelines
+
+> **Purpose.** The rest of this file distills the *common, repeated* problems
+> found across this project's issues and pull requests into a checklist of rules.
+> Read it before touching the codebase so the same mistakes are not made again.
+> Each rule is backed by the real issue/PR where it actually bit us.
 >
 > Derived from a review of **52 issues** and **100 merged PRs** (#86–#231).
 > Last updated: 2026-06-16.
