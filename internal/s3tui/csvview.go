@@ -5,8 +5,11 @@ import (
 	"fmt"
 	"io"
 	"path"
+	"strconv"
 	"strings"
+	"unicode/utf8"
 
+	"github.com/charmbracelet/bubbles/textinput"
 	"github.com/charmbracelet/lipgloss"
 
 	"github.com/ryandam9/aws_explorer/internal/table"
@@ -37,9 +40,14 @@ func delimiterName(r rune) string {
 		return "semicolon"
 	case '|':
 		return "pipe"
-	default:
-		return fmt.Sprintf("%q", string(r))
+	case ' ':
+		return "space"
 	}
+	// Control characters (e.g. ASCII 31 unit separator) have no printable glyph.
+	if r < 0x20 || r == 0x7f {
+		return fmt.Sprintf("ASCII %d (0x%02x)", r, r)
+	}
+	return fmt.Sprintf("%q", string(r))
 }
 
 // looksLikeCSV reports whether a key's extension marks it as delimited text.
@@ -261,6 +269,103 @@ func indexRune(rs []rune, r rune) int {
 	return 0
 }
 
+// parseDelimiterSpec interprets a user-typed delimiter so unusual separators
+// (a tab, ASCII 31 unit-separator, etc.) can be entered in the UI. It accepts:
+//   - a single literal character: ; | # …
+//   - an escape: \t, \xNN / \uNNNN (hex), \\ (backslash)
+//   - a decimal code: 31, 9 …
+//   - a name: tab, comma, semicolon, pipe, space, unit/us
+//
+// Returns the rune and whether it was understood and is usable as a delimiter.
+func parseDelimiterSpec(s string) (rune, bool) {
+	if s == "" {
+		return 0, false
+	}
+	switch strings.ToLower(s) {
+	case "tab", `\t`:
+		return '\t', true
+	case "comma":
+		return ',', true
+	case "semicolon", "semi":
+		return ';', true
+	case "pipe", "bar":
+		return '|', true
+	case "space":
+		return ' ', true
+	case "unit", "us":
+		return '\x1f', true
+	}
+	switch {
+	case strings.HasPrefix(s, `\x`), strings.HasPrefix(s, `\X`),
+		strings.HasPrefix(s, `\u`), strings.HasPrefix(s, `\U`):
+		if n, err := strconv.ParseInt(s[2:], 16, 32); err == nil {
+			return rune(n), validDelimRune(rune(n))
+		}
+		return 0, false
+	case s == `\\`:
+		return '\\', true
+	case len(s) > 1 && isAllDigits(s):
+		if n, err := strconv.Atoi(s); err == nil {
+			return rune(n), validDelimRune(rune(n))
+		}
+		return 0, false
+	}
+	r := []rune(s)
+	if len(r) == 1 {
+		return r[0], validDelimRune(r[0])
+	}
+	return 0, false
+}
+
+func isAllDigits(s string) bool {
+	for _, c := range s {
+		if c < '0' || c > '9' {
+			return false
+		}
+	}
+	return s != ""
+}
+
+// validDelimRune rejects runes that encoding/csv won't accept as a field
+// delimiter.
+func validDelimRune(r rune) bool {
+	return r > 0 && r != '\r' && r != '\n' && r != utf8.RuneError && r != '\ufeff'
+}
+
+// startDelimiterInput opens the typed delimiter prompt.
+func (m *Model) startDelimiterInput() {
+	ti := textinput.New()
+	ti.Prompt = "delimiter: "
+	ti.Placeholder = `,  \t  \x1f  ;  31`
+	ti.CharLimit = 12
+	ti.Width = 20
+	ti.Focus()
+	m.csvDelimInput = ti
+	m.csvDelimEditing = true
+	m.csvDelimErr = ""
+}
+
+// applyDelimiterInput parses the typed spec and reparses the file with it; on
+// failure the prompt stays open with an explanation.
+func (m *Model) applyDelimiterInput() {
+	spec := strings.TrimSpace(m.csvDelimInput.Value())
+	r, ok := parseDelimiterSpec(spec)
+	if !ok {
+		m.csvDelimErr = "unrecognised delimiter — try , \\t \\x1f or 31"
+		return
+	}
+	recs, parsed := parseCSV(m.previewContent, r)
+	if !parsed {
+		m.csvDelimErr = "no table found with delimiter " + delimiterName(r)
+		return
+	}
+	m.csvDelim = r
+	m.csvAll = recs
+	m.buildCSVTable()
+	m.csvDelimEditing = false
+	m.csvDelimErr = ""
+}
+
 // handleCSVKey routes a key press in the full-screen CSV view. It returns true
 // when the key was consumed.
 func (m *Model) handleCSVKey(key string) bool {
@@ -282,6 +387,9 @@ func (m *Model) handleCSVKey(key string) bool {
 		return true
 	case "s":
 		m.cycleCSVDelimiter()
+		return true
+	case "S":
+		m.startDelimiterInput()
 		return true
 	case "w":
 		m.cycleCSVRowCap()
@@ -311,27 +419,44 @@ func (m *Model) csvView() string {
 	info := ui.MutedStyle().Render(m.csvInfoLine())
 	panel := ui.TablePanelStyle(true).Render(m.csvTable.View())
 	scroll := ui.TableScrollIndicator(&m.csvTable)
-	hints := ui.MutedStyle().Render(
-		"[↑/↓ PgUp/PgDn] rows   [←/→] columns   [s] delimiter   [w] rows shown   [t] raw text   [Esc] close")
 
 	parts := []string{title, info, panel}
 	if scroll != "" {
 		parts = append(parts, scroll)
 	}
-	parts = append(parts, hints)
+	parts = append(parts, m.csvFooter())
 	return lipgloss.JoinVertical(lipgloss.Left, parts...)
 }
 
-// csvInfoLine summarises the delimiter, column count and the row window.
+// csvFooter is the typed-delimiter prompt while editing, otherwise the key hints.
+func (m *Model) csvFooter() string {
+	if m.csvDelimEditing {
+		line := m.csvDelimInput.View() + ui.MutedStyle().Render("   Enter apply · Esc cancel")
+		if m.csvDelimErr != "" {
+			line += "   " + ui.ErrorStyle().Render(m.csvDelimErr)
+		}
+		return line
+	}
+	return ui.MutedStyle().Render(
+		"[↑/↓ PgUp/PgDn] rows   [←/→] columns   [s] cycle delim · [S] set delim…   [w] rows shown   [t] raw text   [Esc] close")
+}
+
+// csvInfoLine summarises the delimiter, the column window and the row window.
 func (m *Model) csvInfoLine() string {
 	cols := 0
 	if len(m.csvAll) > 0 {
 		cols = len(m.csvAll[0])
+	}
+	// Make horizontal scrolling discoverable: when columns are off-screen, say
+	// how many are shown and how to reach the rest.
+	colsPart := fmt.Sprintf("%d columns", cols)
+	if hl, hr := m.csvTable.ColScrollInfo(); hl+hr > 0 {
+		colsPart = fmt.Sprintf("%d of %d columns shown (←/→ for more)", cols-hl-hr, cols)
 	}
 	rowsPart := fmt.Sprintf("%d rows", m.csvTotal)
 	if m.csvHidden > 0 {
 		rowsPart = fmt.Sprintf("first %d + last %d of %d rows (%d hidden)",
 			m.csvRowCap, m.csvRowCap, m.csvTotal, m.csvHidden)
 	}
-	return fmt.Sprintf("delimiter: %s   ·   %d columns   ·   %s", delimiterName(m.csvDelim), cols, rowsPart)
+	return fmt.Sprintf("delimiter: %s   ·   %s   ·   %s", delimiterName(m.csvDelim), colsPart, rowsPart)
 }
