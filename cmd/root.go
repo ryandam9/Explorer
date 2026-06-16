@@ -87,6 +87,7 @@ Run "aws_explorer config init" to write a starter file.`,
   # Scan every available region
   aws_explorer --all-regions`,
 	PersistentPreRunE: func(cmd *cobra.Command, args []string) error {
+		applyOutputFormatDefault(cmd)
 		if err := output.ValidateFormat(outputFormat); err != nil {
 			return err
 		}
@@ -148,6 +149,22 @@ func applyGlobalAWSOverrides() {
 		AppConfig.AWS.Regions = []string{awsRegion}
 		AppConfig.AWS.AllRegions = false
 		AppConfig.Filters.Regions = nil
+	}
+}
+
+// applyOutputFormatDefault wires the configured default output format onto the
+// --output flag when the user did not pass it explicitly. An explicit
+// --output/-o always wins; among config values output.format takes precedence
+// over the older app.defaultOutput. Applied before ValidateFormat so an invalid
+// configured value is still rejected.
+func applyOutputFormatDefault(cmd *cobra.Command) {
+	if AppConfig == nil || cmd.Flags().Changed("output") {
+		return
+	}
+	if f := AppConfig.Output.Format; f != "" {
+		outputFormat = f
+	} else if d := AppConfig.App.DefaultOutput; d != "" {
+		outputFormat = d
 	}
 }
 
