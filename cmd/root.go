@@ -87,20 +87,20 @@ Run "aws_explorer config init" to write a starter file.`,
   # Scan every available region
   aws_explorer --all-regions`,
 	PersistentPreRunE: func(cmd *cobra.Command, args []string) error {
+		applyOutputFormatDefault(cmd)
 		if err := output.ValidateFormat(outputFormat); err != nil {
 			return err
 		}
 		return preflightAuth(cmd)
 	},
-	Run: func(cmd *cobra.Command, args []string) {
+	RunE: func(cmd *cobra.Command, args []string) error {
 		applyGlobalAWSOverrides()
 
 		ctx := context.Background()
 
 		eng, err := engine.NewEngine(ctx, AppConfig)
 		if err != nil {
-			fmt.Fprintf(os.Stderr, "Error: failed to initialize engine: %v\n", err)
-			os.Exit(1)
+			return fmt.Errorf("failed to initialize engine: %w", err)
 		}
 
 		// Collection warnings are summarized after the run by the output
@@ -113,6 +113,7 @@ Run "aws_explorer config init" to write a starter file.`,
 			NoHeader:   noHeader,
 			TotalTasks: len(eng.PlannedTaskKeys()),
 		})
+		return nil
 	},
 }
 
@@ -151,8 +152,29 @@ func applyGlobalAWSOverrides() {
 	}
 }
 
+// applyOutputFormatDefault wires the configured default output format onto the
+// --output flag when the user did not pass it explicitly. An explicit
+// --output/-o always wins; among config values output.format takes precedence
+// over the older app.defaultOutput. Applied before ValidateFormat so an invalid
+// configured value is still rejected.
+func applyOutputFormatDefault(cmd *cobra.Command) {
+	if AppConfig == nil || cmd.Flags().Changed("output") {
+		return
+	}
+	if f := AppConfig.Output.Format; f != "" {
+		outputFormat = f
+	} else if d := AppConfig.App.DefaultOutput; d != "" {
+		outputFormat = d
+	}
+}
+
 func init() {
 	cobra.OnInitialize(initConfig)
+
+	// Commands return their errors (Cobra prints them); usage text is only
+	// helpful for flag/arg mistakes, not runtime failures, so suppress the
+	// usage dump on a returned error.
+	rootCmd.SilenceUsage = true
 
 	rootCmd.Version = fmt.Sprintf("%s (commit: %s, built: %s)", version, commit, date)
 

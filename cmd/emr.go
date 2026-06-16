@@ -35,7 +35,7 @@ config's aws.regions list is used.`,
 
   # Pin one region
   aws_explorer emr --region us-east-1`,
-	Run: func(cmd *cobra.Command, args []string) {
+	RunE: func(cmd *cobra.Command, args []string) error {
 		ctx, cancel := context.WithCancel(context.Background())
 		defer cancel()
 
@@ -52,15 +52,14 @@ config's aws.regions list is used.`,
 
 		model, err := emrtui.NewModel(ctx, emrCfg, regions, scanAll, AppConfig, configFilePath())
 		if err != nil {
-			fmt.Fprintf(os.Stderr, "Error initializing EMR dashboard: %v\n", err)
-			os.Exit(1)
+			return fmt.Errorf("initializing EMR dashboard: %w", err)
 		}
 
 		p := tea.NewProgram(ui.WithWindowTitle(model), tea.WithAltScreen(), tea.WithContext(ctx))
 		if _, err := p.Run(); err != nil {
-			fmt.Fprintf(os.Stderr, "Error running EMR dashboard: %v\n", err)
-			os.Exit(1)
+			return fmt.Errorf("running EMR dashboard: %w", err)
 		}
+		return nil
 	},
 }
 

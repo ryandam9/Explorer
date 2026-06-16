@@ -7,6 +7,7 @@ import (
 
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/service/s3"
+	"github.com/aws/aws-sdk-go-v2/service/s3/types"
 	"golang.org/x/sync/errgroup"
 
 	"github.com/ryandam9/aws_explorer/internal/awsutil"
@@ -43,7 +44,12 @@ func (c *Collector) Collect(ctx context.Context, input services.CollectInput) ([
 	// so pages can only be streamed out when no enrichment follows.
 	wantDetails := input.DetailLevel == services.DetailLevelDetailed || input.DetailLevel == services.DetailLevelRaw
 
-	paginator := s3.NewListBucketsPaginator(client, &s3.ListBucketsInput{})
+	// MaxBuckets is set to the API maximum so each bucket's BucketRegion is
+	// returned: S3 only includes the per-bucket region when the request carries
+	// at least one valid parameter. Pagination still walks every bucket.
+	paginator := s3.NewListBucketsPaginator(client, &s3.ListBucketsInput{
+		MaxBuckets: aws.Int32(10000),
+	})
 	for paginator.HasMorePages() {
 		page, err := paginator.NextPage(ctx)
 		if err != nil {
@@ -52,26 +58,7 @@ func (c *Collector) Collect(ctx context.Context, input services.CollectInput) ([
 
 		batch := make([]model.Resource, 0, len(page.Buckets))
 		for _, bucket := range page.Buckets {
-			name := aws.ToString(bucket.Name)
-
-			res := model.Resource{
-				Service: "s3",
-				Type:    "bucket",
-				Region:  "global",
-				ID:      name,
-				Name:    name,
-				ARN:     awsutil.S3BucketARN(name),
-				Summary: map[string]string{
-					"creationDate": "",
-				},
-			}
-
-			if bucket.CreationDate != nil {
-				res.CreatedAt = bucket.CreationDate
-				res.Summary["creationDate"] = bucket.CreationDate.Format("2006-01-02 15:04:05")
-			}
-
-			batch = append(batch, res)
+			batch = append(batch, mapBucket(bucket))
 		}
 		if wantDetails {
 			resources = append(resources, batch...)
@@ -95,6 +82,37 @@ func (c *Collector) Collect(ctx context.Context, input services.CollectInput) ([
 	}
 
 	return resources, nil
+}
+
+// mapBucket builds a Resource from a ListBuckets entry. The bucket's home
+// region is taken from BucketRegion (returned by ListBuckets) rather than the
+// global label; an absent region falls back to "global".
+func mapBucket(bucket types.Bucket) model.Resource {
+	name := aws.ToString(bucket.Name)
+
+	region := aws.ToString(bucket.BucketRegion)
+	if region == "" {
+		region = "global"
+	}
+
+	res := model.Resource{
+		Service: "s3",
+		Type:    "bucket",
+		Region:  region,
+		ID:      name,
+		Name:    name,
+		ARN:     awsutil.S3BucketARN(name),
+		Summary: map[string]string{
+			"creationDate": "",
+		},
+	}
+
+	if bucket.CreationDate != nil {
+		res.CreatedAt = bucket.CreationDate
+		res.Summary["creationDate"] = bucket.CreationDate.Format("2006-01-02 15:04:05")
+	}
+
+	return res
 }
 
 // fetchBucketDetails fetches all bucket detail fields concurrently.

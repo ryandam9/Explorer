@@ -56,8 +56,7 @@ The report is read-only and best-effort: a denied API call skips that source
 
 		eng, err := engine.NewEngine(ctx, AppConfig)
 		if err != nil {
-			fmt.Fprintf(os.Stderr, "Error: failed to initialize engine: %v\n", err)
-			os.Exit(1)
+			return fmt.Errorf("failed to initialize engine: %w", err)
 		}
 		SilenceScanLogs()
 
@@ -75,8 +74,7 @@ The report is read-only and best-effort: a denied API call skips that source
 			return nil
 		}
 		if err := expiry.Render(os.Stdout, items, outputFormat, noHeader); err != nil {
-			fmt.Fprintf(os.Stderr, "Error rendering report: %v\n", err)
-			os.Exit(1)
+			return fmt.Errorf("rendering report: %w", err)
 		}
 		return nil
 	},

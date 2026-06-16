@@ -58,8 +58,7 @@ This is the CLI generalization of the summary TUI's 'x' cross-reference.`,
 
 		eng, err := engine.NewEngine(ctx, AppConfig)
 		if err != nil {
-			fmt.Fprintf(os.Stderr, "Error: failed to initialize engine: %v\n", err)
-			os.Exit(1)
+			return fmt.Errorf("failed to initialize engine: %w", err)
 		}
 		SilenceScanLogs()
 
@@ -72,8 +71,7 @@ This is the CLI generalization of the summary TUI's 'x' cross-reference.`,
 
 		result := xref.WhereUsed(target, xref.BuildIndex(edges))
 		if err := xref.Render(os.Stdout, result, outputFormat, noHeader); err != nil {
-			fmt.Fprintf(os.Stderr, "Error rendering report: %v\n", err)
-			os.Exit(1)
+			return fmt.Errorf("rendering report: %w", err)
 		}
 		return nil
 	},

@@ -3,7 +3,6 @@ package cmd
 import (
 	"context"
 	"fmt"
-	"os"
 	"strings"
 
 	tea "github.com/charmbracelet/bubbletea"
@@ -27,7 +26,7 @@ toolkit (findings linter, path tracer, exposure audit, snapshot diff).`,
 
   # Sweep every region with a named profile
   aws_explorer vpc --all-regions --profile prod`,
-	Run: func(cmd *cobra.Command, args []string) {
+	RunE: func(cmd *cobra.Command, args []string) error {
 		ctx, cancel := context.WithCancel(context.Background())
 		defer cancel()
 
@@ -45,15 +44,14 @@ toolkit (findings linter, path tracer, exposure audit, snapshot diff).`,
 
 		m, err := vpctui.NewModel(ctx, vpcCfg, awsRegion, scanAll, activeTheme, configFilePath(), AppConfig)
 		if err != nil {
-			fmt.Fprintf(os.Stderr, "Error initializing VPC TUI: %v\n", err)
-			os.Exit(1)
+			return fmt.Errorf("initializing VPC TUI: %w", err)
 		}
 
 		p := tea.NewProgram(ui.WithWindowTitle(m), tea.WithAltScreen(), tea.WithContext(ctx))
 		if _, err := p.Run(); err != nil {
-			fmt.Fprintf(os.Stderr, "Error running VPC TUI: %v\n", err)
-			os.Exit(1)
+			return fmt.Errorf("running VPC TUI: %w", err)
 		}
+		return nil
 	},
 }
 

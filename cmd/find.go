@@ -53,15 +53,13 @@ This is the CLI twin of the summary TUI's Ctrl+P jump palette.`,
 
 		eng, err := engine.NewEngine(ctx, AppConfig)
 		if err != nil {
-			fmt.Fprintf(os.Stderr, "Error: failed to initialize engine: %v\n", err)
-			os.Exit(1)
+			return fmt.Errorf("failed to initialize engine: %w", err)
 		}
 		SilenceScanLogs()
 
 		result, err := eng.Run(ctx)
 		if err != nil {
-			fmt.Fprintf(os.Stderr, "Error collecting resources: %v\n", err)
-			os.Exit(1)
+			return fmt.Errorf("collecting resources: %w", err)
 		}
 		resources := result.Resources
 		errs := result.Errors

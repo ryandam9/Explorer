@@ -105,8 +105,7 @@ per-resource drill-down). The call is read-only.`,
 			m := billtui.New(ctx, api, start, end, label, billInterval, AppConfig.AWS.Profile)
 			p := tea.NewProgram(ui.WithWindowTitle(m), tea.WithAltScreen(), tea.WithContext(ctx))
 			if _, err := p.Run(); err != nil {
-				fmt.Fprintf(os.Stderr, "Error running bill TUI: %v\n", err)
-				os.Exit(1)
+				return fmt.Errorf("running bill TUI: %w", err)
 			}
 			return nil
 		}
@@ -125,8 +124,7 @@ per-resource drill-down). The call is read-only.`,
 			return nil
 		}
 		if err := billing.Render(os.Stdout, bill, outputFormat, noHeader); err != nil {
-			fmt.Fprintf(os.Stderr, "Error rendering the bill: %v\n", err)
-			os.Exit(1)
+			return fmt.Errorf("rendering the bill: %w", err)
 		}
 		return nil
 	},

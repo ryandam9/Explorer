@@ -31,7 +31,7 @@ var configInitCmd = &cobra.Command{
 
   # Scaffold the per-user config used from any directory
   aws_explorer config init --path ~/.config/aws_explorer/config.yaml`,
-	Run: func(cmd *cobra.Command, args []string) {
+	RunE: func(cmd *cobra.Command, args []string) error {
 		path := configInitPath
 		if path == "" {
 			path = "config.yaml"
@@ -40,20 +40,18 @@ var configInitCmd = &cobra.Command{
 			path = filepath.Join(home, path[2:])
 		}
 		if _, err := os.Stat(path); err == nil && !configInitForce {
-			fmt.Fprintf(os.Stderr, "Error: %s already exists (use --force to overwrite)\n", path)
-			os.Exit(1)
+			return fmt.Errorf("%s already exists (use --force to overwrite)", path)
 		}
 		if dir := filepath.Dir(path); dir != "." {
 			if err := os.MkdirAll(dir, 0o755); err != nil {
-				fmt.Fprintf(os.Stderr, "Error creating %s: %v\n", dir, err)
-				os.Exit(1)
+				return fmt.Errorf("creating %s: %w", dir, err)
 			}
 		}
 		if err := os.WriteFile(path, defaultConfigYAML, 0o644); err != nil {
-			fmt.Fprintf(os.Stderr, "Error writing %s: %v\n", path, err)
-			os.Exit(1)
+			return fmt.Errorf("writing %s: %w", path, err)
 		}
 		fmt.Printf("Wrote %s\n", path)
+		return nil
 	},
 }
 

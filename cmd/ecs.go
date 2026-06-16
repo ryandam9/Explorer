@@ -58,8 +58,7 @@ Needs ecs:ListClusters, ecs:ListTasks and ecs:DescribeTasks.`,
 
 		eng, err := engine.NewEngine(ctx, AppConfig)
 		if err != nil {
-			fmt.Fprintf(os.Stderr, "Error: failed to initialize engine: %v\n", err)
-			os.Exit(1)
+			return fmt.Errorf("failed to initialize engine: %w", err)
 		}
 		SilenceScanLogs()
 
@@ -76,8 +75,7 @@ Needs ecs:ListClusters, ecs:ListTasks and ecs:DescribeTasks.`,
 			return nil
 		}
 		if err := ecstriage.Render(os.Stdout, recs, outputFormat, noHeader); err != nil {
-			fmt.Fprintf(os.Stderr, "Error rendering report: %v\n", err)
-			os.Exit(1)
+			return fmt.Errorf("rendering report: %w", err)
 		}
 		return nil
 	},
