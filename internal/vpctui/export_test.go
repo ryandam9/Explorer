@@ -1,6 +1,7 @@
 package vpctui
 
 import (
+	"os"
 	"strings"
 	"testing"
 	"time"
@@ -201,7 +202,7 @@ func TestWriteExportRoundTrip(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
 	data := exportSnap()
 	at := time.Date(2026, 6, 9, 12, 0, 0, 0, time.UTC)
-	mdPath, htmlPath, err := writeExport(data, analyzeVPC(data.Snap), at)
+	mdPath, htmlPath, svgPath, err := writeExport(data, analyzeVPC(data.Snap), at)
 	if err != nil {
 		t.Fatalf("writeExport: %v", err)
 	}
@@ -210,5 +211,11 @@ func TestWriteExportRoundTrip(t *testing.T) {
 	}
 	if !strings.HasSuffix(htmlPath, "vpc-1-20260609-220000.html") {
 		t.Errorf("unexpected html export path: %s", htmlPath)
+	}
+	if !strings.HasSuffix(svgPath, "vpc-1-20260609-220000.svg") {
+		t.Errorf("unexpected svg export path: %s", svgPath)
+	}
+	if b, rerr := os.ReadFile(svgPath); rerr != nil || !strings.Contains(string(b), "<svg") {
+		t.Errorf("svg file missing or not an SVG: err=%v", rerr)
 	}
 }
