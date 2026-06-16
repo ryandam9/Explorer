@@ -1,11 +1,16 @@
 package elbv2
 
 import (
+	"context"
+	"errors"
+	"fmt"
 	"testing"
 	"time"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
+	"github.com/aws/aws-sdk-go-v2/service/elasticloadbalancingv2"
 	"github.com/aws/aws-sdk-go-v2/service/elasticloadbalancingv2/types"
+	"github.com/ryandam9/aws_explorer/internal/model"
 	"github.com/ryandam9/aws_explorer/internal/services"
 )
 
@@ -122,5 +127,55 @@ func TestMapLoadBalancer_NilCreatedTime(t *testing.T) {
 
 	if res.CreatedAt != nil {
 		t.Errorf("expected nil CreatedAt, got %v", res.CreatedAt)
+	}
+}
+
+// fakeTagsAPI fails the first DescribeTags call and serves tags on later calls,
+// so the per-batch continue-on-error behavior can be verified.
+type fakeTagsAPI struct {
+	calls   int
+	failIdx int // 0-based call index that returns an error
+	tags    map[string]map[string]string
+}
+
+func (f *fakeTagsAPI) DescribeTags(_ context.Context, in *elasticloadbalancingv2.DescribeTagsInput, _ ...func(*elasticloadbalancingv2.Options)) (*elasticloadbalancingv2.DescribeTagsOutput, error) {
+	call := f.calls
+	f.calls++
+	if call == f.failIdx {
+		return nil, errors.New("Throttling: rate exceeded")
+	}
+	var tds []types.TagDescription
+	for _, arn := range in.ResourceArns {
+		td := types.TagDescription{ResourceArn: aws.String(arn)}
+		for k, v := range f.tags[arn] {
+			td.Tags = append(td.Tags, types.Tag{Key: aws.String(k), Value: aws.String(v)})
+		}
+		tds = append(tds, td)
+	}
+	return &elasticloadbalancingv2.DescribeTagsOutput{TagDescriptions: tds}, nil
+}
+
+func TestApplyTags_ContinuesAfterBatchError(t *testing.T) {
+	c := NewCollector()
+
+	// Two full batches: the first batch's DescribeTags fails, the second succeeds.
+	batch := make([]model.Resource, 0, describeTagsBatch+1)
+	for i := 0; i < describeTagsBatch+1; i++ {
+		arn := fmt.Sprintf("arn:aws:elasticloadbalancing:us-east-1:1:loadbalancer/app/lb%d", i)
+		batch = append(batch, model.Resource{ARN: arn, Tags: map[string]string{}})
+	}
+	lastARN := batch[len(batch)-1].ARN
+
+	api := &fakeTagsAPI{failIdx: 0, tags: map[string]map[string]string{
+		lastARN: {"env": "prod"},
+	}}
+
+	c.applyTags(context.Background(), api, batch)
+
+	if api.calls != 2 {
+		t.Fatalf("expected both batches to be attempted, got %d calls", api.calls)
+	}
+	if batch[len(batch)-1].Tags["env"] != "prod" {
+		t.Errorf("second-batch LB should be tagged despite the first batch failing, got %v", batch[len(batch)-1].Tags)
 	}
 }

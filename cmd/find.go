@@ -12,6 +12,7 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"github.com/ryandam9/aws_explorer/internal/csvexport"
 	"github.com/ryandam9/aws_explorer/internal/discovery"
 	"github.com/ryandam9/aws_explorer/internal/engine"
 	"github.com/ryandam9/aws_explorer/internal/fuzzy"
@@ -152,7 +153,7 @@ func renderFindResults(w io.Writer, matched []model.Resource, format string, noH
 			}
 		}
 		for _, r := range rows {
-			if err := cw.Write([]string{r.Name, r.Type, r.ID, r.Region, r.ARN}); err != nil {
+			if err := cw.Write(csvexport.SanitizeRow([]string{r.Name, r.Type, r.ID, r.Region, r.ARN})); err != nil {
 				return err
 			}
 		}

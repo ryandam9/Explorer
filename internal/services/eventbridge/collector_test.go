@@ -1,10 +1,16 @@
 package eventbridge
 
 import (
+	"context"
+	"errors"
+	"strings"
 	"testing"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
+	"github.com/aws/aws-sdk-go-v2/service/eventbridge"
 	"github.com/aws/aws-sdk-go-v2/service/eventbridge/types"
+
+	"github.com/ryandam9/aws_explorer/internal/services"
 )
 
 func TestCollector_Metadata(t *testing.T) {
@@ -82,5 +88,64 @@ func TestMapBus(t *testing.T) {
 	}
 	if res.ARN != "arn:aws:events:us-east-1:123456789012:event-bus/payments" {
 		t.Errorf("ARN = %q", res.ARN)
+	}
+}
+
+// fakeEB implements eventBridgeAPI with configurable buses and per-bus rule
+// results/errors (keyed by bus name), single-page.
+type fakeEB struct {
+	buses    []types.EventBus
+	rules    map[string][]types.Rule
+	rulesErr map[string]error
+}
+
+func (f fakeEB) ListEventBuses(context.Context, *eventbridge.ListEventBusesInput, ...func(*eventbridge.Options)) (*eventbridge.ListEventBusesOutput, error) {
+	return &eventbridge.ListEventBusesOutput{EventBuses: f.buses}, nil
+}
+
+func (f fakeEB) ListRules(_ context.Context, in *eventbridge.ListRulesInput, _ ...func(*eventbridge.Options)) (*eventbridge.ListRulesOutput, error) {
+	name := aws.ToString(in.EventBusName)
+	if err := f.rulesErr[name]; err != nil {
+		return nil, err
+	}
+	return &eventbridge.ListRulesOutput{Rules: f.rules[name]}, nil
+}
+
+func TestCollect_OneBusRuleFailureKeepsOtherBuses(t *testing.T) {
+	c := NewCollector()
+	api := fakeEB{
+		buses: []types.EventBus{
+			{Name: aws.String("default"), Arn: aws.String("arn:default")},
+			{Name: aws.String("busA"), Arn: aws.String("arn:busA")},
+			{Name: aws.String("busB"), Arn: aws.String("arn:busB")},
+		},
+		rules: map[string][]types.Rule{
+			"busB": {{Name: aws.String("ruleB"), Arn: aws.String("arn:ruleB")}},
+		},
+		rulesErr: map[string]error{"busA": errors.New("AccessDenied: ListRules")},
+	}
+
+	resources, err := c.collect(context.Background(), api, services.CollectInput{Region: "us-east-1"})
+	if err == nil || !strings.Contains(err.Error(), "busA") {
+		t.Fatalf("expected a joined error naming busA, got: %v", err)
+	}
+
+	var gotRuleB, gotBusB bool
+	for _, r := range resources {
+		if r.Type == "rule" && r.Name == "ruleB" {
+			gotRuleB = true
+		}
+		if r.Type == "eventBus" && r.Name == "busB" {
+			gotBusB = true
+		}
+		if r.Type == "eventBus" && r.Name == "default" {
+			t.Error("default bus should not be emitted as a resource")
+		}
+	}
+	if !gotRuleB {
+		t.Error("busB's rule should be collected despite busA's failure")
+	}
+	if !gotBusB {
+		t.Error("busB (custom bus) should be emitted as a resource")
 	}
 }

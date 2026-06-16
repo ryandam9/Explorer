@@ -7,6 +7,7 @@ package eventbridge
 
 import (
 	"context"
+	"errors"
 	"fmt"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
@@ -16,6 +17,13 @@ import (
 	"github.com/ryandam9/aws_explorer/internal/model"
 	"github.com/ryandam9/aws_explorer/internal/services"
 )
+
+// eventBridgeAPI is the subset of the EventBridge client used by the collector,
+// extracted so per-bus failure handling can be unit-tested with a fake.
+type eventBridgeAPI interface {
+	ListEventBuses(context.Context, *eventbridge.ListEventBusesInput, ...func(*eventbridge.Options)) (*eventbridge.ListEventBusesOutput, error)
+	ListRules(context.Context, *eventbridge.ListRulesInput, ...func(*eventbridge.Options)) (*eventbridge.ListRulesOutput, error)
+}
 
 type Collector struct{}
 
@@ -32,14 +40,25 @@ func (c *Collector) IsGlobal() bool {
 }
 
 func (c *Collector) Collect(ctx context.Context, input services.CollectInput) ([]model.Resource, error) {
-	client := eventbridge.NewFromConfig(input.AWSConfig)
+	return c.collect(ctx, eventbridge.NewFromConfig(input.AWSConfig), input)
+}
 
+// collect lists each event bus's rules independently: if one bus's ListRules
+// is denied or fails, that bus is recorded as a partial error and the remaining
+// buses are still collected, rather than aborting the whole region.
+func (c *Collector) collect(ctx context.Context, client eventBridgeAPI, input services.CollectInput) ([]model.Resource, error) {
 	buses, err := c.listBuses(ctx, client)
 	if err != nil {
-		return nil, fmt.Errorf("failed to list EventBridge event buses: %w", err)
+		// listBuses returns whatever pages it gathered before failing, so keep
+		// going with those rather than discarding them.
+		err = fmt.Errorf("failed to list EventBridge event buses: %w", err)
 	}
 
 	var resources []model.Resource
+	var errs []error
+	if err != nil {
+		errs = append(errs, err)
+	}
 	for _, bus := range buses {
 		name := aws.ToString(bus.Name)
 		// The default bus exists in every account/region; surfacing it as a
@@ -51,7 +70,7 @@ func (c *Collector) Collect(ctx context.Context, input services.CollectInput) ([
 
 		rules, err := c.listRules(ctx, client, name)
 		if err != nil {
-			return resources, fmt.Errorf("failed to list EventBridge rules on bus %q: %w", name, err)
+			errs = append(errs, fmt.Errorf("failed to list EventBridge rules on bus %q: %w", name, err))
 		}
 		batch := make([]model.Resource, 0, len(rules))
 		for _, rule := range rules {
@@ -59,10 +78,10 @@ func (c *Collector) Collect(ctx context.Context, input services.CollectInput) ([
 		}
 		resources = input.EmitOrAppend(resources, batch)
 	}
-	return resources, nil
+	return resources, errors.Join(errs...)
 }
 
-func (c *Collector) listBuses(ctx context.Context, client *eventbridge.Client) ([]types.EventBus, error) {
+func (c *Collector) listBuses(ctx context.Context, client eventBridgeAPI) ([]types.EventBus, error) {
 	var out []types.EventBus
 	var token *string
 	for {
@@ -79,7 +98,7 @@ func (c *Collector) listBuses(ctx context.Context, client *eventbridge.Client) (
 	return out, nil
 }
 
-func (c *Collector) listRules(ctx context.Context, client *eventbridge.Client, busName string) ([]types.Rule, error) {
+func (c *Collector) listRules(ctx context.Context, client eventBridgeAPI, busName string) ([]types.Rule, error) {
 	var out []types.Rule
 	var token *string
 	for {
