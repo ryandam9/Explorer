@@ -54,6 +54,9 @@ func (mm *m) View() string {
 		}
 		frame = ui.OverlayCenter(frame, ui.AboutView(title, mm.defBody(), ui.AboutWidth(mm.width)), mm.width, mm.height)
 	}
+	if mm.detailActive {
+		frame = ui.OverlayCenter(frame, ui.AboutView(mm.detailTitle, mm.detailBody(), ui.AboutWidth(mm.width)), mm.width, mm.height)
+	}
 	if mm.showAbout {
 		frame = ui.OverlayCenter(frame, ui.AboutView("About — AWS Glue", glueAboutText, ui.AboutWidth(mm.width)), mm.width, mm.height)
 	}
@@ -96,6 +99,39 @@ func (mm *m) defBody() string {
 	return strings.TrimRight(b.String(), "\n")
 }
 
+// detailBody renders the resource-detail overlay's contents (loading / error /
+// the flattened rows). A row's shape selects its rendering: an aligned
+// label/value line, a section header, an indented bullet, or a blank separator.
+func (mm *m) detailBody() string {
+	if mm.detailLoading {
+		return mm.spinner.View() + " Loading details…"
+	}
+	if mm.detailErr != nil {
+		return "Could not load details: " + mm.detailErr.Error()
+	}
+	if len(mm.detail.Rows) == 0 {
+		return "No additional details available."
+	}
+	var b strings.Builder
+	for _, r := range mm.detail.Rows {
+		switch {
+		case r.Section:
+			b.WriteString(r.Label + "\n")
+		case r.Label == "" && r.Value == "":
+			b.WriteString("\n")
+		case r.Label == "":
+			b.WriteString("  " + r.Value + "\n")
+		default:
+			value := r.Value
+			if value == "" {
+				value = "—"
+			}
+			b.WriteString(fmt.Sprintf("%-18s %s\n", r.Label, value))
+		}
+	}
+	return strings.TrimRight(b.String(), "\n")
+}
+
 const glueAboutText = "This is the AWS Glue dashboard. Tab across Jobs, Crawlers, Triggers, " +
 	"Workflows, Connections and the Catalog (databases); each row shows health " +
 	"at a glance — a job's last run state and duration, a crawler's last-crawl " +
@@ -105,6 +141,9 @@ const glueAboutText = "This is the AWS Glue dashboard. Tab across Jobs, Crawlers
 	"run history, L opens that run's CloudWatch logs.\n\n" +
 	"Press f for the findings panel — deterministic posture/cost checks (failing or " +
 	"stale jobs, failed crawls) over the loaded jobs and crawlers.\n\n" +
+	"On the other tabs, press Enter for a detail overlay of the selected crawler, " +
+	"trigger, workflow, connection or database (configuration, targets/actions and " +
+	"last-run status, fetched on demand).\\n\\n" +
 	"Press o on any row to open it in the AWS console, / to filter, and r to refresh."
 
 func (mm *m) renderTabBar() string {
@@ -280,6 +319,8 @@ func (mm *m) helpHints() []ui.KeyHint {
 	}
 	if mm.tab == tabJobs {
 		hints = append(hints, ui.H("Enter", "runs"), ui.H("d", "definition"))
+	} else {
+		hints = append(hints, ui.H("Enter", "detail"))
 	}
 	hints = append(hints, ui.H("f", "findings"))
 	if hl, hr := mm.tbl.ColScrollInfo(); hl+hr > 0 {
