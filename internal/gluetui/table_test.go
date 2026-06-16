@@ -127,6 +127,32 @@ func TestGlueFindingsPanel(t *testing.T) {
 	}
 }
 
+// TestGlueStatusBarPinnedToBottom guards issue #237: on a tab with no data the
+// status bar must stay on the bottom line of the terminal rather than floating
+// up to the top behind the short "no results" message.
+func TestGlueStatusBarPinnedToBottom(t *testing.T) {
+	mm := &m{
+		regions: []string{"us-east-1"},
+		filter:  textinput.New(),
+		tbl:     newGlueTable(tabColumns(tabJobs, false)),
+		runsTbl: newGlueTable(runColumns()),
+	}
+	mm.width, mm.height = 120, 24
+	mm.rebuild()
+
+	out := mm.View()
+	if !strings.Contains(out, "No jobs found in scope.") {
+		t.Fatalf("expected the empty-tab message:\n%s", out)
+	}
+	lines := strings.Split(out, "\n")
+	if len(lines) != mm.height {
+		t.Errorf("rendered %d lines, want %d (status bar should fill to the bottom)", len(lines), mm.height)
+	}
+	if last := lines[len(lines)-1]; !strings.Contains(last, "quit") {
+		t.Errorf("status bar is not on the bottom line; last line = %q\nfull:\n%s", last, out)
+	}
+}
+
 func TestGlueRunsView(t *testing.T) {
 	mm := newGlueTestModel(120, 24)
 	mm.runsActive = true

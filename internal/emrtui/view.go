@@ -36,9 +36,23 @@ func (mm *m) View() string {
 		sb.WriteString(mm.renderTable())
 	}
 
-	sb.WriteString("\n" + ui.StatusBar(mm.width, mm.statusLeft(), mm.helpHints()))
+	// Pin the status bar to the bottom of the terminal. When the list has data
+	// the table is fit to fill the height, but on an empty/loading view the body
+	// is short and the status bar would otherwise float up to the top (issue
+	// #237). Pad the body with blank lines so the body + the blank separator +
+	// the status bar always reach the full terminal height.
+	body := sb.String()
+	status := ui.StatusBar(mm.width, mm.statusLeft(), mm.helpHints())
+	sep := "\n"
+	if mm.height > 0 {
+		// n newlines between the body and status bar so the two together exactly
+		// fill the terminal height (lipgloss.Height = newline count + 1).
+		if n := mm.height - lipgloss.Height(body) - lipgloss.Height(status) + 1; n > 1 {
+			sep = strings.Repeat("\n", n)
+		}
+	}
 
-	frame := mm.applyToast(sb.String())
+	frame := mm.applyToast(ui.ClipToSize(body+sep+status, mm.width, mm.height))
 	if mm.detailActive {
 		frame = ui.OverlayCenter(frame, ui.AboutView("Cluster — "+mm.detailCluster.Name, mm.detailBody(), ui.AboutWidth(mm.width)), mm.width, mm.height)
 	}

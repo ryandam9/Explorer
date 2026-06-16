@@ -166,6 +166,27 @@ func TestEMRFindingsPanel(t *testing.T) {
 	}
 }
 
+// TestEMRStatusBarPinnedToBottom guards issue #237: when the cluster list has
+// no data the status bar must stay on the bottom line of the terminal rather
+// than floating up behind the short "no results" message.
+func TestEMRStatusBarPinnedToBottom(t *testing.T) {
+	mm := newClusterTestModel(120, 24)
+	mm.inv = Inventory{} // no clusters
+	mm.rebuild()
+
+	out := mm.View()
+	if !strings.Contains(out, "No clusters found in scope.") {
+		t.Fatalf("expected the empty-list message:\n%s", out)
+	}
+	lines := strings.Split(out, "\n")
+	if len(lines) != mm.height {
+		t.Errorf("rendered %d lines, want %d (status bar should fill to the bottom)", len(lines), mm.height)
+	}
+	if last := lines[len(lines)-1]; !strings.Contains(last, "quit") {
+		t.Errorf("status bar is not on the bottom line; last line = %q\nfull:\n%s", last, out)
+	}
+}
+
 func TestClusterTableFilter(t *testing.T) {
 	mm := newClusterTestModel(120, 24)
 	mm.filter.SetValue("terminated")
