@@ -198,6 +198,47 @@ func TestGlueTabSortByName(t *testing.T) {
 	}
 }
 
+// TestGlueProgressiveLoad checks the two-phase load: the skeleton renders and
+// schedules job enrichment, an enrichMsg patches the job's last-run state, and a
+// stale-generation enrichMsg is ignored.
+func TestGlueProgressiveLoad(t *testing.T) {
+	mm := newGlueTestModel(120, 24)
+	mm.loadGen = 1
+	mm.loading = true
+	mm.inv = Inventory{}
+	mm.tab = tabJobs
+
+	_, cmd := mm.Update(invMsg{gen: 1, inv: Inventory{Jobs: []Job{
+		{Name: "etl", Region: "us-east-1"},
+	}}})
+	if mm.loading {
+		t.Error("the skeleton should clear loading")
+	}
+	if mm.enrichPending != 1 {
+		t.Errorf("enrichPending = %d, want 1 region", mm.enrichPending)
+	}
+	if cmd == nil {
+		t.Error("phase 1 should schedule phase-2 enrichment")
+	}
+
+	enriched := mm.inv.Jobs[0]
+	enriched.LastRunState = "SUCCEEDED"
+	mm.Update(enrichMsg{gen: 1, region: "us-east-1", jobs: []Job{enriched}})
+	if mm.inv.Jobs[0].LastRunState != "SUCCEEDED" {
+		t.Errorf("enrichment not applied: %+v", mm.inv.Jobs[0])
+	}
+	if mm.enrichPending != 0 {
+		t.Errorf("enrichPending = %d after enrich, want 0", mm.enrichPending)
+	}
+
+	stale := mm.inv.Jobs[0]
+	stale.LastRunState = "STALE"
+	mm.Update(enrichMsg{gen: 0, region: "us-east-1", jobs: []Job{stale}})
+	if mm.inv.Jobs[0].LastRunState != "SUCCEEDED" {
+		t.Error("stale-generation enrichMsg should be ignored")
+	}
+}
+
 func TestGlueRunsView(t *testing.T) {
 	mm := newGlueTestModel(120, 24)
 	mm.runsActive = true

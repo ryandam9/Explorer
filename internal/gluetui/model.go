@@ -116,6 +116,13 @@ type m struct {
 	findingList    []findings.Finding
 	findingsTbl    table.Model
 
+	// Progressive load: ListSkeleton fills the tabs fast (phase 1, jobs without
+	// their last-run state), then each region's jobs are enriched in the
+	// background (phase 2). loadGen tags each load so a refresh's stragglers can't
+	// patch a newer load; enrichPending counts the regions still enriching.
+	loadGen       int
+	enrichPending int
+
 	spinner   spinner.Model
 	toast     string
 	toastExp  time.Time
@@ -123,8 +130,16 @@ type m struct {
 }
 
 type invMsg struct {
+	gen int
 	inv Inventory
 	err error
+}
+
+// enrichMsg delivers one region's enriched jobs (last-run state) during phase 2.
+type enrichMsg struct {
+	gen    int
+	region string
+	jobs   []Job
 }
 
 type runsMsg struct {
@@ -234,16 +249,52 @@ func (mm *m) cycleSort() {
 }
 
 func (mm *m) Init() tea.Cmd {
-	return tea.Batch(mm.spinner.Tick, mm.loadInventoryCmd())
+	return tea.Batch(mm.spinner.Tick, mm.beginLoad())
 }
 
-func (mm *m) loadInventoryCmd() tea.Cmd {
+// beginLoad starts a fresh progressive load: it bumps the generation, clears the
+// inventory and returns the phase-1 (list skeleton) command.
+func (mm *m) beginLoad() tea.Cmd {
+	mm.loadGen++
+	mm.loading = true
+	mm.inv = Inventory{}
+	mm.enrichPending = 0
+	return mm.loadInventoryCmd(mm.loadGen)
+}
+
+// loadInventoryCmd is phase 1: list every resource (jobs without their last-run
+// state) so the tabs appear immediately.
+func (mm *m) loadInventoryCmd(gen int) tea.Cmd {
 	return func() tea.Msg {
-		slog.Info("Loading Glue inventory", "regions", len(mm.regions))
+		slog.Info("Listing Glue resources", "regions", len(mm.regions))
 		ctx, cancel := context.WithTimeout(mm.ctx, inventoryTimeout)
 		defer cancel()
-		inv, err := mm.client.LoadInventory(ctx)
-		return invMsg{inv: inv, err: err}
+		inv, err := mm.client.ListSkeleton(ctx)
+		return invMsg{gen: gen, inv: inv, err: err}
+	}
+}
+
+// enrichCmds is phase 2: one enrichment command per region with jobs, each
+// streaming that region's enriched jobs back via an enrichMsg.
+func (mm *m) enrichCmds(gen int) []tea.Cmd {
+	byRegion := map[string][]Job{}
+	for _, j := range mm.inv.Jobs {
+		byRegion[j.Region] = append(byRegion[j.Region], j)
+	}
+	cmds := make([]tea.Cmd, 0, len(byRegion))
+	for region, jobs := range byRegion {
+		cmds = append(cmds, mm.enrichRegionCmd(gen, region, jobs))
+	}
+	mm.enrichPending = len(cmds)
+	return cmds
+}
+
+func (mm *m) enrichRegionCmd(gen int, region string, jobs []Job) tea.Cmd {
+	return func() tea.Msg {
+		slog.Info("Enriching Glue jobs", "region", region, "count", len(jobs))
+		ctx, cancel := context.WithTimeout(mm.ctx, inventoryTimeout)
+		defer cancel()
+		return enrichMsg{gen: gen, region: region, jobs: mm.client.EnrichRegion(ctx, region, jobs)}
 	}
 }
 
@@ -373,13 +424,24 @@ func (mm *m) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 
 	case invMsg:
+		if msg.gen != mm.loadGen {
+			break // a newer load superseded this one
+		}
 		mm.loading = false
 		if msg.err != nil {
 			mm.err = msg.err
 		} else {
 			mm.inv = msg.inv
 			mm.rebuild()
+			// Phase 2: enrich each region's jobs in the background.
+			cmds = append(cmds, mm.enrichCmds(msg.gen)...)
 		}
+
+	case enrichMsg:
+		if msg.gen != mm.loadGen {
+			break // stragglers from a superseded load
+		}
+		mm.applyEnrichment(msg)
 
 	case runsMsg:
 		mm.runsLoading = false
@@ -425,8 +487,7 @@ func (mm *m) handleKey(msg tea.KeyMsg) []tea.Cmd {
 			return []tea.Cmd{tea.Quit}
 		case "enter", "esc":
 			mm.err = nil
-			mm.loading = true
-			cmds = append(cmds, mm.loadInventoryCmd())
+			cmds = append(cmds, mm.beginLoad(), mm.spinner.Tick)
 		}
 		return cmds
 	}
@@ -618,9 +679,28 @@ func (mm *m) startReload(cmds *[]tea.Cmd) {
 	if mm.loading {
 		return
 	}
-	mm.loading = true
-	mm.inv = Inventory{}
-	*cmds = append(*cmds, mm.loadInventoryCmd(), mm.spinner.Tick)
+	*cmds = append(*cmds, mm.beginLoad(), mm.spinner.Tick)
+}
+
+// applyEnrichment patches one region's enriched jobs back into the inventory by
+// (region, name), decrements the pending-region counter and re-renders.
+func (mm *m) applyEnrichment(msg enrichMsg) {
+	byName := make(map[string]Job, len(msg.jobs))
+	for _, j := range msg.jobs {
+		byName[j.Name] = j
+	}
+	for i := range mm.inv.Jobs {
+		if mm.inv.Jobs[i].Region != msg.region {
+			continue
+		}
+		if e, ok := byName[mm.inv.Jobs[i].Name]; ok {
+			mm.inv.Jobs[i] = e
+		}
+	}
+	if mm.enrichPending > 0 {
+		mm.enrichPending--
+	}
+	mm.rebuild()
 }
 
 // closeOrScrollOverlay handles keys for a scrollable detail overlay: q/ctrl+c

@@ -305,7 +305,11 @@ func (mm *m) statusLeft() string {
 	if len(mm.regions) != 1 {
 		regionLabel = fmt.Sprintf("all (%d regions)", len(mm.regions))
 	}
-	return fmt.Sprintf("Region: %s  ·  %s: %d", regionLabel, tabNames[mm.tab], mm.rowCount())
+	left := fmt.Sprintf("Region: %s  ·  %s: %d", regionLabel, tabNames[mm.tab], mm.rowCount())
+	if mm.enrichPending > 0 {
+		left += "  ·  enriching…" // phase 2 still filling jobs' last-run state
+	}
+	return left
 }
 
 func (mm *m) helpHints() []ui.KeyHint {

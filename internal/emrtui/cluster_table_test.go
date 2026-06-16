@@ -330,6 +330,53 @@ func TestEMRHBaseBoundToB(t *testing.T) {
 	}
 }
 
+// TestEMRProgressiveLoad checks the two-phase load: the skeleton renders and
+// schedules enrichment, an enrichMsg patches the matching cluster, and a
+// stale-generation enrichMsg is ignored.
+func TestEMRProgressiveLoad(t *testing.T) {
+	mm := newClusterTestModel(120, 24)
+	mm.loadGen = 1
+	mm.loading = true
+	mm.inv = Inventory{}
+
+	// Phase 1: the skeleton arrives.
+	_, cmd := mm.Update(invMsg{gen: 1, inv: Inventory{Clusters: []Cluster{
+		{ID: "j-1", Name: "a", Region: "us-east-1", State: "RUNNING"},
+	}}})
+	if mm.loading {
+		t.Error("the skeleton should clear loading")
+	}
+	if len(mm.view) != 1 {
+		t.Fatalf("skeleton not rendered: %d rows", len(mm.view))
+	}
+	if mm.enrichPending != 1 {
+		t.Errorf("enrichPending = %d, want 1 region", mm.enrichPending)
+	}
+	if cmd == nil {
+		t.Error("phase 1 should schedule phase-2 enrichment")
+	}
+
+	// Phase 2: enrichment patches the cluster and clears the pending counter.
+	enriched := mm.inv.Clusters[0]
+	enriched.ReleaseLabel = "emr-7.1.0"
+	enriched.DetailKnown = true
+	mm.Update(enrichMsg{gen: 1, region: "us-east-1", clusters: []Cluster{enriched}})
+	if mm.inv.Clusters[0].ReleaseLabel != "emr-7.1.0" {
+		t.Errorf("enrichment not applied: %+v", mm.inv.Clusters[0])
+	}
+	if mm.enrichPending != 0 {
+		t.Errorf("enrichPending = %d after enrich, want 0", mm.enrichPending)
+	}
+
+	// A straggler from a superseded load (wrong generation) is ignored.
+	stale := mm.inv.Clusters[0]
+	stale.ReleaseLabel = "STALE"
+	mm.Update(enrichMsg{gen: 0, region: "us-east-1", clusters: []Cluster{stale}})
+	if mm.inv.Clusters[0].ReleaseLabel != "emr-7.1.0" {
+		t.Error("stale-generation enrichMsg should be ignored")
+	}
+}
+
 func TestClusterTableFilter(t *testing.T) {
 	mm := newClusterTestModel(120, 24)
 	mm.filter.SetValue("terminated")
