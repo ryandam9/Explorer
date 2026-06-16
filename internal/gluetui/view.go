@@ -7,6 +7,7 @@ import (
 	"github.com/charmbracelet/lipgloss"
 	"github.com/charmbracelet/x/ansi"
 
+	"github.com/ryandam9/aws_explorer/internal/findings"
 	"github.com/ryandam9/aws_explorer/internal/ui"
 )
 
@@ -22,6 +23,8 @@ func (mm *m) View() string {
 
 	if mm.runsActive {
 		sb.WriteString(mm.renderRuns())
+	} else if mm.findingsActive {
+		sb.WriteString(mm.renderFindings())
 	} else {
 		sb.WriteString(mm.renderTabBar() + "\n")
 		sb.WriteString(mm.renderTable())
@@ -86,6 +89,8 @@ const glueAboutText = "This is the AWS Glue dashboard. Tab across Jobs, Crawlers
 	"Press Enter on a job to see its run history: state, duration, DPU-hours and " +
 	"an estimated cost per run, with the error message inline on failures. In the " +
 	"run history, L opens that run's CloudWatch logs.\n\n" +
+	"Press f for the findings panel — deterministic posture/cost checks (failing or " +
+	"stale jobs, failed crawls) over the loaded jobs and crawlers.\n\n" +
 	"Press o on any row to open it in the AWS console, / to filter, and r to refresh."
 
 func (mm *m) renderTabBar() string {
@@ -166,6 +171,41 @@ func (mm *m) renderRuns() string {
 	}
 }
 
+// renderFindings draws the deterministic posture/cost panel over the loaded
+// inventory (jobs + crawlers). The selected finding's detail and suggested fix
+// sit in the footer.
+func (mm *m) renderFindings() string {
+	head := lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color(ui.ColorHeading())).
+		Render(" Findings — posture & cost checks") + "\n" +
+		lipgloss.NewStyle().Foreground(lipgloss.Color(ui.ColorMuted())).
+			Render("  deterministic checks over the loaded jobs & crawlers · y copies the fix")
+
+	if len(mm.findingList) == 0 {
+		return head + "\n\n  " + lipgloss.NewStyle().Foreground(lipgloss.Color(ui.ColorSuccess())).
+			Render("✓ No findings for the loaded resources.")
+	}
+
+	foot := mm.findingsFooter()
+	mm.fitTable(&mm.findingsTbl, lipgloss.Height(head), lipgloss.Height(foot)+1)
+	return head + "\n" + ui.TablePanelStyle(true).Render(mm.findingsTbl.View()) +
+		"\n" + ui.TableScrollIndicator(&mm.findingsTbl) + "\n" + foot
+}
+
+// findingsFooter renders the selected finding's detail and suggested fix.
+func (mm *m) findingsFooter() string {
+	f, ok := mm.selectedFinding()
+	if !ok {
+		return ""
+	}
+	w := mm.width - 6
+	out := lipgloss.NewStyle().Foreground(lipgloss.Color(ui.ColorText())).Render("  " + truncate(f.Detail, w))
+	if f.Fix != "" {
+		out += "\n" + lipgloss.NewStyle().Foreground(lipgloss.Color(ui.ColorMuted())).
+			Render("    fix: "+truncate(f.Fix, w-6))
+	}
+	return out
+}
+
 func (mm *m) renderError() string {
 	b := "\n" + lipgloss.NewStyle().Foreground(lipgloss.Color(ui.ColorError())).Bold(true).
 		Render("  AWS Glue dashboard error") + "\n\n"
@@ -190,6 +230,9 @@ func (mm *m) statusLeft() string {
 	if mm.runsActive {
 		return fmt.Sprintf("Job: %s  ·  Runs: %d", mm.runsJob.Name, len(mm.runs))
 	}
+	if mm.findingsActive {
+		return "Findings: " + findings.Summary(mm.findingList)
+	}
 	regionLabel := mm.regions[0]
 	if len(mm.regions) != 1 {
 		regionLabel = fmt.Sprintf("all (%d regions)", len(mm.regions))
@@ -208,6 +251,15 @@ func (mm *m) helpHints() []ui.KeyHint {
 			ui.H("q", "quit"),
 		}
 	}
+	if mm.findingsActive {
+		return []ui.KeyHint{
+			ui.H("↑/↓", "findings"),
+			ui.H("y", "copy fix"),
+			ui.H("Esc", "back"),
+			ui.H("i", "about"),
+			ui.H("q", "quit"),
+		}
+	}
 	hints := []ui.KeyHint{
 		ui.H("Tab", "pane"),
 		ui.H("↑/↓", "rows"),
@@ -215,6 +267,7 @@ func (mm *m) helpHints() []ui.KeyHint {
 	if mm.tab == tabJobs {
 		hints = append(hints, ui.H("Enter", "runs"), ui.H("d", "definition"))
 	}
+	hints = append(hints, ui.H("f", "findings"))
 	if hl, hr := mm.tbl.ColScrollInfo(); hl+hr > 0 {
 		hints = append(hints, ui.H("</>", "columns"))
 	}

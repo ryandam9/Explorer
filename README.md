@@ -811,12 +811,19 @@ Run history (Enter on a job):
 | `↑/↓` (`j/k`) | Move selection |
 | `Enter` | Open the selected job's run history |
 | `d` | Show the selected job's definition (role, version, worker, script, connections, args — secrets redacted) |
+| `f` | **Findings** — deterministic posture/cost checks (failing or stale jobs, failed crawls) over the loaded jobs & crawlers; `y` copies the suggested fix |
 | `/` | Filter the current pane |
 | `o` | Open the selected resource in the AWS console |
 | `r` | Refresh |
 | `L` | (run history) open the selected run's CloudWatch logs (`/aws-glue/jobs/*`, stream = run ID) |
 | `y` | (run history) copy the selected run's error |
 | `i` | About this page · `q` quit |
+
+The **Findings** panel reuses the same deterministic checks as `audit`
+(`GLU-JOB-*`, `GLU-CRAWL-001`) over the data already on screen — no extra AWS
+calls. Checks that need data the dashboard doesn't load (a job's security
+configuration, worker count, per-run DPU-seconds, the VPC network inventory) are
+**suppressed rather than guessed**; run `audit` for the full set.
 
 The DPU-hour cost is an **estimate** (`$0.44`/DPU-hour, us-east-1 ETL rate);
 runs that report no `DPUSeconds` (still running, or legacy jobs) show no figure
@@ -891,17 +898,32 @@ Step history (Enter on a cluster):
 | `↑/↓` (`j/k`) | Move selection |
 | `Enter` / `s` | Open the selected cluster's step history |
 | `d` | Show the selected cluster's detail (release, log URI, role, EC2 attributes) |
+| `f` | **Findings** — deterministic posture/cost checks (idle/long-running clusters, no log destination or security config, terminated-with-errors) over the loaded clusters; `y` copies the suggested fix |
 | `L` | Open the cluster's (or selected step's) logs in the S3 browser |
 | `u` | Open a persistent application UI (Spark History / YARN Timeline / Tez) |
 | `y` | Open the live **YARN application browser** (requires on-cluster access) |
 | `h` | Open the **HBase table browser** (requires on-cluster access) |
 | `z` | Open the **Oozie workflow/coordinator browser** (requires on-cluster access) |
+| `t` | Toggle the **terminated** cluster tail (the list shows only active clusters by default) |
+| `S` / `R` | Cycle the sort column / reverse the direction |
 | `/` | Filter the cluster list |
 | `o` | Open the selected cluster in the AWS console |
 | `r` | Refresh |
 | `i` | About this page · `q` quit |
 
 (In the step history, `y` copies the selected step's failure reason.)
+
+The cluster list shows only **active** clusters by default (`STARTING`,
+`BOOTSTRAPPING`, `RUNNING`, `WAITING`, `TERMINATING`), so the often-large
+terminated tail neither dominates the view nor costs a `DescribeCluster` each;
+press `t` to include it (the status bar shows `active` / `all states`). The CLI
+twin honours this too — `emr clusters --all-states`, or naming states with
+`--state`, fetches the full set.
+
+The **Findings** panel reuses the same deterministic checks as `audit`
+(`EMR-COST-*`, `EMR-LOG-001`, `EMR-SEC-001`, `EMR-STEP-002`) over the data
+already on screen — no extra AWS calls. (The latest-step check needs per-cluster
+step history, loaded lazily, so it stays silent here.)
 
 `L` opens the [S3 browser](#s3-tui-usage) rooted at the cluster's log archive
 (`<LogUri>/<cluster-id>/`), or at a specific step's folder

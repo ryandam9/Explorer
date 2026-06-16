@@ -15,6 +15,7 @@ import (
 
 	"github.com/ryandam9/aws_explorer/internal/config"
 	"github.com/ryandam9/aws_explorer/internal/consolelink"
+	"github.com/ryandam9/aws_explorer/internal/findings"
 	"github.com/ryandam9/aws_explorer/internal/table"
 	"github.com/ryandam9/aws_explorer/internal/ui"
 )
@@ -87,6 +88,13 @@ type m struct {
 	defLoading bool
 	defErr     error
 
+	// Findings panel (f) — deterministic posture/cost checks over the loaded
+	// inventory. findingList is computed synchronously (no AWS call), parallel to
+	// the table's rows.
+	findingsActive bool
+	findingList    []findings.Finding
+	findingsTbl    table.Model
+
 	spinner   spinner.Model
 	toast     string
 	toastExp  time.Time
@@ -132,17 +140,18 @@ func NewModel(ctx context.Context, awsCfg *config.AWSConfig, regions []string, a
 
 	activeRegions := client.Regions()
 	return &m{
-		ctx:        ctx,
-		client:     client,
-		regions:    activeRegions,
-		allRegions: allRegions,
-		appCfg:     appCfg,
-		configPath: configPath,
-		filter:     f,
-		spinner:    s,
-		tbl:        newGlueTable(tabColumns(tabJobs, len(activeRegions) > 1)),
-		runsTbl:    newGlueTable(runColumns()),
-		loading:    true,
+		ctx:         ctx,
+		client:      client,
+		regions:     activeRegions,
+		allRegions:  allRegions,
+		appCfg:      appCfg,
+		configPath:  configPath,
+		filter:      f,
+		spinner:     s,
+		tbl:         newGlueTable(tabColumns(tabJobs, len(activeRegions) > 1)),
+		runsTbl:     newGlueTable(runColumns()),
+		findingsTbl: newGlueTable(findingsColumns(len(activeRegions) > 1)),
+		loading:     true,
 	}, nil
 }
 
@@ -406,6 +415,37 @@ func (mm *m) handleKey(msg tea.KeyMsg) []tea.Cmd {
 		return cmds
 	}
 
+	// Findings panel sub-view.
+	if mm.findingsActive {
+		switch msg.String() {
+		case "q", "ctrl+c":
+			return []tea.Cmd{tea.Quit}
+		case "esc", "backspace", "left":
+			mm.findingsActive = false
+		case "up", "k":
+			mm.findingsTbl.MoveUp(1)
+		case "down", "j":
+			mm.findingsTbl.MoveDown(1)
+		case "g", "home":
+			mm.findingsTbl.GotoTop()
+		case "G", "end":
+			mm.findingsTbl.GotoBottom()
+		case "<", ",":
+			mm.findingsTbl.ScrollLeft()
+		case ">", ".":
+			mm.findingsTbl.ScrollRight()
+		case "y":
+			if f, ok := mm.selectedFinding(); ok && f.Fix != "" {
+				_ = clipboard.WriteAll(f.Fix)
+				mm.setToast("Copied suggested fix")
+				cmds = append(cmds, toastCmd(3*time.Second))
+			}
+		case ui.KeyAbout:
+			mm.showAbout = true
+		}
+		return cmds
+	}
+
 	// Dashboard.
 	switch msg.String() {
 	case "q", "ctrl+c":
@@ -454,12 +494,30 @@ func (mm *m) handleKey(msg tea.KeyMsg) []tea.Cmd {
 				cmds = append(cmds, mm.loadDefCmd(job), mm.spinner.Tick)
 			}
 		}
+	case "f":
+		mm.openFindings()
 	case "o":
 		mm.openConsole(&cmds)
 	case ui.KeyAbout:
 		mm.showAbout = true
 	}
 	return cmds
+}
+
+// openFindings computes the deterministic findings over the loaded inventory
+// (jobs and crawlers, across every loaded tab/region) and opens the panel.
+// Synchronous — no AWS call — so there is no loading state.
+func (mm *m) openFindings() {
+	mm.findingList = mm.computeFindings()
+	mm.findingsActive = true
+	multi := len(mm.regions) > 1
+	mm.findingsTbl.SetColumns(findingsColumns(multi))
+	rows := make([]table.Row, 0, len(mm.findingList))
+	for _, f := range mm.findingList {
+		rows = append(rows, findingRow(f, multi))
+	}
+	mm.findingsTbl.SetRows(rows)
+	mm.findingsTbl.SetCursor(0)
 }
 
 // openConsole copies (and opens, when local) the console URL for the selected
@@ -490,6 +548,9 @@ func (mm *m) PageTitle() string {
 	base := "AWS Glue"
 	if mm.runsActive {
 		return base + " › " + mm.runsJob.Name + " › runs"
+	}
+	if mm.findingsActive {
+		return base + " › Findings"
 	}
 	return base + " › " + tabNames[mm.tab]
 }
