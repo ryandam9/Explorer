@@ -56,7 +56,7 @@ func (c *Collector) mapFileSystem(fs types.FileSystemDescription, region string)
 	}
 	return model.Resource{
 		Service:   "efs",
-		Type:      "fileSystem",
+		Type:      "file-system",
 		Region:    region,
 		ID:        id,
 		Name:      name,

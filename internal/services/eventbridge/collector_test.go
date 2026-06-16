@@ -80,8 +80,8 @@ func TestMapBus(t *testing.T) {
 		Arn:  aws.String("arn:aws:events:us-east-1:123456789012:event-bus/payments"),
 	}, "us-east-1")
 
-	if res.Type != "eventBus" {
-		t.Errorf("Type = %q, want eventBus", res.Type)
+	if res.Type != "event-bus" {
+		t.Errorf("Type = %q, want event-bus", res.Type)
 	}
 	if res.Name != "payments" {
 		t.Errorf("Name = %q", res.Name)
@@ -135,10 +135,10 @@ func TestCollect_OneBusRuleFailureKeepsOtherBuses(t *testing.T) {
 		if r.Type == "rule" && r.Name == "ruleB" {
 			gotRuleB = true
 		}
-		if r.Type == "eventBus" && r.Name == "busB" {
+		if r.Type == "event-bus" && r.Name == "busB" {
 			gotBusB = true
 		}
-		if r.Type == "eventBus" && r.Name == "default" {
+		if r.Type == "event-bus" && r.Name == "default" {
 			t.Error("default bus should not be emitted as a resource")
 		}
 	}

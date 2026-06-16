@@ -22,7 +22,7 @@ func TestMapFileSystem(t *testing.T) {
 		LifeCycleState:       types.LifeCycleStateAvailable,
 		NumberOfMountTargets: 3,
 	}, "us-east-1")
-	if res.Service != "efs" || res.Type != "fileSystem" {
+	if res.Service != "efs" || res.Type != "file-system" {
 		t.Fatalf("service/type = %q/%q", res.Service, res.Type)
 	}
 	if res.Name != "shared" || res.State != "available" || res.Summary["mountTargets"] != "3" {

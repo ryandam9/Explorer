@@ -29,7 +29,7 @@ func TestMapStateMachine(t *testing.T) {
 	}
 	res := c.mapStateMachine(sm, "us-east-1")
 
-	if res.Service != "stepfunctions" || res.Type != "stateMachine" {
+	if res.Service != "stepfunctions" || res.Type != "state-machine" {
 		t.Errorf("Service/Type = %q/%q", res.Service, res.Type)
 	}
 	if res.Region != "us-east-1" {

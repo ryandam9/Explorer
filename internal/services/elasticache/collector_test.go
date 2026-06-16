@@ -22,7 +22,7 @@ func TestMapCluster(t *testing.T) {
 		Engine:             aws.String("redis"),
 		CacheNodeType:      aws.String("cache.t3.micro"),
 	}, "us-east-1")
-	if res.Service != "elasticache" || res.Type != "cacheCluster" {
+	if res.Service != "elasticache" || res.Type != "cache-cluster" {
 		t.Fatalf("service/type = %q/%q", res.Service, res.Type)
 	}
 	if res.ID != "redis-prod" || res.State != "available" || res.Summary["engine"] != "redis" {

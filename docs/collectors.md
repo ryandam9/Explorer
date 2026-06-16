@@ -20,8 +20,8 @@ Two things this table makes explicit:
 | Service | Scope | Resource types collected | Detailed mode | Primary IAM | Known gaps |
 |---|---|---|:---:|---|---|
 | `acm` | regional | `certificate` | – | `acm:ListCertificates` | expiry, validation, SANs (no `DescribeCertificate`) |
-| `apigateway` | regional | `restApi`, `httpApi`, `websocketApi` | – | `apigateway:GET` | stages, routes, integrations, authorizers, domains |
-| `athena` | regional | `workGroup` | – | `athena:ListWorkGroups` | data catalogs, named queries, result config |
+| `apigateway` | regional | `rest-api`, `http-api`, `websocket-api` | – | `apigateway:GET` | stages, routes, integrations, authorizers, domains |
+| `athena` | regional | `work-group` | – | `athena:ListWorkGroups` | data catalogs, named queries, result config |
 | `cloudformation` | regional | `stack` | – | `cloudformation:DescribeStacks` | drift, outputs/params, termination protection |
 | `cloudfront` | global | `distribution` | – | `cloudfront:ListDistributions` | origins, WAF, viewer cert, logging |
 | `cloudwatch` | regional | `alarm` | yes | `cloudwatch:DescribeAlarms` | composite alarms; log groups (see the `cw` command) |
@@ -29,12 +29,12 @@ Two things this table makes explicit:
 | `ec2` | regional | `instance`, `vpc`, `subnet`, `security-group`, `volume`, `network-interface` | yes | `ec2:Describe*` | route tables, IGW/NAT, endpoints, EIPs, snapshots, AMIs (some in the `vpc` TUI) |
 | `ecr` | regional | `repository` | – | `ecr:DescribeRepositories` | image scan/lifecycle/replication config |
 | `ecs` | regional | `cluster` | yes | `ecs:ListClusters`, `DescribeClusters` | services, tasks, task definitions, capacity providers |
-| `efs` | regional | `fileSystem` | – | `elasticfilesystem:DescribeFileSystems` | mount targets, encryption, lifecycle policy |
+| `efs` | regional | `file-system` | – | `elasticfilesystem:DescribeFileSystems` | mount targets, encryption, lifecycle policy |
 | `eks` | regional | `cluster` | yes | `eks:ListClusters`, `DescribeCluster` | node groups, Fargate profiles, add-ons |
-| `elasticache` | regional | `cacheCluster` | – | `elasticache:DescribeCacheClusters` | replication groups, serverless, encryption |
-| `elbv2` | regional | `loadbalancer` | – | `elasticloadbalancing:Describe*` | target groups, listeners, target health |
+| `elasticache` | regional | `cache-cluster` | – | `elasticache:DescribeCacheClusters` | replication groups, serverless, encryption |
+| `elbv2` | regional | `load-balancer` | – | `elasticloadbalancing:Describe*` | target groups, listeners, target health |
 | `emr` | regional | `cluster`, `step` | yes | `elasticmapreduce:ListClusters`, `DescribeCluster` | instance groups/fleets |
-| `eventbridge` | regional | `eventBus`, `rule` | – | `events:ListEventBuses`, `ListRules` | rule targets, EventBridge Scheduler |
+| `eventbridge` | regional | `event-bus`, `rule` | – | `events:ListEventBuses`, `ListRules` | rule targets, EventBridge Scheduler |
 | `glue` | regional | `database`, `job`, `crawler`, `trigger`, `workflow`, `connection` | yes | `glue:GetDatabases`, `ListJobs`, … | tables, classifiers, security configs |
 | `iam` | global | `role`, `user`, `group`, `policy`, `instance-profile` | yes | `iam:ListRoles`/`ListUsers`/`ListGroups`/`ListPolicies`/`ListInstanceProfiles` | OIDC/SAML providers, server certs, access keys |
 | `kinesis` | regional | `stream` | – | `kinesis:ListStreams` | shards, retention, encryption, consumers |
@@ -42,12 +42,12 @@ Two things this table makes explicit:
 | `lambda` | regional | `function` | yes | `lambda:ListFunctions`, `ListTags` | event source mappings, function URLs, VPC config, layers |
 | `rds` | regional | `instance`, `cluster` | yes | `rds:DescribeDBInstances`, `DescribeDBClusters` | snapshots, proxies, parameter/subnet groups |
 | `redshift` | regional | `cluster` | – | `redshift:DescribeClusters` | serverless, encryption, network config |
-| `route53` | global | `hostedZone` | – | `route53:ListHostedZones` | records, health checks, resolver rules |
+| `route53` | global | `hosted-zone` | – | `route53:ListHostedZones` | records, health checks, resolver rules |
 | `s3` | global | `bucket` | yes | `s3:ListAllMyBuckets` (+ per-bucket GETs in detailed mode) | detail fields are fetched only in detailed mode |
 | `secretsmanager` | regional | `secret` | – | `secretsmanager:ListSecrets` | last-accessed date, replication status |
 | `sns` | regional | `topic` | – | `sns:ListTopics` | attributes, subscriptions, encryption |
 | `sqs` | regional | `queue` | – | `sqs:ListQueues` | attributes, DLQ config, message counts |
-| `stepfunctions` | regional | `stateMachine` | – | `states:ListStateMachines` | status, logging, definition, recent executions |
+| `stepfunctions` | regional | `state-machine` | – | `states:ListStateMachines` | status, logging, definition, recent executions |
 
 ## Notes
 

@@ -50,7 +50,7 @@ func (c *Collector) mapWorkGroup(wg types.WorkGroupSummary, region, account stri
 	name := aws.ToString(wg.Name)
 	res := model.Resource{
 		Service: "athena",
-		Type:    "workGroup",
+		Type:    "work-group",
 		Region:  region,
 		ID:      name,
 		Name:    name,

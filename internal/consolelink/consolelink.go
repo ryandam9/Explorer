@@ -286,7 +286,7 @@ func deepLink(n linkInput) (string, bool) {
 		}
 
 	case "route53":
-		if n.typ == "hostedzone" {
+		if n.typ == "hosted-zone" {
 			return "https://us-east-1.console.aws.amazon.com/route53/v2/hostedzones#ListRecordSets/" + q(lastSegment(n.id)), true
 		}
 

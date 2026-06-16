@@ -27,7 +27,7 @@ func TestMapREST(t *testing.T) {
 	}
 	res := c.mapREST(api, "us-east-1")
 
-	if res.Service != "apigateway" || res.Type != "restApi" {
+	if res.Service != "apigateway" || res.Type != "rest-api" {
 		t.Errorf("Service/Type = %q/%q", res.Service, res.Type)
 	}
 	if res.Region != "us-east-1" {
@@ -67,7 +67,7 @@ func TestMapV2_HTTP(t *testing.T) {
 	}
 	res := c.mapV2(api, "us-east-1")
 
-	if res.Type != "httpApi" {
+	if res.Type != "http-api" {
 		t.Errorf("Type = %q, want httpApi", res.Type)
 	}
 	if res.ARN != "arn:aws:apigateway:us-east-1::/apis/h1" {
@@ -87,7 +87,7 @@ func TestMapV2_WebSocket(t *testing.T) {
 		Name:         aws.String("chat"),
 		ProtocolType: v2types.ProtocolTypeWebsocket,
 	}, "us-east-1")
-	if res.Type != "websocketApi" {
+	if res.Type != "websocket-api" {
 		t.Errorf("Type = %q, want websocketApi", res.Type)
 	}
 }

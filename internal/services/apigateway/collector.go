@@ -98,7 +98,7 @@ func (c *Collector) mapREST(api v1types.RestApi, region string) model.Resource {
 	}
 	res := model.Resource{
 		Service:   "apigateway",
-		Type:      "restApi",
+		Type:      "rest-api",
 		Region:    region,
 		ID:        id,
 		Name:      name,
@@ -119,9 +119,9 @@ func (c *Collector) mapV2(api v2types.Api, region string) model.Resource {
 		name = id
 	}
 	protocol := string(api.ProtocolType)
-	resType := "httpApi"
+	resType := "http-api"
 	if api.ProtocolType == v2types.ProtocolTypeWebsocket {
-		resType = "websocketApi"
+		resType = "websocket-api"
 	}
 	res := model.Resource{
 		Service:   "apigateway",

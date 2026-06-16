@@ -103,7 +103,7 @@ func (c *Collector) mapLoadBalancer(region string, lb types.LoadBalancer, detail
 
 	res := model.Resource{
 		Service: "elbv2",
-		Type:    "loadbalancer",
+		Type:    "load-balancer",
 		Region:  region,
 		ID:      id,
 		Name:    name,

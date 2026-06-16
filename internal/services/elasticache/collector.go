@@ -50,7 +50,7 @@ func (c *Collector) mapCluster(cl types.CacheCluster, region string) model.Resou
 	id := aws.ToString(cl.CacheClusterId)
 	res := model.Resource{
 		Service: "elasticache",
-		Type:    "cacheCluster",
+		Type:    "cache-cluster",
 		Region:  region,
 		ID:      id,
 		Name:    id,

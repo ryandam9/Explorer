@@ -55,8 +55,8 @@ func TestMapZone_BasicFields(t *testing.T) {
 	if res.Service != "route53" {
 		t.Errorf("Service = %q, want %q", res.Service, "route53")
 	}
-	if res.Type != "hostedZone" {
-		t.Errorf("Type = %q, want %q", res.Type, "hostedZone")
+	if res.Type != "hosted-zone" {
+		t.Errorf("Type = %q, want %q", res.Type, "hosted-zone")
 	}
 	if res.ID != "/hostedzone/Z1PA6795UKMFR9" {
 		t.Errorf("ID = %q", res.ID)
