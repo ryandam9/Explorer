@@ -7,6 +7,7 @@ import (
 	"io"
 	"os"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -970,6 +971,44 @@ func (c *S3Client) DeleteObject(bucket, key string) error {
 		Key:    aws.String(key),
 	})
 	return err
+}
+
+// GetObjectRange downloads up to maxBytes of an object's raw bytes, reporting
+// whether the object was larger than the window (truncated). Used to fetch
+// compressed objects and archives for in-UI decompression. It uses a longer
+// timeout than the metadata calls since the window can be several megabytes.
+func (c *S3Client) GetObjectRange(bucket, key string, maxBytes int64) ([]byte, bool, error) {
+	ctx, cancel := context.WithTimeout(c.ctx, 2*time.Minute)
+	defer cancel()
+
+	if maxBytes <= 0 {
+		maxBytes = 64 * 1024
+	}
+	out, err := c.client.GetObject(ctx, &s3.GetObjectInput{
+		Bucket: aws.String(bucket),
+		Key:    aws.String(key),
+		Range:  aws.String(fmt.Sprintf("bytes=0-%d", maxBytes-1)),
+	})
+	if err != nil {
+		return nil, false, err
+	}
+	defer out.Body.Close()
+
+	data, err := io.ReadAll(io.LimitReader(out.Body, maxBytes))
+	if err != nil {
+		return nil, false, err
+	}
+	// ContentRange ("bytes 0-N/total") tells us the real object size; fall back
+	// to "filled the window" when it's absent.
+	truncated := int64(len(data)) == maxBytes
+	if cr := aws.ToString(out.ContentRange); cr != "" {
+		if i := strings.LastIndex(cr, "/"); i >= 0 {
+			if total, perr := strconv.ParseInt(cr[i+1:], 10, 64); perr == nil {
+				truncated = total > int64(len(data))
+			}
+		}
+	}
+	return data, truncated, nil
 }
 
 func (c *S3Client) GetObjectPreview(bucket, key string, maxBytes int64) (string, error) {
