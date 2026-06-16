@@ -1744,13 +1744,23 @@ rules and subnet associations**, subnet attributes, NAT gateway state/subnet/
 tables/**security groups/subnets** — covering the classic silent breakers like
 a NACL re-association or an endpoint SG swap.
 
-### Markdown export (`E`)
+### Export (`E`)
 
-Writes a self-contained Markdown report — a resource-count summary, all findings
-grouped by severity with fixes, and inventory tables (subnets, security groups,
-route tables, NAT gateways, endpoints, network interfaces) — to
-`~/.aws_explorer/exports/<vpc-id>-<timestamp>.md`. Ideal for pasting into a
-support case or runbook. The status bar shows the path.
+Writes a self-contained report — a resource-count summary, all findings grouped
+by severity with fixes, and inventory tables (subnets, security groups, route
+tables, NAT gateways, endpoints, network interfaces) — in three formats sharing
+a basename under `~/.aws_explorer/exports/<vpc-id>-<timestamp>.{md,html,svg}`:
+
+- **Markdown** (`.md`) — ideal for pasting into a support case or runbook.
+- **HTML** (`.html`) — styled, with a sticky table-of-contents and searchable,
+  paginated resource tables; leads with the architecture diagram.
+- **SVG** (`.svg`) — a deterministic **architecture diagram**: the internet and
+  its gateway, the VPC as a container, availability-zone columns of subnets
+  colour-coded public / private / isolated by their default route, NAT gateways
+  drawn in their subnet, and arrows for the traffic-flow paths (internet ⇄ IGW,
+  public → IGW, private → NAT → IGW). Pure function of the snapshot — no AI.
+
+The status bar shows the paths.
 
 ### AWS Reachability Analyzer (`A`)
 

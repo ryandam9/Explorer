@@ -33,6 +33,7 @@ type reportHTMLData struct {
 	Region      string
 	GeneratedAt string
 	TOC         []htmlTOCEntry
+	Diagram     template.HTML
 	Content     template.HTML
 }
 
@@ -43,13 +44,17 @@ func exportHTML(data fullExport, findings []Finding, generatedAt time.Time) stri
 		blackfriday.WithExtensions(blackfriday.CommonExtensions|blackfriday.AutoHeadingIDs))
 	wrapped := tableWrapRe.ReplaceAllString(string(rendered), `<div class="dt-wrap"><table>$1</table></div>`)
 
+	// The architecture diagram leads the report; give it its own TOC entry.
+	toc := append([]htmlTOCEntry{{Title: "Architecture", Anchor: "architecture"}}, buildTOC(md)...)
+
 	d := reportHTMLData{
 		Title:       "VPC Report: " + data.VPC.ID,
 		VPCID:       data.VPC.ID,
 		Region:      data.VPC.Region,
 		GeneratedAt: reportTime(generatedAt),
-		TOC:         buildTOC(md),
-		Content:     template.HTML(wrapped), //nolint:gosec // generated from our own report
+		TOC:         toc,
+		Diagram:     template.HTML(vpcDiagramSVG(data)), //nolint:gosec // generated from our own snapshot
+		Content:     template.HTML(wrapped),             //nolint:gosec // generated from our own report
 	}
 	var buf bytes.Buffer
 	if err := reportTmpl.Execute(&buf, d); err != nil {
@@ -144,6 +149,9 @@ main h2 { display:inline-block; margin:2rem 0 1rem; font-family:var(--display); 
 main h2:first-of-type { margin-top:0; }
 main h3 { margin:1.5rem 0 .5rem; font-family:var(--display); font-size:1rem; text-transform:uppercase; }
 main > p em { display:inline-block; background:var(--panel); border:2px solid var(--ink); padding:.1rem .45rem; font-style:normal; font-weight:600; }
+/* Architecture diagram — framed like a table, scrolls if wider than the column. */
+.diagram { overflow-x:auto; margin:.4rem 0 1.4rem; padding:1rem; background:var(--panel); border:3px solid var(--ink); box-shadow:var(--shadow); }
+.diagram svg { max-width:100%; height:auto; display:block; margin:0 auto; }
 a { color:var(--ink); font-weight:700; text-decoration:underline; text-decoration-thickness:2px; }
 code { background:var(--lime); border:2px solid var(--ink); padding:.05em .3em; font-family:var(--mono); font-size:.85em; }
 ul { padding-left:1.2rem; }
@@ -195,6 +203,10 @@ tbody tr:hover { background:var(--yellow); }
 {{- end}}
 </nav>
 <main>
+<section class="arch">
+<h2 id="architecture">Architecture</h2>
+<div class="diagram">{{.Diagram}}</div>
+</section>
 {{.Content}}
 </main>
 </div>

@@ -652,23 +652,29 @@ func exportDir() (string, error) {
 	return dir, nil
 }
 
-// writeExport writes the Markdown and HTML reports to timestamped files sharing
-// a basename and returns both paths.
-func writeExport(data fullExport, findings []Finding, now time.Time) (mdPath, htmlPath string, err error) {
+// writeExport writes the Markdown and HTML reports and the standalone SVG
+// architecture diagram to timestamped files sharing a basename, returning all
+// three paths.
+func writeExport(data fullExport, findings []Finding, now time.Time) (mdPath, htmlPath, svgPath string, err error) {
 	dir, err := exportDir()
 	if err != nil {
-		return "", "", err
+		return "", "", "", err
 	}
 	base := fmt.Sprintf("%s-%s", data.VPC.ID, now.In(reportLoc).Format("20060102-150405"))
 	mdPath = filepath.Join(dir, base+".md")
 	if err := os.WriteFile(mdPath, []byte(exportMarkdown(data, findings, now)), 0o644); err != nil {
-		return "", "", err
+		return "", "", "", err
 	}
 	htmlPath = filepath.Join(dir, base+".html")
 	if err := os.WriteFile(htmlPath, []byte(exportHTML(data, findings, now)), 0o644); err != nil {
-		return mdPath, "", err
+		return mdPath, "", "", err
 	}
-	return mdPath, htmlPath, nil
+	// Also write the architecture diagram as a standalone SVG for reuse.
+	svgPath = filepath.Join(dir, base+".svg")
+	if err := os.WriteFile(svgPath, []byte(vpcDiagramSVG(data)), 0o644); err != nil {
+		return mdPath, htmlPath, "", err
+	}
+	return mdPath, htmlPath, svgPath, nil
 }
 
 // exportResourceCSV writes the currently displayed resource table (full
