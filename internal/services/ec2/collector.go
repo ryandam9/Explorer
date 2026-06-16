@@ -2,6 +2,7 @@ package ec2
 
 import (
 	"context"
+	"errors"
 	"fmt"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
@@ -11,6 +12,17 @@ import (
 	"github.com/ryandam9/aws_explorer/internal/model"
 	"github.com/ryandam9/aws_explorer/internal/services"
 )
+
+// ec2API is the subset of the EC2 client used by the collector. Splitting it
+// out lets each resource family be exercised with a fake client in tests.
+type ec2API interface {
+	ec2.DescribeInstancesAPIClient
+	ec2.DescribeVpcsAPIClient
+	ec2.DescribeSubnetsAPIClient
+	ec2.DescribeSecurityGroupsAPIClient
+	ec2.DescribeVolumesAPIClient
+	ec2.DescribeNetworkInterfacesAPIClient
+}
 
 // Collector implements the services.Collector interface for EC2.
 type Collector struct{}
@@ -29,97 +41,132 @@ func (c *Collector) IsGlobal() bool {
 }
 
 func (c *Collector) Collect(ctx context.Context, input services.CollectInput) ([]model.Resource, error) {
-	client := ec2.NewFromConfig(input.AWSConfig)
+	return c.collect(ctx, ec2.NewFromConfig(input.AWSConfig), input)
+}
+
+// collect gathers every EC2 resource family. Each family is collected
+// independently: a failure in one (e.g. a denied DescribeVpcs) degrades only
+// that family — already-collected resources are kept and the remaining
+// families are still queried. All family errors are joined and returned so the
+// engine records them as a partial result rather than aborting the region.
+func (c *Collector) collect(ctx context.Context, api ec2API, input services.CollectInput) ([]model.Resource, error) {
 	var resources []model.Resource
+	var errs []error
 
-	// 1. Collect Instances
-	paginator := ec2.NewDescribeInstancesPaginator(client, &ec2.DescribeInstancesInput{})
-	for paginator.HasMorePages() {
-		page, err := paginator.NextPage(ctx)
-		if err != nil {
-			return resources, fmt.Errorf("failed to describe EC2 instances: %w", err)
+	collectors := []func(context.Context, ec2API, services.CollectInput, []model.Resource) ([]model.Resource, error){
+		c.collectInstances,
+		c.collectVPCs,
+		c.collectSubnets,
+		c.collectSecurityGroups,
+		c.collectVolumes,
+		c.collectNetworkInterfaces,
+	}
+	for _, collect := range collectors {
+		var err error
+		if resources, err = collect(ctx, api, input, resources); err != nil {
+			errs = append(errs, err)
 		}
+	}
 
+	return resources, errors.Join(errs...)
+}
+
+func (c *Collector) collectInstances(ctx context.Context, api ec2API, input services.CollectInput, acc []model.Resource) ([]model.Resource, error) {
+	p := ec2.NewDescribeInstancesPaginator(api, &ec2.DescribeInstancesInput{})
+	for p.HasMorePages() {
+		page, err := p.NextPage(ctx)
+		if err != nil {
+			return acc, fmt.Errorf("failed to describe EC2 instances: %w", err)
+		}
 		var batch []model.Resource
 		for _, reservation := range page.Reservations {
 			for _, instance := range reservation.Instances {
 				batch = append(batch, c.mapInstance(input.Region, input.AccountID, instance, input.DetailLevel))
 			}
 		}
-		resources = input.EmitOrAppend(resources, batch)
+		acc = input.EmitOrAppend(acc, batch)
 	}
+	return acc, nil
+}
 
-	// 2. Collect VPCs
-	vpcPaginator := ec2.NewDescribeVpcsPaginator(client, &ec2.DescribeVpcsInput{})
-	for vpcPaginator.HasMorePages() {
-		page, err := vpcPaginator.NextPage(ctx)
+func (c *Collector) collectVPCs(ctx context.Context, api ec2API, input services.CollectInput, acc []model.Resource) ([]model.Resource, error) {
+	p := ec2.NewDescribeVpcsPaginator(api, &ec2.DescribeVpcsInput{})
+	for p.HasMorePages() {
+		page, err := p.NextPage(ctx)
 		if err != nil {
-			return resources, fmt.Errorf("failed to describe VPCs: %w", err)
+			return acc, fmt.Errorf("failed to describe VPCs: %w", err)
 		}
 		batch := make([]model.Resource, 0, len(page.Vpcs))
 		for _, vpc := range page.Vpcs {
 			batch = append(batch, c.mapVpc(input.Region, input.AccountID, vpc, input.DetailLevel))
 		}
-		resources = input.EmitOrAppend(resources, batch)
+		acc = input.EmitOrAppend(acc, batch)
 	}
+	return acc, nil
+}
 
-	// 3. Collect Subnets
-	subnetPaginator := ec2.NewDescribeSubnetsPaginator(client, &ec2.DescribeSubnetsInput{})
-	for subnetPaginator.HasMorePages() {
-		page, err := subnetPaginator.NextPage(ctx)
+func (c *Collector) collectSubnets(ctx context.Context, api ec2API, input services.CollectInput, acc []model.Resource) ([]model.Resource, error) {
+	p := ec2.NewDescribeSubnetsPaginator(api, &ec2.DescribeSubnetsInput{})
+	for p.HasMorePages() {
+		page, err := p.NextPage(ctx)
 		if err != nil {
-			return resources, fmt.Errorf("failed to describe subnets: %w", err)
+			return acc, fmt.Errorf("failed to describe subnets: %w", err)
 		}
 		batch := make([]model.Resource, 0, len(page.Subnets))
 		for _, subnet := range page.Subnets {
 			batch = append(batch, c.mapSubnet(input.Region, input.AccountID, subnet))
 		}
-		resources = input.EmitOrAppend(resources, batch)
+		acc = input.EmitOrAppend(acc, batch)
 	}
+	return acc, nil
+}
 
-	// 4. Collect Security Groups
-	sgPaginator := ec2.NewDescribeSecurityGroupsPaginator(client, &ec2.DescribeSecurityGroupsInput{})
-	for sgPaginator.HasMorePages() {
-		page, err := sgPaginator.NextPage(ctx)
+func (c *Collector) collectSecurityGroups(ctx context.Context, api ec2API, input services.CollectInput, acc []model.Resource) ([]model.Resource, error) {
+	p := ec2.NewDescribeSecurityGroupsPaginator(api, &ec2.DescribeSecurityGroupsInput{})
+	for p.HasMorePages() {
+		page, err := p.NextPage(ctx)
 		if err != nil {
-			return resources, fmt.Errorf("failed to describe security groups: %w", err)
+			return acc, fmt.Errorf("failed to describe security groups: %w", err)
 		}
 		batch := make([]model.Resource, 0, len(page.SecurityGroups))
 		for _, sg := range page.SecurityGroups {
 			batch = append(batch, c.mapSecurityGroup(input.Region, input.AccountID, sg))
 		}
-		resources = input.EmitOrAppend(resources, batch)
+		acc = input.EmitOrAppend(acc, batch)
 	}
+	return acc, nil
+}
 
-	// 5. Collect EBS Volumes
-	volPaginator := ec2.NewDescribeVolumesPaginator(client, &ec2.DescribeVolumesInput{})
-	for volPaginator.HasMorePages() {
-		page, err := volPaginator.NextPage(ctx)
+func (c *Collector) collectVolumes(ctx context.Context, api ec2API, input services.CollectInput, acc []model.Resource) ([]model.Resource, error) {
+	p := ec2.NewDescribeVolumesPaginator(api, &ec2.DescribeVolumesInput{})
+	for p.HasMorePages() {
+		page, err := p.NextPage(ctx)
 		if err != nil {
-			return resources, fmt.Errorf("failed to describe volumes: %w", err)
+			return acc, fmt.Errorf("failed to describe volumes: %w", err)
 		}
 		batch := make([]model.Resource, 0, len(page.Volumes))
 		for _, vol := range page.Volumes {
 			batch = append(batch, c.mapVolume(input.Region, input.AccountID, vol))
 		}
-		resources = input.EmitOrAppend(resources, batch)
+		acc = input.EmitOrAppend(acc, batch)
 	}
+	return acc, nil
+}
 
-	// 6. Collect Network Interfaces (ENIs)
-	eniPaginator := ec2.NewDescribeNetworkInterfacesPaginator(client, &ec2.DescribeNetworkInterfacesInput{})
-	for eniPaginator.HasMorePages() {
-		page, err := eniPaginator.NextPage(ctx)
+func (c *Collector) collectNetworkInterfaces(ctx context.Context, api ec2API, input services.CollectInput, acc []model.Resource) ([]model.Resource, error) {
+	p := ec2.NewDescribeNetworkInterfacesPaginator(api, &ec2.DescribeNetworkInterfacesInput{})
+	for p.HasMorePages() {
+		page, err := p.NextPage(ctx)
 		if err != nil {
-			return resources, fmt.Errorf("failed to describe network interfaces: %w", err)
+			return acc, fmt.Errorf("failed to describe network interfaces: %w", err)
 		}
 		batch := make([]model.Resource, 0, len(page.NetworkInterfaces))
 		for _, eni := range page.NetworkInterfaces {
 			batch = append(batch, c.mapNetworkInterface(input.Region, input.AccountID, eni))
 		}
-		resources = input.EmitOrAppend(resources, batch)
+		acc = input.EmitOrAppend(acc, batch)
 	}
-
-	return resources, nil
+	return acc, nil
 }
 
 func (c *Collector) mapInstance(region, account string, instance types.Instance, detail services.DetailLevel) model.Resource {

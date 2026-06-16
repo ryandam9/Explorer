@@ -1,13 +1,97 @@
 package ec2
 
 import (
+	"context"
+	"errors"
+	"strings"
 	"testing"
 	"time"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
+	"github.com/aws/aws-sdk-go-v2/service/ec2"
 	"github.com/aws/aws-sdk-go-v2/service/ec2/types"
 	"github.com/ryandam9/aws_explorer/internal/services"
 )
+
+// fakeEC2 implements ec2API. Each Describe* call returns its configured error
+// (non-nil => that family fails) and otherwise a single resource so successful
+// families are observable in the output.
+type fakeEC2 struct {
+	instErr, vpcErr, subnetErr, sgErr, volErr, eniErr error
+}
+
+func (f fakeEC2) DescribeInstances(context.Context, *ec2.DescribeInstancesInput, ...func(*ec2.Options)) (*ec2.DescribeInstancesOutput, error) {
+	if f.instErr != nil {
+		return nil, f.instErr
+	}
+	return &ec2.DescribeInstancesOutput{Reservations: []types.Reservation{{Instances: []types.Instance{{InstanceId: aws.String("i-1")}}}}}, nil
+}
+
+func (f fakeEC2) DescribeVpcs(context.Context, *ec2.DescribeVpcsInput, ...func(*ec2.Options)) (*ec2.DescribeVpcsOutput, error) {
+	if f.vpcErr != nil {
+		return nil, f.vpcErr
+	}
+	return &ec2.DescribeVpcsOutput{Vpcs: []types.Vpc{{VpcId: aws.String("vpc-1")}}}, nil
+}
+
+func (f fakeEC2) DescribeSubnets(context.Context, *ec2.DescribeSubnetsInput, ...func(*ec2.Options)) (*ec2.DescribeSubnetsOutput, error) {
+	if f.subnetErr != nil {
+		return nil, f.subnetErr
+	}
+	return &ec2.DescribeSubnetsOutput{Subnets: []types.Subnet{{SubnetId: aws.String("subnet-1")}}}, nil
+}
+
+func (f fakeEC2) DescribeSecurityGroups(context.Context, *ec2.DescribeSecurityGroupsInput, ...func(*ec2.Options)) (*ec2.DescribeSecurityGroupsOutput, error) {
+	if f.sgErr != nil {
+		return nil, f.sgErr
+	}
+	return &ec2.DescribeSecurityGroupsOutput{SecurityGroups: []types.SecurityGroup{{GroupId: aws.String("sg-1")}}}, nil
+}
+
+func (f fakeEC2) DescribeVolumes(context.Context, *ec2.DescribeVolumesInput, ...func(*ec2.Options)) (*ec2.DescribeVolumesOutput, error) {
+	if f.volErr != nil {
+		return nil, f.volErr
+	}
+	return &ec2.DescribeVolumesOutput{Volumes: []types.Volume{{VolumeId: aws.String("vol-1")}}}, nil
+}
+
+func (f fakeEC2) DescribeNetworkInterfaces(context.Context, *ec2.DescribeNetworkInterfacesInput, ...func(*ec2.Options)) (*ec2.DescribeNetworkInterfacesOutput, error) {
+	if f.eniErr != nil {
+		return nil, f.eniErr
+	}
+	return &ec2.DescribeNetworkInterfacesOutput{NetworkInterfaces: []types.NetworkInterface{{NetworkInterfaceId: aws.String("eni-1")}}}, nil
+}
+
+func TestCollect_PartialFailureKeepsOtherFamilies(t *testing.T) {
+	c := NewCollector()
+	// VPCs and security groups are denied; every other family succeeds.
+	api := fakeEC2{
+		vpcErr: errors.New("AccessDenied: DescribeVpcs"),
+		sgErr:  errors.New("AccessDenied: DescribeSecurityGroups"),
+	}
+
+	resources, err := c.collect(context.Background(), api, services.CollectInput{Region: "us-east-1", AccountID: "123456789012"})
+
+	if err == nil {
+		t.Fatal("expected a joined error for the failed families")
+	}
+	if msg := err.Error(); !strings.Contains(msg, "VPCs") || !strings.Contains(msg, "security groups") {
+		t.Errorf("joined error should name both failed families, got: %v", msg)
+	}
+
+	got := map[string]bool{}
+	for _, r := range resources {
+		got[r.Type] = true
+	}
+	for _, want := range []string{"instance", "subnet", "volume", "network-interface"} {
+		if !got[want] {
+			t.Errorf("expected %q to still be collected despite VPC/SG failures; got types %v", want, got)
+		}
+	}
+	if got["vpc"] || got["security-group"] {
+		t.Errorf("failed families should yield no resources; got types %v", got)
+	}
+}
 
 func TestMapInstance_BasicFields(t *testing.T) {
 	c := NewCollector()
