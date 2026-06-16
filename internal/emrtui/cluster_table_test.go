@@ -3,6 +3,7 @@ package emrtui
 import (
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
@@ -282,6 +283,31 @@ func TestEMRRefreshGuardedWhileLoading(t *testing.T) {
 	mm.loading = false
 	if cmds := mm.handleKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("r")}); len(cmds) == 0 || !mm.loading {
 		t.Error("r when idle should start a reload")
+	}
+}
+
+// TestEMRAgeColumnAndSort checks the AGE column renders a compact age and that
+// sorting by AGE defaults to oldest-first.
+func TestEMRAgeColumnAndSort(t *testing.T) {
+	mm := newClusterTestModel(120, 24)
+	now := time.Now()
+	mm.inv.Clusters = []Cluster{
+		{Name: "old", ID: "j-OLD", Region: "us-east-1", State: "RUNNING", Created: now.Add(-72 * time.Hour)},
+		{Name: "young", ID: "j-YNG", Region: "us-east-1", State: "RUNNING", Created: now.Add(-1 * time.Hour)},
+	}
+	mm.rebuild()
+	if !strings.Contains(mm.tbl.View(), "3d") {
+		t.Errorf("expected AGE 3d for the old cluster:\n%s", mm.tbl.View())
+	}
+
+	for mm.sortCol != colAge {
+		mm.cycleSort()
+	}
+	if mm.sortAsc {
+		t.Error("AGE should default to descending (oldest first)")
+	}
+	if mm.view[0].Name != "old" {
+		t.Errorf("AGE desc first = %q, want old", mm.view[0].Name)
 	}
 }
 

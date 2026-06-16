@@ -915,14 +915,14 @@ func (mm *m) openFindings() {
 
 // cycleSort advances the cluster-list sort: natural order → each column in
 // turn → back to natural order. Each column starts in its most useful
-// direction (descending for the numeric HRS column, ascending otherwise);
-// press R to flip it.
+// direction (descending for the numeric HRS and AGE columns — biggest/oldest
+// first — ascending otherwise); press R to flip it.
 func (mm *m) cycleSort() {
 	mm.sortCol++
 	if mm.sortCol >= len(clusterColumns(len(mm.regions) > 1)) {
 		mm.sortCol = -1
 	}
-	mm.sortAsc = mm.sortCol != colHRS
+	mm.sortAsc = mm.sortCol != colHRS && mm.sortCol != colAge
 	mm.tbl.SetCursor(0)
 	mm.rebuild()
 }
