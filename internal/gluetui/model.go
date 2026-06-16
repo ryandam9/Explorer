@@ -73,6 +73,12 @@ type m struct {
 	tbl  table.Model
 	view []rowT // active tab's filtered rows, parallel to the table's rows
 
+	// Column sort for the active tab: sortCol -1 keeps the natural (name, region)
+	// order; otherwise it indexes the tab's columns and sortAsc flips direction.
+	// It resets to natural order on a tab switch (each tab has its own columns).
+	sortCol int
+	sortAsc bool
+
 	filter       textinput.Model
 	filterActive bool
 
@@ -172,6 +178,7 @@ func NewModel(ctx context.Context, awsCfg *config.AWSConfig, regions []string, a
 		runsTbl:     newGlueTable(runColumns()),
 		findingsTbl: newGlueTable(findingsColumns(len(activeRegions) > 1)),
 		loading:     true,
+		sortCol:     -1,
 	}, nil
 }
 
@@ -180,7 +187,12 @@ func NewModel(ctx context.Context, awsCfg *config.AWSConfig, regions []string, a
 // cursor.
 func (mm *m) rebuild() {
 	mm.view = mm.buildView()
-	mm.tbl.SetColumns(tabColumns(mm.tab, len(mm.regions) > 1))
+	cols := tabColumns(mm.tab, len(mm.regions) > 1)
+	if mm.sortCol >= len(cols) {
+		mm.sortCol = -1 // a narrower tab can't keep a wider tab's sort column
+	}
+	table.ApplySortHeader(cols, mm.sortCol, mm.sortAsc, func(int) bool { return true })
+	mm.tbl.SetColumns(cols)
 	rows := make([]table.Row, 0, len(mm.view))
 	for _, r := range mm.view {
 		rows = append(rows, r.cells)
@@ -204,6 +216,20 @@ func (mm *m) switchTab(next bool) {
 	mm.filter.SetValue("")
 	mm.filterActive = false
 	mm.filter.Blur()
+	mm.sortCol = -1 // each tab has its own columns; start in natural order
+	mm.rebuild()
+}
+
+// cycleSort advances the active tab's sort: natural order → each column in turn
+// → back to natural order. Each column starts ascending; press R to reverse.
+func (mm *m) cycleSort() {
+	mm.sortCol++
+	if mm.sortCol >= len(tabColumns(mm.tab, len(mm.regions) > 1)) {
+		mm.sortCol = -1
+	}
+	mm.sortAsc = true
+	mm.sel[mm.tab] = 0
+	mm.tbl.SetCursor(0)
 	mm.rebuild()
 }
 
@@ -569,6 +595,14 @@ func (mm *m) handleKey(msg tea.KeyMsg) []tea.Cmd {
 		}
 	case "f":
 		mm.openFindings()
+	case "S":
+		mm.cycleSort()
+	case "R":
+		if mm.sortCol >= 0 {
+			mm.sortAsc = !mm.sortAsc
+			mm.tbl.SetCursor(0)
+			mm.rebuild()
+		}
 	case "o":
 		mm.openConsole(&cmds)
 	case ui.KeyAbout:

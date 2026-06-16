@@ -1,6 +1,7 @@
 package gluetui
 
 import (
+	"sort"
 	"strings"
 
 	"github.com/ryandam9/aws_explorer/internal/model"
@@ -126,20 +127,51 @@ func (mm *m) tabCount(t tab) int {
 	return 0
 }
 
-// buildView returns the active tab's rows filtered by the active filter term.
+// buildView returns the active tab's rows, filtered by the active filter term
+// and ordered by the active column sort.
 func (mm *m) buildView() []rowT {
 	rows := mm.tabRows(mm.tab)
 	term := strings.ToLower(strings.TrimSpace(mm.filter.Value()))
-	if term == "" {
-		return rows
-	}
-	out := make([]rowT, 0, len(rows))
-	for _, r := range rows {
-		if rowMatches(r, term) {
-			out = append(out, r)
+	if term != "" {
+		out := make([]rowT, 0, len(rows))
+		for _, r := range rows {
+			if rowMatches(r, term) {
+				out = append(out, r)
+			}
 		}
+		rows = out
 	}
-	return out
+	mm.sortRows(rows)
+	return rows
+}
+
+// sortRows orders rows in place by the selected column's displayed text.
+// sortCol -1 leaves the natural (name, region) order untouched. The compare is
+// case-insensitive over the rendered cell, with NAME as a stable tiebreak, so
+// it works uniformly across every tab's column set.
+func (mm *m) sortRows(rows []rowT) {
+	if mm.sortCol < 0 {
+		return
+	}
+	col := mm.sortCol
+	sort.SliceStable(rows, func(i, j int) bool {
+		c := strings.Compare(strings.ToLower(cellAt(rows[i], col)), strings.ToLower(cellAt(rows[j], col)))
+		if c == 0 {
+			c = strings.Compare(strings.ToLower(cellAt(rows[i], 0)), strings.ToLower(cellAt(rows[j], 0)))
+		}
+		if mm.sortAsc {
+			return c < 0
+		}
+		return c > 0
+	})
+}
+
+// cellAt returns row r's cell at index i, or "" when out of range.
+func cellAt(r rowT, i int) string {
+	if i < 0 || i >= len(r.cells) {
+		return ""
+	}
+	return r.cells[i]
 }
 
 // rowMatches reports whether any cell (or the region) contains term.

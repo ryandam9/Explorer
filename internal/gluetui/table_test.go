@@ -16,6 +16,7 @@ func newGlueTestModel(w, h int) *m {
 	mm := &m{
 		regions: []string{"us-east-1"},
 		filter:  textinput.New(),
+		sortCol: -1,
 		tbl:     newGlueTable(tabColumns(tabJobs, false)),
 		runsTbl: newGlueTable(runColumns()),
 		inv: Inventory{
@@ -134,6 +135,7 @@ func TestGlueStatusBarPinnedToBottom(t *testing.T) {
 	mm := &m{
 		regions: []string{"us-east-1"},
 		filter:  textinput.New(),
+		sortCol: -1,
 		tbl:     newGlueTable(tabColumns(tabJobs, false)),
 		runsTbl: newGlueTable(runColumns()),
 	}
@@ -166,6 +168,33 @@ func TestGlueRefreshGuardedWhileLoading(t *testing.T) {
 	mm.loading = false
 	if cmds := mm.handleKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("r")}); len(cmds) == 0 || !mm.loading {
 		t.Error("r when idle should start a reload")
+	}
+}
+
+// TestGlueTabSortByName checks S cycles the sort onto NAME (with a header
+// arrow), R reverses it, and switching tabs resets to the natural order.
+func TestGlueTabSortByName(t *testing.T) {
+	mm := newGlueTestModel(120, 24) // Jobs: nightly-orders-etl-production, ingest
+
+	mm.handleKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("S")}) // → NAME ascending
+	if mm.sortCol != 0 || !mm.sortAsc {
+		t.Fatalf("after S: sortCol=%d asc=%v, want col 0 asc", mm.sortCol, mm.sortAsc)
+	}
+	if mm.view[0].name != "ingest" {
+		t.Errorf("NAME asc first = %q, want ingest", mm.view[0].name)
+	}
+	if !strings.Contains(mm.tbl.View(), "NAME"+table.SortAscArrow) {
+		t.Errorf("header missing NAME sort arrow:\n%s", mm.tbl.View())
+	}
+
+	mm.handleKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("R")}) // reverse
+	if mm.view[0].name != "nightly-orders-etl-production" {
+		t.Errorf("NAME desc first = %q, want nightly", mm.view[0].name)
+	}
+
+	mm.switchTab(true) // → Crawlers; sort resets
+	if mm.sortCol != -1 {
+		t.Errorf("tab switch should reset the sort, got sortCol=%d", mm.sortCol)
 	}
 }
 
