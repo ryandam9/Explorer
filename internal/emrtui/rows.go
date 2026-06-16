@@ -3,6 +3,7 @@ package emrtui
 import (
 	"sort"
 	"strings"
+	"time"
 
 	"github.com/ryandam9/aws_explorer/internal/model"
 	"github.com/ryandam9/aws_explorer/internal/table"
@@ -18,6 +19,7 @@ const (
 	colRelease
 	colApps
 	colHRS
+	colAge
 	colRegion
 )
 
@@ -41,6 +43,7 @@ func clusterColumns(multi bool) []table.Column {
 		{Title: "RELEASE", Width: 9},
 		{Title: "APPLICATIONS", Width: 12},
 		{Title: "HRS", Width: 4},
+		{Title: "AGE", Width: 5},
 	}
 	if multi {
 		cols = append(cols, table.Column{Title: "REGION", Width: 9})
@@ -59,6 +62,7 @@ func clusterRow(c Cluster, multi bool) table.Row {
 		c.ReleaseLabel,
 		truncate(c.Applications, appsCap),
 		instanceHours(c.InstanceHours),
+		ageLabel(c.Created),
 	}
 	if multi {
 		r = append(r, c.Region)
@@ -71,6 +75,28 @@ func instanceHours(h int32) string {
 		return "—"
 	}
 	return itoa(int(h))
+}
+
+// ageLabel renders how long ago a cluster was created as a compact "5d" / "3h"
+// / "12m", or "—" when the creation time is unknown.
+func ageLabel(created time.Time) string {
+	if created.IsZero() {
+		return "—"
+	}
+	d := time.Since(created)
+	if d < 0 {
+		d = 0
+	}
+	switch {
+	case d >= 24*time.Hour:
+		return itoa(int(d.Hours())/24) + "d"
+	case d >= time.Hour:
+		return itoa(int(d.Hours())) + "h"
+	case d >= time.Minute:
+		return itoa(int(d.Minutes())) + "m"
+	default:
+		return "<1m"
+	}
 }
 
 func itoa(n int) string {
@@ -150,6 +176,22 @@ func clusterCmp(a, b Cluster, col int) int {
 			return 1
 		default:
 			return 0
+		}
+	case colAge:
+		// Compare by age (now − Created): a newer cluster has a smaller age, so
+		// the ascending arrow reads youngest-first. Unknown (zero) creation times
+		// sort as the oldest.
+		switch {
+		case a.Created.Equal(b.Created):
+			return 0
+		case a.Created.IsZero():
+			return 1
+		case b.Created.IsZero():
+			return -1
+		case a.Created.After(b.Created): // a is newer → smaller age → a < b
+			return -1
+		default:
+			return 1
 		}
 	case colRegion:
 		return strings.Compare(a.Region, b.Region)

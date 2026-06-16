@@ -867,7 +867,8 @@ the dashboard with a logged note and never abort the session.
 
 `emr` opens an interactive dashboard for Amazon EMR. Each row is a **cluster**,
 colour-coded by state, showing its release label, the applications installed on
-it (Spark, HBase, Hive, Oozie…) and its size. Press **Enter** (or `s`) on a
+it (Spark, HBase, Hive, Oozie…), its size and how long ago it was created
+(**AGE**). Press **Enter** (or `s`) on a
 cluster to drill into its **step history** — state, duration and
 action-on-failure, with the failure reason inline on a failed step. Press `d`
 for the cluster detail (log URI, role, EC2 attributes).
