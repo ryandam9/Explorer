@@ -157,7 +157,7 @@ const glueAboutText = "This is the AWS Glue dashboard. Tab across Jobs, Crawlers
 	"stale jobs, failed crawls) over the loaded jobs and crawlers.\n\n" +
 	"On the other tabs, press Enter for a detail overlay of the selected crawler, " +
 	"trigger, workflow, connection or database (configuration, targets/actions and " +
-	"last-run status, fetched on demand).\\n\\n" +
+	"last-run status, fetched on demand).\n\n" +
 	"Press S to cycle the column the active tab is sorted by (R reverses the " +
 	"direction), o on any row to open it in the AWS console, / to filter, and r to refresh."
 
