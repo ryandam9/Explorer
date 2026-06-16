@@ -8,6 +8,7 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/x/ansi"
 
+	"github.com/ryandam9/aws_explorer/internal/findings"
 	"github.com/ryandam9/aws_explorer/internal/table"
 )
 
@@ -90,6 +91,38 @@ func TestGlueTabCountMatchesRows(t *testing.T) {
 	for tb := tab(0); tb < tabCount; tb++ {
 		if got, want := mm.tabCount(tb), len(mm.tabRows(tb)); got != want {
 			t.Errorf("tab %s: tabCount=%d, len(tabRows)=%d", tabNames[tb], got, want)
+		}
+	}
+}
+
+// TestGlueFindingsPanel checks the findings panel flags a job whose latest run
+// failed, suppresses the checks the inventory can't evaluate (no security-config
+// guess), and renders without overflow.
+func TestGlueFindingsPanel(t *testing.T) {
+	mm := newGlueTestModel(120, 24)
+	mm.openFindings()
+	if !mm.findingsActive {
+		t.Fatal("openFindings should activate the panel")
+	}
+	var lastRunFailed, sawSecurity bool
+	for _, f := range mm.findingList {
+		if f.ID == findings.CheckGlueLastRunFailed && f.Resource == "ingest" {
+			lastRunFailed = true
+		}
+		if f.ID == findings.CheckGlueNoSecurityConf {
+			sawSecurity = true
+		}
+	}
+	if !lastRunFailed {
+		t.Errorf("expected a latest-run-failed finding for ingest, got %+v", mm.findingList)
+	}
+	if sawSecurity {
+		t.Error("GLU-SEC-001 must be suppressed in the TUI panel (security config is unknown at inventory)")
+	}
+	out := mm.View()
+	for i, line := range strings.Split(out, "\n") {
+		if lw := ansi.StringWidth(line); lw > 120 {
+			t.Errorf("findings line %d overflows (%d > 120): %q", i, lw, line)
 		}
 	}
 }

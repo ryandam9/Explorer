@@ -15,6 +15,7 @@ import (
 	"github.com/ryandam9/aws_explorer/internal/config"
 	"github.com/ryandam9/aws_explorer/internal/consolelink"
 	"github.com/ryandam9/aws_explorer/internal/emrconn"
+	"github.com/ryandam9/aws_explorer/internal/findings"
 	"github.com/ryandam9/aws_explorer/internal/table"
 	"github.com/ryandam9/aws_explorer/internal/ui"
 )
@@ -107,6 +108,13 @@ type m struct {
 	hbaseTbl      table.Model
 	hbaseConfirm  bool // row-count scan confirmation prompt
 	hbaseCounting bool
+
+	// Findings panel (f) — deterministic posture/cost checks over the loaded
+	// inventory. findingList is computed synchronously (no AWS call), parallel to
+	// the table's rows.
+	findingsActive bool
+	findingList    []findings.Finding
+	findingsTbl    table.Model
 
 	// Oozie workflow/coordinator browser (z on a cluster).
 	oozieActive  bool
@@ -205,23 +213,24 @@ func NewModel(ctx context.Context, awsCfg *config.AWSConfig, regions []string, a
 	}
 
 	return &m{
-		ctx:        ctx,
-		client:     client,
-		regions:    activeRegions,
-		allRegions: allRegions,
-		appCfg:     appCfg,
-		configPath: configPath,
-		dialer:     dialer,
-		dialerErr:  dialerErr,
-		filter:     f,
-		spinner:    s,
-		tbl:        tbl,
-		stepsTbl:   newSubTable(stepColumns()),
-		yarnTbl:    newSubTable(yarnColumns()),
-		hbaseTbl:   newSubTable(hbaseColumns()),
-		oozieTbl:   newSubTable(oozieWFColumns()),
-		loading:    true,
-		sortCol:    -1,
+		ctx:         ctx,
+		client:      client,
+		regions:     activeRegions,
+		allRegions:  allRegions,
+		appCfg:      appCfg,
+		configPath:  configPath,
+		dialer:      dialer,
+		dialerErr:   dialerErr,
+		filter:      f,
+		spinner:     s,
+		tbl:         tbl,
+		stepsTbl:    newSubTable(stepColumns()),
+		yarnTbl:     newSubTable(yarnColumns()),
+		hbaseTbl:    newSubTable(hbaseColumns()),
+		oozieTbl:    newSubTable(oozieWFColumns()),
+		findingsTbl: newSubTable(findingsColumns(len(activeRegions) > 1)),
+		loading:     true,
+		sortCol:     -1,
 	}, nil
 }
 
@@ -694,6 +703,37 @@ func (mm *m) handleKey(msg tea.KeyMsg) []tea.Cmd {
 		return cmds
 	}
 
+	// Findings panel sub-view.
+	if mm.findingsActive {
+		switch msg.String() {
+		case "q", "ctrl+c":
+			return []tea.Cmd{tea.Quit}
+		case "esc", "backspace", "left", "h":
+			mm.findingsActive = false
+		case "up", "k":
+			mm.findingsTbl.MoveUp(1)
+		case "down", "j":
+			mm.findingsTbl.MoveDown(1)
+		case "g", "home":
+			mm.findingsTbl.GotoTop()
+		case "G", "end":
+			mm.findingsTbl.GotoBottom()
+		case "<", ",":
+			mm.findingsTbl.ScrollLeft()
+		case ">", ".":
+			mm.findingsTbl.ScrollRight()
+		case "y":
+			if f, ok := mm.selectedFinding(); ok && f.Fix != "" {
+				_ = clipboard.WriteAll(f.Fix)
+				mm.setToast("Copied suggested fix")
+				cmds = append(cmds, toastCmd(3*time.Second))
+			}
+		case ui.KeyAbout:
+			mm.showAbout = true
+		}
+		return cmds
+	}
+
 	// Cluster list.
 	switch msg.String() {
 	case "q", "ctrl+c":
@@ -784,6 +824,8 @@ func (mm *m) handleKey(msg tea.KeyMsg) []tea.Cmd {
 			mm.oozieErr = nil
 			cmds = append(cmds, mm.loadOozieCmd(cl), mm.spinner.Tick)
 		}
+	case "f":
+		mm.openFindings()
 	case "o":
 		mm.openConsole(&cmds)
 	case "S":
@@ -798,6 +840,17 @@ func (mm *m) handleKey(msg tea.KeyMsg) []tea.Cmd {
 		mm.showAbout = true
 	}
 	return cmds
+}
+
+// openFindings computes the deterministic findings over the loaded inventory
+// and opens the panel. Synchronous — no AWS call — so there is no loading state.
+func (mm *m) openFindings() {
+	mm.findingList = mm.computeFindings()
+	mm.findingsActive = true
+	multi := len(mm.regions) > 1
+	mm.findingsTbl.SetColumns(findingsColumns(multi))
+	mm.setRows(&mm.findingsTbl, len(mm.findingList), func(i int) table.Row { return findingRow(mm.findingList[i], multi) })
+	mm.findingsTbl.SetCursor(0)
 }
 
 // cycleSort advances the cluster-list sort: natural order → each column in
@@ -861,6 +914,9 @@ func (mm *m) PageTitle() string {
 	}
 	if mm.oozieActive {
 		return base + " › " + mm.oozieCluster.Name + " › Oozie"
+	}
+	if mm.findingsActive {
+		return base + " › Findings"
 	}
 	return base + " › Clusters"
 }

@@ -8,6 +8,7 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/x/ansi"
 
+	"github.com/ryandam9/aws_explorer/internal/findings"
 	"github.com/ryandam9/aws_explorer/internal/table"
 	"github.com/ryandam9/aws_explorer/internal/ui"
 )
@@ -133,6 +134,35 @@ func TestTerminatedToggleReloads(t *testing.T) {
 	mm.handleKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("t")})
 	if mm.showTerminated {
 		t.Error("second t should toggle showTerminated back off")
+	}
+}
+
+// TestEMRFindingsPanel checks the findings panel computes deterministic
+// findings over the loaded inventory (the terminated-with-errors cluster is the
+// loudest signal) and renders without overflowing the terminal.
+func TestEMRFindingsPanel(t *testing.T) {
+	mm := newClusterTestModel(120, 24)
+	mm.openFindings()
+	if !mm.findingsActive {
+		t.Fatal("openFindings should activate the panel")
+	}
+	var gotCrit bool
+	for _, f := range mm.findingList {
+		if f.Severity == findings.SevCritical && f.Resource == "etl" {
+			gotCrit = true
+		}
+	}
+	if !gotCrit {
+		t.Errorf("expected a CRITICAL finding for the terminated-with-errors cluster, got %+v", mm.findingList)
+	}
+	out := mm.View()
+	for i, line := range strings.Split(out, "\n") {
+		if lw := ansi.StringWidth(line); lw > 120 {
+			t.Errorf("findings line %d overflows (%d > 120): %q", i, lw, line)
+		}
+	}
+	if !strings.Contains(out, "Findings") {
+		t.Errorf("findings view missing heading:\n%s", out)
 	}
 }
 

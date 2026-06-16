@@ -7,6 +7,7 @@ import (
 	"github.com/charmbracelet/lipgloss"
 
 	"github.com/ryandam9/aws_explorer/internal/emrconn"
+	"github.com/ryandam9/aws_explorer/internal/findings"
 	"github.com/ryandam9/aws_explorer/internal/table"
 	"github.com/ryandam9/aws_explorer/internal/ui"
 )
@@ -29,6 +30,8 @@ func (mm *m) View() string {
 		sb.WriteString(mm.renderHBase())
 	} else if mm.oozieActive {
 		sb.WriteString(mm.renderOozie())
+	} else if mm.findingsActive {
+		sb.WriteString(mm.renderFindings())
 	} else {
 		sb.WriteString(mm.renderTable())
 	}
@@ -59,7 +62,10 @@ const emrAboutText = "This is the Amazon EMR dashboard. Each row is a cluster, c
 	"(Spark, HBase, Hive, Oozie…) and its size.\n\n" +
 	"Press Enter (or s) on a cluster to see its step history: state, duration and " +
 	"action-on-failure, with the failure reason inline on a failed step. Press d for " +
-	"the cluster detail (release, log URI, role, EC2 attributes).\n\n" +
+	"the cluster detail (release, log URI, role, EC2 attributes), and f for the " +
+	"findings panel — deterministic posture/cost checks (idle/long-running clusters, " +
+	"no log destination or security configuration, terminated-with-errors) over the " +
+	"loaded clusters.\n\n" +
 	"Press L to open the cluster's (or a step's) logs in the S3 browser, and u to open " +
 	"a persistent application UI (Spark History, YARN Timeline, Tez) — hosted off-cluster, " +
 	"so no SSH tunnel is needed.\n\n" +
@@ -315,6 +321,32 @@ func (mm *m) renderOozie() string {
 	}
 }
 
+// renderFindings draws the deterministic posture/cost panel over the loaded
+// inventory. The selected finding's detail and suggested fix sit in the footer.
+func (mm *m) renderFindings() string {
+	head := heading(" Findings — posture & cost checks") + "\n" +
+		muted("  deterministic checks over the loaded clusters · y copies the fix")
+	if len(mm.findingList) == 0 {
+		return head + "\n\n  " + lipgloss.NewStyle().Foreground(lipgloss.Color(ui.ColorSuccess())).
+			Render("✓ No findings for the loaded clusters.")
+	}
+	return mm.renderSubTable(&mm.findingsTbl, head, mm.findingsFooter())
+}
+
+// findingsFooter renders the selected finding's detail and suggested fix.
+func (mm *m) findingsFooter() string {
+	f, ok := mm.selectedFinding()
+	if !ok {
+		return ""
+	}
+	w := mm.width - 6
+	out := lipgloss.NewStyle().Foreground(lipgloss.Color(ui.ColorText())).Render("  " + truncate(f.Detail, w))
+	if f.Fix != "" {
+		out += "\n" + muted("    fix: "+truncate(f.Fix, w-6))
+	}
+	return out
+}
+
 func ooziePort(d *emrconn.Dialer) int {
 	if d == nil {
 		return emrconn.DefaultOoziePort
@@ -379,6 +411,9 @@ func (mm *m) statusLeft() string {
 	if mm.oozieActive {
 		return fmt.Sprintf("Cluster: %s  ·  Workflows: %d · Coordinators: %d", mm.oozieCluster.Name, len(mm.oozieWF), len(mm.oozieCoord))
 	}
+	if mm.findingsActive {
+		return "Findings: " + findings.Summary(mm.findingList)
+	}
 	regionLabel := mm.regions[0]
 	if len(mm.regions) != 1 {
 		regionLabel = fmt.Sprintf("all (%d regions)", len(mm.regions))
@@ -429,10 +464,20 @@ func (mm *m) helpHints() []ui.KeyHint {
 			ui.H("q", "quit"),
 		}
 	}
+	if mm.findingsActive {
+		return []ui.KeyHint{
+			ui.H("↑/↓", "findings"),
+			ui.H("y", "copy fix"),
+			ui.H("Esc", "back"),
+			ui.H("i", "about"),
+			ui.H("q", "quit"),
+		}
+	}
 	hints := []ui.KeyHint{
 		ui.H("↑/↓", "rows"),
 		ui.H("Enter", "steps"),
 		ui.H("d", "detail"),
+		ui.H("f", "findings"),
 		ui.H("L", "logs"),
 		ui.H("u", "app UIs"),
 		ui.H("y", "yarn"),
