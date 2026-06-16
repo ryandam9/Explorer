@@ -66,6 +66,8 @@ const emrAboutText = "This is the Amazon EMR dashboard. Each row is a cluster, c
 	"Press y for the live YARN application browser, h for the HBase table browser and z for " +
 	"the Oozie workflow/coordinator browser; these read on-cluster REST daemons and need " +
 	"emr.onCluster configured (off by default).\n\n" +
+	"The list shows only live clusters by default; press t to include the terminated " +
+	"tail (and again to hide it).\n\n" +
 	"Press S to cycle the column the list is sorted by (R reverses the direction), " +
 	"o to open a cluster in the AWS console, / to filter, and r to refresh."
 
@@ -382,7 +384,11 @@ func (mm *m) statusLeft() string {
 		regionLabel = fmt.Sprintf("all (%d regions)", len(mm.regions))
 	}
 	// The active sort is shown by the ↑/↓ arrow on the column header.
-	return fmt.Sprintf("Region: %s  ·  Clusters: %d", regionLabel, mm.rowCount())
+	scope := "active"
+	if mm.showTerminated {
+		scope = "all states"
+	}
+	return fmt.Sprintf("Region: %s  ·  Clusters: %d (%s)", regionLabel, mm.rowCount(), scope)
 }
 
 func (mm *m) helpHints() []ui.KeyHint {
@@ -437,6 +443,11 @@ func (mm *m) helpHints() []ui.KeyHint {
 	if mm.sortCol >= 0 {
 		hints = append(hints, ui.H("R", "reverse"))
 	}
+	termLabel := "show terminated"
+	if mm.showTerminated {
+		termLabel = "hide terminated"
+	}
+	hints = append(hints, ui.H("t", termLabel))
 	if hl, hr := mm.tbl.ColScrollInfo(); hl+hr > 0 {
 		hints = append(hints, ui.H("</>", "columns"))
 	}

@@ -101,6 +101,41 @@ func TestClusterTableSortCycle(t *testing.T) {
 	}
 }
 
+// TestActiveClusterStatesExcludeTerminated guards the default scope: the
+// server-side state filter must not list the terminated tail.
+func TestActiveClusterStatesExcludeTerminated(t *testing.T) {
+	for _, s := range activeClusterStates {
+		switch string(s) {
+		case "TERMINATED", "TERMINATED_WITH_ERRORS":
+			t.Errorf("activeClusterStates must not include terminal state %q", s)
+		}
+	}
+}
+
+// TestTerminatedToggleReloads checks the "t" key flips the scope and kicks off a
+// reload (the scope changes what ListClusters returns, so it can't be filtered
+// client-side).
+func TestTerminatedToggleReloads(t *testing.T) {
+	mm := newClusterTestModel(120, 24)
+	if mm.showTerminated {
+		t.Fatal("dashboard should default to active clusters only")
+	}
+	cmds := mm.handleKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("t")})
+	if !mm.showTerminated {
+		t.Error("t should toggle showTerminated on")
+	}
+	if !mm.loading {
+		t.Error("t should trigger a reload (loading=true)")
+	}
+	if len(cmds) == 0 {
+		t.Error("t should issue a reload command")
+	}
+	mm.handleKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("t")})
+	if mm.showTerminated {
+		t.Error("second t should toggle showTerminated back off")
+	}
+}
+
 func TestClusterTableFilter(t *testing.T) {
 	mm := newClusterTestModel(120, 24)
 	mm.filter.SetValue("terminated")

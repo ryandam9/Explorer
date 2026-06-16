@@ -27,6 +27,20 @@ import (
 // load so accounts with many clusters don't trip EMR's request throttling.
 const describeConcurrency = 8
 
+// activeClusterStates are the live (non-terminal) EMR cluster states. The
+// dashboard lists only these by default so the often-large tail of recently
+// terminated clusters doesn't dominate the view — or waste a DescribeCluster on
+// each. The terminated states (TERMINATED, TERMINATED_WITH_ERRORS) are fetched
+// only when the caller opts in (the dashboard's "t" toggle / the CLI's
+// --all-states), keeping ListClusters cheap and the list focused.
+var activeClusterStates = []emrtypes.ClusterState{
+	emrtypes.ClusterStateStarting,
+	emrtypes.ClusterStateBootstrapping,
+	emrtypes.ClusterStateRunning,
+	emrtypes.ClusterStateWaiting,
+	emrtypes.ClusterStateTerminating,
+}
+
 // Cluster is the dashboard's flattened view of an EMR cluster — only the fields
 // the table, detail panel and console link need.
 type Cluster struct {
@@ -162,9 +176,11 @@ func resolveRegions(ctx context.Context, cfg aws.Config) []string {
 }
 
 // LoadInventory fans the cluster listing out across every region in parallel.
-// Per-region failures are soft (opt-in regions commonly deny EMR); an error is
-// returned only when every region fails completely.
-func (c *Client) LoadInventory(ctx context.Context) (Inventory, error) {
+// When includeTerminated is false only live clusters are listed (the dashboard
+// default); when true the terminated tail is included too. Per-region failures
+// are soft (opt-in regions commonly deny EMR); an error is returned only when
+// every region fails completely.
+func (c *Client) LoadInventory(ctx context.Context, includeTerminated bool) (Inventory, error) {
 	var (
 		mu       sync.Mutex
 		inv      Inventory
@@ -177,7 +193,7 @@ func (c *Client) LoadInventory(ctx context.Context) (Inventory, error) {
 		wg.Add(1)
 		go func(region string) {
 			defer wg.Done()
-			clusters, err := c.loadRegion(ctx, region)
+			clusters, err := c.loadRegion(ctx, region, includeTerminated)
 			mu.Lock()
 			defer mu.Unlock()
 			if err != nil {
@@ -202,12 +218,18 @@ func (c *Client) LoadInventory(ctx context.Context) (Inventory, error) {
 }
 
 // loadRegion lists clusters for one region and enriches each with DescribeCluster
-// (release label, applications, stop reason) under bounded concurrency.
-func (c *Client) loadRegion(ctx context.Context, region string) ([]Cluster, error) {
+// (release label, applications, stop reason) under bounded concurrency. Unless
+// includeTerminated is set, ListClusters is filtered to the live states so the
+// terminated tail is neither listed nor enriched.
+func (c *Client) loadRegion(ctx context.Context, region string, includeTerminated bool) ([]Cluster, error) {
 	cl := c.clientFor(region)
 	var clusters []Cluster
 
-	pag := emr.NewListClustersPaginator(cl, &emr.ListClustersInput{})
+	input := &emr.ListClustersInput{}
+	if !includeTerminated {
+		input.ClusterStates = activeClusterStates
+	}
+	pag := emr.NewListClustersPaginator(cl, input)
 	for pag.HasMorePages() {
 		page, err := pag.NextPage(ctx)
 		if err != nil {

@@ -68,6 +68,7 @@ var (
 	emrStepsLimit   int
 	emrStepsStatus  string
 	emrClusterState string
+	emrAllStates    bool
 )
 
 // emrRegionScope resolves the region list and all-regions flag the same way the
@@ -105,7 +106,11 @@ var emrClustersCmd = &cobra.Command{
 		if err != nil {
 			return err
 		}
-		inv, err := client.LoadInventory(ctx)
+		// Fetch the terminated tail when the user asks for it explicitly, either
+		// via --all-states or by naming states with --state (so e.g.
+		// --state TERMINATED still works); otherwise list only live clusters.
+		includeTerminated := emrAllStates || emrClusterState != ""
+		inv, err := client.LoadInventory(ctx, includeTerminated)
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "warning: %v\n", err)
 		}
@@ -367,6 +372,7 @@ func init() {
 	registerThemeCompletion(emrCmd, ui.ThemeNames())
 
 	emrClustersCmd.Flags().StringVar(&emrClusterState, "state", "", "only show clusters in these states (comma-separated, e.g. RUNNING,WAITING)")
+	emrClustersCmd.Flags().BoolVar(&emrAllStates, "all-states", false, "include terminated clusters (default lists only active clusters)")
 
 	emrStepsCmd.Flags().IntVar(&emrStepsLimit, "limit", 50, "maximum number of steps to fetch")
 	emrStepsCmd.Flags().StringVar(&emrStepsStatus, "status", "", "only show steps in this state (e.g. FAILED, COMPLETED)")
