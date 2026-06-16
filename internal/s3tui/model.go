@@ -1472,10 +1472,15 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				// Save all rows for restore
 				m.allBucketRows = m.bucketTable.Rows()
 				m.bucketSearch.Focus()
+				m.bucketSearch.CursorEnd()
 				return m, nil
 			} else if m.state == stateObjectList {
 				m.focus = focusPrefixInput
+				// Show the current path and put the cursor at its end so it's
+				// ready to extend/edit rather than starting at column 0.
+				m.prefixInput.SetValue(m.prefix)
 				m.prefixInput.Focus()
+				m.prefixInput.CursorEnd()
 				return m, nil
 			}
 
