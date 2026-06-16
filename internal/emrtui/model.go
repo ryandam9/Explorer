@@ -22,6 +22,17 @@ import (
 // stepWindow caps how many steps the history view fetches per cluster.
 const stepWindow = 50
 
+// Fetch deadlines bound every load so a slow or hung AWS/on-cluster call
+// surfaces a retryable error instead of spinning forever. Inventory fans out
+// across every region with per-cluster enrichment, so it gets generous
+// headroom; an on-cluster full-table row count can legitimately run long, so it
+// gets the most.
+const (
+	inventoryTimeout = 2 * time.Minute
+	drillTimeout     = 45 * time.Second
+	scanTimeout      = 10 * time.Minute
+)
+
 type m struct {
 	ctx        context.Context
 	client     *Client
@@ -255,7 +266,9 @@ func (mm *m) Init() tea.Cmd {
 func (mm *m) loadInventoryCmd() tea.Cmd {
 	return func() tea.Msg {
 		slog.Info("Loading EMR inventory", "regions", len(mm.regions))
-		inv, err := mm.client.LoadInventory(mm.ctx)
+		ctx, cancel := context.WithTimeout(mm.ctx, inventoryTimeout)
+		defer cancel()
+		inv, err := mm.client.LoadInventory(ctx)
 		return invMsg{inv: inv, err: err}
 	}
 }
@@ -263,7 +276,9 @@ func (mm *m) loadInventoryCmd() tea.Cmd {
 func (mm *m) loadStepsCmd(cl Cluster) tea.Cmd {
 	return func() tea.Msg {
 		slog.Info("Loading EMR steps", "cluster", cl.ID, "region", cl.Region)
-		steps, err := mm.client.Steps(mm.ctx, cl.Region, cl.ID, stepWindow)
+		ctx, cancel := context.WithTimeout(mm.ctx, drillTimeout)
+		defer cancel()
+		steps, err := mm.client.Steps(ctx, cl.Region, cl.ID, stepWindow)
 		return stepsMsg{cluster: cl, steps: steps, err: err}
 	}
 }
@@ -278,7 +293,9 @@ func (mm *m) loadYarnCmd(cl Cluster) tea.Cmd {
 			return yarnMsg{cluster: cl, err: err}
 		}
 		slog.Info("Loading YARN applications", "cluster", cl.ID)
-		apps, metrics, err := FetchYARN(mm.ctx, mm.dialer, cl.MasterDNS)
+		ctx, cancel := context.WithTimeout(mm.ctx, drillTimeout)
+		defer cancel()
+		apps, metrics, err := FetchYARN(ctx, mm.dialer, cl.MasterDNS)
 		return yarnMsg{cluster: cl, apps: apps, metrics: metrics, err: err}
 	}
 }
@@ -293,7 +310,9 @@ func (mm *m) loadOozieCmd(cl Cluster) tea.Cmd {
 			return oozieMsg{cluster: cl, err: err}
 		}
 		slog.Info("Loading Oozie jobs", "cluster", cl.ID)
-		wf, coords, err := FetchOozie(mm.ctx, mm.dialer, cl.MasterDNS)
+		ctx, cancel := context.WithTimeout(mm.ctx, drillTimeout)
+		defer cancel()
+		wf, coords, err := FetchOozie(ctx, mm.dialer, cl.MasterDNS)
 		return oozieMsg{cluster: cl, workflows: wf, coords: coords, err: err}
 	}
 }
@@ -301,7 +320,9 @@ func (mm *m) loadOozieCmd(cl Cluster) tea.Cmd {
 func (mm *m) countHbaseRowsCmd(t HBaseTable) tea.Cmd {
 	return func() tea.Msg {
 		slog.Info("Counting HBase rows (full scan)", "table", t.Qualified)
-		count, capped, err := CountHBaseRows(mm.ctx, mm.dialer, mm.hbaseCluster.MasterDNS, t.Qualified)
+		ctx, cancel := context.WithTimeout(mm.ctx, scanTimeout)
+		defer cancel()
+		count, capped, err := CountHBaseRows(ctx, mm.dialer, mm.hbaseCluster.MasterDNS, t.Qualified)
 		return hbaseCountMsg{qualified: t.Qualified, count: count, capped: capped, err: err}
 	}
 }
@@ -316,7 +337,9 @@ func (mm *m) loadHbaseCmd(cl Cluster) tea.Cmd {
 			return hbaseMsg{cluster: cl, err: err}
 		}
 		slog.Info("Loading HBase tables", "cluster", cl.ID)
-		tables, err := FetchHBase(mm.ctx, mm.dialer, cl.MasterDNS)
+		ctx, cancel := context.WithTimeout(mm.ctx, drillTimeout)
+		defer cancel()
+		tables, err := FetchHBase(ctx, mm.dialer, cl.MasterDNS)
 		return hbaseMsg{cluster: cl, tables: tables, err: err}
 	}
 }
@@ -324,7 +347,9 @@ func (mm *m) loadHbaseCmd(cl Cluster) tea.Cmd {
 func (mm *m) loadAppUICmd(cl Cluster, opt appUIOption) tea.Cmd {
 	return func() tea.Msg {
 		slog.Info("Generating EMR persistent app UI link", "cluster", cl.ID, "type", opt.UIType)
-		url, err := mm.client.PersistentAppUIURL(mm.ctx, cl.Region, cl.ARN, opt.UIType)
+		ctx, cancel := context.WithTimeout(mm.ctx, drillTimeout)
+		defer cancel()
+		url, err := mm.client.PersistentAppUIURL(ctx, cl.Region, cl.ARN, opt.UIType)
 		return appUIMsg{label: opt.Label, url: url, err: err}
 	}
 }
