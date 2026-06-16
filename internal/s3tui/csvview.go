@@ -18,8 +18,9 @@ import (
 
 // csvDelimiters are the candidate delimiters auto-detection chooses among, in
 // preference order (earlier wins ties). They are also the values the "s" key
-// cycles through so a user can override a wrong guess.
-var csvDelimiters = []rune{',', '\t', ';', '|'}
+// cycles through so a user can override a wrong guess. \x1f is the ASCII unit
+// separator, common in mainframe/extract ".dat" files.
+var csvDelimiters = []rune{',', '\t', ';', '|', '\x1f'}
 
 // csvRowCaps are the first-N/last-N row windows the "w" key cycles through. 0
 // means "all rows". A large CSV preview shows the first cap and last cap rows
@@ -72,7 +73,7 @@ func delimiterName(r rune) string {
 // looksLikeCSV reports whether a key's extension marks it as delimited text.
 func looksLikeCSV(key string) bool {
 	switch strings.ToLower(path.Ext(key)) {
-	case ".csv", ".tsv", ".tab":
+	case ".csv", ".tsv", ".tab", ".dat", ".psv":
 		return true
 	}
 	return false
