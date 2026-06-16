@@ -16,12 +16,10 @@ func TestEscGoesUpOneFolderThenToBuckets(t *testing.T) {
 	if m.state != stateObjectList || m.prefix != "logs/2026/" {
 		t.Fatalf("after 1st esc: state=%d prefix=%q, want object list at logs/2026/", m.state, m.prefix)
 	}
-	// Up again.
 	m.Update(tea.KeyMsg{Type: tea.KeyEsc})
 	if m.state != stateObjectList || m.prefix != "logs/" {
 		t.Fatalf("after 2nd esc: state=%d prefix=%q, want logs/", m.state, m.prefix)
 	}
-	// Up to bucket root.
 	m.Update(tea.KeyMsg{Type: tea.KeyEsc})
 	if m.state != stateObjectList || m.prefix != "" {
 		t.Fatalf("after 3rd esc: state=%d prefix=%q, want object root", m.state, m.prefix)
@@ -33,34 +31,58 @@ func TestEscGoesUpOneFolderThenToBuckets(t *testing.T) {
 	}
 }
 
-func TestDetailsDebounceOnlyFetchesSettledKey(t *testing.T) {
+func newObjectListModel() *Model {
 	m := &Model{width: 100, height: 30, state: stateObjectList, focus: focusObjects,
-		lastSelectedKey: "logs/a.txt"}
+		prefix: "logs/", objectDetailsCache: map[string]*ObjectDetails{}}
+	m.initObjectTable()
+	m.objectMaps = []map[string]string{
+		{"name": "a.txt", "type": "FILE", "size": "1 B"},
+		{"name": "b.txt", "type": "FILE", "size": "2 B"},
+	}
+	m.objectTable.SetRows(m.buildObjectRows())
+	m.lastSelectedKey = "logs/a.txt"
+	return m
+}
 
-	// A debounce for a key the cursor has moved away from does nothing.
-	m.Update(objectDetailsDebounceMsg{key: "logs/old.txt"})
-	if m.detailsInFlight != "" {
-		t.Errorf("stale debounce should not dispatch a fetch, got inFlight=%q", m.detailsInFlight)
+// Scrolling must not fetch metadata — that was the source of the lag.
+func TestScrollingDoesNotFetchDetails(t *testing.T) {
+	m := newObjectListModel()
+	m.Update(tea.KeyMsg{Type: tea.KeyDown})
+	if m.detailsLoading {
+		t.Error("moving the cursor must not start a details fetch")
+	}
+	if m.selectedDetails != nil {
+		t.Error("no details should be present until requested")
+	}
+}
+
+// Pressing d fetches on demand; the result is cached and shown.
+func TestDetailsFetchedOnDemand(t *testing.T) {
+	m := newObjectListModel()
+
+	m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("d")})
+	if !m.detailsLoading {
+		t.Fatal("pressing d should start a details fetch")
 	}
 
-	// A debounce for the current key dispatches exactly one fetch.
-	m.Update(objectDetailsDebounceMsg{key: "logs/a.txt"})
-	if m.detailsInFlight != "logs/a.txt" {
-		t.Fatalf("settled debounce should dispatch, inFlight=%q", m.detailsInFlight)
+	det := &ObjectDetails{ContentType: "text/plain"}
+	m.Update(objectDetailsMsg{key: "logs/a.txt", details: det})
+	if m.detailsLoading {
+		t.Error("loading should clear on result")
 	}
-	// A second debounce for the same in-flight key does not re-dispatch.
-	before := m.detailsInFlight
-	m.Update(objectDetailsDebounceMsg{key: "logs/a.txt"})
-	if m.detailsInFlight != before {
-		t.Errorf("duplicate debounce should be a no-op")
+	if m.selectedDetails != det {
+		t.Error("fetched details should be shown for the selected object")
+	}
+	if m.objectDetailsCache["logs/a.txt"] != det {
+		t.Error("details should be cached for instant revisits")
 	}
 
-	// When the result arrives, the in-flight marker clears.
-	m.Update(objectDetailsMsg{key: "logs/a.txt", details: &ObjectDetails{}})
-	if m.detailsInFlight != "" {
-		t.Errorf("inFlight should clear on result, got %q", m.detailsInFlight)
-	}
-	if m.selectedDetails == nil {
-		t.Errorf("details should be stored for the selected key")
+	// Revisiting a cached key shows details with no new fetch.
+	m.selectedDetails = nil
+	m.objectTable.SetCursor(0)
+	m.Update(tea.KeyMsg{Type: tea.KeyDown}) // to b.txt
+	m.Update(tea.KeyMsg{Type: tea.KeyUp})   // back to a.txt
+	if m.selectedDetails != det || m.detailsLoading {
+		t.Errorf("revisit should serve cache without fetching: details=%v loading=%v", m.selectedDetails, m.detailsLoading)
 	}
 }

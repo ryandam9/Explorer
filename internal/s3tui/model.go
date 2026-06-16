@@ -104,21 +104,6 @@ type objectDetailsMsg struct {
 	err     error
 }
 
-// objectDetailsDebounceMsg fires a short while after the object cursor lands on
-// a key; the details are only fetched if the cursor is still there, so scrolling
-// quickly through a listing doesn't trigger a fetch per row.
-type objectDetailsDebounceMsg struct{ key string }
-
-// objectDetailsDebounce is how long the cursor must settle on an object before
-// its (multi-call) details are fetched.
-const objectDetailsDebounce = 200 * time.Millisecond
-
-func scheduleObjectDetails(key string) tea.Cmd {
-	return tea.Tick(objectDetailsDebounce, func(time.Time) tea.Msg {
-		return objectDetailsDebounceMsg{key: key}
-	})
-}
-
 type objectPreviewMsg struct {
 	key     string
 	content string
@@ -205,7 +190,7 @@ type Model struct {
 
 	lastSelectedKey       string
 	selectedDetails       *ObjectDetails
-	detailsInFlight       string // key whose details fetch is currently dispatched
+	objectDetailsCache    map[string]*ObjectDetails // on-demand object metadata, by key
 	selectedBucketDetails *BucketDetails
 	// objectsNextToken is set when the current listing was cut off by the
 	// page window; "L" continues from it.
@@ -356,6 +341,7 @@ func NewModel(ctx context.Context, awsCfg *config.AWSConfig, region, bucket, pre
 		sortAsc:            true,
 		bucketRegionCache:  make(map[string]string),
 		bucketDetailsCache: make(map[string]*BucketDetails),
+		objectDetailsCache: make(map[string]*ObjectDetails),
 		themeIdx:           themeIdx,
 		allowDelete:        allowDelete,
 		configPath:         configPath,
@@ -1509,6 +1495,15 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					}
 					return m, tea.Batch(cmds...)
 				}
+			} else if m.state == stateObjectList && m.focus == focusObjects {
+				// On-demand object metadata: fetch the selected file's extended
+				// details (content-type, encryption, tags, ACL…) only when asked.
+				// Return so "d" isn't also forwarded to the table (its keymap binds
+				// d to half-page-down).
+				if key, ok := m.selectedObjectKey(); ok && m.selectedDetails == nil && !m.detailsLoading {
+					cmds = append(cmds, m.fetchObjectDetails(key))
+				}
+				return m, tea.Batch(cmds...)
 			}
 
 		case "f":
@@ -1779,28 +1774,19 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.selectedDetails = nil
 
 		if len(m.objectMaps) > 0 && m.objectMaps[0]["type"] != "DIR" {
+			// On-demand: show cached metadata if we have it, but don't fetch on
+			// load. The user requests it with "d".
 			m.lastSelectedKey = m.prefix + m.objectMaps[0]["name"]
-			m.detailsInFlight = m.lastSelectedKey
-			cmds = append(cmds, m.fetchObjectDetails(m.lastSelectedKey))
-		}
-
-	case objectDetailsDebounceMsg:
-		// Fetch only if the cursor is still on this key and we haven't already
-		// dispatched (or completed) a fetch for it.
-		if msg.key == m.lastSelectedKey && m.selectedDetails == nil && m.detailsInFlight != msg.key {
-			m.detailsInFlight = msg.key
-			cmds = append(cmds, m.fetchObjectDetails(msg.key))
+			m.selectedDetails = m.objectDetailsCache[m.lastSelectedKey]
 		}
 
 	case objectDetailsMsg:
 		m.detailsLoading = false
-		if msg.key == m.detailsInFlight {
-			m.detailsInFlight = ""
+		if msg.err == nil && msg.details != nil {
+			m.objectDetailsCache[msg.key] = msg.details // serve revisits from cache
 		}
-		if msg.key == m.lastSelectedKey {
-			if msg.err == nil {
-				m.selectedDetails = msg.details
-			}
+		if msg.key == m.lastSelectedKey && msg.err == nil {
+			m.selectedDetails = msg.details
 		}
 
 	case bucketDetailsMsg:
@@ -1911,15 +1897,11 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if idx >= 0 && idx < len(m.objectMaps) {
 				r := m.objectMaps[idx]
 				if r["type"] != "DIR" {
-					newKey := m.prefix + r["name"]
-					if newKey != m.lastSelectedKey {
-						m.lastSelectedKey = newKey
-						m.selectedDetails = nil
-						// Debounce: defer the multi-call details fetch until the
-						// cursor settles, so holding ↑/↓ stays responsive instead
-						// of firing a HeadObject/ACL/Tag burst per row.
-						cmds = append(cmds, scheduleObjectDetails(newKey))
-					}
+					m.lastSelectedKey = m.prefix + r["name"]
+					// On-demand: don't fetch metadata while scrolling. Serve it from
+					// the cache if this key was fetched before; otherwise leave it for
+					// the user to request with "d".
+					m.selectedDetails = m.objectDetailsCache[m.lastSelectedKey]
 				} else {
 					m.lastSelectedKey = ""
 					m.selectedDetails = nil
@@ -2196,6 +2178,7 @@ func (m *Model) statusHints() []ui.KeyHint {
 			ui.H("↑/↓", "navigate"),
 			ui.H("Enter", "open"),
 			ui.H("p", "preview"),
+			ui.H("d", "details"),
 		}
 		hints = append(hints, colScrollHints(&m.objectTable)...)
 		hints = append(hints,
@@ -2378,8 +2361,10 @@ func (m *Model) objectListView() string {
 		if isDir {
 			metaText = "Status: N/A"
 		} else {
-			if m.detailsLoading || m.selectedDetails == nil {
+			if m.detailsLoading {
 				metaText = m.loadingLine("Loading object metadata…")
+			} else if m.selectedDetails == nil {
+				metaText = ui.MutedStyle().Render("Press d to load metadata (content-type, encryption, tags, ACL…)")
 			} else {
 				// Build tags string
 				tagStr := ""
@@ -2712,6 +2697,7 @@ func (m *Model) helpView() string {
 			"Objects",
 			"  /                  Jump to prefix",
 			"  p                  Preview object (CSV→table, .gz→decompress, .tar→browse members)",
+			"  d                  Load extended metadata for the selected object (on demand)",
 			"  y                  Copy S3 URI to clipboard",
 			"  o                  Open bucket/object in the AWS console (copies the URL)",
 			"  g                  Generate presigned URL (1 hour)",
