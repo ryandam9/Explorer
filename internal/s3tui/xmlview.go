@@ -6,11 +6,16 @@ import (
 	"strings"
 )
 
+// xmlBOM is the UTF-8 byte-order mark that prefixes many Windows/.NET XML
+// files; it must be stripped before the content reads as starting with "<".
+const xmlBOM = "\ufeff"
+
 // looksLikeXMLContent reports whether content is (or starts as) an XML/HTML
-// document, so the preview can pretty-print it. A conservative check: it must
-// start with "<" and either be an XML declaration or contain a real element.
+// document, so the preview can pretty-print it. A conservative check: after a
+// leading BOM/whitespace it must start with "<" and either be an XML
+// declaration or contain a real element.
 func looksLikeXMLContent(s string) bool {
-	t := strings.TrimSpace(s)
+	t := strings.TrimSpace(strings.TrimPrefix(s, xmlBOM))
 	if t == "" || t[0] != '<' {
 		return false
 	}
@@ -25,6 +30,7 @@ func looksLikeXMLContent(s string) bool {
 // re-emitted with indentation until the first decode error, then flushed. ok is
 // false when nothing parsed, so the caller can fall back to the raw text.
 func formatXML(s string) (string, bool) {
+	s = strings.TrimPrefix(s, xmlBOM)
 	dec := xml.NewDecoder(strings.NewReader(s))
 	dec.Strict = false
 
@@ -52,7 +58,20 @@ func formatXML(s string) (string, bool) {
 		return "", false
 	}
 	_ = enc.Flush()
-	return buf.String(), true
+	return declarationOnOwnLine(buf.String()), true
+}
+
+// declarationOnOwnLine puts the XML declaration (and any leading processing
+// instruction) on its own line — the encoder otherwise runs it straight into
+// the root element, e.g. "<?xml ...?><root>".
+func declarationOnOwnLine(out string) string {
+	if !strings.HasPrefix(out, "<?") {
+		return out
+	}
+	if i := strings.Index(out, "?>"); i >= 0 && i+2 < len(out) && out[i+2] == '<' {
+		return out[:i+2] + "\n" + out[i+2:]
+	}
+	return out
 }
 
 // hardWrap breaks each line of s to at most width display columns so a long
