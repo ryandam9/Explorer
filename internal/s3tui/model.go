@@ -614,6 +614,28 @@ func (m *Model) loadBuckets() tea.Cmd {
 	}
 }
 
+// regionPending marks a bucket whose region is not yet known — shown in the
+// Region column until the async per-bucket lookup fills it in. With modern S3
+// listings the region arrives up front, so this is only seen for non-AWS
+// S3-compatible endpoints that omit it.
+const regionPending = "…"
+
+// bucketRow turns a listing entry into the (name, region, created) triple shown
+// in the bucket table. The region comes straight from the listing when S3
+// provides it (s3:ListBuckets now reports BucketRegion), falling back to
+// regionPending so the per-bucket lookup can fill it in later.
+func bucketRow(b s3types.Bucket) (name, region, created string) {
+	name = aws.ToString(b.Name)
+	region = aws.ToString(b.BucketRegion)
+	if region == "" {
+		region = regionPending
+	}
+	if b.CreationDate != nil {
+		created = b.CreationDate.Format("2006-01-02 15:04:05")
+	}
+	return name, region, created
+}
+
 func (m *Model) fetchBucketRegions() tea.Cmd {
 	rows := m.bucketTable.Rows()
 	if len(rows) == 0 {
@@ -626,7 +648,7 @@ func (m *Model) fetchBucketRegions() tea.Cmd {
 	// leave the region column stuck at "…" for buckets we've seen before.
 	cacheApplied := false
 	for i, row := range rows {
-		if row[2] != "…" {
+		if row[2] != regionPending {
 			continue
 		}
 		if region, ok := m.bucketRegionCache[row[1]]; ok {
@@ -644,7 +666,7 @@ func (m *Model) fetchBucketRegions() tea.Cmd {
 	cmds := make([]tea.Cmd, 0, len(rows))
 	for i, row := range rows {
 		name := row[1]
-		if row[2] != "…" {
+		if row[2] != regionPending {
 			continue
 		}
 		idx := i
@@ -1121,7 +1143,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					m.prefix = ""
 					m.prefixInput.SetValue("")
 					// Region may still be loading; fall back to the cache.
-					if m.region == "…" {
+					if m.region == regionPending {
 						if cached, ok := m.bucketRegionCache[m.bucket]; ok {
 							m.region = cached
 						}
@@ -1415,7 +1437,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					m.prefix = ""
 					m.prefixInput.SetValue("")
 					// Region may still be loading; fall back to the cache.
-					if m.region == "…" {
+					if m.region == regionPending {
 						if cached, ok := m.bucketRegionCache[m.bucket]; ok {
 							m.region = cached
 						}
@@ -1490,11 +1512,15 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					continue
 				}
 				m.seenBuckets[name] = true
-				dateStr := ""
-				if b.CreationDate != nil {
-					dateStr = b.CreationDate.Format("2006-01-02 15:04:05")
+				name, region, dateStr := bucketRow(b)
+				// S3 reports each bucket's region in the listing itself, so the region
+				// column is filled in immediately and correctly. Cache it; only buckets
+				// with no region in the listing (region "…", e.g. a non-AWS
+				// S3-compatible endpoint) fall back to the async per-bucket lookup.
+				if region != regionPending {
+					m.bucketRegionCache[name] = region
 				}
-				m.allBucketRows = append(m.allBucketRows, table.Row{"", name, "…", dateStr})
+				m.allBucketRows = append(m.allBucketRows, table.Row{"", name, region, dateStr})
 			}
 			m.bucketTable.SetRows(seqRows(m.allBucketRows))
 			if firstBucket && m.bucket == "" && len(m.allBucketRows) > 0 {

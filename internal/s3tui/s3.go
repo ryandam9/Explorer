@@ -139,11 +139,28 @@ func (c *S3Client) ListBuckets() ([]s3types.Bucket, error) {
 	ctx, cancel := c.requestContext()
 	defer cancel()
 
-	output, err := c.client.ListBuckets(ctx, &s3.ListBucketsInput{})
-	if err != nil {
-		return nil, err
+	// Request with a page size so the response is parameterised: S3 only
+	// includes each bucket's BucketRegion when the request carries at least one
+	// valid parameter, which lets us read a bucket's region straight from the
+	// listing instead of a separate (slow, sometimes wrong) GetBucketLocation
+	// call. Follow continuation tokens so accounts with many buckets list fully.
+	var buckets []s3types.Bucket
+	var token *string
+	for {
+		output, err := c.client.ListBuckets(ctx, &s3.ListBucketsInput{
+			MaxBuckets:        aws.Int32(1000),
+			ContinuationToken: token,
+		})
+		if err != nil {
+			return nil, err
+		}
+		buckets = append(buckets, output.Buckets...)
+		if output.ContinuationToken == nil || *output.ContinuationToken == "" {
+			break
+		}
+		token = output.ContinuationToken
 	}
-	return output.Buckets, nil
+	return buckets, nil
 }
 
 type ListObjectsResult struct {
