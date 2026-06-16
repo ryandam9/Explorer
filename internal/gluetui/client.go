@@ -248,19 +248,44 @@ func (c *Client) LoadInventory(ctx context.Context) (Inventory, error) {
 	return inv, nil
 }
 
-// loadRegion gathers every resource type for one region. Listings are
-// independent and best-effort: a failure in one is logged but the rest proceed,
-// so a denied GetTriggers (say) still yields jobs and crawlers.
+// loadRegion gathers every resource type for one region. The six listings are
+// independent, so they run concurrently rather than one after another. Each is
+// best-effort: a failure in one is logged but the rest proceed, so a denied
+// GetTriggers (say) still yields jobs and crawlers. Each goroutine writes a
+// distinct Inventory field, so no locking is needed.
 func (c *Client) loadRegion(ctx context.Context, region string) (Inventory, error) {
 	cl := c.clientFor(region)
 	var inv Inventory
 
-	jobs, err := c.loadJobs(ctx, cl, region)
-	if err != nil {
-		slog.Warn("GetJobs failed", "region", region, "error", err.Error())
+	var wg sync.WaitGroup
+	run := func(f func()) {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			f()
+		}()
 	}
-	inv.Jobs = jobs
 
+	run(func() {
+		jobs, err := c.loadJobs(ctx, cl, region)
+		if err != nil {
+			slog.Warn("GetJobs failed", "region", region, "error", err.Error())
+		}
+		inv.Jobs = jobs
+	})
+	run(func() { inv.Crawlers = c.loadCrawlers(ctx, cl, region) })
+	run(func() { inv.Triggers = c.loadTriggers(ctx, cl, region) })
+	run(func() { inv.Workflows = c.loadWorkflows(ctx, cl, region) })
+	run(func() { inv.Connections = c.loadConnections(ctx, cl, region) })
+	run(func() { inv.Databases = c.loadDatabases(ctx, cl, region) })
+	wg.Wait()
+
+	return inv, nil
+}
+
+// loadCrawlers lists every crawler in the region (best-effort, paginated).
+func (c *Client) loadCrawlers(ctx context.Context, cl *glue.Client, region string) []Crawler {
+	var out []Crawler
 	var token *string
 	for {
 		page, err := cl.GetCrawlers(ctx, &glue.GetCrawlersInput{NextToken: token})
@@ -269,15 +294,20 @@ func (c *Client) loadRegion(ctx context.Context, region string) (Inventory, erro
 			break
 		}
 		for _, cr := range page.Crawlers {
-			inv.Crawlers = append(inv.Crawlers, c.mapCrawler(region, cr))
+			out = append(out, c.mapCrawler(region, cr))
 		}
 		if page.NextToken == nil {
 			break
 		}
 		token = page.NextToken
 	}
+	return out
+}
 
-	token = nil
+// loadTriggers lists every trigger in the region (best-effort, paginated).
+func (c *Client) loadTriggers(ctx context.Context, cl *glue.Client, region string) []Trigger {
+	var out []Trigger
+	var token *string
 	for {
 		page, err := cl.GetTriggers(ctx, &glue.GetTriggersInput{NextToken: token})
 		if err != nil {
@@ -285,15 +315,20 @@ func (c *Client) loadRegion(ctx context.Context, region string) (Inventory, erro
 			break
 		}
 		for _, tr := range page.Triggers {
-			inv.Triggers = append(inv.Triggers, c.mapTrigger(region, tr))
+			out = append(out, c.mapTrigger(region, tr))
 		}
 		if page.NextToken == nil {
 			break
 		}
 		token = page.NextToken
 	}
+	return out
+}
 
-	token = nil
+// loadWorkflows lists every workflow in the region (best-effort, paginated).
+func (c *Client) loadWorkflows(ctx context.Context, cl *glue.Client, region string) []Workflow {
+	var out []Workflow
+	var token *string
 	for {
 		page, err := cl.ListWorkflows(ctx, &glue.ListWorkflowsInput{NextToken: token})
 		if err != nil {
@@ -301,15 +336,20 @@ func (c *Client) loadRegion(ctx context.Context, region string) (Inventory, erro
 			break
 		}
 		for _, name := range page.Workflows {
-			inv.Workflows = append(inv.Workflows, Workflow{Name: name, Region: region, ARN: c.arn(region, "workflow/"+name)})
+			out = append(out, Workflow{Name: name, Region: region, ARN: c.arn(region, "workflow/"+name)})
 		}
 		if page.NextToken == nil {
 			break
 		}
 		token = page.NextToken
 	}
+	return out
+}
 
-	token = nil
+// loadConnections lists every connection in the region (best-effort, paginated).
+func (c *Client) loadConnections(ctx context.Context, cl *glue.Client, region string) []Connection {
+	var out []Connection
+	var token *string
 	for {
 		page, err := cl.GetConnections(ctx, &glue.GetConnectionsInput{NextToken: token})
 		if err != nil {
@@ -317,7 +357,7 @@ func (c *Client) loadRegion(ctx context.Context, region string) (Inventory, erro
 			break
 		}
 		for _, conn := range page.ConnectionList {
-			inv.Connections = append(inv.Connections, Connection{
+			out = append(out, Connection{
 				Name: aws.ToString(conn.Name), Region: region,
 				ARN:    c.arn(region, "connection/"+aws.ToString(conn.Name)),
 				Type:   string(conn.ConnectionType),
@@ -329,8 +369,14 @@ func (c *Client) loadRegion(ctx context.Context, region string) (Inventory, erro
 		}
 		token = page.NextToken
 	}
+	return out
+}
 
-	token = nil
+// loadDatabases lists every catalog database in the region (best-effort,
+// paginated).
+func (c *Client) loadDatabases(ctx context.Context, cl *glue.Client, region string) []Database {
+	var out []Database
+	var token *string
 	for {
 		page, err := cl.GetDatabases(ctx, &glue.GetDatabasesInput{NextToken: token})
 		if err != nil {
@@ -338,7 +384,7 @@ func (c *Client) loadRegion(ctx context.Context, region string) (Inventory, erro
 			break
 		}
 		for _, db := range page.DatabaseList {
-			inv.Databases = append(inv.Databases, Database{
+			out = append(out, Database{
 				Name: aws.ToString(db.Name), Region: region,
 				ARN:         c.arn(region, "database/"+aws.ToString(db.Name)),
 				Description: aws.ToString(db.Description),
@@ -349,8 +395,7 @@ func (c *Client) loadRegion(ctx context.Context, region string) (Inventory, erro
 		}
 		token = page.NextToken
 	}
-
-	return inv, nil
+	return out
 }
 
 // loadJobs lists jobs and stamps each with its latest run state via a
