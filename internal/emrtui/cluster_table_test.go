@@ -311,6 +311,25 @@ func TestEMRAgeColumnAndSort(t *testing.T) {
 	}
 }
 
+// TestEMRHBaseBoundToB verifies the HBase browser opens on b (not h, which is
+// vim-left/back), and that h closes the sub-view.
+func TestEMRHBaseBoundToB(t *testing.T) {
+	mm := newClusterTestModel(120, 24)
+
+	mm.handleKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("h")})
+	if mm.hbaseActive {
+		t.Error("h must not open the HBase browser from the cluster list")
+	}
+	mm.handleKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("b")})
+	if !mm.hbaseActive {
+		t.Fatal("b should open the HBase browser")
+	}
+	mm.handleKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("h")})
+	if mm.hbaseActive {
+		t.Error("h should go back from (close) the HBase sub-view")
+	}
+}
+
 func TestClusterTableFilter(t *testing.T) {
 	mm := newClusterTestModel(120, 24)
 	mm.filter.SetValue("terminated")

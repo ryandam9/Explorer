@@ -83,7 +83,7 @@ const emrAboutText = "This is the Amazon EMR dashboard. Each row is a cluster, c
 	"Press L to open the cluster's (or a step's) logs in the S3 browser, and u to open " +
 	"a persistent application UI (Spark History, YARN Timeline, Tez) — hosted off-cluster, " +
 	"so no SSH tunnel is needed.\n\n" +
-	"Press y for the live YARN application browser, h for the HBase table browser and z for " +
+	"Press y for the live YARN application browser, b for the HBase table browser and z for " +
 	"the Oozie workflow/coordinator browser; these read on-cluster REST daemons and need " +
 	"emr.onCluster configured (off by default).\n\n" +
 	"The list shows only live clusters by default; press t to include the terminated " +
@@ -528,7 +528,7 @@ func (mm *m) helpHints() []ui.KeyHint {
 		ui.H("L", "logs"),
 		ui.H("u", "app UIs"),
 		ui.H("y", "yarn"),
-		ui.H("h", "hbase"),
+		ui.H("b", "hbase"),
 		ui.H("z", "oozie"),
 		ui.H("S", "sort"),
 	}

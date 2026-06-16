@@ -662,7 +662,7 @@ func (mm *m) handleKey(msg tea.KeyMsg) []tea.Cmd {
 		switch msg.String() {
 		case "q", "ctrl+c":
 			return []tea.Cmd{tea.Quit}
-		case "esc", "backspace", "left":
+		case "esc", "backspace", "left", "h":
 			mm.hbaseActive = false
 		case "up", "k":
 			mm.hbaseTbl.MoveUp(1)
@@ -698,7 +698,7 @@ func (mm *m) handleKey(msg tea.KeyMsg) []tea.Cmd {
 		switch msg.String() {
 		case "q", "ctrl+c":
 			return []tea.Cmd{tea.Quit}
-		case "esc", "backspace", "left":
+		case "esc", "backspace", "left", "h":
 			mm.oozieActive = false
 		case "tab", "right":
 			mm.oozieCoords = !mm.oozieCoords
@@ -826,7 +826,9 @@ func (mm *m) handleKey(msg tea.KeyMsg) []tea.Cmd {
 			mm.yarnErr = nil
 			cmds = append(cmds, mm.loadYarnCmd(cl), mm.spinner.Tick)
 		}
-	case "h":
+	case "b":
+		// HBase browser is bound to b, not h: in the sub-views h is vim-left /
+		// back, so binding it here too would open HBase on a vim-left reflex.
 		if cl, ok := mm.selectedCluster(); ok {
 			mm.hbaseActive = true
 			mm.hbaseCluster = cl

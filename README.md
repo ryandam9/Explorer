@@ -907,7 +907,7 @@ Step history (Enter on a cluster):
 | `L` | Open the cluster's (or selected step's) logs in the S3 browser |
 | `u` | Open a persistent application UI (Spark History / YARN Timeline / Tez) |
 | `y` | Open the live **YARN application browser** (requires on-cluster access) |
-| `h` | Open the **HBase table browser** (requires on-cluster access) |
+| `b` | Open the **HBase table browser** (requires on-cluster access) |
 | `z` | Open the **Oozie workflow/coordinator browser** (requires on-cluster access) |
 | `t` | Toggle the **terminated** cluster tail (the list shows only active clusters by default) |
 | `S` / `R` | Cycle the sort column / reverse the direction |
