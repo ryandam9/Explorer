@@ -194,15 +194,16 @@ type Model struct {
 	selectedBucketDetails *BucketDetails
 	// objectsNextToken is set when the current listing was cut off by the
 	// page window; "L" continues from it.
-	objectsNextToken *string
-	detailsLoading   bool
-	showHelp         bool
-	showAbout        bool
-	showPreview      bool
-	previewKey       string
-	previewContent   string
-	previewLoading   bool
-	previewErr       error
+	objectsNextToken  *string
+	detailsLoading    bool
+	showHelp          bool
+	showAbout         bool
+	showPreview       bool
+	previewKey        string
+	previewContent    string
+	previewLoading    bool
+	previewErr        error
+	previewNotTabular bool // user pressed "t" but the text isn't table-shaped
 
 	// Full-screen CSV table view (a CSV/TSV object previewed with "p").
 	showCSV      bool
@@ -730,6 +731,7 @@ func decompressedPreview(out []byte, truncated, isCSV bool) string {
 // initPreviewViewport builds the scrollable text viewport for a (non-CSV)
 // preview from the fetched content.
 func (m *Model) initPreviewViewport(content string, err error) {
+	m.previewNotTabular = false
 	panelW := min(100, max(40, m.width-12))
 	panelH := min(28, max(10, m.height-10))
 	vpW := panelW - 8 // border + padding + scrollbar gutter
@@ -1317,6 +1319,18 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				}
 				m.showPreview = false
 				m.previewLoading = false
+				return m, nil
+			}
+			// "t" tries to render the current text as a delimited table (works for
+			// any file — .txt, .log, .json…), mirroring the table view's "t" → raw.
+			if msg.String() == "t" && !m.previewLoading && m.previewErr == nil {
+				if m.initCSV(m.previewContent) {
+					m.showPreview = false
+					m.showCSV = true
+					m.previewNotTabular = false
+				} else {
+					m.previewNotTabular = true
+				}
 				return m, nil
 			}
 			// Forward all other keys to the preview viewport for scrolling.
@@ -2661,10 +2675,11 @@ func (m *Model) deleteConfirmView() string {
 const s3AboutText = "This is the dedicated S3 browser. The first screen lists your buckets " +
 	"(with details on d); Enter opens a bucket and you navigate its prefixes like " +
 	"folders, drilling into objects.\n\n" +
-	"On an object you can preview its contents (p) — a CSV or TSV opens in a " +
+	"On an object you can preview its contents (p) — a CSV/TSV/.dat opens in a " +
 	"full-screen, scrollable table with auto-detected delimiter (press s/S to change " +
 	"it, h to set which row holds the column names — 0 for none, w to adjust how many " +
-	"rows are shown, t for raw text). A .gz is decompressed " +
+	"rows are shown, t for raw text). In any text preview, press t to view it as a " +
+	"table (handy for .txt/.log exports). A .gz is decompressed " +
 	"and shown by its inner type, and a .tar/.tar.gz/.tgz opens a browser of its " +
 	"members so you can open any file inside. You can also copy its S3 URI (y), open it " +
 	"in the AWS console (o), generate a 1-hour presigned URL (g) and download it " +
@@ -2761,6 +2776,10 @@ func (m *Model) previewView() string {
 	width := min(100, max(40, m.width-12))
 	height := min(28, max(10, m.height-10))
 	title := ui.PanelTitleStyle().Render("OBJECT PREVIEW: " + m.previewKey)
+	hint := "[↑/↓/PgUp/PgDn] Scroll  [t] View as table  [Esc] Close"
+	if m.previewNotTabular {
+		hint += "   " + ui.ErrorStyle().Render("not delimited — staying in text")
+	}
 	return lipgloss.NewStyle().
 		Width(width).
 		Height(height).
@@ -2770,5 +2789,5 @@ func (m *Model) previewView() string {
 		BorderForeground(lipgloss.Color(ui.ColorBorderFocus())).
 		Foreground(lipgloss.Color(ui.ColorText())).
 		Padding(1, 2).
-		Render(lipgloss.JoinVertical(lipgloss.Left, title, "", body, "", ui.MutedStyle().Render("[↑/↓/PgUp/PgDn] Scroll  [Esc] Close")))
+		Render(lipgloss.JoinVertical(lipgloss.Left, title, "", body, "", ui.MutedStyle().Render(hint)))
 }
