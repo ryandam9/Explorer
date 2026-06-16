@@ -48,19 +48,33 @@ func (mm *m) View() string {
 
 	frame := mm.applyToast(ui.ClipToSize(body+sep+status, mm.width, mm.height))
 	if mm.defActive {
-		title := "Job — " + mm.def.Name
-		if mm.defLoading {
-			title = "Job definition"
+		if mm.defLoading || mm.defErr != nil {
+			frame = ui.OverlayCenter(frame, ui.AboutView("Job definition", mm.defBody(), ui.AboutWidth(mm.width)), mm.width, mm.height)
+		} else {
+			frame = ui.OverlayCenter(frame, mm.scrollOverlay("Job — "+mm.def.Name, mm.defBody()), mm.width, mm.height)
 		}
-		frame = ui.OverlayCenter(frame, ui.AboutView(title, mm.defBody(), ui.AboutWidth(mm.width)), mm.width, mm.height)
 	}
 	if mm.detailActive {
-		frame = ui.OverlayCenter(frame, ui.AboutView(mm.detailTitle, mm.detailBody(), ui.AboutWidth(mm.width)), mm.width, mm.height)
+		if mm.detailLoading || mm.detailErr != nil {
+			frame = ui.OverlayCenter(frame, ui.AboutView(mm.detailTitle, mm.detailBody(), ui.AboutWidth(mm.width)), mm.width, mm.height)
+		} else {
+			frame = ui.OverlayCenter(frame, mm.scrollOverlay(mm.detailTitle, mm.detailBody()), mm.width, mm.height)
+		}
 	}
 	if mm.showAbout {
 		frame = ui.OverlayCenter(frame, ui.AboutView("About — AWS Glue", glueAboutText, ui.AboutWidth(mm.width)), mm.width, mm.height)
 	}
 	return frame
+}
+
+// scrollOverlay renders a loaded detail overlay: it sizes and fills the shared
+// viewport with content (preserving the scroll offset), then frames the
+// windowed body plus a scroll hint to match the help overlay.
+func (mm *m) scrollOverlay(title, content string) string {
+	mm.layoutOverlayVP(content)
+	hint := lipgloss.NewStyle().Foreground(lipgloss.Color(ui.ColorMuted())).Render("↑/↓ scroll · Esc close")
+	body := lipgloss.JoinVertical(lipgloss.Left, mm.overlayVP.View(), "", hint)
+	return ui.HelpView(title, body, mm.overlayVP.Width+4)
 }
 
 // defBody renders the job-definition overlay's contents (loading / error /

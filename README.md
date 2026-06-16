@@ -813,7 +813,7 @@ Run history (Enter on a job):
 | `Tab` / `Shift+Tab` | Switch pane |
 | `↑/↓` (`j/k`) | Move selection |
 | `Enter` | On **Jobs**, open the selected job's run history; on the other tabs, open the selected resource's detail overlay (fetched on demand) |
-| `d` | Show the selected job's definition (role, version, worker, script, connections, args — secrets redacted) |
+| `d` | Show the selected job's definition (role, version, worker, script, connections, args — secrets redacted); the overlay scrolls (`↑/↓`) when taller than the screen |
 | `f` | **Findings** — deterministic posture/cost checks (failing or stale jobs, failed crawls) over the loaded jobs & crawlers; `y` copies the suggested fix |
 | `/` | Filter the current pane |
 | `o` | Open the selected resource in the AWS console |
@@ -900,7 +900,7 @@ Step history (Enter on a cluster):
 |-----|--------|
 | `↑/↓` (`j/k`) | Move selection |
 | `Enter` / `s` | Open the selected cluster's step history |
-| `d` | Show the selected cluster's detail (release, log URI, role, EC2 attributes) |
+| `d` | Show the selected cluster's detail (release, log URI, role, EC2 attributes); the overlay scrolls (`↑/↓`) when taller than the screen |
 | `f` | **Findings** — deterministic posture/cost checks (idle/long-running clusters, no log destination or security config, terminated-with-errors) over the loaded clusters; `y` copies the suggested fix |
 | `L` | Open the cluster's (or selected step's) logs in the S3 browser |
 | `u` | Open a persistent application UI (Spark History / YARN Timeline / Tez) |

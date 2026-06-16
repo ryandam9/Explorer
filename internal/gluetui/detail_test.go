@@ -116,6 +116,35 @@ func TestGlueEnterOnJobsTabKeepsRuns(t *testing.T) {
 	}
 }
 
+// TestGlueDefOverlayScrolls verifies the job-definition overlay is scrollable
+// when its content (many default arguments) is taller than the viewport.
+func TestGlueDefOverlayScrolls(t *testing.T) {
+	args := map[string]string{}
+	for _, k := range []string{"--a", "--b", "--c", "--d", "--e", "--f", "--g", "--h", "--i", "--j", "--k", "--l"} {
+		args[k] = "v"
+	}
+	mm := newGlueTestModel(100, 16) // short height → definition taller than the viewport
+	mm.defActive = true
+	mm.def = JobDef{Name: "big-job", Role: "role/glue", DefaultArguments: args}
+
+	out := mm.View() // sizes and fills the shared viewport
+	if !strings.Contains(out, "Job — big-job") {
+		t.Errorf("definition overlay missing title:\n%s", out)
+	}
+	if mm.overlayVP.TotalLineCount() <= mm.overlayVP.Height {
+		t.Fatalf("test needs content taller than the viewport (lines=%d height=%d)",
+			mm.overlayVP.TotalLineCount(), mm.overlayVP.Height)
+	}
+	mm.handleKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("j")})
+	if mm.overlayVP.YOffset == 0 {
+		t.Error("j should scroll the definition viewport down")
+	}
+	mm.handleKey(tea.KeyMsg{Type: tea.KeyEsc})
+	if mm.defActive {
+		t.Error("Esc should close the definition overlay")
+	}
+}
+
 // TestGlueDetailOverlayRenders checks the overlay composes over the dashboard
 // without panicking or overflowing the terminal width.
 func TestGlueDetailOverlayRenders(t *testing.T) {
