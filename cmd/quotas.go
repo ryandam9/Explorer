@@ -55,8 +55,7 @@ quota (reported on stderr) and never aborts the run.`,
 
 		eng, err := engine.NewEngine(ctx, AppConfig)
 		if err != nil {
-			fmt.Fprintf(os.Stderr, "Error: failed to initialize engine: %v\n", err)
-			os.Exit(1)
+			return fmt.Errorf("failed to initialize engine: %w", err)
 		}
 		SilenceScanLogs()
 
@@ -81,8 +80,7 @@ quota (reported on stderr) and never aborts the run.`,
 			return nil
 		}
 		if err := quotas.Render(os.Stdout, rows, outputFormat, noHeader); err != nil {
-			fmt.Fprintf(os.Stderr, "Error rendering report: %v\n", err)
-			os.Exit(1)
+			return fmt.Errorf("rendering report: %w", err)
 		}
 		if hidden > 0 && strings.EqualFold(outputFormat, "table") {
 			fmt.Fprintf(os.Stderr, "\n%d quota(s) below %.0f%% or without a usage metric hidden — use --threshold 0 to list all.\n", hidden, quotasThreshold)

@@ -3,7 +3,6 @@ package cmd
 import (
 	"context"
 	"fmt"
-	"os"
 	"strings"
 
 	tea "github.com/charmbracelet/bubbletea"
@@ -35,7 +34,7 @@ delete operations.`,
 
   # Point at LocalStack or MinIO
   aws_explorer s3 --endpoint-url http://localhost:4566`,
-	Run: func(cmd *cobra.Command, args []string) {
+	RunE: func(cmd *cobra.Command, args []string) error {
 		ctx, cancel := context.WithCancel(context.Background())
 		defer cancel()
 
@@ -48,16 +47,15 @@ delete operations.`,
 
 		m, err := s3tui.NewModel(ctx, s3Cfg, awsRegion, s3Bucket, s3Prefix, activeTheme, s3AllowDelete, s3EndpointURL, configFilePath(), AppConfig)
 		if err != nil {
-			fmt.Fprintf(os.Stderr, "Error initializing S3 TUI: %v\n", err)
-			os.Exit(1)
+			return fmt.Errorf("initializing S3 TUI: %w", err)
 		}
 
 		p := tea.NewProgram(ui.WithWindowTitle(m), tea.WithAltScreen(), tea.WithContext(ctx))
 
 		if _, err := p.Run(); err != nil {
-			fmt.Fprintf(os.Stderr, "Error running S3 TUI: %v\n", err)
-			os.Exit(1)
+			return fmt.Errorf("running S3 TUI: %w", err)
 		}
+		return nil
 	},
 }
 

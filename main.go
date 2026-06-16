@@ -2,6 +2,7 @@ package main
 
 import (
 	_ "embed"
+	"errors"
 	"log/slog"
 	"os"
 
@@ -37,6 +38,13 @@ func main() {
 	cmd.SetDefaultConfig(defaultConfig)
 	if err := cmd.Execute(); err != nil {
 		// Cobra has already printed the error (and usage where relevant).
-		os.Exit(1)
+		// A command may request a specific exit code (e.g. audit --fail-on
+		// signals findings with code 2) via an error implementing ExitCode.
+		code := 1
+		var ec interface{ ExitCode() int }
+		if errors.As(err, &ec) {
+			code = ec.ExitCode()
+		}
+		os.Exit(code)
 	}
 }

@@ -153,8 +153,7 @@ cloudwatch:GetMetricData and are skipped without it.`,
 
 		eng, err := engine.NewEngine(ctx, AppConfig)
 		if err != nil {
-			fmt.Fprintf(os.Stderr, "Error: failed to initialize engine: %v\n", err)
-			os.Exit(1)
+			return fmt.Errorf("failed to initialize engine: %w", err)
 		}
 
 		// Problems are summarized after the run (CLI) or shown in the errors
@@ -176,8 +175,7 @@ cloudwatch:GetMetricData and are skipped without it.`,
 			m := audittui.New(regions, AppConfig.AWS.AllRegions, dropIgnored(ch, ignore))
 			p := tea.NewProgram(ui.WithWindowTitle(m), tea.WithAltScreen(), tea.WithContext(ctx))
 			if _, err := p.Run(); err != nil {
-				fmt.Fprintf(os.Stderr, "Error running audit TUI: %v\n", err)
-				os.Exit(1)
+				return fmt.Errorf("running audit TUI: %w", err)
 			}
 			return nil
 		}
@@ -189,11 +187,14 @@ cloudwatch:GetMetricData and are skipped without it.`,
 		output.PrintErrors(os.Stderr, errs)
 
 		if err := renderAuditFindings(fs); err != nil {
-			fmt.Fprintf(os.Stderr, "Error rendering findings: %v\n", err)
-			os.Exit(1)
+			return fmt.Errorf("rendering findings: %w", err)
 		}
 		if auditFailOn != "" && findings.AnyAtOrAbove(fs, failOn) {
-			os.Exit(auditExitFindings)
+			// Findings at/above the threshold are a successful scan outcome, not
+			// an error: signal exit code 2 to the caller while staying silent so
+			// Cobra prints no "Error:" line on top of the rendered findings.
+			cmd.SilenceErrors = true
+			return &exitError{code: auditExitFindings}
 		}
 		return nil
 	},

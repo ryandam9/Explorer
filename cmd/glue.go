@@ -33,7 +33,7 @@ config's aws.regions list is used.`,
 
   # Pin one region
   aws_explorer glue --region us-east-1`,
-	Run: func(cmd *cobra.Command, args []string) {
+	RunE: func(cmd *cobra.Command, args []string) error {
 		ctx, cancel := context.WithCancel(context.Background())
 		defer cancel()
 
@@ -50,15 +50,14 @@ config's aws.regions list is used.`,
 
 		model, err := gluetui.NewModel(ctx, glueCfg, regions, scanAll, AppConfig, configFilePath())
 		if err != nil {
-			fmt.Fprintf(os.Stderr, "Error initializing Glue dashboard: %v\n", err)
-			os.Exit(1)
+			return fmt.Errorf("initializing Glue dashboard: %w", err)
 		}
 
 		p := tea.NewProgram(ui.WithWindowTitle(model), tea.WithAltScreen(), tea.WithContext(ctx))
 		if _, err := p.Run(); err != nil {
-			fmt.Fprintf(os.Stderr, "Error running Glue dashboard: %v\n", err)
-			os.Exit(1)
+			return fmt.Errorf("running Glue dashboard: %w", err)
 		}
+		return nil
 	},
 }
 

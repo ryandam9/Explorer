@@ -56,25 +56,22 @@ unchanged account diffs clean.`,
   aws_explorer summary --baseline            # yesterday
   aws_explorer summary --diff                # today
   aws_explorer summary --diff -o json        # for automation`,
-	Run: func(cmd *cobra.Command, args []string) {
+	RunE: func(cmd *cobra.Command, args []string) error {
 		ctx, cancel := context.WithCancel(context.Background())
 		defer cancel()
 
 		if summaryBaseline && summaryDiff {
-			fmt.Fprintln(os.Stderr, "Error: --baseline and --diff are mutually exclusive")
-			os.Exit(1)
+			return fmt.Errorf("--baseline and --diff are mutually exclusive")
 		}
 		if (summaryBaseline || summaryDiff) && summaryTUI {
-			fmt.Fprintln(os.Stderr, "Error: --baseline/--diff cannot be combined with --tui (use the D key in the TUI instead)")
-			os.Exit(1)
+			return fmt.Errorf("--baseline/--diff cannot be combined with --tui (use the D key in the TUI instead)")
 		}
 
 		applyGlobalAWSOverrides()
 
 		eng, err := engine.NewEngine(ctx, AppConfig)
 		if err != nil {
-			fmt.Fprintf(os.Stderr, "Error: failed to initialize engine: %v\n", err)
-			os.Exit(1)
+			return fmt.Errorf("failed to initialize engine: %w", err)
 		}
 
 		if summaryTUI {
@@ -92,10 +89,9 @@ unchanged account diffs clean.`,
 				tui.WithCoverageAdvisory(!summaryTypedOnly))
 			p := tea.NewProgram(ui.WithWindowTitle(m), tea.WithAltScreen(), tea.WithMouseCellMotion(), tea.WithContext(ctx))
 			if _, err := p.Run(); err != nil {
-				fmt.Fprintf(os.Stderr, "Error running summary TUI: %v\n", err)
-				os.Exit(1)
+				return fmt.Errorf("running summary TUI: %w", err)
 			}
-			return
+			return nil
 		}
 
 		// Problems are summarized after the run; the raw log stream would
@@ -104,8 +100,7 @@ unchanged account diffs clean.`,
 
 		result, err := eng.Run(ctx)
 		if err != nil {
-			fmt.Fprintf(os.Stderr, "Error collecting resources: %v\n", err)
-			os.Exit(1)
+			return fmt.Errorf("collecting resources: %w", err)
 		}
 
 		resources := result.Resources
@@ -124,18 +119,16 @@ unchanged account diffs clean.`,
 
 		if summaryBaseline || summaryDiff {
 			if err := runBaselineOrDiff(resources, eng.AccountID, eng.EffectiveRegions(), summaryDiff); err != nil {
-				fmt.Fprintf(os.Stderr, "Error: %v\n", err)
-				os.Exit(1)
+				return err
 			}
-			return
+			return nil
 		}
 
 		rows := summary.BuildRows(resources)
 		if len(rows) == 0 {
 			fmt.Println("No resources found.")
 		} else if err := summary.Render(os.Stdout, rows, outputFormat, noHeader); err != nil {
-			fmt.Fprintf(os.Stderr, "Error rendering summary: %v\n", err)
-			os.Exit(1)
+			return fmt.Errorf("rendering summary: %w", err)
 		}
 
 		// Coverage advisory: only for the human table view (json/csv/ndjson must
@@ -149,6 +142,7 @@ unchanged account diffs clean.`,
 				fmt.Fprintln(os.Stdout, "\n"+note)
 			}
 		}
+		return nil
 	},
 }
 

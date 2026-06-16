@@ -3,7 +3,6 @@ package cmd
 import (
 	"context"
 	"fmt"
-	"os"
 	"strings"
 
 	tea "github.com/charmbracelet/bubbletea"
@@ -34,7 +33,7 @@ list; otherwise the config's aws.regions list is used.`,
 
   # Open a group and tail events matching a pattern
   aws_explorer cw -g /aws/lambda/my-fn -f ERROR`,
-	Run: func(cmd *cobra.Command, args []string) {
+	RunE: func(cmd *cobra.Command, args []string) error {
 		ctx, cancel := context.WithCancel(context.Background())
 		defer cancel()
 
@@ -68,16 +67,15 @@ list; otherwise the config's aws.regions list is used.`,
 
 		m, err := cwtui.NewModel(ctx, cwCfg, regions, scanAll, configFilePath(), AppConfig, cwGroup, cwStream, cwFilter)
 		if err != nil {
-			fmt.Fprintf(os.Stderr, "Error initializing CloudWatch Logs TUI: %v\n", err)
-			os.Exit(1)
+			return fmt.Errorf("initializing CloudWatch Logs TUI: %w", err)
 		}
 
 		p := tea.NewProgram(ui.WithWindowTitle(m), tea.WithAltScreen(), tea.WithContext(ctx))
 
 		if _, err := p.Run(); err != nil {
-			fmt.Fprintf(os.Stderr, "Error running CloudWatch Logs TUI: %v\n", err)
-			os.Exit(1)
+			return fmt.Errorf("running CloudWatch Logs TUI: %w", err)
 		}
+		return nil
 	},
 }
 

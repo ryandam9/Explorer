@@ -93,15 +93,14 @@ Run "aws_explorer config init" to write a starter file.`,
 		}
 		return preflightAuth(cmd)
 	},
-	Run: func(cmd *cobra.Command, args []string) {
+	RunE: func(cmd *cobra.Command, args []string) error {
 		applyGlobalAWSOverrides()
 
 		ctx := context.Background()
 
 		eng, err := engine.NewEngine(ctx, AppConfig)
 		if err != nil {
-			fmt.Fprintf(os.Stderr, "Error: failed to initialize engine: %v\n", err)
-			os.Exit(1)
+			return fmt.Errorf("failed to initialize engine: %w", err)
 		}
 
 		// Collection warnings are summarized after the run by the output
@@ -114,6 +113,7 @@ Run "aws_explorer config init" to write a starter file.`,
 			NoHeader:   noHeader,
 			TotalTasks: len(eng.PlannedTaskKeys()),
 		})
+		return nil
 	},
 }
 
@@ -170,6 +170,11 @@ func applyOutputFormatDefault(cmd *cobra.Command) {
 
 func init() {
 	cobra.OnInitialize(initConfig)
+
+	// Commands return their errors (Cobra prints them); usage text is only
+	// helpful for flag/arg mistakes, not runtime failures, so suppress the
+	// usage dump on a returned error.
+	rootCmd.SilenceUsage = true
 
 	rootCmd.Version = fmt.Sprintf("%s (commit: %s, built: %s)", version, commit, date)
 
