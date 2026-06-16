@@ -157,6 +157,11 @@ func TestExportHTMLStructure(t *testing.T) {
 		"<div class=\"dt-wrap\"><table>",         // tables wrapped for full-width fill + scroll
 		"cdn.datatables.net",                     // DataTables stylesheet/script loaded
 		"new DataTable(t,",                       // resource tables initialized as DataTables
+		"pageLength: 25",                         // #212: paginate by default so the header stays visible
+		"Roboto+Condensed",                       // #212: Roboto Condensed loaded for the table text
+		`--table:"Roboto Condensed"`,             // #212: and applied via the table font var
+		"max-height:80vh",                        // #212: plain/offline tables scroll within ~80vh
+		"position:sticky",                        // #212: header pinned during scroll
 	} {
 		if !strings.Contains(html, want) {
 			t.Errorf("export HTML missing %q", want)

@@ -110,7 +110,7 @@ const reportHTMLTemplate = `<!DOCTYPE html>
 <link rel="stylesheet" href="https://cdn.datatables.net/2.1.8/css/dataTables.dataTables.min.css">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Archivo+Black&family=Space+Grotesk:wght@400;500;600;700&family=Space+Mono:wght@400;700&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Archivo+Black&family=Roboto+Condensed:wght@400;500;700&family=Space+Grotesk:wght@400;500;600;700&family=Space+Mono:wght@400;700&display=swap" rel="stylesheet">
 <style>
 /* Neo-brutalism: flat bright blocks, thick black borders, hard offset shadows. */
 :root {
@@ -120,6 +120,7 @@ const reportHTMLTemplate = `<!DOCTYPE html>
   --body:"Space Grotesk",ui-sans-serif,system-ui,-apple-system,"Segoe UI",sans-serif;
   --display:"Archivo Black","Space Grotesk",sans-serif;
   --mono:"Space Mono",ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
+  --table:"Roboto Condensed",ui-sans-serif,system-ui,-apple-system,"Segoe UI",sans-serif;
 }
 * { box-sizing:border-box; }
 html { scroll-behavior:smooth; }
@@ -131,7 +132,7 @@ body { margin:0; font:16px/1.55 var(--body); color:var(--ink); background:var(--
 .banner .meta span { background:var(--panel); border:3px solid var(--ink); box-shadow:var(--shadow-sm); padding:.15rem .65rem; font-family:var(--mono); }
 .banner .badge { background:var(--pink); font-weight:700; text-transform:uppercase; }
 /* Layout */
-.layout { display:flex; align-items:flex-start; gap:1.5rem; max-width:1500px; margin:0 auto; padding:1.5rem; }
+.layout { display:flex; align-items:flex-start; gap:1.5rem; max-width:1900px; margin:0 auto; padding:1.5rem; }
 nav.toc { position:sticky; top:1rem; width:250px; flex:0 0 250px; max-height:calc(100vh - 2rem); overflow-y:auto; background:var(--panel); border:4px solid var(--ink); box-shadow:var(--shadow); padding:1rem; }
 nav.toc h2 { margin:0 0 .8rem; font-family:var(--display); font-size:.85rem; text-transform:uppercase; background:var(--blue); border:3px solid var(--ink); box-shadow:var(--shadow-sm); padding:.35rem .55rem; }
 nav.toc a { display:block; margin:.45rem 0; padding:.35rem .55rem; color:var(--ink); text-decoration:none; font-weight:600; font-size:.84rem; background:var(--panel); border:2px solid var(--ink); box-shadow:var(--shadow-sm); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; transition:transform .05s ease,box-shadow .05s ease; }
@@ -152,11 +153,18 @@ hr { border:none; border-top:3px solid var(--ink); margin:2rem 0; }
 /* Tables — wrapper scrolls horizontally; table fills the row so column
    backgrounds (e.g. the header) always reach the right edge. */
 .dt-wrap { overflow-x:auto; margin:.4rem 0 1.4rem; background:var(--panel); border:3px solid var(--ink); box-shadow:var(--shadow); }
+/* Plain tables (offline / no-JS, and the small two-column ones DataTables
+   skips) get a bounded height so a long table scrolls inside the box at ~80%
+   of the viewport instead of forcing a page scroll that hides the header. The
+   DataTables-enhanced tables paginate instead, so they are left unbounded
+   (their search/length/paging controls must stay visible). */
+.dt-wrap:not(:has(.dt-container)) { max-height:80vh; overflow:auto; }
 table { border-collapse:separate; border-spacing:0; width:100%; margin:0; background:var(--panel); font-size:.86rem; }
-th, td { border-right:2px solid var(--ink); border-bottom:2px solid var(--ink); padding:.5rem .7rem; text-align:left; vertical-align:top; white-space:nowrap; font-family:var(--mono); font-size:.82rem; }
+th, td { border-right:2px solid var(--ink); border-bottom:2px solid var(--ink); padding:.5rem .7rem; text-align:left; vertical-align:top; white-space:nowrap; font-family:var(--table); font-size:.86rem; }
 th:last-child, td:last-child { border-right:none; }
 tbody tr:last-child td { border-bottom:none; }
-th { background:var(--blue); font-weight:700; text-transform:uppercase; font-size:.74rem; letter-spacing:.02em; }
+/* Pin the header so it stays visible while the table body scrolls. */
+th { background:var(--blue); font-weight:700; text-transform:uppercase; font-size:.78rem; letter-spacing:.02em; position:sticky; top:0; z-index:1; }
 tbody tr:nth-child(even) { background:#fff7d6; }
 tbody tr:hover { background:var(--yellow); }
 /* DataTables controls, restyled to match */
@@ -202,7 +210,7 @@ document.addEventListener('DOMContentLoaded', function () {
     if (t.querySelectorAll('thead th').length <= 2) { return; }
     new DataTable(t, {
       paging: true,
-      pageLength: -1,
+      pageLength: 25,
       lengthMenu: [[25, 50, 100, -1], [25, 50, 100, 'All']],
       order: [],
       autoWidth: false,
