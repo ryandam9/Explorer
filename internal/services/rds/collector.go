@@ -2,6 +2,7 @@ package rds
 
 import (
 	"context"
+	"errors"
 	"fmt"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
@@ -10,6 +11,13 @@ import (
 	"github.com/ryandam9/aws_explorer/internal/model"
 	"github.com/ryandam9/aws_explorer/internal/services"
 )
+
+// rdsAPI is the subset of the RDS client used by the collector. Splitting it
+// out lets each resource family be exercised with a fake client in tests.
+type rdsAPI interface {
+	rds.DescribeDBInstancesAPIClient
+	rds.DescribeDBClustersAPIClient
+}
 
 // Collector implements the services.Collector interface for RDS.
 type Collector struct{}
@@ -28,42 +36,61 @@ func (c *Collector) IsGlobal() bool {
 }
 
 func (c *Collector) Collect(ctx context.Context, input services.CollectInput) ([]model.Resource, error) {
-	client := rds.NewFromConfig(input.AWSConfig)
+	return c.collect(ctx, rds.NewFromConfig(input.AWSConfig), input)
+}
+
+// collect gathers DB instances and DB clusters independently: a failure in one
+// (e.g. a denied DescribeDBInstances) degrades only that family — the other is
+// still queried and already-collected resources are kept. Errors are joined so
+// the engine records a partial result rather than aborting the region.
+func (c *Collector) collect(ctx context.Context, api rdsAPI, input services.CollectInput) ([]model.Resource, error) {
 	var resources []model.Resource
+	var errs []error
 
-	// 1. Collect DB Instances
-	paginator := rds.NewDescribeDBInstancesPaginator(client, &rds.DescribeDBInstancesInput{})
-	for paginator.HasMorePages() {
-		page, err := paginator.NextPage(ctx)
+	var err error
+	if resources, err = c.collectInstances(ctx, api, input, resources); err != nil {
+		errs = append(errs, err)
+	}
+	if resources, err = c.collectClusters(ctx, api, input, resources); err != nil {
+		errs = append(errs, err)
+	}
+
+	return resources, errors.Join(errs...)
+}
+
+func (c *Collector) collectInstances(ctx context.Context, api rdsAPI, input services.CollectInput, acc []model.Resource) ([]model.Resource, error) {
+	p := rds.NewDescribeDBInstancesPaginator(api, &rds.DescribeDBInstancesInput{})
+	for p.HasMorePages() {
+		page, err := p.NextPage(ctx)
 		if err != nil {
-			return resources, fmt.Errorf("failed to describe RDS instances: %w", err)
+			return acc, fmt.Errorf("failed to describe RDS instances: %w", err)
 		}
-
 		batch := make([]model.Resource, 0, len(page.DBInstances))
 		for _, instance := range page.DBInstances {
 			batch = append(batch, c.mapInstance(input.Region, instance, input.DetailLevel))
 		}
-		resources = input.EmitOrAppend(resources, batch)
+		acc = input.EmitOrAppend(acc, batch)
 	}
+	return acc, nil
+}
 
-	// 2. Collect DB Clusters (Aurora / Serverless v2). A cluster with no
-	// provisioned instances is invisible in the instance listing above, so it
-	// must be collected separately.
-	clusterPaginator := rds.NewDescribeDBClustersPaginator(client, &rds.DescribeDBClustersInput{})
-	for clusterPaginator.HasMorePages() {
-		page, err := clusterPaginator.NextPage(ctx)
+// collectClusters gathers DB clusters (Aurora / Serverless v2). A cluster with
+// no provisioned instances is invisible in the instance listing, so it must be
+// collected separately.
+func (c *Collector) collectClusters(ctx context.Context, api rdsAPI, input services.CollectInput, acc []model.Resource) ([]model.Resource, error) {
+	p := rds.NewDescribeDBClustersPaginator(api, &rds.DescribeDBClustersInput{})
+	for p.HasMorePages() {
+		page, err := p.NextPage(ctx)
 		if err != nil {
-			return resources, fmt.Errorf("failed to describe RDS clusters: %w", err)
+			return acc, fmt.Errorf("failed to describe RDS clusters: %w", err)
 		}
-
 		batch := make([]model.Resource, 0, len(page.DBClusters))
 		for _, cluster := range page.DBClusters {
 			batch = append(batch, c.mapCluster(input.Region, cluster, input.DetailLevel))
 		}
-		resources = input.EmitOrAppend(resources, batch)
+		acc = input.EmitOrAppend(acc, batch)
 	}
-
-	return resources, nil
+	return acc, nil
 }
 
 func (c *Collector) mapCluster(region string, cluster types.DBCluster, detail services.DetailLevel) model.Resource {

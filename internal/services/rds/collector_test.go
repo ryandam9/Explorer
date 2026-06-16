@@ -1,10 +1,14 @@
 package rds
 
 import (
+	"context"
+	"errors"
+	"strings"
 	"testing"
 	"time"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
+	"github.com/aws/aws-sdk-go-v2/service/rds"
 	"github.com/aws/aws-sdk-go-v2/service/rds/types"
 	"github.com/ryandam9/aws_explorer/internal/services"
 )
@@ -193,5 +197,51 @@ func TestMapInstance_NilCreateTime(t *testing.T) {
 
 	if res.CreatedAt != nil {
 		t.Errorf("expected nil CreatedAt when not set, got %v", res.CreatedAt)
+	}
+}
+
+// fakeRDS implements rdsAPI; each call returns its configured error (non-nil =>
+// that family fails) and otherwise a single resource so successes are visible.
+type fakeRDS struct {
+	instErr, clusterErr error
+}
+
+func (f fakeRDS) DescribeDBInstances(context.Context, *rds.DescribeDBInstancesInput, ...func(*rds.Options)) (*rds.DescribeDBInstancesOutput, error) {
+	if f.instErr != nil {
+		return nil, f.instErr
+	}
+	return &rds.DescribeDBInstancesOutput{DBInstances: []types.DBInstance{{DBInstanceIdentifier: aws.String("db-1")}}}, nil
+}
+
+func (f fakeRDS) DescribeDBClusters(context.Context, *rds.DescribeDBClustersInput, ...func(*rds.Options)) (*rds.DescribeDBClustersOutput, error) {
+	if f.clusterErr != nil {
+		return nil, f.clusterErr
+	}
+	return &rds.DescribeDBClustersOutput{DBClusters: []types.DBCluster{{DBClusterIdentifier: aws.String("cl-1")}}}, nil
+}
+
+func TestCollect_InstanceFailureStillCollectsClusters(t *testing.T) {
+	c := NewCollector()
+	api := fakeRDS{instErr: errors.New("AccessDenied: DescribeDBInstances")}
+
+	resources, err := c.collect(context.Background(), api, services.CollectInput{Region: "us-east-1"})
+	if err == nil || !strings.Contains(err.Error(), "instances") {
+		t.Fatalf("expected an error naming the instances family, got: %v", err)
+	}
+	if len(resources) != 1 || resources[0].Type != "cluster" {
+		t.Errorf("clusters should still be collected when instances fail, got %+v", resources)
+	}
+}
+
+func TestCollect_ClusterFailureKeepsInstances(t *testing.T) {
+	c := NewCollector()
+	api := fakeRDS{clusterErr: errors.New("AccessDenied: DescribeDBClusters")}
+
+	resources, err := c.collect(context.Background(), api, services.CollectInput{Region: "us-east-1"})
+	if err == nil || !strings.Contains(err.Error(), "clusters") {
+		t.Fatalf("expected an error naming the clusters family, got: %v", err)
+	}
+	if len(resources) != 1 || resources[0].Type != "instance" {
+		t.Errorf("instances should be kept when clusters fail, got %+v", resources)
 	}
 }
