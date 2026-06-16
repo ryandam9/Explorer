@@ -11,6 +11,7 @@ import (
 	"log/slog"
 	"sort"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
@@ -56,6 +57,12 @@ type Cluster struct {
 	MasterDNS     string
 	StateReason   string
 	Created       time.Time
+
+	// DetailKnown is true once DescribeCluster enrichment succeeded for this
+	// cluster. When false the detail-only fields below (and AutoTerminate,
+	// MasterDNS, Applications, ReleaseLabel) were never populated — a denied or
+	// throttled DescribeCluster — so a blank value means "unknown", not "none".
+	DetailKnown bool
 
 	// Detail-only fields, populated by enrichment (DescribeCluster).
 	LogURI          string
@@ -104,6 +111,11 @@ type AppInfo struct {
 // Inventory is the full set of EMR clusters gathered across regions.
 type Inventory struct {
 	Clusters []Cluster
+
+	// EnrichFailures counts clusters that were listed but whose DescribeCluster
+	// enrichment failed (denied/throttled), so the dashboard can warn that some
+	// detail columns are unknown rather than silently blank.
+	EnrichFailures int
 }
 
 // Client holds one EMR client per region.
@@ -193,7 +205,7 @@ func (c *Client) LoadInventory(ctx context.Context, includeTerminated bool) (Inv
 		wg.Add(1)
 		go func(region string) {
 			defer wg.Done()
-			clusters, err := c.loadRegion(ctx, region, includeTerminated)
+			clusters, enrichFails, err := c.loadRegion(ctx, region, includeTerminated)
 			mu.Lock()
 			defer mu.Unlock()
 			if err != nil {
@@ -205,6 +217,7 @@ func (c *Client) LoadInventory(ctx context.Context, includeTerminated bool) (Inv
 				return
 			}
 			inv.Clusters = append(inv.Clusters, clusters...)
+			inv.EnrichFailures += enrichFails
 		}(region)
 	}
 	wg.Wait()
@@ -221,7 +234,7 @@ func (c *Client) LoadInventory(ctx context.Context, includeTerminated bool) (Inv
 // (release label, applications, stop reason) under bounded concurrency. Unless
 // includeTerminated is set, ListClusters is filtered to the live states so the
 // terminated tail is neither listed nor enriched.
-func (c *Client) loadRegion(ctx context.Context, region string, includeTerminated bool) ([]Cluster, error) {
+func (c *Client) loadRegion(ctx context.Context, region string, includeTerminated bool) ([]Cluster, int, error) {
 	cl := c.clientFor(region)
 	var clusters []Cluster
 
@@ -233,15 +246,18 @@ func (c *Client) loadRegion(ctx context.Context, region string, includeTerminate
 	for pag.HasMorePages() {
 		page, err := pag.NextPage(ctx)
 		if err != nil {
-			return clusters, err
+			return clusters, 0, err
 		}
 		for _, summary := range page.Clusters {
 			clusters = append(clusters, clusterFromSummary(region, summary))
 		}
 	}
 
-	var wg sync.WaitGroup
-	sem := make(chan struct{}, describeConcurrency)
+	var (
+		wg          sync.WaitGroup
+		enrichFails atomic.Int32
+		sem         = make(chan struct{}, describeConcurrency)
+	)
 	for i := range clusters {
 		if clusters[i].ID == "" {
 			continue
@@ -253,6 +269,13 @@ func (c *Client) loadRegion(ctx context.Context, region string, includeTerminate
 			defer func() { <-sem }()
 			out, err := cl.DescribeCluster(ctx, &emr.DescribeClusterInput{ClusterId: aws.String(clusters[i].ID)})
 			if err != nil || out.Cluster == nil {
+				// Enrichment failed (denied/throttled) — leave the detail fields
+				// unset and record it so the dashboard can flag the gap rather than
+				// render blanks as "none".
+				if err != nil {
+					slog.Debug("EMR DescribeCluster failed", "cluster", clusters[i].ID, "region", region, "error", err.Error())
+				}
+				enrichFails.Add(1)
 				return
 			}
 			applyClusterDetail(&clusters[i], out.Cluster)
@@ -260,7 +283,7 @@ func (c *Client) loadRegion(ctx context.Context, region string, includeTerminate
 	}
 	wg.Wait()
 
-	return clusters, nil
+	return clusters, int(enrichFails.Load()), nil
 }
 
 // Steps fetches a cluster's step history (newest first, capped to limit).
@@ -377,6 +400,7 @@ func clusterFromSummary(region string, s emrtypes.ClusterSummary) Cluster {
 // applyClusterDetail layers a DescribeCluster result onto a cluster. Pure over
 // its inputs, so it is fixture-tested.
 func applyClusterDetail(c *Cluster, cl *emrtypes.Cluster) {
+	c.DetailKnown = true
 	c.ReleaseLabel = aws.ToString(cl.ReleaseLabel)
 	c.Applications = applicationNames(cl.Applications)
 	c.AutoTerminate = aws.ToBool(cl.AutoTerminate)

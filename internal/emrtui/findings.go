@@ -25,7 +25,7 @@ func (mm *m) computeFindings() []findings.Finding {
 	now := time.Now()
 	byRegion := map[string][]findings.EMRCluster{}
 	for _, c := range mm.inv.Clusters {
-		byRegion[c.Region] = append(byRegion[c.Region], findings.EMRCluster{
+		ec := findings.EMRCluster{
 			ID:                c.ID,
 			Name:              c.Name,
 			ARN:               c.ARN,
@@ -35,7 +35,18 @@ func (mm *m) computeFindings() []findings.Finding {
 			HasLogURI:         c.LogURI != "",
 			HasSecurityConfig: c.SecurityConfig != "",
 			StepsKnown:        false, // step history is loaded lazily, per cluster
-		})
+		}
+		if !c.DetailKnown {
+			// DescribeCluster was denied/throttled, so the detail-derived posture
+			// is unknown. Mark the "good" values so the log/security/auto-terminate
+			// checks stay silent rather than firing on a false blank (under-warn);
+			// the state-derived checks (terminated-with-errors, idle WAITING) still
+			// apply, since they read only the always-present list summary.
+			ec.AutoTerminate = true
+			ec.HasLogURI = true
+			ec.HasSecurityConfig = true
+		}
+		byRegion[c.Region] = append(byRegion[c.Region], ec)
 	}
 	var out []findings.Finding
 	for region, clusters := range byRegion {

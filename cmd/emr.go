@@ -114,6 +114,9 @@ var emrClustersCmd = &cobra.Command{
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "warning: %v\n", err)
 		}
+		if inv.EnrichFailures > 0 {
+			fmt.Fprintf(os.Stderr, "warning: %d cluster(s) could not be enriched (DescribeCluster denied/throttled); some columns are blank\n", inv.EnrichFailures)
+		}
 		clusters := emrtui.FilterClustersByState(inv.Clusters, emrClusterState)
 		return emrtui.RenderClusters(os.Stdout, clusters, outputFormat, noHeader)
 	},
