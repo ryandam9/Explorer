@@ -1,10 +1,14 @@
 package iam
 
 import (
+	"context"
+	"errors"
+	"strings"
 	"testing"
 	"time"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
+	"github.com/aws/aws-sdk-go-v2/service/iam"
 	"github.com/aws/aws-sdk-go-v2/service/iam/types"
 	"github.com/ryandam9/aws_explorer/internal/services"
 )
@@ -128,5 +132,140 @@ func TestMapRole_NilCreateDate(t *testing.T) {
 
 	if res.CreatedAt != nil {
 		t.Errorf("expected nil CreatedAt, got %v", res.CreatedAt)
+	}
+}
+
+func TestMapUser_Fields(t *testing.T) {
+	created := time.Date(2024, 1, 2, 3, 4, 5, 0, time.UTC)
+	lastUsed := time.Date(2024, 6, 1, 12, 0, 0, 0, time.UTC)
+	u := types.User{
+		UserId: aws.String("AID1"), UserName: aws.String("alice"),
+		Arn: aws.String("arn:aws:iam::1:user/alice"), Path: aws.String("/eng/"),
+		CreateDate: &created, PasswordLastUsed: &lastUsed,
+	}
+
+	res := (&Collector{}).mapUser(u, services.DetailLevelSummary)
+	if res.Type != "user" || res.Name != "alice" || res.ID != "AID1" {
+		t.Errorf("unexpected mapping: %+v", res)
+	}
+	if res.Region != "global" || res.Summary["path"] != "/eng/" {
+		t.Errorf("region/path = %q/%q", res.Region, res.Summary["path"])
+	}
+	if res.Details != nil {
+		t.Error("no Details expected at summary level")
+	}
+
+	det := (&Collector{}).mapUser(u, services.DetailLevelDetailed)
+	if det.Details["passwordLastUsed"] != "2024-06-01 12:00:00" {
+		t.Errorf("passwordLastUsed = %v", det.Details["passwordLastUsed"])
+	}
+}
+
+func TestMapPolicy_AttachmentCount(t *testing.T) {
+	p := types.Policy{
+		PolicyId: aws.String("PID1"), PolicyName: aws.String("app-policy"),
+		Arn: aws.String("arn:aws:iam::1:policy/app-policy"), Path: aws.String("/"),
+		AttachmentCount: aws.Int32(3), IsAttachable: true,
+		DefaultVersionId: aws.String("v2"), Description: aws.String("app perms"),
+	}
+	res := (&Collector{}).mapPolicy(p, services.DetailLevelDetailed)
+	if res.Type != "policy" || res.Summary["attachmentCount"] != "3" {
+		t.Errorf("unexpected mapping: %+v", res)
+	}
+	if res.Details["defaultVersionId"] != "v2" || res.Details["isAttachable"] != true {
+		t.Errorf("details = %+v", res.Details)
+	}
+}
+
+func TestMapInstanceProfile_Role(t *testing.T) {
+	ip := types.InstanceProfile{
+		InstanceProfileId: aws.String("IPID1"), InstanceProfileName: aws.String("web-profile"),
+		Arn: aws.String("arn:aws:iam::1:instance-profile/web-profile"), Path: aws.String("/"),
+		Roles: []types.Role{{RoleName: aws.String("web-role")}},
+	}
+	res := (&Collector{}).mapInstanceProfile(ip)
+	if res.Type != "instance-profile" || res.Summary["role"] != "web-role" {
+		t.Errorf("unexpected mapping: %+v", res)
+	}
+}
+
+// fakeIAM implements iamAPI with single-page list responses and a per-family
+// error (non-nil => that family's List call fails).
+type fakeIAM struct {
+	roleErr, userErr, groupErr, policyErr, profileErr error
+}
+
+func (f fakeIAM) ListRoles(context.Context, *iam.ListRolesInput, ...func(*iam.Options)) (*iam.ListRolesOutput, error) {
+	if f.roleErr != nil {
+		return nil, f.roleErr
+	}
+	return &iam.ListRolesOutput{Roles: []types.Role{{RoleId: aws.String("R1"), RoleName: aws.String("r1"), Arn: aws.String("arn:r1")}}}, nil
+}
+
+func (f fakeIAM) ListUsers(context.Context, *iam.ListUsersInput, ...func(*iam.Options)) (*iam.ListUsersOutput, error) {
+	if f.userErr != nil {
+		return nil, f.userErr
+	}
+	return &iam.ListUsersOutput{Users: []types.User{{UserId: aws.String("U1"), UserName: aws.String("u1"), Arn: aws.String("arn:u1")}}}, nil
+}
+
+func (f fakeIAM) ListGroups(context.Context, *iam.ListGroupsInput, ...func(*iam.Options)) (*iam.ListGroupsOutput, error) {
+	if f.groupErr != nil {
+		return nil, f.groupErr
+	}
+	return &iam.ListGroupsOutput{Groups: []types.Group{{GroupId: aws.String("G1"), GroupName: aws.String("g1"), Arn: aws.String("arn:g1")}}}, nil
+}
+
+func (f fakeIAM) ListPolicies(context.Context, *iam.ListPoliciesInput, ...func(*iam.Options)) (*iam.ListPoliciesOutput, error) {
+	if f.policyErr != nil {
+		return nil, f.policyErr
+	}
+	return &iam.ListPoliciesOutput{Policies: []types.Policy{{PolicyId: aws.String("P1"), PolicyName: aws.String("p1"), Arn: aws.String("arn:p1")}}}, nil
+}
+
+func (f fakeIAM) ListInstanceProfiles(context.Context, *iam.ListInstanceProfilesInput, ...func(*iam.Options)) (*iam.ListInstanceProfilesOutput, error) {
+	if f.profileErr != nil {
+		return nil, f.profileErr
+	}
+	return &iam.ListInstanceProfilesOutput{InstanceProfiles: []types.InstanceProfile{{InstanceProfileId: aws.String("IP1"), InstanceProfileName: aws.String("ip1"), Arn: aws.String("arn:ip1")}}}, nil
+}
+
+func TestCollect_AllFamilies(t *testing.T) {
+	resources, err := (&Collector{}).collect(context.Background(), fakeIAM{}, services.CollectInput{})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	got := map[string]bool{}
+	for _, r := range resources {
+		got[r.Type] = true
+	}
+	for _, want := range []string{"role", "user", "group", "policy", "instance-profile"} {
+		if !got[want] {
+			t.Errorf("expected a %q resource, got types %v", want, got)
+		}
+	}
+}
+
+func TestCollect_PartialFailureKeepsOtherFamilies(t *testing.T) {
+	// Users and policies are denied; the rest must still be collected.
+	api := fakeIAM{
+		userErr:   errors.New("AccessDenied: ListUsers"),
+		policyErr: errors.New("AccessDenied: ListPolicies"),
+	}
+	resources, err := (&Collector{}).collect(context.Background(), api, services.CollectInput{})
+	if err == nil || !strings.Contains(err.Error(), "users") || !strings.Contains(err.Error(), "policies") {
+		t.Fatalf("expected a joined error naming users and policies, got: %v", err)
+	}
+	got := map[string]bool{}
+	for _, r := range resources {
+		got[r.Type] = true
+	}
+	for _, want := range []string{"role", "group", "instance-profile"} {
+		if !got[want] {
+			t.Errorf("%q should still be collected despite user/policy failures; got %v", want, got)
+		}
+	}
+	if got["user"] || got["policy"] {
+		t.Errorf("failed families should yield no resources; got %v", got)
 	}
 }
