@@ -632,9 +632,11 @@ func (mm *m) handleKey(msg tea.KeyMsg) []tea.Cmd {
 		case ">", ".":
 			mm.yarnTbl.ScrollRight()
 		case "r":
-			mm.yarnLoading = true
-			mm.yarnErr = nil
-			cmds = append(cmds, mm.loadYarnCmd(mm.yarnCluster), mm.spinner.Tick)
+			if !mm.yarnLoading {
+				mm.yarnLoading = true
+				mm.yarnErr = nil
+				cmds = append(cmds, mm.loadYarnCmd(mm.yarnCluster), mm.spinner.Tick)
+			}
 		case ui.KeyAbout:
 			mm.showAbout = true
 		}
@@ -680,9 +682,11 @@ func (mm *m) handleKey(msg tea.KeyMsg) []tea.Cmd {
 				mm.hbaseConfirm = true
 			}
 		case "r":
-			mm.hbaseLoading = true
-			mm.hbaseErr = nil
-			cmds = append(cmds, mm.loadHbaseCmd(mm.hbaseCluster), mm.spinner.Tick)
+			if !mm.hbaseLoading {
+				mm.hbaseLoading = true
+				mm.hbaseErr = nil
+				cmds = append(cmds, mm.loadHbaseCmd(mm.hbaseCluster), mm.spinner.Tick)
+			}
 		case ui.KeyAbout:
 			mm.showAbout = true
 		}
@@ -712,9 +716,11 @@ func (mm *m) handleKey(msg tea.KeyMsg) []tea.Cmd {
 		case ">", ".":
 			mm.oozieTbl.ScrollRight()
 		case "r":
-			mm.oozieLoading = true
-			mm.oozieErr = nil
-			cmds = append(cmds, mm.loadOozieCmd(mm.oozieCluster), mm.spinner.Tick)
+			if !mm.oozieLoading {
+				mm.oozieLoading = true
+				mm.oozieErr = nil
+				cmds = append(cmds, mm.loadOozieCmd(mm.oozieCluster), mm.spinner.Tick)
+			}
 		case ui.KeyAbout:
 			mm.showAbout = true
 		}
@@ -772,17 +778,16 @@ func (mm *m) handleKey(msg tea.KeyMsg) []tea.Cmd {
 		mm.filterActive = true
 		mm.filter.Focus()
 	case "r":
-		mm.loading = true
-		mm.inv = Inventory{}
-		cmds = append(cmds, mm.loadInventoryCmd(), mm.spinner.Tick)
+		mm.startReload(&cmds)
 	case "t":
 		// Toggle the terminated tail and reload (it changes what ListClusters
-		// returns, so it can't be filtered client-side).
-		mm.showTerminated = !mm.showTerminated
-		mm.loading = true
-		mm.inv = Inventory{}
-		mm.tbl.SetCursor(0)
-		cmds = append(cmds, mm.loadInventoryCmd(), mm.spinner.Tick)
+		// returns, so it can't be filtered client-side). Ignore while a load is
+		// already running so the toggle and the in-flight scope stay in sync.
+		if !mm.loading {
+			mm.showTerminated = !mm.showTerminated
+			mm.tbl.SetCursor(0)
+			mm.startReload(&cmds)
+		}
 	case "enter", "s":
 		if cl, ok := mm.selectedCluster(); ok {
 			mm.stepsActive = true
@@ -857,6 +862,18 @@ func (mm *m) handleKey(msg tea.KeyMsg) []tea.Cmd {
 		mm.showAbout = true
 	}
 	return cmds
+}
+
+// startReload kicks off an inventory reload, unless one is already running, so
+// a double-press of r (or the t toggle) can't fire concurrent loads that race
+// to overwrite the inventory and double the API traffic.
+func (mm *m) startReload(cmds *[]tea.Cmd) {
+	if mm.loading {
+		return
+	}
+	mm.loading = true
+	mm.inv = Inventory{}
+	*cmds = append(*cmds, mm.loadInventoryCmd(), mm.spinner.Tick)
 }
 
 // openDetail opens the scrollable cluster-detail overlay for cl, resetting the

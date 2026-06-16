@@ -536,9 +536,7 @@ func (mm *m) handleKey(msg tea.KeyMsg) []tea.Cmd {
 		mm.filterActive = true
 		mm.filter.Focus()
 	case "r":
-		mm.loading = true
-		mm.inv = Inventory{}
-		cmds = append(cmds, mm.loadInventoryCmd(), mm.spinner.Tick)
+		mm.startReload(&cmds)
 	case "enter":
 		if mm.tab == tabJobs {
 			if job, ok := mm.selectedJob(); ok {
@@ -577,6 +575,18 @@ func (mm *m) handleKey(msg tea.KeyMsg) []tea.Cmd {
 		mm.showAbout = true
 	}
 	return cmds
+}
+
+// startReload kicks off an inventory reload, unless one is already running, so
+// a double-press of r can't fire concurrent loads that race to overwrite the
+// inventory and double the API traffic.
+func (mm *m) startReload(cmds *[]tea.Cmd) {
+	if mm.loading {
+		return
+	}
+	mm.loading = true
+	mm.inv = Inventory{}
+	*cmds = append(*cmds, mm.loadInventoryCmd(), mm.spinner.Tick)
 }
 
 // closeOrScrollOverlay handles keys for a scrollable detail overlay: q/ctrl+c

@@ -131,6 +131,9 @@ func TestTerminatedToggleReloads(t *testing.T) {
 	if len(cmds) == 0 {
 		t.Error("t should issue a reload command")
 	}
+	// The toggle is guarded while a load is in flight; let it complete, then a
+	// second t flips the scope back.
+	mm.loading = false
 	mm.handleKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("t")})
 	if mm.showTerminated {
 		t.Error("second t should toggle showTerminated back off")
@@ -254,6 +257,31 @@ func TestEMRDetailOverlayScrollsAndCloses(t *testing.T) {
 	mm.handleKey(tea.KeyMsg{Type: tea.KeyEsc})
 	if mm.detailActive {
 		t.Error("Esc should close the detail overlay")
+	}
+}
+
+// TestEMRRefreshGuardedWhileLoading verifies r (and the t toggle) are no-ops
+// while a load is already running, so they can't fire concurrent inventory
+// loads.
+func TestEMRRefreshGuardedWhileLoading(t *testing.T) {
+	mm := newClusterTestModel(120, 24)
+
+	mm.loading = true
+	if cmds := mm.handleKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("r")}); len(cmds) != 0 {
+		t.Errorf("r during a load should not start another (got %d cmds)", len(cmds))
+	}
+	before := mm.showTerminated
+	cmds := mm.handleKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("t")})
+	if mm.showTerminated != before {
+		t.Error("t during a load should not toggle the terminated scope")
+	}
+	if len(cmds) != 0 {
+		t.Error("t during a load should not start a reload")
+	}
+
+	mm.loading = false
+	if cmds := mm.handleKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("r")}); len(cmds) == 0 || !mm.loading {
+		t.Error("r when idle should start a reload")
 	}
 }
 
