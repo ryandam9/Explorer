@@ -4,7 +4,35 @@ import (
 	"testing"
 
 	tea "github.com/charmbracelet/bubbletea"
+
+	"github.com/ryandam9/aws_explorer/internal/table"
 )
+
+func TestBucketSummaryOnDemand(t *testing.T) {
+	m := &Model{width: 100, height: 30, state: stateBucketList, focus: focusBuckets,
+		bucketRegionCache:  map[string]string{},
+		bucketDetailsCache: map[string]*BucketDetails{}}
+	m.initBucketTable()
+	m.bucketTable.SetRows([]table.Row{
+		{"1", "my-bucket", "us-east-1", "2026-01-01"},
+		{"2", "other-bucket", "us-east-1", "2026-01-02"},
+	})
+
+	// Scrolling the bucket list selects a bucket but fetches no summary.
+	m.Update(tea.KeyMsg{Type: tea.KeyDown})
+	if m.detailsLoading {
+		t.Error("scrolling buckets must not fetch the (~19-call) summary")
+	}
+	if m.selectedBucketDetails != nil {
+		t.Error("no bucket summary should load until requested")
+	}
+
+	// Pressing d opens the full detail view (where the fetch happens on demand).
+	m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("d")})
+	if m.state != stateBucketDetail {
+		t.Errorf("d should open the bucket detail view, state=%d", m.state)
+	}
+}
 
 func TestEscGoesUpOneFolderThenToBuckets(t *testing.T) {
 	m := &Model{width: 100, height: 30, state: stateObjectList, focus: focusObjects,

@@ -1727,10 +1727,10 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		} else {
 			m.statusMsg = fmt.Sprintf("%d bucket(s) found", count)
 			if m.bucket == "" {
+				// On-demand: select the first bucket but don't fetch its summary until
+				// the user opens the detail view with "d".
 				m.bucket = m.allBucketRows[0][1]
-				if cmd := m.ensureBucketDetails(m.bucket); cmd != nil {
-					cmds = append(cmds, cmd)
-				}
+				m.selectedBucketDetails = m.bucketDetailsCache[m.bucket]
 			}
 			if pending {
 				cmds = append(cmds, m.fetchBucketRegions())
@@ -1878,13 +1878,12 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 		if m.state == stateBucketList {
 			row := m.bucketTable.SelectedRow()
-			if len(row) > 0 && (m.selectedBucketDetails == nil || m.bucket != row[1]) {
+			if len(row) > 0 && m.bucket != row[1] {
 				m.bucket = row[1]
-				// Served from the session cache when this bucket was already
-				// visited — scrolling the list doesn't refetch ~19 calls per row.
-				if cmd := m.ensureBucketDetails(row[1]); cmd != nil {
-					cmds = append(cmds, cmd)
-				}
+				// On-demand: don't fetch the (~19-call) bucket summary while
+				// scrolling. Serve it from the session cache if already fetched;
+				// otherwise it loads when the user opens the detail view with "d".
+				m.selectedBucketDetails = m.bucketDetailsCache[row[1]]
 			}
 		}
 	} else if m.state == stateObjectList {
@@ -2249,7 +2248,10 @@ func (m *Model) bucketListView() string {
 		date := row[3]
 		title = fmt.Sprintf("BUCKET DETAILS: %s  [d] Full detail view", name)
 
-		metaText = m.loadingLine("Loading bucket details…")
+		metaText = ui.MutedStyle().Render("Press d for full details (versioning, encryption, lifecycle, policy…)")
+		if m.detailsLoading {
+			metaText = m.loadingLine("Loading bucket details…")
+		}
 		if !m.detailsLoading && m.selectedBucketDetails != nil {
 			tagStr := ""
 			if len(m.selectedBucketDetails.Tags) > 0 {
