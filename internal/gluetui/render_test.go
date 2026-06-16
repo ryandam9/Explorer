@@ -8,6 +8,15 @@ import (
 	"time"
 )
 
+// TestGlueAboutTextNoLiteralEscapes guards against an escaping slip: paragraph
+// breaks must be real newlines, not a literal backslash-n the overlay would
+// render verbatim.
+func TestGlueAboutTextNoLiteralEscapes(t *testing.T) {
+	if strings.Contains(glueAboutText, `\n`) {
+		t.Errorf("glueAboutText contains a literal \\n escape:\n%s", glueAboutText)
+	}
+}
+
 func TestFilterRunsByStatus(t *testing.T) {
 	runs := []JobRun{
 		{ID: "1", State: "SUCCEEDED"},
