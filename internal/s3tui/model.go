@@ -110,6 +110,16 @@ type objectPreviewMsg struct {
 	err     error
 }
 
+// archiveLoadedMsg carries a fetched-and-listed tar archive (data is the raw,
+// already-decompressed tar bytes used to extract members on demand).
+type archiveLoadedMsg struct {
+	key       string
+	data      []byte
+	members   []archiveMember
+	truncated bool
+	err       error
+}
+
 type bucketDetailsMsg struct {
 	bucket  string
 	details *BucketDetails
@@ -194,14 +204,27 @@ type Model struct {
 	previewErr       error
 
 	// Full-screen CSV table view (a CSV/TSV object previewed with "p").
-	showCSV           bool
-	csvTable          table.Model
-	csvDelim          rune
-	csvAll            [][]string // parsed header + data rows
-	csvRowCap         int        // first-N/last-N window (0 = all)
-	csvRowCapSet      bool
-	csvTotal          int // total data rows parsed
-	csvHidden         int // rows omitted by the window
+	showCSV      bool
+	csvTable     table.Model
+	csvDelim     rune
+	csvAll       [][]string // parsed header + data rows
+	csvRowCap    int        // first-N/last-N window (0 = all)
+	csvRowCapSet bool
+	csvTotal     int // total data rows parsed
+	csvHidden    int // rows omitted by the window
+
+	// Full-screen archive browser (a .tar/.tar.gz/.tgz object). Selecting a
+	// member opens its content in the CSV or text view.
+	showArchive        bool
+	archiveTable       table.Model
+	archiveKey         string
+	archiveData        []byte // decompressed tar bytes, for extracting members
+	archiveMembers     []archiveMember
+	archiveTruncated   bool
+	archiveLoading     bool
+	archiveErr         error
+	previewFromArchive bool // the current preview/CSV came from an archive member
+
 	bucketRegionCache map[string]string
 	// bucketDetailsCache holds fetched bucket details for the session: each
 	// fetch costs ~19 API calls and is triggered by every selection change in
@@ -589,19 +612,111 @@ func (m *Model) fetchObjectPreview(key string) tea.Cmd {
 	}
 }
 
-// openPreview starts previewing an object: a CSV/TSV opens in the full-screen
-// table view, anything else in the text-preview overlay. The content is fetched
-// asynchronously; the view shows a spinner until it arrives.
+// openPreview starts previewing an object. A tar archive opens the full-screen
+// member browser; a plain .gz is decompressed and shown as a CSV table or text
+// by its inner name; a CSV/TSV opens the table view; anything else opens the
+// text overlay. Content is fetched asynchronously with a spinner.
 func (m *Model) openPreview(key string) tea.Cmd {
 	m.previewKey = key
-	if looksLikeCSV(key) {
+	m.previewFromArchive = false
+	m.showCSV = false
+	m.showPreview = false
+	m.showArchive = false
+
+	switch {
+	case looksLikeTar(key):
+		m.showArchive = true
+		m.archiveKey = key
+		m.archiveLoading = true
+		m.archiveErr = nil
+		m.archiveData = nil
+		m.archiveMembers = nil
+		return m.fetchArchive(key)
+	case looksLikeGzip(key):
+		m.routePreviewView(innerName(key))
+		m.previewLoading = true
+		m.previewErr = nil
+		return m.fetchGzipPreview(key)
+	default:
+		m.routePreviewView(key)
+		return m.fetchObjectPreview(key)
+	}
+}
+
+// routePreviewView selects the CSV table or the text overlay for a logical
+// filename (the inner name for compressed objects).
+func (m *Model) routePreviewView(name string) {
+	if looksLikeCSV(name) {
 		m.showCSV = true
 		m.showPreview = false
 	} else {
 		m.showPreview = true
 		m.showCSV = false
 	}
-	return m.fetchObjectPreview(key)
+}
+
+// fetchGzipPreview downloads and decompresses a plain .gz object for preview.
+func (m *Model) fetchGzipPreview(key string) tea.Cmd {
+	m.previewLoading = true
+	m.previewErr = nil
+	m.previewContent = ""
+	bucket := m.bucket
+	client := m.client
+	return func() tea.Msg {
+		data, _, err := client.GetObjectRange(bucket, key, gzCompressedCap)
+		if err != nil {
+			return objectPreviewMsg{key: key, err: err}
+		}
+		out, truncated, err := gunzip(data, gzDecompressedCap)
+		if err != nil {
+			return objectPreviewMsg{key: key, err: err}
+		}
+		return objectPreviewMsg{key: key, content: decompressedPreview(out, truncated, looksLikeCSV(innerName(key)))}
+	}
+}
+
+// fetchArchive downloads a tar archive (decompressing if gzipped) and lists its
+// members.
+func (m *Model) fetchArchive(key string) tea.Cmd {
+	bucket := m.bucket
+	client := m.client
+	gzipped := isGzipCompressed(key)
+	return func() tea.Msg {
+		data, truncated, err := client.GetObjectRange(bucket, key, tarCompressedCap)
+		if err != nil {
+			return archiveLoadedMsg{key: key, err: err}
+		}
+		raw := data
+		if gzipped {
+			out, tr, gerr := gunzip(data, tarDecompressedCap)
+			if gerr != nil {
+				return archiveLoadedMsg{key: key, err: gerr}
+			}
+			raw = out
+			truncated = truncated || tr
+		}
+		members, merr := tarMembers(raw)
+		if merr != nil {
+			return archiveLoadedMsg{key: key, err: merr}
+		}
+		return archiveLoadedMsg{key: key, data: raw, members: members, truncated: truncated}
+	}
+}
+
+// decompressedPreview turns decompressed bytes into preview text, flagging
+// binary content. A truncation note is appended only for non-CSV content — for
+// a CSV it would corrupt the last row, and the table reports its own row window.
+func decompressedPreview(out []byte, truncated, isCSV bool) string {
+	for _, b := range out {
+		if b == 0 {
+			return "Binary content (decompressed). Download to inspect."
+		}
+	}
+	text := string(out)
+	if truncated && !isCSV {
+		text += "\n\n… preview truncated …"
+	}
+	return text
 }
 
 // initPreviewViewport builds the scrollable text viewport for a (non-CSV)
@@ -1030,6 +1145,9 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if m.showCSV {
 			m.layoutCSVTable()
 		}
+		if m.showArchive {
+			m.layoutArchiveTable()
+		}
 
 		bucketTableHeight := m.height - 18
 		if bucketTableHeight < 5 {
@@ -1149,8 +1267,25 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.csvTable, _ = m.csvTable.Update(msg)
 			return m, nil
 		}
+		if m.showArchive {
+			if msg.String() == "ctrl+c" {
+				return m, tea.Quit
+			}
+			if m.handleArchiveKey(msg.String()) {
+				return m, nil
+			}
+			m.archiveTable, _ = m.archiveTable.Update(msg)
+			return m, nil
+		}
 		if m.showPreview {
 			if msg.String() == "esc" {
+				// A member opened from an archive returns to the member list.
+				if m.previewFromArchive {
+					m.previewFromArchive = false
+					m.showPreview = false
+					m.showArchive = true
+					return m, nil
+				}
 				m.showPreview = false
 				m.previewLoading = false
 				return m, nil
@@ -1636,6 +1771,11 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 		}
 
+	case archiveLoadedMsg:
+		if msg.key == m.archiveKey {
+			m.applyArchiveLoaded(msg)
+		}
+
 	case presignedURLMsg:
 		if msg.err != nil {
 			m.statusMsg = fmt.Sprintf("Presign error: %s", summarizeS3Error(msg.err))
@@ -1767,6 +1907,12 @@ func (m *Model) View() string {
 	// gets the whole window rather than a narrow overlay.
 	if m.showCSV {
 		out := ui.AppStyle().Render(m.csvView())
+		return m.debug.Overlay(out, m.width, m.height)
+	}
+
+	// Full-screen archive member browser.
+	if m.showArchive {
+		out := ui.AppStyle().Render(m.archiveView())
 		return m.debug.Overlay(out, m.width, m.height)
 	}
 
@@ -2459,7 +2605,9 @@ const s3AboutText = "This is the dedicated S3 browser. The first screen lists yo
 	"folders, drilling into objects.\n\n" +
 	"On an object you can preview its contents (p) — a CSV or TSV opens in a " +
 	"full-screen, scrollable table with auto-detected delimiter (press s to change " +
-	"it, w to adjust how many rows are shown, t for raw text) — copy its S3 URI (y), open it " +
+	"it, w to adjust how many rows are shown, t for raw text). A .gz is decompressed " +
+	"and shown by its inner type, and a .tar/.tar.gz/.tgz opens a browser of its " +
+	"members so you can open any file inside. You can also copy its S3 URI (y), open it " +
 	"in the AWS console (o), generate a 1-hour presigned URL (g) and download it " +
 	"(D). Use / to jump to a prefix, f to flatten the listing, s to sort, and L to " +
 	"load more when a listing is truncated.\n\n" +
@@ -2499,7 +2647,7 @@ func (m *Model) helpView() string {
 			"",
 			"Objects",
 			"  /                  Jump to prefix",
-			"  p                  Preview object (CSV/TSV opens as a scrollable table)",
+			"  p                  Preview object (CSV→table, .gz→decompress, .tar→browse members)",
 			"  y                  Copy S3 URI to clipboard",
 			"  o                  Open bucket/object in the AWS console (copies the URL)",
 			"  g                  Generate presigned URL (1 hour)",

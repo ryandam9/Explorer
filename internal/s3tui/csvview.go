@@ -268,6 +268,11 @@ func (m *Model) handleCSVKey(key string) bool {
 	case "esc", "q":
 		m.showCSV = false
 		m.csvAll = nil
+		// A member opened from an archive returns to the member list.
+		if m.previewFromArchive {
+			m.previewFromArchive = false
+			m.showArchive = true
+		}
 		return true
 	case "t":
 		// Toggle to the raw-text preview of the same object.
