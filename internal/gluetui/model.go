@@ -41,6 +41,15 @@ var tabNames = [tabCount]string{"Jobs", "Crawlers", "Triggers", "Workflows", "Co
 // runWindow caps how many runs the history view fetches per job.
 const runWindow = 20
 
+// Fetch deadlines bound every load so a slow or hung AWS call surfaces a
+// retryable error instead of spinning forever. Inventory fans out across every
+// region with per-job enrichment, so it gets generous headroom; the per-job
+// drill-downs are single calls and get less.
+const (
+	inventoryTimeout = 2 * time.Minute
+	drillTimeout     = 45 * time.Second
+)
+
 type m struct {
 	ctx        context.Context
 	client     *Client
@@ -176,7 +185,9 @@ func (mm *m) Init() tea.Cmd {
 func (mm *m) loadInventoryCmd() tea.Cmd {
 	return func() tea.Msg {
 		slog.Info("Loading Glue inventory", "regions", len(mm.regions))
-		inv, err := mm.client.LoadInventory(mm.ctx)
+		ctx, cancel := context.WithTimeout(mm.ctx, inventoryTimeout)
+		defer cancel()
+		inv, err := mm.client.LoadInventory(ctx)
 		return invMsg{inv: inv, err: err}
 	}
 }
@@ -184,7 +195,9 @@ func (mm *m) loadInventoryCmd() tea.Cmd {
 func (mm *m) loadRunsCmd(job Job) tea.Cmd {
 	return func() tea.Msg {
 		slog.Info("Loading Glue job runs", "job", job.Name, "region", job.Region)
-		runs, err := mm.client.JobRuns(mm.ctx, job.Region, job.Name, runWindow)
+		ctx, cancel := context.WithTimeout(mm.ctx, drillTimeout)
+		defer cancel()
+		runs, err := mm.client.JobRuns(ctx, job.Region, job.Name, runWindow)
 		return runsMsg{job: job, runs: runs, err: err}
 	}
 }
@@ -192,7 +205,9 @@ func (mm *m) loadRunsCmd(job Job) tea.Cmd {
 func (mm *m) loadDefCmd(job Job) tea.Cmd {
 	return func() tea.Msg {
 		slog.Info("Loading Glue job definition", "job", job.Name, "region", job.Region)
-		def, err := mm.client.JobDefinition(mm.ctx, job.Region, job.Name)
+		ctx, cancel := context.WithTimeout(mm.ctx, drillTimeout)
+		defer cancel()
+		def, err := mm.client.JobDefinition(ctx, job.Region, job.Name)
 		return defMsg{def: def, err: err}
 	}
 }
