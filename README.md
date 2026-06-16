@@ -237,7 +237,9 @@ with a built-in collector.
 It combines two sources and merges them by ARN:
 
 1. **The 29 typed collectors** (EC2, S3, RDS, …) for rich data — state,
-   availability zone, and service-specific summary fields.
+   availability zone, and service-specific summary fields. See
+   [docs/collectors.md](docs/collectors.md) for exactly which resource types
+   each collector covers, its required IAM, and known gaps.
 2. **A universal sweep via the [Resource Groups Tagging API]** (`tag:GetResources`),
    which returns ARNs and tags for taggable resources across hundreds of
    services in each region. This is what gives the long tail (KMS keys, subnets,
