@@ -64,3 +64,31 @@ func TestHardWrap(t *testing.T) {
 		}
 	}
 }
+
+func TestXMLBOMHandling(t *testing.T) {
+	// A UTF-8 BOM (common in Windows/.NET XML) must not stop detection.
+	bom := xmlBOM + `<?xml version="1.0"?><root><a>1</a></root>`
+	if !looksLikeXMLContent(bom) {
+		t.Fatal("BOM-prefixed XML should be detected as XML")
+	}
+	out, ok := formatXML(bom)
+	if !ok {
+		t.Fatal("BOM-prefixed XML should format")
+	}
+	if strings.Contains(out, xmlBOM) {
+		t.Errorf("BOM should be stripped from the formatted output")
+	}
+	if !strings.Contains(out, "\n  <a>1</a>") {
+		t.Errorf("BOM XML should be re-indented:\n%s", out)
+	}
+}
+
+func TestXMLDeclarationOnOwnLine(t *testing.T) {
+	out, ok := formatXML(`<?xml version="1.0"?><root><a>1</a></root>`)
+	if !ok {
+		t.Fatal("formatXML")
+	}
+	if !strings.HasPrefix(out, "<?xml version=\"1.0\"?>\n<root>") {
+		t.Errorf("declaration should be on its own line:\n%s", out)
+	}
+}
