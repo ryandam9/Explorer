@@ -213,6 +213,10 @@ type Model struct {
 	csvTotal     int // total data rows parsed
 	csvHidden    int // rows omitted by the window
 
+	csvDelimInput   textinput.Model // typed custom-delimiter prompt ("S")
+	csvDelimEditing bool
+	csvDelimErr     string
+
 	// Full-screen archive browser (a .tar/.tar.gz/.tgz object). Selecting a
 	// member opens its content in the CSV or text view.
 	showArchive        bool
@@ -1259,6 +1263,19 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if m.showCSV {
 			if msg.String() == "ctrl+c" {
 				return m, tea.Quit
+			}
+			// The typed delimiter prompt captures keys while open.
+			if m.csvDelimEditing {
+				switch msg.String() {
+				case "enter":
+					m.applyDelimiterInput()
+				case "esc":
+					m.csvDelimEditing = false
+					m.csvDelimErr = ""
+				default:
+					m.csvDelimInput, _ = m.csvDelimInput.Update(msg)
+				}
+				return m, nil
 			}
 			if m.handleCSVKey(msg.String()) {
 				return m, nil
