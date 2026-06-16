@@ -10,6 +10,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/charmbracelet/bubbles/textinput"
+	"github.com/charmbracelet/bubbles/viewport"
 	"github.com/charmbracelet/lipgloss"
 
 	"github.com/ryandam9/aws_explorer/internal/table"
@@ -184,6 +185,7 @@ func (m *Model) initCSV(content string) bool {
 	}
 	m.csvAll = recs
 	m.csvHeaderRow = 1 // row 1 is the header by default (reset per file)
+	m.csvRecordActive = false
 	if m.csvRowCap == 0 && !m.csvRowCapSet {
 		m.csvRowCap = defaultCSVRowCap
 		m.csvRowCapSet = true
@@ -225,6 +227,7 @@ func (m *Model) buildCSVTable() {
 	m.csvTotal = len(data)
 	display, hidden := windowRecords(data, m.csvRowCap)
 	m.csvHidden = hidden
+	m.csvDisplay = display // keep the on-screen rows for the record view
 
 	cols := make([]table.Column, len(header))
 	for i, h := range header {
@@ -478,16 +481,81 @@ func (m *Model) handleCSVKey(key string) bool {
 	case "right", ">", ".":
 		m.csvTable.ScrollRight()
 		return true
+	case "enter":
+		m.openCSVRecord()
+		return true
 	}
 	return false
 }
 
-// csvView renders the full-screen CSV table window.
+// openCSVRecord shows the selected table row vertically as Col : value pairs —
+// far easier to read than horizontally scrolling a wide row.
+func (m *Model) openCSVRecord() {
+	i := m.csvTable.Cursor()
+	if i < 0 || i >= len(m.csvDisplay) {
+		return
+	}
+	rec := m.csvDisplay[i]
+	if rec == nil {
+		return // the elision divider between the first/last windows
+	}
+	header, _ := m.headerAndData()
+
+	// Width to which column names are padded, so the colons line up.
+	labelW := 0
+	for _, h := range header {
+		if w := len([]rune(strings.TrimSpace(h))); w > labelW {
+			labelW = w
+		}
+	}
+	if labelW > 32 {
+		labelW = 32
+	}
+
+	n := len(header)
+	if len(rec) > n {
+		n = len(rec)
+	}
+	var b strings.Builder
+	for j := 0; j < n; j++ {
+		name := ""
+		if j < len(header) {
+			name = strings.TrimSpace(header[j])
+		}
+		if name == "" {
+			name = fmt.Sprintf("col %d", j+1)
+		}
+		if r := []rune(name); len(r) > labelW {
+			name = string(r[:labelW])
+		}
+		val := ""
+		if j < len(rec) {
+			val = strings.ReplaceAll(rec[j], "\r", "")
+		}
+		fmt.Fprintf(&b, "%-*s : %s\n", labelW, name, val)
+	}
+
+	vpW := m.tableViewWidth()
+	vpH := m.height - 8
+	if vpH < 3 {
+		vpH = 3
+	}
+	m.csvRecordViewport = viewport.New(vpW, vpH)
+	m.csvRecordViewport.SetContent(hardWrap(strings.TrimRight(b.String(), "\n"), vpW))
+	m.csvRecordIndex = i
+	m.csvRecordActive = true
+}
+
+// csvView renders the full-screen CSV table window (or the single-row record
+// view when active).
 func (m *Model) csvView() string {
 	title := ui.PanelTitleStyle().Render("CSV TABLE: " + m.previewKey)
 
 	if m.previewLoading {
 		return lipgloss.JoinVertical(lipgloss.Left, title, "", m.loadingLine("Loading CSV…"))
+	}
+	if m.csvRecordActive {
+		return m.csvRecordView()
 	}
 	if m.previewErr != nil {
 		return lipgloss.JoinVertical(lipgloss.Left, title, "",
@@ -516,7 +584,23 @@ func (m *Model) csvFooter() string {
 		return line
 	}
 	return ui.MutedStyle().Render(
-		"[↑/↓ PgUp/PgDn] rows   [←/→] columns   [s]/[S] delimiter   [h] header row   [w] rows shown   [t] raw text   [Esc] close")
+		"[↑/↓ PgUp/PgDn] rows   [Enter] row as record   [←/→] columns   [s]/[S] delimiter   [h] header row   [w] rows   [t] raw   [Esc] close")
+}
+
+// csvRecordView renders the selected row vertically as Col : value pairs.
+func (m *Model) csvRecordView() string {
+	header, _ := m.headerAndData()
+	title := ui.PanelTitleStyle().Render("RECORD: " + m.previewKey)
+	info := ui.MutedStyle().Render(fmt.Sprintf("row %d   ·   %d columns", m.csvRecordIndex+1, len(header)))
+	bar := ui.VScrollbar(
+		m.csvRecordViewport.Height,
+		m.csvRecordViewport.TotalLineCount(),
+		m.csvRecordViewport.VisibleLineCount(),
+		m.csvRecordViewport.YOffset,
+	)
+	body := lipgloss.JoinHorizontal(lipgloss.Top, m.csvRecordViewport.View(), " ", bar)
+	hints := ui.MutedStyle().Render("[↑/↓ PgUp/PgDn] scroll   [Esc] back to table")
+	return lipgloss.JoinVertical(lipgloss.Left, title, info, ui.TablePanelStyle(true).Render(body), hints)
 }
 
 // csvInfoLine summarises the delimiter, header row, the column window and the
