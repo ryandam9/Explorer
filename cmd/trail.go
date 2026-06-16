@@ -106,13 +106,22 @@ This is the CLI twin of the summary TUI's 't' CloudTrail timeline.`,
 		ui.InitFromConfig(AppConfig.UI) // theme the status messages
 		ctx := context.Background()
 
-		regions := trailRegions()
-		awscfg, err := auth.BuildAWSConfig(ctx, &AppConfig.AWS, regions[0])
+		awscfg, err := auth.BuildAWSConfig(ctx, &AppConfig.AWS, trailBootstrapRegion())
 		if err != nil {
 			if hint, ok := awserr.LoginHint(err, AppConfig.AWS.Profile); ok {
 				return errors.New(hint)
 			}
 			return fmt.Errorf("unable to load AWS config: %w", err)
+		}
+
+		// Resolve the region set through the shared resolver so trail honors
+		// ec2:DescribeRegions for --all-regions exactly like the engine. A
+		// pinned -r region wins outright.
+		var regions []string
+		if awsRegion != "" {
+			regions = []string{awsRegion}
+		} else {
+			regions = awsutil.ResolveRegions(ctx, awscfg, AppConfig.AWS.Regions, AppConfig.AWS.AllRegions)
 		}
 
 		opts := trail.Options{
@@ -189,27 +198,20 @@ This is the CLI twin of the summary TUI's 't' CloudTrail timeline.`,
 	},
 }
 
-// trailRegions resolves the regions to query. -r pins a single region;
-// otherwise --all-regions (or an "all" entry / multiple entries in
-// aws.regions) fans out, defaulting to one region.
-func trailRegions() []string {
+// trailBootstrapRegion picks the region used to build the AWS config before the
+// full region set is resolved. -r wins; otherwise the first concrete configured
+// region; otherwise us-east-1 (also used when --all-regions / "all" is set,
+// since the real set is resolved from the built config).
+func trailBootstrapRegion() string {
 	if awsRegion != "" {
-		return []string{awsRegion}
+		return awsRegion
 	}
-	if AppConfig.AWS.AllRegions {
-		return awsutil.FallbackRegions
-	}
-	var rs []string
 	for _, r := range AppConfig.AWS.Regions {
-		if strings.EqualFold(r, "all") {
-			return awsutil.FallbackRegions
+		if r != "" && !strings.EqualFold(r, "all") {
+			return r
 		}
-		rs = append(rs, r)
 	}
-	if len(rs) > 0 {
-		return rs
-	}
-	return []string{"us-east-1"}
+	return "us-east-1"
 }
 
 // trailRegionScope describes the region set for status messages.

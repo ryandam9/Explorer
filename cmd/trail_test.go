@@ -113,36 +113,41 @@ func TestBuildTrailFilter_RejectsMultipleFilters(t *testing.T) {
 	}
 }
 
-func TestTrailRegions(t *testing.T) {
+// TestTrailBootstrapRegion covers the region used to build the AWS config
+// before the full set is resolved. The full region set itself (--all-regions
+// fan-out, config regions, the "all" keyword) is resolved by
+// awsutil.ResolveRegions and tested in that package.
+func TestTrailBootstrapRegion(t *testing.T) {
 	savedRegion, savedCfg := awsRegion, AppConfig
 	defer func() { awsRegion, AppConfig = savedRegion, savedCfg }()
 
-	// -r pins a single region, beating everything else.
+	// -r pins the bootstrap region, beating everything else.
 	AppConfig = &config.Config{}
 	AppConfig.AWS.AllRegions = true
 	awsRegion = "eu-west-1"
-	if got := trailRegions(); len(got) != 1 || got[0] != "eu-west-1" {
-		t.Errorf("-r should pin one region, got %v", got)
+	if got := trailBootstrapRegion(); got != "eu-west-1" {
+		t.Errorf("-r should set the bootstrap region, got %q", got)
 	}
 
-	// --all-regions (no -r) fans out to the fallback list.
+	// The first concrete configured region is used as bootstrap.
 	awsRegion = ""
 	AppConfig = &config.Config{}
+	AppConfig.AWS.Regions = []string{"ap-southeast-2", "us-east-1"}
+	if got := trailBootstrapRegion(); got != "ap-southeast-2" {
+		t.Errorf("first configured region should bootstrap, got %q", got)
+	}
+
+	// The "all" keyword is skipped in favor of a concrete region.
+	AppConfig = &config.Config{}
+	AppConfig.AWS.Regions = []string{"all", "us-west-2"}
+	if got := trailBootstrapRegion(); got != "us-west-2" {
+		t.Errorf(`"all" should be skipped for bootstrap, got %q`, got)
+	}
+
+	// Default bootstrap is us-east-1 (including when only --all-regions is set).
+	AppConfig = &config.Config{}
 	AppConfig.AWS.AllRegions = true
-	if got := trailRegions(); len(got) < 2 {
-		t.Errorf("--all-regions should fan out, got %v", got)
-	}
-
-	// Config regions are honored when set.
-	AppConfig = &config.Config{}
-	AppConfig.AWS.Regions = []string{"us-east-1", "ap-southeast-2"}
-	if got := trailRegions(); len(got) != 2 || got[1] != "ap-southeast-2" {
-		t.Errorf("config regions should be used, got %v", got)
-	}
-
-	// Default is a single region.
-	AppConfig = &config.Config{}
-	if got := trailRegions(); len(got) != 1 || got[0] != "us-east-1" {
-		t.Errorf("default should be us-east-1, got %v", got)
+	if got := trailBootstrapRegion(); got != "us-east-1" {
+		t.Errorf("default bootstrap should be us-east-1, got %q", got)
 	}
 }
