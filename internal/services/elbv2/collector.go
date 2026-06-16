@@ -53,10 +53,17 @@ func (c *Collector) Collect(ctx context.Context, input services.CollectInput) ([
 // describeTagsBatch is the DescribeTags ResourceArns limit (20 per call).
 const describeTagsBatch = 20
 
+// describeTagsAPI is the subset of the ELBv2 client used for tag enrichment,
+// extracted so the batch error handling can be unit-tested with a fake.
+type describeTagsAPI interface {
+	DescribeTags(context.Context, *elasticloadbalancingv2.DescribeTagsInput, ...func(*elasticloadbalancingv2.Options)) (*elasticloadbalancingv2.DescribeTagsOutput, error)
+}
+
 // applyTags fills each resource's Tags from DescribeTags, in batches of 20
 // ARNs. Errors are swallowed: tags are an enrichment, not a reason to fail the
-// whole collection.
-func (c *Collector) applyTags(ctx context.Context, client *elasticloadbalancingv2.Client, batch []model.Resource) {
+// whole collection. A failed batch is skipped so the remaining batches (and the
+// load balancers they tag) are still processed.
+func (c *Collector) applyTags(ctx context.Context, client describeTagsAPI, batch []model.Resource) {
 	byARN := make(map[string]int, len(batch))
 	arns := make([]string, 0, len(batch))
 	for i, r := range batch {
@@ -70,7 +77,7 @@ func (c *Collector) applyTags(ctx context.Context, client *elasticloadbalancingv
 		chunk := arns[start:min(start+describeTagsBatch, len(arns))]
 		out, err := client.DescribeTags(ctx, &elasticloadbalancingv2.DescribeTagsInput{ResourceArns: chunk})
 		if err != nil {
-			return
+			continue
 		}
 		for _, td := range out.TagDescriptions {
 			idx, ok := byARN[aws.ToString(td.ResourceArn)]
