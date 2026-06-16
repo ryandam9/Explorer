@@ -1,6 +1,7 @@
 package vpctui
 
 import (
+	"encoding/json"
 	"encoding/xml"
 	"io"
 	"strconv"
@@ -28,8 +29,11 @@ func diagramFixture() fullExport {
 				{ID: "rtb-priv", IsMain: true, Associations: []string{"subnet-priv-a", "subnet-priv-b"},
 					Routes: []Route{{Destination: "0.0.0.0/0", Target: "nat-1", State: "active"}}},
 			},
-			NatGateways:       []NatGWInfo{{ID: "nat-1", SubnetID: "subnet-pub-a", State: "available"}},
-			NetworkInterfaces: []ENIInfo{{ID: "eni-1", SubnetID: "subnet-priv-a"}, {ID: "eni-2", SubnetID: "subnet-priv-a"}},
+			NatGateways: []NatGWInfo{{ID: "nat-1", SubnetID: "subnet-pub-a", State: "available"}},
+			NetworkInterfaces: []ENIInfo{
+				{ID: "eni-1", SubnetID: "subnet-priv-a", SecurityGroups: []string{"sg-app", "sg-db"}},
+				{ID: "eni-2", SubnetID: "subnet-priv-a", SecurityGroups: []string{"sg-app"}},
+			},
 		},
 	}
 }
@@ -192,6 +196,60 @@ func TestVPCDiagramSVGWithinViewBox(t *testing.T) {
 				t.Errorf("text anchor (%d,%d) outside viewBox %dx%d", x, y, w, h)
 			}
 		}
+	}
+}
+
+// TestVPCDiagramElements checks the Cytoscape graph model: the VPC/AZ compound
+// parents, subnet classes, NAT/IGW/internet nodes, SG nodes and the traffic /
+// SG edges — and that it is valid, deterministic JSON.
+func TestVPCDiagramElements(t *testing.T) {
+	raw := vpcDiagramElements(diagramFixture())
+	var els []cyEl
+	if err := json.Unmarshal([]byte(raw), &els); err != nil {
+		t.Fatalf("elements JSON invalid: %v", err)
+	}
+	byID := map[string]cyEl{}
+	var traffic, sgEdges int
+	for _, e := range els {
+		if e.Data.Source != "" { // edge
+			if strings.Contains(e.Classes, "sg") {
+				sgEdges++
+			} else if strings.Contains(e.Classes, "traffic") {
+				traffic++
+			}
+			continue
+		}
+		byID[e.Data.ID] = e
+	}
+
+	if _, ok := byID["vpc:vpc-1"]; !ok {
+		t.Error("missing VPC compound node")
+	}
+	if got := byID["az:ap-southeast-2a"].Data.Parent; got != "vpc:vpc-1" {
+		t.Errorf("AZ parent = %q, want vpc:vpc-1", got)
+	}
+	if s := byID["subnet-pub-a"]; s.Data.Parent != "az:ap-southeast-2a" || !strings.Contains(s.Classes, "public") {
+		t.Errorf("subnet-pub-a parent=%q classes=%q", s.Data.Parent, s.Classes)
+	}
+	if !strings.Contains(byID["subnet-priv-a"].Classes, "private") {
+		t.Errorf("subnet-priv-a classes = %q, want private", byID["subnet-priv-a"].Classes)
+	}
+	for _, id := range []string{"internet", "igw"} {
+		if !strings.Contains(byID[id].Classes, "traffic") {
+			t.Errorf("%s classes = %q, want traffic", id, byID[id].Classes)
+		}
+	}
+	if !strings.Contains(byID["nat-1"].Classes, "nat") {
+		t.Error("missing NAT node nat-1")
+	}
+	if _, ok := byID["sg:sg-app"]; !ok {
+		t.Error("missing SG node sg:sg-app")
+	}
+	if traffic == 0 || sgEdges == 0 {
+		t.Errorf("edges: traffic=%d sg=%d, want both > 0", traffic, sgEdges)
+	}
+	if raw != vpcDiagramElements(diagramFixture()) {
+		t.Error("elements output should be deterministic")
 	}
 }
 

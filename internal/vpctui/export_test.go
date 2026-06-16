@@ -163,6 +163,13 @@ func TestExportHTMLStructure(t *testing.T) {
 		`--table:"Roboto Condensed"`,             // #212: and applied via the table font var
 		"max-height:80vh",                        // #212: plain/offline tables scroll within ~80vh
 		"position:sticky",                        // #212: header pinned during scroll
+		`<h2 id="architecture">`,                 // architecture section
+		`<div class="layer-toggles"`,             // layer checkbox bar
+		`data-layer="sg"`,                        // security-group toggle
+		`<div id="cy">`,                          // Cytoscape mount (holds the fallback SVG)
+		"cytoscape",                              // Cytoscape library loaded
+		"var vpcElements =",                      // graph model embedded
+		"<svg",                                   // static SVG fallback inside #cy
 	} {
 		if !strings.Contains(html, want) {
 			t.Errorf("export HTML missing %q", want)

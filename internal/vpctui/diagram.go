@@ -1,6 +1,7 @@
 package vpctui
 
 import (
+	"encoding/json"
 	"fmt"
 	"sort"
 	"strings"
@@ -422,6 +423,201 @@ func subnetEgress(snap vpcSnapshot) map[string]dgEgress {
 			}
 		}
 		out[s.ID] = eg
+	}
+	return out
+}
+
+// ---------------------------------------------------------------------------
+// Cytoscape graph model
+//
+// vpcDiagramElements emits the same VPC topology as a Cytoscape.js elements
+// array (JSON) so the HTML report can render it as an interactive, auto-laid-out
+// diagram with per-layer toggles, pan/zoom and animation. It is a pure,
+// deterministic function over the snapshot — the rendering is the browser's job,
+// but the graph (nodes, edges, parents, classes) is built and unit-tested here.
+//
+// Layer classes used by the report's checkbox toggles: "subnet", "nat", "sg",
+// and "traffic" (the internet/IGW nodes and every flow edge).
+// ---------------------------------------------------------------------------
+
+type cyData struct {
+	ID     string `json:"id"`
+	Parent string `json:"parent,omitempty"`
+	Label  string `json:"label,omitempty"`
+	Full   string `json:"full,omitempty"`   // multi-line label (with CIDR/ENIs) for the "detail labels" toggle
+	Source string `json:"source,omitempty"` // edges
+	Target string `json:"target,omitempty"`
+}
+
+type cyEl struct {
+	Data    cyData `json:"data"`
+	Classes string `json:"classes,omitempty"`
+}
+
+// vpcDiagramElements returns the Cytoscape elements as a JSON array string.
+func vpcDiagramElements(data fullExport) string {
+	snap := data.Snap
+	egress := subnetEgress(snap)
+	eni := eniCountBySubnet(snap)
+	sgs := subnetSGs(snap)
+
+	// subnet → AZ, for placing NAT nodes in the right AZ container.
+	azOf := map[string]string{}
+	byAZ := map[string][]SubnetInfo{}
+	for _, s := range snap.Subnets {
+		az := s.AZ
+		if az == "" {
+			az = "(no AZ)"
+		}
+		azOf[s.ID] = az
+		byAZ[az] = append(byAZ[az], s)
+	}
+	azs := make([]string, 0, len(byAZ))
+	for az := range byAZ {
+		azs = append(azs, az)
+	}
+	sort.Strings(azs)
+	for _, az := range azs {
+		col := byAZ[az]
+		sort.SliceStable(col, func(i, j int) bool {
+			ri, rj := egressRank(egress[col[i].ID].kind), egressRank(egress[col[j].ID].kind)
+			if ri != rj {
+				return ri < rj
+			}
+			return col[i].ID < col[j].ID
+		})
+		byAZ[az] = col
+	}
+
+	var els []cyEl
+	add := func(e cyEl) { els = append(els, e) }
+	edge := func(src, tgt, class string) {
+		add(cyEl{Data: cyData{ID: "e:" + src + "->" + tgt, Source: src, Target: tgt}, Classes: class})
+	}
+
+	vpcNode := "vpc:" + data.VPC.ID
+	vpcLabel := "VPC · " + data.VPC.ID
+	if data.VPC.CIDR != "" {
+		vpcLabel += "  " + data.VPC.CIDR
+	}
+	add(cyEl{Data: cyData{ID: vpcNode, Label: vpcLabel}, Classes: "vpc"})
+
+	hasIGW := len(snap.InternetGateways) > 0
+	const igwNode = "igw"
+	if hasIGW {
+		add(cyEl{Data: cyData{ID: "internet", Label: "INTERNET"}, Classes: "internet traffic"})
+		add(cyEl{Data: cyData{ID: igwNode, Label: "IGW · " + snap.InternetGateways[0].ID}, Classes: "igw traffic"})
+		edge("igw", "internet", "traffic")
+	}
+
+	for _, az := range azs {
+		azNode := "az:" + az
+		add(cyEl{Data: cyData{ID: azNode, Parent: vpcNode, Label: az}, Classes: "az"})
+		for _, s := range byAZ[az] {
+			name := s.Name
+			if name == "" {
+				name = s.ID
+			}
+			cidr := s.CIDR
+			if cidr == "" {
+				cidr = "—"
+			}
+			full := name + "\n" + s.ID + "\n" + cidr + " · " + plural(eni[s.ID], "ENI", "ENIs")
+			add(cyEl{
+				Data:    cyData{ID: s.ID, Parent: azNode, Label: name, Full: full},
+				Classes: "subnet " + subnetClass(egress[s.ID].kind),
+			})
+			switch egress[s.ID].kind {
+			case "igw":
+				if hasIGW {
+					edge(s.ID, igwNode, "traffic")
+				}
+			case "nat":
+				edge(s.ID, egress[s.ID].target, "traffic")
+			}
+			for _, sg := range sgs[s.ID] {
+				edge(s.ID, "sg:"+sg, "sg")
+			}
+		}
+	}
+
+	// NAT nodes, in their subnet's AZ; egress to the IGW.
+	nats := append([]NatGWInfo(nil), snap.NatGateways...)
+	sort.Slice(nats, func(i, j int) bool { return nats[i].ID < nats[j].ID })
+	for _, n := range nats {
+		az := azOf[n.SubnetID]
+		parent := ""
+		if az != "" {
+			parent = "az:" + az
+		}
+		add(cyEl{Data: cyData{ID: n.ID, Parent: parent, Label: "NAT · " + n.ID}, Classes: "nat"})
+		if hasIGW {
+			edge(n.ID, igwNode, "traffic")
+		}
+	}
+
+	// Unique SG nodes (inside the VPC container), referenced by subnet→sg edges.
+	seen := map[string]bool{}
+	var sgIDs []string
+	for _, ids := range sgs {
+		for _, sg := range ids {
+			if !seen[sg] {
+				seen[sg] = true
+				sgIDs = append(sgIDs, sg)
+			}
+		}
+	}
+	sort.Strings(sgIDs)
+	for _, sg := range sgIDs {
+		add(cyEl{Data: cyData{ID: "sg:" + sg, Parent: vpcNode, Label: sg}, Classes: "sg"})
+	}
+
+	out, err := json.Marshal(els)
+	if err != nil {
+		return "[]"
+	}
+	return string(out)
+}
+
+// subnetClass maps an egress kind to the Cytoscape subnet class.
+func subnetClass(kind string) string {
+	switch kind {
+	case "igw":
+		return "public"
+	case "nat":
+		return "private"
+	case "other":
+		return "other"
+	default:
+		return "isolated"
+	}
+}
+
+// subnetSGs maps each subnet to the sorted, unique security groups used by the
+// ENIs in it — the data behind the diagram's toggleable security-group layer.
+func subnetSGs(snap vpcSnapshot) map[string][]string {
+	sets := map[string]map[string]bool{}
+	for _, e := range snap.NetworkInterfaces {
+		if e.SubnetID == "" {
+			continue
+		}
+		if sets[e.SubnetID] == nil {
+			sets[e.SubnetID] = map[string]bool{}
+		}
+		for _, sg := range e.SecurityGroups {
+			if sg != "" {
+				sets[e.SubnetID][sg] = true
+			}
+		}
+	}
+	out := make(map[string][]string, len(sets))
+	for sn, set := range sets {
+		ids := make([]string, 0, len(set))
+		for id := range set {
+			ids = append(ids, id)
+		}
+		sort.Strings(ids)
+		out[sn] = ids
 	}
 	return out
 }

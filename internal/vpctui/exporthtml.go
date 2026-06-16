@@ -34,6 +34,7 @@ type reportHTMLData struct {
 	GeneratedAt string
 	TOC         []htmlTOCEntry
 	Diagram     template.HTML
+	Elements    template.JS
 	Content     template.HTML
 }
 
@@ -53,8 +54,9 @@ func exportHTML(data fullExport, findings []Finding, generatedAt time.Time) stri
 		Region:      data.VPC.Region,
 		GeneratedAt: reportTime(generatedAt),
 		TOC:         toc,
-		Diagram:     template.HTML(vpcDiagramSVG(data)), //nolint:gosec // generated from our own snapshot
-		Content:     template.HTML(wrapped),             //nolint:gosec // generated from our own report
+		Diagram:     template.HTML(vpcDiagramSVG(data)),    //nolint:gosec // generated from our own snapshot
+		Elements:    template.JS(vpcDiagramElements(data)), //nolint:gosec // our own JSON graph model
+		Content:     template.HTML(wrapped),                //nolint:gosec // generated from our own report
 	}
 	var buf bytes.Buffer
 	if err := reportTmpl.Execute(&buf, d); err != nil {
@@ -152,6 +154,13 @@ main > p em { display:inline-block; background:var(--panel); border:2px solid va
 /* Architecture diagram — framed like a table, scrolls if wider than the column. */
 .diagram { overflow-x:auto; margin:.4rem 0 1.4rem; padding:1rem; background:var(--panel); border:3px solid var(--ink); box-shadow:var(--shadow); }
 .diagram svg { max-width:100%; height:auto; display:block; margin:0 auto; }
+/* Interactive (Cytoscape) diagram + its layer toggles. The static SVG inside
+   #cy is the offline fallback; the script replaces it when Cytoscape loads. */
+.layer-toggles { display:flex; flex-wrap:wrap; gap:.45rem .9rem; margin:.4rem 0 .8rem; font-weight:600; font-size:.85rem; }
+.layer-toggles label { display:inline-flex; align-items:center; gap:.35rem; background:var(--panel); border:2px solid var(--ink); box-shadow:var(--shadow-sm); padding:.18rem .55rem; cursor:pointer; user-select:none; }
+.layer-toggles input { accent-color:var(--ink); }
+#cy { width:100%; height:72vh; min-height:440px; }
+#cy svg { max-width:100%; height:auto; display:block; margin:0 auto; } /* offline fallback */
 a { color:var(--ink); font-weight:700; text-decoration:underline; text-decoration-thickness:2px; }
 code { background:var(--lime); border:2px solid var(--ink); padding:.05em .3em; font-family:var(--mono); font-size:.85em; }
 ul { padding-left:1.2rem; }
@@ -205,7 +214,14 @@ tbody tr:hover { background:var(--yellow); }
 <main>
 <section class="arch">
 <h2 id="architecture">Architecture</h2>
-<div class="diagram">{{.Diagram}}</div>
+<div class="layer-toggles" role="group" aria-label="Toggle diagram layers">
+<label><input type="checkbox" checked data-layer="subnet"> Subnets</label>
+<label><input type="checkbox" checked data-layer="traffic"> Traffic &amp; IGW</label>
+<label><input type="checkbox" checked data-layer="nat"> NAT gateways</label>
+<label><input type="checkbox" checked data-layer="sg"> Security groups</label>
+<label><input type="checkbox" checked id="toggle-detail"> Detail labels</label>
+</div>
+<div class="diagram"><div id="cy">{{.Diagram}}</div></div>
 </section>
 {{.Content}}
 </main>
@@ -229,6 +245,62 @@ document.addEventListener('DOMContentLoaded', function () {
       stateSave: false
     });
   });
+});
+</script>
+<script src="https://cdn.jsdelivr.net/npm/cytoscape@3.30.2/dist/cytoscape.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/layout-base@2.0.1/layout-base.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/cose-base@2.2.0/cose-base.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/cytoscape-fcose@2.2.0/cytoscape-fcose.js"></script>
+<script>
+var vpcElements = {{.Elements}};
+// Render the architecture graph interactively with Cytoscape: compound nodes
+// for the VPC and its AZs, subnet/NAT/SG nodes and traffic-flow edges, with the
+// checkbox bar toggling element classes. If the CDN is blocked the static SVG
+// already inside #cy stays as the offline fallback.
+document.addEventListener('DOMContentLoaded', function () {
+  var el = document.getElementById('cy');
+  if (!el || typeof cytoscape === 'undefined' || !Array.isArray(vpcElements) || !vpcElements.length) { return; }
+  el.innerHTML = ''; // drop the fallback SVG; Cytoscape owns the box now
+  if (typeof cytoscapeFcose !== 'undefined') { try { cytoscape.use(cytoscapeFcose); } catch (e) {} }
+  var fcose = typeof cytoscapeFcose !== 'undefined';
+  var font = 'Roboto Condensed, ui-sans-serif, system-ui, Arial, sans-serif';
+  var cy = cytoscape({
+    container: el,
+    elements: vpcElements,
+    wheelSensitivity: 0.2,
+    style: [
+      { selector: 'node', style: { 'font-family': font, 'font-size': 11, 'border-width': 2, 'border-color': '#111111', 'text-valign': 'center', 'text-halign': 'center', label: 'data(label)' } },
+      { selector: ':parent', style: { 'background-opacity': 0.12, 'border-width': 3, 'text-valign': 'top', 'text-halign': 'center', 'font-weight': 'bold', 'padding': '14px', 'shape': 'round-rectangle' } },
+      { selector: '.vpc', style: { 'background-color': '#b8ff3c' } },
+      { selector: '.az', style: { 'background-color': '#fff7d6' } },
+      { selector: '.subnet', style: { 'shape': 'round-rectangle', 'width': 184, 'height': 56, 'text-wrap': 'wrap', 'text-max-width': 168, label: 'data(full)' } },
+      { selector: '.subnet.brief', style: { label: 'data(label)' } },
+      { selector: '.public', style: { 'background-color': '#d6ffd1', 'border-color': '#1f8a3b' } },
+      { selector: '.private', style: { 'background-color': '#e3efff', 'border-color': '#1f6feb' } },
+      { selector: '.isolated, .other', style: { 'background-color': '#f0f0f0', 'border-color': '#777777' } },
+      { selector: '.nat', style: { 'shape': 'round-rectangle', 'background-color': '#ffd6a5', 'border-color': '#d97706', 'width': 120, 'height': 30 } },
+      { selector: '.igw', style: { 'shape': 'round-rectangle', 'background-color': '#ffe500', 'width': 150, 'height': 40 } },
+      { selector: '.internet', style: { 'shape': 'round-rectangle', 'background-color': '#00d4ff', 'width': 150, 'height': 44, 'font-weight': 'bold' } },
+      { selector: '.sg', style: { 'shape': 'round-rectangle', 'background-color': '#eeeeee', 'border-color': '#999999', 'width': 'label', 'height': 22, 'padding': '6px', 'font-size': 10 } },
+      { selector: 'edge.traffic', style: { 'width': 2, 'line-color': '#111111', 'target-arrow-color': '#111111', 'target-arrow-shape': 'triangle', 'curve-style': 'bezier', 'line-dash-pattern': [6, 4] } },
+      { selector: 'edge.sg', style: { 'width': 1, 'line-color': '#1f6feb', 'line-style': 'dashed', 'target-arrow-shape': 'none', 'curve-style': 'bezier', 'opacity': 0.6 } }
+    ],
+    layout: fcose
+      ? { name: 'fcose', animate: true, animationDuration: 600, quality: 'default', nodeSeparation: 90, padding: 24 }
+      : { name: 'cose', animate: true, padding: 24 }
+  });
+  // Animate the traffic edges (marching ants) to suggest flow direction.
+  var offset = 0;
+  setInterval(function () { offset = (offset + 1) % 20; cy.edges('.traffic').style('line-dash-offset', -offset); }, 80);
+  // Layer checkboxes hide/show element classes.
+  document.querySelectorAll('.layer-toggles input[data-layer]').forEach(function (cb) {
+    cb.addEventListener('change', function () {
+      cy.elements('.' + cb.getAttribute('data-layer')).style('display', cb.checked ? 'element' : 'none');
+    });
+  });
+  // Detail-labels toggle switches subnet nodes between the full and brief label.
+  var det = document.getElementById('toggle-detail');
+  if (det) { det.addEventListener('change', function () { cy.nodes('.subnet').toggleClass('brief', !det.checked); }); }
 });
 </script>
 </body>

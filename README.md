@@ -1753,7 +1753,12 @@ a basename under `~/.aws_explorer/exports/<vpc-id>-<timestamp>.{md,html,svg}`:
 
 - **Markdown** (`.md`) — ideal for pasting into a support case or runbook.
 - **HTML** (`.html`) — styled, with a sticky table-of-contents and searchable,
-  paginated resource tables; leads with the architecture diagram.
+  paginated resource tables; leads with an **interactive architecture diagram**
+  (Cytoscape.js): pan/zoom, animated traffic-flow edges, and a checkbox bar to
+  toggle layers — **Subnets**, **Traffic & IGW**, **NAT gateways**, **Security
+  groups** (derived from each subnet's ENIs) and **Detail labels**. It needs
+  network access for the diagram library; if blocked it falls back to the
+  embedded static SVG.
 - **SVG** (`.svg`) — a deterministic **architecture diagram**: the internet and
   its gateway, the VPC as a container, availability-zone columns of subnets
   colour-coded public / private / isolated by their default route, NAT gateways
