@@ -738,7 +738,15 @@ func (m *Model) initPreviewViewport(content string, err error) {
 	}
 	m.previewViewport = viewport.New(vpW, vpH)
 	if err == nil && content != "" {
-		m.previewViewport.SetContent(content)
+		// Pretty-print XML so a minified single-line document is readable, then
+		// wrap long lines so nothing is clipped off the right edge of the pane.
+		display := content
+		if looksLikeXMLContent(display) {
+			if formatted, ok := formatXML(display); ok {
+				display = formatted
+			}
+		}
+		m.previewViewport.SetContent(hardWrap(display, vpW))
 	}
 }
 
