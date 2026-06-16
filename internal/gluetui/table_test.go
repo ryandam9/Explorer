@@ -153,6 +153,22 @@ func TestGlueStatusBarPinnedToBottom(t *testing.T) {
 	}
 }
 
+// TestGlueRefreshGuardedWhileLoading verifies r is a no-op while a load is
+// already running, so it can't fire concurrent inventory loads.
+func TestGlueRefreshGuardedWhileLoading(t *testing.T) {
+	mm := newGlueTestModel(120, 24)
+
+	mm.loading = true
+	if cmds := mm.handleKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("r")}); len(cmds) != 0 {
+		t.Errorf("r during a load should not start another (got %d cmds)", len(cmds))
+	}
+
+	mm.loading = false
+	if cmds := mm.handleKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("r")}); len(cmds) == 0 || !mm.loading {
+		t.Error("r when idle should start a reload")
+	}
+}
+
 func TestGlueRunsView(t *testing.T) {
 	mm := newGlueTestModel(120, 24)
 	mm.runsActive = true
