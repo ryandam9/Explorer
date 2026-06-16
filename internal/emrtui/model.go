@@ -63,6 +63,11 @@ type m struct {
 	sortCol int
 	sortAsc bool
 
+	// showTerminated includes the terminated cluster tail in the inventory. Off
+	// by default so the list shows only live clusters; the "t" key toggles it and
+	// reloads.
+	showTerminated bool
+
 	filter       textinput.Model
 	filterActive bool
 
@@ -268,7 +273,7 @@ func (mm *m) loadInventoryCmd() tea.Cmd {
 		slog.Info("Loading EMR inventory", "regions", len(mm.regions))
 		ctx, cancel := context.WithTimeout(mm.ctx, inventoryTimeout)
 		defer cancel()
-		inv, err := mm.client.LoadInventory(ctx)
+		inv, err := mm.client.LoadInventory(ctx, mm.showTerminated)
 		return invMsg{inv: inv, err: err}
 	}
 }
@@ -711,6 +716,14 @@ func (mm *m) handleKey(msg tea.KeyMsg) []tea.Cmd {
 	case "r":
 		mm.loading = true
 		mm.inv = Inventory{}
+		cmds = append(cmds, mm.loadInventoryCmd(), mm.spinner.Tick)
+	case "t":
+		// Toggle the terminated tail and reload (it changes what ListClusters
+		// returns, so it can't be filtered client-side).
+		mm.showTerminated = !mm.showTerminated
+		mm.loading = true
+		mm.inv = Inventory{}
+		mm.tbl.SetCursor(0)
 		cmds = append(cmds, mm.loadInventoryCmd(), mm.spinner.Tick)
 	case "enter", "s":
 		if cl, ok := mm.selectedCluster(); ok {
