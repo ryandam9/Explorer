@@ -2,6 +2,7 @@ package gluetui
 
 import (
 	"context"
+	"fmt"
 	"log/slog"
 	"os"
 	"os/exec"
@@ -88,6 +89,14 @@ type m struct {
 	defLoading bool
 	defErr     error
 
+	// Resource-detail overlay (Enter on a crawler/trigger/workflow/connection/
+	// database). Fetched on demand, one Get* call per resource type.
+	detailActive  bool
+	detailTitle   string
+	detail        ResourceDetail
+	detailLoading bool
+	detailErr     error
+
 	// Findings panel (f) — deterministic posture/cost checks over the loaded
 	// inventory. findingList is computed synchronously (no AWS call), parallel to
 	// the table's rows.
@@ -115,6 +124,11 @@ type runsMsg struct {
 type defMsg struct {
 	def JobDef
 	err error
+}
+
+type detailMsg struct {
+	detail ResourceDetail
+	err    error
 }
 
 // cwJumpDoneMsg is delivered after the suspended cw TUI exits.
@@ -221,6 +235,36 @@ func (mm *m) loadDefCmd(job Job) tea.Cmd {
 	}
 }
 
+// loadDetailCmd fetches the on-demand detail for the selected non-job resource,
+// dispatching to the per-type Get* call. Best-effort: a denied call surfaces as
+// an error inside the overlay rather than aborting the dashboard.
+func (mm *m) loadDetailCmd(typ, region, name string) tea.Cmd {
+	return func() tea.Msg {
+		slog.Info("Loading Glue resource detail", "type", typ, "name", name, "region", region)
+		ctx, cancel := context.WithTimeout(mm.ctx, drillTimeout)
+		defer cancel()
+		var (
+			d   ResourceDetail
+			err error
+		)
+		switch typ {
+		case "crawler":
+			d, err = mm.client.CrawlerDetail(ctx, region, name)
+		case "trigger":
+			d, err = mm.client.TriggerDetail(ctx, region, name)
+		case "workflow":
+			d, err = mm.client.WorkflowDetail(ctx, region, name)
+		case "connection":
+			d, err = mm.client.ConnectionDetail(ctx, region, name)
+		case "database":
+			d, err = mm.client.DatabaseDetail(ctx, region, name)
+		default:
+			err = fmt.Errorf("no detail available for %q", typ)
+		}
+		return detailMsg{detail: d, err: err}
+	}
+}
+
 // jumpToRunLogsCmd suspends the dashboard and runs the cw Logs TUI as a child
 // of this same binary, pre-filtered to the run's Glue log group and its
 // JobRunId stream (AXE-028). Continuous logging writes "<runId>" and
@@ -321,6 +365,11 @@ func (mm *m) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		mm.defErr = msg.err
 		mm.def = msg.def
 
+	case detailMsg:
+		mm.detailLoading = false
+		mm.detailErr = msg.err
+		mm.detail = msg.detail
+
 	case tea.KeyMsg:
 		cmds = append(cmds, mm.handleKey(msg)...)
 	}
@@ -357,6 +406,17 @@ func (mm *m) handleKey(msg tea.KeyMsg) []tea.Cmd {
 			return []tea.Cmd{tea.Quit}
 		default:
 			mm.defActive = false
+		}
+		return cmds
+	}
+
+	// Resource-detail overlay: any key closes it (q still quits).
+	if mm.detailActive {
+		switch msg.String() {
+		case "q", "ctrl+c":
+			return []tea.Cmd{tea.Quit}
+		default:
+			mm.detailActive = false
 		}
 		return cmds
 	}
@@ -483,6 +543,15 @@ func (mm *m) handleKey(msg tea.KeyMsg) []tea.Cmd {
 				mm.runsErr = nil
 				cmds = append(cmds, mm.loadRunsCmd(job), mm.spinner.Tick)
 			}
+		} else if r, ok := mm.selectedRow(); ok {
+			// Crawlers, triggers, workflows, connections and databases drill into a
+			// detail overlay fetched on demand (issue #238).
+			mm.detailActive = true
+			mm.detailLoading = true
+			mm.detail = ResourceDetail{}
+			mm.detailErr = nil
+			mm.detailTitle = detailTitleFor(r.typ, r.name)
+			cmds = append(cmds, mm.loadDetailCmd(r.typ, r.region, r.name), mm.spinner.Tick)
 		}
 	case "d":
 		if mm.tab == tabJobs {

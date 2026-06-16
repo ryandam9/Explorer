@@ -105,6 +105,15 @@ func shortTime(t time.Time) string {
 	return t.Local().Format("2006-01-02 15:04")
 }
 
+// fmtTimePtr renders a pointer timestamp as "2026-06-15 01:14" in local time,
+// or "—" when nil or zero (the SDK leaves optional times nil).
+func fmtTimePtr(t *time.Time) string {
+	if t == nil {
+		return "—"
+	}
+	return shortTime(*t)
+}
+
 // truncate shortens s to width runes, appending an ellipsis when it overflows.
 func truncate(s string, width int) string {
 	if width <= 0 {

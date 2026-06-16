@@ -779,7 +779,10 @@ on stderr and never aborts the run.
 (databases); each row shows health at a glance — a job's last run state and
 duration, a crawler's last-crawl status. Press **Enter** on a job to drill into
 its **run history**: state, duration, DPU-hours and an estimated cost per run,
-with the error message inline on failures.
+with the error message inline on failures. On the other tabs, **Enter** opens a
+**detail overlay** for the selected crawler, trigger, workflow, connection or
+database — its configuration, targets/actions and last-run/last-crawl status,
+fetched on demand.
 
 ```bash
 ./bin/aws_explorer glue [--region us-east-1 | --all-regions] [--theme <name>]
@@ -809,7 +812,7 @@ Run history (Enter on a job):
 |-----|--------|
 | `Tab` / `Shift+Tab` | Switch pane |
 | `↑/↓` (`j/k`) | Move selection |
-| `Enter` | Open the selected job's run history |
+| `Enter` | On **Jobs**, open the selected job's run history; on the other tabs, open the selected resource's detail overlay (fetched on demand) |
 | `d` | Show the selected job's definition (role, version, worker, script, connections, args — secrets redacted) |
 | `f` | **Findings** — deterministic posture/cost checks (failing or stale jobs, failed crawls) over the loaded jobs & crawlers; `y` copies the suggested fix |
 | `/` | Filter the current pane |
@@ -854,10 +857,10 @@ and ISO-8601 `started`/`completed`. `runs` is region-specific: it uses
 `--region` when given, otherwise the first region in scope.
 
 **IAM permissions.** Read-only:
-`glue:{GetJobs,GetJob,GetJobRuns,GetCrawlers,GetTriggers,ListWorkflows,GetConnections,GetDatabases}`
-and `sts:GetCallerIdentity` (for ARN/console links). Per-region or per-listing
-denials degrade that part of the dashboard with a logged note and never abort
-the session.
+`glue:{GetJobs,GetJob,GetJobRuns,GetCrawlers,GetCrawler,GetTriggers,GetTrigger,ListWorkflows,GetWorkflow,GetConnections,GetConnection,GetDatabases,GetDatabase}`
+and `sts:GetCallerIdentity` (for ARN/console links). The detail overlay's
+`Get*` calls and any per-region or per-listing denial degrade just that part of
+the dashboard with a logged note and never abort the session.
 
 ## Amazon EMR dashboard
 
