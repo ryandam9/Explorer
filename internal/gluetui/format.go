@@ -166,6 +166,16 @@ func sortedKeys(m map[string]string) []string {
 	return keys
 }
 
+// costEstimateNote labels the run-cost estimate, flagging when the figure uses
+// the rate region's price for a job in a different region — Glue DPU-hour
+// pricing varies by region, so the estimate is only exact in costs.GlueRateRegion.
+func costEstimateNote(region string) string {
+	if region != "" && region != costs.GlueRateRegion {
+		return "(estimate · " + costs.GlueRateRegion + " rate)"
+	}
+	return "(estimate)"
+}
+
 // runsTotals sums the DPU-hours and estimated cost across a set of runs, for
 // the run-history footer.
 func runsTotals(runs []JobRun) (dpuHours, costUSD float64) {

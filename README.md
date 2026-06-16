@@ -831,7 +831,9 @@ configuration, worker count, per-run DPU-seconds, the VPC network inventory) are
 
 The DPU-hour cost is an **estimate** (`$0.44`/DPU-hour, us-east-1 ETL rate);
 runs that report no `DPUSeconds` (still running, or legacy jobs) show no figure
-rather than `$0.00`.
+rather than `$0.00`. Glue DPU pricing varies by region, so for a job outside
+us-east-1 the run-history footer flags that the figure uses the us-east-1 rate
+(`estimate · us-east-1 rate`).
 
 ### Scriptable twins
 
