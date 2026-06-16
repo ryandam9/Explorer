@@ -212,9 +212,15 @@ type Model struct {
 	csvAll       [][]string // parsed header + data rows
 	csvRowCap    int        // first-N/last-N window (0 = all)
 	csvRowCapSet bool
-	csvTotal     int // total data rows parsed
-	csvHidden    int // rows omitted by the window
-	csvHeaderRow int // 1-based header row; 0 = no header (synthesised column names)
+	csvTotal     int        // total data rows parsed
+	csvHidden    int        // rows omitted by the window
+	csvHeaderRow int        // 1-based header row; 0 = no header (synthesised column names)
+	csvDisplay   [][]string // rows currently in the table (parallel to its cursor)
+
+	// Single-row "record" view (Enter on a table row) — Col : value pairs.
+	csvRecordActive   bool
+	csvRecordViewport viewport.Model
+	csvRecordIndex    int
 
 	// Typed prompt shared by the "S" (delimiter) and "h" (header row) actions.
 	csvInput     textinput.Model
@@ -1162,6 +1168,9 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 		if m.showCSV {
 			m.layoutCSVTable()
+			if m.csvRecordActive {
+				m.openCSVRecord() // re-wrap the record to the new width
+			}
 		}
 		if m.showArchive {
 			m.layoutArchiveTable()
@@ -1277,6 +1286,18 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if m.showCSV {
 			if msg.String() == "ctrl+c" {
 				return m, tea.Quit
+			}
+			// The single-row record view captures keys while open.
+			if m.csvRecordActive {
+				switch msg.String() {
+				case "esc", "q", "enter", "backspace", "left", "h":
+					m.csvRecordActive = false
+				default:
+					var vpCmd tea.Cmd
+					m.csvRecordViewport, vpCmd = m.csvRecordViewport.Update(msg)
+					cmds = append(cmds, vpCmd)
+				}
+				return m, tea.Batch(cmds...)
 			}
 			// The typed prompt (delimiter or header row) captures keys while open.
 			if m.csvPrompt != csvPromptNone {
@@ -2678,7 +2699,8 @@ const s3AboutText = "This is the dedicated S3 browser. The first screen lists yo
 	"On an object you can preview its contents (p) — a CSV/TSV/.dat opens in a " +
 	"full-screen, scrollable table with auto-detected delimiter (press s/S to change " +
 	"it, h to set which row holds the column names — 0 for none, w to adjust how many " +
-	"rows are shown, t for raw text). In any text preview, press t to view it as a " +
+	"rows are shown, Enter to read the highlighted row vertically as Col : value pairs, " +
+	"t for raw text). In any text preview, press t to view it as a " +
 	"table (handy for .txt/.log exports). A .gz is decompressed " +
 	"and shown by its inner type, and a .tar/.tar.gz/.tgz opens a browser of its " +
 	"members so you can open any file inside. You can also copy its S3 URI (y), open it " +
