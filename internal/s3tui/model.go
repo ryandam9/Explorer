@@ -104,6 +104,21 @@ type objectDetailsMsg struct {
 	err     error
 }
 
+// objectDetailsDebounceMsg fires a short while after the object cursor lands on
+// a key; the details are only fetched if the cursor is still there, so scrolling
+// quickly through a listing doesn't trigger a fetch per row.
+type objectDetailsDebounceMsg struct{ key string }
+
+// objectDetailsDebounce is how long the cursor must settle on an object before
+// its (multi-call) details are fetched.
+const objectDetailsDebounce = 200 * time.Millisecond
+
+func scheduleObjectDetails(key string) tea.Cmd {
+	return tea.Tick(objectDetailsDebounce, func(time.Time) tea.Msg {
+		return objectDetailsDebounceMsg{key: key}
+	})
+}
+
 type objectPreviewMsg struct {
 	key     string
 	content string
@@ -190,6 +205,7 @@ type Model struct {
 
 	lastSelectedKey       string
 	selectedDetails       *ObjectDetails
+	detailsInFlight       string // key whose details fetch is currently dispatched
 	selectedBucketDetails *BucketDetails
 	// objectsNextToken is set when the current listing was cut off by the
 	// page window; "L" continues from it.
@@ -1448,11 +1464,19 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case "esc":
 			m.err = nil
 			if m.state == stateObjectList {
-				m.state = stateBucketList
-				m.focus = focusBuckets
-				m.bucket = ""
-				m.prefix = ""
-				cmds = append(cmds, m.loadBuckets())
+				if m.prefix != "" {
+					// Step up one folder (to the object's parent) rather than all
+					// the way back to the bucket list, so siblings stay browsable.
+					m.prefix = parentPrefix(m.prefix)
+					m.prefixInput.SetValue(m.prefix)
+					cmds = append(cmds, m.loadObjects())
+				} else {
+					m.state = stateBucketList
+					m.focus = focusBuckets
+					m.bucket = ""
+					m.prefix = ""
+					cmds = append(cmds, m.loadBuckets())
+				}
 			}
 
 		case "/":
@@ -1756,11 +1780,23 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 		if len(m.objectMaps) > 0 && m.objectMaps[0]["type"] != "DIR" {
 			m.lastSelectedKey = m.prefix + m.objectMaps[0]["name"]
+			m.detailsInFlight = m.lastSelectedKey
 			cmds = append(cmds, m.fetchObjectDetails(m.lastSelectedKey))
+		}
+
+	case objectDetailsDebounceMsg:
+		// Fetch only if the cursor is still on this key and we haven't already
+		// dispatched (or completed) a fetch for it.
+		if msg.key == m.lastSelectedKey && m.selectedDetails == nil && m.detailsInFlight != msg.key {
+			m.detailsInFlight = msg.key
+			cmds = append(cmds, m.fetchObjectDetails(msg.key))
 		}
 
 	case objectDetailsMsg:
 		m.detailsLoading = false
+		if msg.key == m.detailsInFlight {
+			m.detailsInFlight = ""
+		}
 		if msg.key == m.lastSelectedKey {
 			if msg.err == nil {
 				m.selectedDetails = msg.details
@@ -1879,7 +1915,10 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					if newKey != m.lastSelectedKey {
 						m.lastSelectedKey = newKey
 						m.selectedDetails = nil
-						cmds = append(cmds, m.fetchObjectDetails(newKey))
+						// Debounce: defer the multi-call details fetch until the
+						// cursor settles, so holding ↑/↓ stays responsive instead
+						// of firing a HeadObject/ACL/Tag burst per row.
+						cmds = append(cmds, scheduleObjectDetails(newKey))
 					}
 				} else {
 					m.lastSelectedKey = ""
