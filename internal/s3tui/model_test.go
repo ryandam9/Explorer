@@ -183,3 +183,37 @@ func TestBucketRowFallsBackToPendingWhenRegionAbsent(t *testing.T) {
 		t.Errorf("region = %q, want pending placeholder %q", region, regionPending)
 	}
 }
+
+func TestBucketsScannedFillsRegionsFromListing(t *testing.T) {
+	m := &Model{
+		bucketRegionCache:  map[string]string{},
+		bucketDetailsCache: map[string]*BucketDetails{},
+		state:              stateBucketList,
+		bucket:             "preselected", // skip the auto-select path (needs a client)
+	}
+	m.initBucketTable()
+
+	created := time.Date(2026, 6, 15, 0, 0, 0, 0, time.UTC)
+	m.Update(bucketsScannedMsg{buckets: []s3types.Bucket{
+		{Name: aws.String("syd"), BucketRegion: aws.String("ap-southeast-2"), CreationDate: &created},
+		{Name: aws.String("nva"), BucketRegion: aws.String("us-east-1"), CreationDate: &created},
+	}})
+
+	rows := m.bucketTable.Rows()
+	if len(rows) != 2 {
+		t.Fatalf("rows = %d, want 2", len(rows))
+	}
+	// Region column (index 2) is filled from the listing right away — no "…".
+	if rows[0][2] != "ap-southeast-2" {
+		t.Errorf("row 0 region = %q, want ap-southeast-2", rows[0][2])
+	}
+	if rows[1][2] != "us-east-1" {
+		t.Errorf("row 1 region = %q, want us-east-1", rows[1][2])
+	}
+	if m.bucketRegionCache["syd"] != "ap-southeast-2" {
+		t.Errorf("cache not populated: %v", m.bucketRegionCache)
+	}
+	if m.loading {
+		t.Error("loading should be cleared after the listing arrives")
+	}
+}

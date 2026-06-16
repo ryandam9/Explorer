@@ -80,17 +80,10 @@ type BucketDetails struct {
 // Message types
 // ---------------------------------------------------------------------------
 
-type bucketsLoadedMsg struct {
-	rows    []table.Row
-	warning string
-}
-
-type regionsDiscoveredMsg struct {
-	regions []string
-}
-
-type regionScannedMsg struct {
-	region  string
+// bucketsScannedMsg carries the result of the single, global s3:ListBuckets
+// call. The listing reports every bucket the account owns, each with its
+// region, so no per-region scan is needed.
+type bucketsScannedMsg struct {
 	buckets []s3types.Bucket
 	err     error
 }
@@ -207,12 +200,6 @@ type Model struct {
 	bucketDetailsCache map[string]*BucketDetails
 	themeIdx           int
 
-	// Multi-region bucket scan state
-	scanTotal   int
-	scanDone    int
-	scanning    bool
-	seenBuckets map[string]bool
-
 	// Bucket search overlay
 	inBucketSearch bool
 	bucketSearch   textinput.Model
@@ -316,7 +303,6 @@ func NewModel(ctx context.Context, awsCfg *config.AWSConfig, region, bucket, pre
 		sortAsc:            true,
 		bucketRegionCache:  make(map[string]string),
 		bucketDetailsCache: make(map[string]*BucketDetails),
-		seenBuckets:        make(map[string]bool),
 		themeIdx:           themeIdx,
 		allowDelete:        allowDelete,
 		configPath:         configPath,
@@ -594,23 +580,26 @@ func (m *Model) fetchObjectPreview(key string) tea.Cmd {
 }
 
 func (m *Model) loadBuckets() tea.Cmd {
-	// Reset scan state for a clean run (handles refresh too).
+	// Reset for a clean run (handles refresh too).
 	m.loading = true
-	m.scanning = false
-	m.scanTotal = 0
-	m.scanDone = 0
-	m.seenBuckets = make(map[string]bool)
 	m.allBucketRows = nil
 	m.bucketTable.SetRows(nil)
 	m.statusMsg = ""
 
-	awsCfg := m.awsCfg
-	ctx := m.client.ctx
+	// s3:ListBuckets is a global call that returns every bucket the account
+	// owns, each tagged with its region — so a single request replaces the old
+	// per-region scan. Access-denied is reported as an empty list (the IAM hint
+	// is shown by the handler) rather than a hard error.
+	client := m.client
 	return func() tea.Msg {
-		slog.Info("Discovering AWS regions for S3 scan")
-		regions := ListRegions(ctx, awsCfg)
-		slog.Info("Scanning regions for S3 buckets", "regions", len(regions))
-		return regionsDiscoveredMsg{regions: regions}
+		slog.Info("Listing S3 buckets")
+		buckets, err := client.ListBuckets()
+		if err != nil && hasAPIErrorCode(err, "AccessDenied", "AccessDeniedException",
+			"UnauthorizedOperation", "AuthorizationError") {
+			return bucketsScannedMsg{}
+		}
+		slog.Info("Listed S3 buckets", "count", len(buckets))
+		return bucketsScannedMsg{buckets: buckets, err: err}
 	}
 }
 
@@ -906,7 +895,7 @@ func (m *Model) Init() tea.Cmd {
 }
 
 func (m *Model) isWaiting() bool {
-	return m.loading || m.scanning || m.detailsLoading || m.previewLoading
+	return m.loading || m.detailsLoading || m.previewLoading
 }
 
 func (m *Model) startSpinner() tea.Cmd {
@@ -1477,90 +1466,42 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	// --- Message handlers ---
 
-	case regionsDiscoveredMsg:
+	case bucketsScannedMsg:
 		m.loading = false
-		m.scanning = true
-		m.scanTotal = len(msg.regions)
-		m.scanDone = 0
-		m.statusMsg = fmt.Sprintf("Scanning %d regions…", m.scanTotal)
-		awsCfg := m.awsCfg
-		endpointURL := m.endpointURL
-		ctx := m.client.ctx
-		scanCmds := make([]tea.Cmd, 0, len(msg.regions))
-		for _, region := range msg.regions {
-			r := region
-			scanCmds = append(scanCmds, func() tea.Msg {
-				slog.Info("Listing S3 buckets", "region", r)
-				buckets, err := ListBucketsInRegion(ctx, awsCfg, r, endpointURL)
-				if err != nil {
-					slog.Warn("Listing S3 buckets failed", "region", r, "error", err.Error())
-				} else {
-					slog.Info("Listed S3 buckets", "region", r, "count", len(buckets))
-				}
-				return regionScannedMsg{region: r, buckets: buckets, err: err}
-			})
+		if msg.err != nil {
+			m.statusMsg = "Could not list buckets: " + summarizeS3Error(msg.err)
+			break
 		}
-		cmds = append(cmds, tea.Batch(scanCmds...))
-
-	case regionScannedMsg:
-		m.scanDone++
-		if msg.err == nil && len(msg.buckets) > 0 {
-			firstBucket := m.bucket == ""
-			for _, b := range msg.buckets {
-				name := aws.ToString(b.Name)
-				if m.seenBuckets[name] {
-					continue
-				}
-				m.seenBuckets[name] = true
-				name, region, dateStr := bucketRow(b)
-				// S3 reports each bucket's region in the listing itself, so the region
-				// column is filled in immediately and correctly. Cache it; only buckets
-				// with no region in the listing (region "…", e.g. a non-AWS
-				// S3-compatible endpoint) fall back to the async per-bucket lookup.
-				if region != regionPending {
-					m.bucketRegionCache[name] = region
-				}
-				m.allBucketRows = append(m.allBucketRows, table.Row{"", name, region, dateStr})
+		m.allBucketRows = m.allBucketRows[:0]
+		pending := false
+		for _, b := range msg.buckets {
+			name, region, dateStr := bucketRow(b)
+			// S3 reports each bucket's region in the listing itself, so the region
+			// column is filled in immediately and correctly. Only buckets with no
+			// region in the listing (a non-AWS S3-compatible endpoint) fall back to
+			// the async per-bucket lookup.
+			if region != regionPending {
+				m.bucketRegionCache[name] = region
+			} else {
+				pending = true
 			}
-			m.bucketTable.SetRows(seqRows(m.allBucketRows))
-			if firstBucket && m.bucket == "" && len(m.allBucketRows) > 0 {
+			m.allBucketRows = append(m.allBucketRows, table.Row{"", name, region, dateStr})
+		}
+		m.bucketTable.SetRows(seqRows(m.allBucketRows))
+		if count := len(m.allBucketRows); count == 0 {
+			m.statusMsg = "No accessible buckets found. Check IAM permissions."
+		} else {
+			m.statusMsg = fmt.Sprintf("%d bucket(s) found", count)
+			if m.bucket == "" {
 				m.bucket = m.allBucketRows[0][1]
 				if cmd := m.ensureBucketDetails(m.bucket); cmd != nil {
 					cmds = append(cmds, cmd)
 				}
 			}
-		} else if msg.err != nil {
-			// Non-access-denied error: surface it in status rather than crashing.
-			m.statusMsg = fmt.Sprintf("Error scanning %s: %s", msg.region, summarizeS3Error(msg.err))
-		}
-		if m.scanDone == m.scanTotal {
-			m.scanning = false
-			count := len(m.allBucketRows)
-			if count == 0 {
-				m.statusMsg = fmt.Sprintf("Scanned %d regions — no accessible buckets found. Check IAM permissions.", m.scanTotal)
-			} else {
-				m.statusMsg = fmt.Sprintf("Scanned %d regions — %d bucket(s) found", m.scanTotal, count)
+			if pending {
 				cmds = append(cmds, m.fetchBucketRegions())
 			}
-		} else {
-			m.statusMsg = fmt.Sprintf("Scanning regions… %d / %d  (%d bucket(s) found so far)", m.scanDone, m.scanTotal, len(m.allBucketRows))
 		}
-
-	case bucketsLoadedMsg:
-		m.loading = false
-		m.err = nil
-		m.bucketTable.SetRows(seqRows(msg.rows))
-		m.allBucketRows = msg.rows // keep a copy for search restore
-		if msg.warning != "" {
-			m.statusMsg = msg.warning
-		}
-		if len(msg.rows) > 0 {
-			m.bucket = msg.rows[0][1]
-			if cmd := m.ensureBucketDetails(msg.rows[0][1]); cmd != nil {
-				cmds = append(cmds, cmd)
-			}
-		}
-		cmds = append(cmds, m.fetchBucketRegions())
 
 	case bucketRegionMsg:
 		m.bucketRegionCache[msg.name] = msg.region
@@ -1809,8 +1750,8 @@ func (m *Model) View() string {
 
 		content = lipgloss.Place(m.width-4, m.height-10, lipgloss.Center, lipgloss.Center, errBox)
 	} else if m.loading {
-		message := "Discovering AWS regions…"
-		detail := "Fetching the list of available regions before scanning for buckets."
+		message := "Listing buckets…"
+		detail := "Fetching your S3 buckets and their regions."
 		if m.state == stateObjectList {
 			message = "Loading objects…"
 			detail = fmt.Sprintf("Bucket: %s   Prefix: %s", m.bucket, displayPrefix(m.prefix))
@@ -1901,8 +1842,6 @@ func (m *Model) renderStatusBar() string {
 		switch {
 		case m.statusMsg != "":
 			left = m.statusMsg
-		case m.scanning:
-			left = fmt.Sprintf("Scanning: %d / %d  |  Buckets: %d", m.scanDone, m.scanTotal, len(m.allBucketRows))
 		default:
 			left = fmt.Sprintf("Buckets: %d", len(m.allBucketRows))
 		}
@@ -2038,10 +1977,10 @@ func tablePanel(t *table.Model, focused bool) string {
 func (m *Model) bucketListView() string {
 	tableSection := tablePanel(&m.bucketTable, m.focus == focusBuckets)
 	if len(m.bucketTable.Rows()) == 0 {
-		// Region scan still in flight (or no buckets at all): show a spinner
-		// or an empty-state line instead of a bare table grid.
+		// Listing still in flight (or no buckets at all): show a spinner or an
+		// empty-state line instead of a bare table grid.
 		body := ui.MutedStyle().Render("No buckets found")
-		if m.loading || m.scanning {
+		if m.loading {
 			body = m.loadingLine("Loading buckets…")
 		}
 		tableSection = ui.TablePanelStyle(m.focus == focusBuckets).Render(body)

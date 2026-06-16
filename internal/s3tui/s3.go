@@ -77,24 +77,6 @@ func ListRegions(ctx context.Context, awsCfg *config.AWSConfig) []string {
 	return regions
 }
 
-// ListBucketsInRegion creates a region-scoped S3 client and returns the bucket list.
-// Returns (nil, nil) for access-denied errors so callers can skip silently.
-func ListBucketsInRegion(ctx context.Context, awsCfg *config.AWSConfig, region, endpointURL string) ([]s3types.Bucket, error) {
-	client, err := NewS3Client(ctx, awsCfg, region, endpointURL)
-	if err != nil {
-		return nil, err
-	}
-	buckets, err := client.ListBuckets()
-	if err != nil {
-		if hasAPIErrorCode(err, "AccessDenied", "AccessDeniedException",
-			"UnauthorizedOperation", "AuthorizationError") {
-			return nil, nil
-		}
-		return nil, err
-	}
-	return buckets, nil
-}
-
 func (c *S3Client) requestContext() (context.Context, context.CancelFunc) {
 	return context.WithTimeout(c.ctx, awsRequestTimeout)
 }
