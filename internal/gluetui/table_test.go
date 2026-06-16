@@ -82,6 +82,18 @@ func TestGlueSelectedJob(t *testing.T) {
 	}
 }
 
+// TestGlueTabCountMatchesRows guards the tab-bar count fast path: tabCount must
+// stay equal to len(tabRows) for every tab so the bar can read inventory slice
+// lengths instead of rebuilding all six tabs' rows each render frame.
+func TestGlueTabCountMatchesRows(t *testing.T) {
+	mm := newGlueTestModel(120, 24)
+	for tb := tab(0); tb < tabCount; tb++ {
+		if got, want := mm.tabCount(tb), len(mm.tabRows(tb)); got != want {
+			t.Errorf("tab %s: tabCount=%d, len(tabRows)=%d", tabNames[tb], got, want)
+		}
+	}
+}
+
 func TestGlueRunsView(t *testing.T) {
 	mm := newGlueTestModel(120, 24)
 	mm.runsActive = true

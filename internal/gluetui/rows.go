@@ -104,6 +104,28 @@ func (mm *m) tabRows(t tab) []rowT {
 	return rows
 }
 
+// tabCount returns how many resources a tab holds. It mirrors len(tabRows(t))
+// (tabRows emits one row per resource and never filters) but reads the
+// inventory slice length directly, so the tab bar can show per-tab counts every
+// render frame without rebuilding all six tabs' rows.
+func (mm *m) tabCount(t tab) int {
+	switch t {
+	case tabJobs:
+		return len(mm.inv.Jobs)
+	case tabCrawlers:
+		return len(mm.inv.Crawlers)
+	case tabTriggers:
+		return len(mm.inv.Triggers)
+	case tabWorkflows:
+		return len(mm.inv.Workflows)
+	case tabConnections:
+		return len(mm.inv.Connections)
+	case tabDatabases:
+		return len(mm.inv.Databases)
+	}
+	return 0
+}
+
 // buildView returns the active tab's rows filtered by the active filter term.
 func (mm *m) buildView() []rowT {
 	rows := mm.tabRows(mm.tab)
