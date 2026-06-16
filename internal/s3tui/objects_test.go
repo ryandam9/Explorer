@@ -46,7 +46,6 @@ func TestObjectsLoadedAppendExtendsListing(t *testing.T) {
 	m := &Model{
 		bucketRegionCache:  map[string]string{},
 		bucketDetailsCache: map[string]*BucketDetails{},
-		seenBuckets:        map[string]bool{},
 		state:              stateObjectList,
 		sortAsc:            true,
 	}

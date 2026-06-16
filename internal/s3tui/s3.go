@@ -77,24 +77,6 @@ func ListRegions(ctx context.Context, awsCfg *config.AWSConfig) []string {
 	return regions
 }
 
-// ListBucketsInRegion creates a region-scoped S3 client and returns the bucket list.
-// Returns (nil, nil) for access-denied errors so callers can skip silently.
-func ListBucketsInRegion(ctx context.Context, awsCfg *config.AWSConfig, region, endpointURL string) ([]s3types.Bucket, error) {
-	client, err := NewS3Client(ctx, awsCfg, region, endpointURL)
-	if err != nil {
-		return nil, err
-	}
-	buckets, err := client.ListBuckets()
-	if err != nil {
-		if hasAPIErrorCode(err, "AccessDenied", "AccessDeniedException",
-			"UnauthorizedOperation", "AuthorizationError") {
-			return nil, nil
-		}
-		return nil, err
-	}
-	return buckets, nil
-}
-
 func (c *S3Client) requestContext() (context.Context, context.CancelFunc) {
 	return context.WithTimeout(c.ctx, awsRequestTimeout)
 }
@@ -139,11 +121,28 @@ func (c *S3Client) ListBuckets() ([]s3types.Bucket, error) {
 	ctx, cancel := c.requestContext()
 	defer cancel()
 
-	output, err := c.client.ListBuckets(ctx, &s3.ListBucketsInput{})
-	if err != nil {
-		return nil, err
+	// Request with a page size so the response is parameterised: S3 only
+	// includes each bucket's BucketRegion when the request carries at least one
+	// valid parameter, which lets us read a bucket's region straight from the
+	// listing instead of a separate (slow, sometimes wrong) GetBucketLocation
+	// call. Follow continuation tokens so accounts with many buckets list fully.
+	var buckets []s3types.Bucket
+	var token *string
+	for {
+		output, err := c.client.ListBuckets(ctx, &s3.ListBucketsInput{
+			MaxBuckets:        aws.Int32(1000),
+			ContinuationToken: token,
+		})
+		if err != nil {
+			return nil, err
+		}
+		buckets = append(buckets, output.Buckets...)
+		if output.ContinuationToken == nil || *output.ContinuationToken == "" {
+			break
+		}
+		token = output.ContinuationToken
 	}
-	return output.Buckets, nil
+	return buckets, nil
 }
 
 type ListObjectsResult struct {
