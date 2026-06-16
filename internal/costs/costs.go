@@ -60,6 +60,11 @@ const (
 // Source: https://aws.amazon.com/glue/pricing/ (us-east-1, ETL jobs).
 const GluePerDPUHourUSD = 0.44
 
+// GlueRateRegion is the region the GluePerDPUHourUSD rate is quoted for. Glue
+// DPU-hour pricing varies by region, so callers showing an estimate for another
+// region should flag that the figure uses this region's rate.
+const GlueRateRegion = "us-east-1"
+
 // GlueRunDPUHours converts a job run's reported DPUSeconds to DPU-hours.
 func GlueRunDPUHours(dpuSeconds float64) float64 {
 	if dpuSeconds <= 0 {

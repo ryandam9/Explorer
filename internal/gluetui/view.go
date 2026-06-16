@@ -230,7 +230,7 @@ func (mm *m) renderRuns() string {
 		}
 		dpu, cost := runsTotals(mm.runs)
 		foot.WriteString(lipgloss.NewStyle().Foreground(lipgloss.Color(ui.ColorText())).
-			Render(fmt.Sprintf("  %d runs · %.2f DPU-hrs ≈ $%.2f (estimate)", len(mm.runs), dpu, cost)))
+			Render(fmt.Sprintf("  %d runs · %.2f DPU-hrs ≈ $%.2f %s", len(mm.runs), dpu, cost, costEstimateNote(mm.runsJob.Region))))
 
 		footStr := foot.String()
 		mm.fitTable(&mm.runsTbl, 1, lipgloss.Height(footStr)+1)

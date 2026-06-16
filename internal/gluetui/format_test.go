@@ -156,6 +156,18 @@ func TestIsSecretKey(t *testing.T) {
 	}
 }
 
+func TestCostEstimateNote(t *testing.T) {
+	if got := costEstimateNote("us-east-1"); got != "(estimate)" {
+		t.Errorf("rate-region note = %q, want plain (estimate)", got)
+	}
+	if got := costEstimateNote(""); got != "(estimate)" {
+		t.Errorf("empty-region note = %q, want plain (estimate)", got)
+	}
+	if got := costEstimateNote("ap-south-1"); !strings.Contains(got, "us-east-1 rate") {
+		t.Errorf("non-rate-region note = %q, want it to flag the us-east-1 rate", got)
+	}
+}
+
 func TestDefBody(t *testing.T) {
 	mm := &m{def: JobDef{
 		Name: "etl", Role: "role/glue", GlueVersion: "4.0", Worker: "G.1X ×10",
