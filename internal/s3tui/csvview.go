@@ -30,6 +30,25 @@ var csvRowCaps = []int{100, 500, 1000, 0}
 // column up; the table scrolls horizontally for the rest.
 const csvCellCap = 60
 
+// csvPromptKind is what the shared typed prompt is currently editing.
+type csvPromptKind int
+
+const (
+	csvPromptNone csvPromptKind = iota
+	csvPromptDelim
+	csvPromptHeader
+)
+
+func maxCols(recs [][]string) int {
+	n := 0
+	for _, r := range recs {
+		if len(r) > n {
+			n = len(r)
+		}
+	}
+	return n
+}
+
 func delimiterName(r rune) string {
 	switch r {
 	case ',':
@@ -163,12 +182,33 @@ func (m *Model) initCSV(content string) bool {
 		return false
 	}
 	m.csvAll = recs
+	m.csvHeaderRow = 1 // row 1 is the header by default (reset per file)
 	if m.csvRowCap == 0 && !m.csvRowCapSet {
 		m.csvRowCap = defaultCSVRowCap
 		m.csvRowCapSet = true
 	}
 	m.buildCSVTable()
 	return true
+}
+
+// headerAndData splits the parsed records into the header row and the data rows
+// per csvHeaderRow (1-based; 0 = no header, so column names are synthesised and
+// every row is data). Rows before the header row are skipped — handy for files
+// that prepend their own header section before the real columns.
+func (m *Model) headerAndData() (header []string, data [][]string) {
+	if m.csvHeaderRow <= 0 {
+		n := maxCols(m.csvAll)
+		header = make([]string, n)
+		for i := range header {
+			header[i] = fmt.Sprintf("col %d", i+1)
+		}
+		return header, m.csvAll
+	}
+	idx := m.csvHeaderRow - 1
+	if idx >= len(m.csvAll) {
+		idx = len(m.csvAll) - 1
+	}
+	return m.csvAll[idx], m.csvAll[idx+1:]
 }
 
 const defaultCSVRowCap = 100
@@ -180,8 +220,7 @@ func (m *Model) buildCSVTable() {
 		m.csvTable = table.New(table.WithStyles(ui.TableStyles()))
 		return
 	}
-	header := m.csvAll[0]
-	data := m.csvAll[1:]
+	header, data := m.headerAndData()
 	m.csvTotal = len(data)
 	display, hidden := windowRecords(data, m.csvRowCap)
 	m.csvHidden = hidden
@@ -332,38 +371,73 @@ func validDelimRune(r rune) bool {
 	return r > 0 && r != '\r' && r != '\n' && r != utf8.RuneError && r != '\ufeff'
 }
 
-// startDelimiterInput opens the typed delimiter prompt.
-func (m *Model) startDelimiterInput() {
+// startCSVPrompt opens the shared typed prompt for the given action.
+func (m *Model) startCSVPrompt(kind csvPromptKind) {
 	ti := textinput.New()
-	ti.Prompt = "delimiter: "
-	ti.Placeholder = `,  \t  \x1f  ;  31`
 	ti.CharLimit = 12
-	ti.Width = 20
+	ti.Width = 22
+	switch kind {
+	case csvPromptDelim:
+		ti.Prompt = "delimiter: "
+		ti.Placeholder = `,  \t  \x1f  ;  31`
+	case csvPromptHeader:
+		ti.Prompt = "header row (0 = none): "
+		ti.SetValue(strconv.Itoa(m.csvHeaderRow))
+		ti.CursorEnd()
+	}
 	ti.Focus()
-	m.csvDelimInput = ti
-	m.csvDelimEditing = true
-	m.csvDelimErr = ""
+	m.csvInput = ti
+	m.csvPrompt = kind
+	m.csvPromptErr = ""
 }
 
-// applyDelimiterInput parses the typed spec and reparses the file with it; on
-// failure the prompt stays open with an explanation.
-func (m *Model) applyDelimiterInput() {
-	spec := strings.TrimSpace(m.csvDelimInput.Value())
+// applyCSVPrompt commits the open prompt; it stays open with an explanation on
+// invalid input.
+func (m *Model) applyCSVPrompt() {
+	switch m.csvPrompt {
+	case csvPromptDelim:
+		m.applyDelimiter()
+	case csvPromptHeader:
+		m.applyHeaderRow()
+	}
+}
+
+func (m *Model) applyDelimiter() {
+	spec := strings.TrimSpace(m.csvInput.Value())
 	r, ok := parseDelimiterSpec(spec)
 	if !ok {
-		m.csvDelimErr = "unrecognised delimiter — try , \\t \\x1f or 31"
+		m.csvPromptErr = "unrecognised delimiter — try , \\t \\x1f or 31"
 		return
 	}
 	recs, parsed := parseCSV(m.previewContent, r)
 	if !parsed {
-		m.csvDelimErr = "no table found with delimiter " + delimiterName(r)
+		m.csvPromptErr = "no table found with delimiter " + delimiterName(r)
 		return
 	}
 	m.csvDelim = r
 	m.csvAll = recs
+	if m.csvHeaderRow > len(m.csvAll) {
+		m.csvHeaderRow = 1
+	}
 	m.buildCSVTable()
-	m.csvDelimEditing = false
-	m.csvDelimErr = ""
+	m.csvPrompt = csvPromptNone
+	m.csvPromptErr = ""
+}
+
+func (m *Model) applyHeaderRow() {
+	n, err := strconv.Atoi(strings.TrimSpace(m.csvInput.Value()))
+	if err != nil || n < 0 {
+		m.csvPromptErr = "enter a row number (0 = no header)"
+		return
+	}
+	if n > len(m.csvAll) {
+		m.csvPromptErr = fmt.Sprintf("only %d row(s) in the file", len(m.csvAll))
+		return
+	}
+	m.csvHeaderRow = n
+	m.buildCSVTable()
+	m.csvPrompt = csvPromptNone
+	m.csvPromptErr = ""
 }
 
 // handleCSVKey routes a key press in the full-screen CSV view. It returns true
@@ -389,7 +463,10 @@ func (m *Model) handleCSVKey(key string) bool {
 		m.cycleCSVDelimiter()
 		return true
 	case "S":
-		m.startDelimiterInput()
+		m.startCSVPrompt(csvPromptDelim)
+		return true
+	case "h":
+		m.startCSVPrompt(csvPromptHeader)
 		return true
 	case "w":
 		m.cycleCSVRowCap()
@@ -428,35 +505,39 @@ func (m *Model) csvView() string {
 	return lipgloss.JoinVertical(lipgloss.Left, parts...)
 }
 
-// csvFooter is the typed-delimiter prompt while editing, otherwise the key hints.
+// csvFooter is the typed prompt while editing, otherwise the key hints.
 func (m *Model) csvFooter() string {
-	if m.csvDelimEditing {
-		line := m.csvDelimInput.View() + ui.MutedStyle().Render("   Enter apply · Esc cancel")
-		if m.csvDelimErr != "" {
-			line += "   " + ui.ErrorStyle().Render(m.csvDelimErr)
+	if m.csvPrompt != csvPromptNone {
+		line := m.csvInput.View() + ui.MutedStyle().Render("   Enter apply · Esc cancel")
+		if m.csvPromptErr != "" {
+			line += "   " + ui.ErrorStyle().Render(m.csvPromptErr)
 		}
 		return line
 	}
 	return ui.MutedStyle().Render(
-		"[↑/↓ PgUp/PgDn] rows   [←/→] columns   [s] cycle delim · [S] set delim…   [w] rows shown   [t] raw text   [Esc] close")
+		"[↑/↓ PgUp/PgDn] rows   [←/→] columns   [s]/[S] delimiter   [h] header row   [w] rows shown   [t] raw text   [Esc] close")
 }
 
-// csvInfoLine summarises the delimiter, the column window and the row window.
+// csvInfoLine summarises the delimiter, header row, the column window and the
+// row window.
 func (m *Model) csvInfoLine() string {
-	cols := 0
-	if len(m.csvAll) > 0 {
-		cols = len(m.csvAll[0])
-	}
+	header, _ := m.headerAndData()
+	cols := len(header)
 	// Make horizontal scrolling discoverable: when columns are off-screen, say
 	// how many are shown and how to reach the rest.
 	colsPart := fmt.Sprintf("%d columns", cols)
 	if hl, hr := m.csvTable.ColScrollInfo(); hl+hr > 0 {
 		colsPart = fmt.Sprintf("%d of %d columns shown (←/→ for more)", cols-hl-hr, cols)
 	}
+	headerPart := fmt.Sprintf("header: row %d", m.csvHeaderRow)
+	if m.csvHeaderRow == 0 {
+		headerPart = "header: none"
+	}
 	rowsPart := fmt.Sprintf("%d rows", m.csvTotal)
 	if m.csvHidden > 0 {
 		rowsPart = fmt.Sprintf("first %d + last %d of %d rows (%d hidden)",
 			m.csvRowCap, m.csvRowCap, m.csvTotal, m.csvHidden)
 	}
-	return fmt.Sprintf("delimiter: %s   ·   %s   ·   %s", delimiterName(m.csvDelim), colsPart, rowsPart)
+	return fmt.Sprintf("delimiter: %s   ·   %s   ·   %s   ·   %s",
+		delimiterName(m.csvDelim), headerPart, colsPart, rowsPart)
 }

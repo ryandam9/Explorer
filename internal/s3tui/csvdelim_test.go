@@ -38,12 +38,12 @@ func TestApplyDelimiterInputUnitSeparator(t *testing.T) {
 	}
 	m := &Model{width: 100, height: 24, previewContent: b.String(), showCSV: true}
 	// Auto-detect would pick comma and fail to find a table; set it manually.
-	m.startDelimiterInput()
-	m.csvDelimInput.SetValue(`\x1f`)
-	m.applyDelimiterInput()
+	m.startCSVPrompt(csvPromptDelim)
+	m.csvInput.SetValue(`\x1f`)
+	m.applyCSVPrompt()
 
-	if m.csvDelimEditing {
-		t.Fatalf("prompt should close on success; err=%q", m.csvDelimErr)
+	if m.csvPrompt != csvPromptNone {
+		t.Fatalf("prompt should close on success; err=%q", m.csvPromptErr)
 	}
 	if m.csvDelim != 0x1f {
 		t.Errorf("delim = %q, want unit separator", string(m.csvDelim))
@@ -56,10 +56,10 @@ func TestApplyDelimiterInputUnitSeparator(t *testing.T) {
 	}
 
 	// An unparseable delimiter keeps the prompt open with an error.
-	m.startDelimiterInput()
-	m.csvDelimInput.SetValue("@")
-	m.applyDelimiterInput()
-	if !m.csvDelimEditing || m.csvDelimErr == "" {
+	m.startCSVPrompt(csvPromptDelim)
+	m.csvInput.SetValue("@")
+	m.applyCSVPrompt()
+	if m.csvPrompt == csvPromptNone || m.csvPromptErr == "" {
 		t.Error("a delimiter that yields no table should keep the prompt open with an error")
 	}
 }
