@@ -190,6 +190,7 @@ type Model struct {
 
 	lastSelectedKey       string
 	selectedDetails       *ObjectDetails
+	objectDetailsCache    map[string]*ObjectDetails // on-demand object metadata, by key
 	selectedBucketDetails *BucketDetails
 	// objectsNextToken is set when the current listing was cut off by the
 	// page window; "L" continues from it.
@@ -340,6 +341,7 @@ func NewModel(ctx context.Context, awsCfg *config.AWSConfig, region, bucket, pre
 		sortAsc:            true,
 		bucketRegionCache:  make(map[string]string),
 		bucketDetailsCache: make(map[string]*BucketDetails),
+		objectDetailsCache: make(map[string]*ObjectDetails),
 		themeIdx:           themeIdx,
 		allowDelete:        allowDelete,
 		configPath:         configPath,
@@ -1448,11 +1450,19 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case "esc":
 			m.err = nil
 			if m.state == stateObjectList {
-				m.state = stateBucketList
-				m.focus = focusBuckets
-				m.bucket = ""
-				m.prefix = ""
-				cmds = append(cmds, m.loadBuckets())
+				if m.prefix != "" {
+					// Step up one folder (to the object's parent) rather than all
+					// the way back to the bucket list, so siblings stay browsable.
+					m.prefix = parentPrefix(m.prefix)
+					m.prefixInput.SetValue(m.prefix)
+					cmds = append(cmds, m.loadObjects())
+				} else {
+					m.state = stateBucketList
+					m.focus = focusBuckets
+					m.bucket = ""
+					m.prefix = ""
+					cmds = append(cmds, m.loadBuckets())
+				}
 			}
 
 		case "/":
@@ -1485,6 +1495,15 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					}
 					return m, tea.Batch(cmds...)
 				}
+			} else if m.state == stateObjectList && m.focus == focusObjects {
+				// On-demand object metadata: fetch the selected file's extended
+				// details (content-type, encryption, tags, ACL…) only when asked.
+				// Return so "d" isn't also forwarded to the table (its keymap binds
+				// d to half-page-down).
+				if key, ok := m.selectedObjectKey(); ok && m.selectedDetails == nil && !m.detailsLoading {
+					cmds = append(cmds, m.fetchObjectDetails(key))
+				}
+				return m, tea.Batch(cmds...)
 			}
 
 		case "f":
@@ -1708,10 +1727,10 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		} else {
 			m.statusMsg = fmt.Sprintf("%d bucket(s) found", count)
 			if m.bucket == "" {
+				// On-demand: select the first bucket but don't fetch its summary until
+				// the user opens the detail view with "d".
 				m.bucket = m.allBucketRows[0][1]
-				if cmd := m.ensureBucketDetails(m.bucket); cmd != nil {
-					cmds = append(cmds, cmd)
-				}
+				m.selectedBucketDetails = m.bucketDetailsCache[m.bucket]
 			}
 			if pending {
 				cmds = append(cmds, m.fetchBucketRegions())
@@ -1755,16 +1774,19 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.selectedDetails = nil
 
 		if len(m.objectMaps) > 0 && m.objectMaps[0]["type"] != "DIR" {
+			// On-demand: show cached metadata if we have it, but don't fetch on
+			// load. The user requests it with "d".
 			m.lastSelectedKey = m.prefix + m.objectMaps[0]["name"]
-			cmds = append(cmds, m.fetchObjectDetails(m.lastSelectedKey))
+			m.selectedDetails = m.objectDetailsCache[m.lastSelectedKey]
 		}
 
 	case objectDetailsMsg:
 		m.detailsLoading = false
-		if msg.key == m.lastSelectedKey {
-			if msg.err == nil {
-				m.selectedDetails = msg.details
-			}
+		if msg.err == nil && msg.details != nil {
+			m.objectDetailsCache[msg.key] = msg.details // serve revisits from cache
+		}
+		if msg.key == m.lastSelectedKey && msg.err == nil {
+			m.selectedDetails = msg.details
 		}
 
 	case bucketDetailsMsg:
@@ -1856,13 +1878,12 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 		if m.state == stateBucketList {
 			row := m.bucketTable.SelectedRow()
-			if len(row) > 0 && (m.selectedBucketDetails == nil || m.bucket != row[1]) {
+			if len(row) > 0 && m.bucket != row[1] {
 				m.bucket = row[1]
-				// Served from the session cache when this bucket was already
-				// visited — scrolling the list doesn't refetch ~19 calls per row.
-				if cmd := m.ensureBucketDetails(row[1]); cmd != nil {
-					cmds = append(cmds, cmd)
-				}
+				// On-demand: don't fetch the (~19-call) bucket summary while
+				// scrolling. Serve it from the session cache if already fetched;
+				// otherwise it loads when the user opens the detail view with "d".
+				m.selectedBucketDetails = m.bucketDetailsCache[row[1]]
 			}
 		}
 	} else if m.state == stateObjectList {
@@ -1875,12 +1896,11 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if idx >= 0 && idx < len(m.objectMaps) {
 				r := m.objectMaps[idx]
 				if r["type"] != "DIR" {
-					newKey := m.prefix + r["name"]
-					if newKey != m.lastSelectedKey {
-						m.lastSelectedKey = newKey
-						m.selectedDetails = nil
-						cmds = append(cmds, m.fetchObjectDetails(newKey))
-					}
+					m.lastSelectedKey = m.prefix + r["name"]
+					// On-demand: don't fetch metadata while scrolling. Serve it from
+					// the cache if this key was fetched before; otherwise leave it for
+					// the user to request with "d".
+					m.selectedDetails = m.objectDetailsCache[m.lastSelectedKey]
 				} else {
 					m.lastSelectedKey = ""
 					m.selectedDetails = nil
@@ -2157,6 +2177,7 @@ func (m *Model) statusHints() []ui.KeyHint {
 			ui.H("↑/↓", "navigate"),
 			ui.H("Enter", "open"),
 			ui.H("p", "preview"),
+			ui.H("d", "details"),
 		}
 		hints = append(hints, colScrollHints(&m.objectTable)...)
 		hints = append(hints,
@@ -2227,7 +2248,10 @@ func (m *Model) bucketListView() string {
 		date := row[3]
 		title = fmt.Sprintf("BUCKET DETAILS: %s  [d] Full detail view", name)
 
-		metaText = m.loadingLine("Loading bucket details…")
+		metaText = ui.MutedStyle().Render("Press d for full details (versioning, encryption, lifecycle, policy…)")
+		if m.detailsLoading {
+			metaText = m.loadingLine("Loading bucket details…")
+		}
 		if !m.detailsLoading && m.selectedBucketDetails != nil {
 			tagStr := ""
 			if len(m.selectedBucketDetails.Tags) > 0 {
@@ -2339,8 +2363,10 @@ func (m *Model) objectListView() string {
 		if isDir {
 			metaText = "Status: N/A"
 		} else {
-			if m.detailsLoading || m.selectedDetails == nil {
+			if m.detailsLoading {
 				metaText = m.loadingLine("Loading object metadata…")
+			} else if m.selectedDetails == nil {
+				metaText = ui.MutedStyle().Render("Press d to load metadata (content-type, encryption, tags, ACL…)")
 			} else {
 				// Build tags string
 				tagStr := ""
@@ -2673,6 +2699,7 @@ func (m *Model) helpView() string {
 			"Objects",
 			"  /                  Jump to prefix",
 			"  p                  Preview object (CSV→table, .gz→decompress, .tar→browse members)",
+			"  d                  Load extended metadata for the selected object (on demand)",
 			"  y                  Copy S3 URI to clipboard",
 			"  o                  Open bucket/object in the AWS console (copies the URL)",
 			"  g                  Generate presigned URL (1 hour)",
