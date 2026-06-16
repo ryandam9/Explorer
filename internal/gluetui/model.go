@@ -15,6 +15,7 @@ import (
 
 	"github.com/ryandam9/aws_explorer/internal/config"
 	"github.com/ryandam9/aws_explorer/internal/consolelink"
+	"github.com/ryandam9/aws_explorer/internal/table"
 	"github.com/ryandam9/aws_explorer/internal/ui"
 )
 
@@ -55,7 +56,10 @@ type m struct {
 	err     error
 
 	tab tab
-	sel [tabCount]int
+	// sel remembers each tab's cursor so switching tabs restores the selection.
+	sel  [tabCount]int
+	tbl  table.Model
+	view []rowT // active tab's filtered rows, parallel to the table's rows
 
 	filter       textinput.Model
 	filterActive bool
@@ -66,7 +70,7 @@ type m struct {
 	runs        []JobRun
 	runsLoading bool
 	runsErr     error
-	runsSel     int
+	runsTbl     table.Model
 
 	// Job-definition overlay (d on a job).
 	defActive  bool
@@ -117,17 +121,52 @@ func NewModel(ctx context.Context, awsCfg *config.AWSConfig, regions []string, a
 	f.Placeholder = "Filter…"
 	f.Width = 30
 
+	activeRegions := client.Regions()
 	return &m{
 		ctx:        ctx,
 		client:     client,
-		regions:    client.Regions(),
+		regions:    activeRegions,
 		allRegions: allRegions,
 		appCfg:     appCfg,
 		configPath: configPath,
 		filter:     f,
 		spinner:    s,
+		tbl:        newGlueTable(tabColumns(tabJobs, len(activeRegions) > 1)),
+		runsTbl:    newGlueTable(runColumns()),
 		loading:    true,
 	}, nil
+}
+
+// rebuild recomputes the active tab's filtered rows and pushes them into the
+// shared table, swapping in the tab's columns and restoring its remembered
+// cursor.
+func (mm *m) rebuild() {
+	mm.view = mm.buildView()
+	mm.tbl.SetColumns(tabColumns(mm.tab, len(mm.regions) > 1))
+	rows := make([]table.Row, 0, len(mm.view))
+	for _, r := range mm.view {
+		rows = append(rows, r.cells)
+	}
+	mm.tbl.SetRows(rows)
+	if mm.sel[mm.tab] >= len(rows) {
+		mm.sel[mm.tab] = max(0, len(rows)-1)
+	}
+	mm.tbl.SetCursor(mm.sel[mm.tab])
+}
+
+// switchTab moves to the next/previous tab, remembering the current cursor and
+// restoring the destination tab's.
+func (mm *m) switchTab(next bool) {
+	mm.sel[mm.tab] = mm.tbl.Cursor()
+	if next {
+		mm.tab = (mm.tab + 1) % tabCount
+	} else {
+		mm.tab = (mm.tab + tabCount - 1) % tabCount
+	}
+	mm.filter.SetValue("")
+	mm.filterActive = false
+	mm.filter.Blur()
+	mm.rebuild()
 }
 
 func (mm *m) Init() tea.Cmd {
@@ -239,14 +278,19 @@ func (mm *m) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			mm.err = msg.err
 		} else {
 			mm.inv = msg.inv
-			mm.clampAll()
+			mm.rebuild()
 		}
 
 	case runsMsg:
 		mm.runsLoading = false
 		mm.runsErr = msg.err
 		mm.runs = msg.runs
-		mm.runsSel = 0
+		rows := make([]table.Row, 0, len(msg.runs))
+		for _, r := range msg.runs {
+			rows = append(rows, runRow(r))
+		}
+		mm.runsTbl.SetRows(rows)
+		mm.runsTbl.SetCursor(0)
 
 	case defMsg:
 		mm.defLoading = false
@@ -302,12 +346,12 @@ func (mm *m) handleKey(msg tea.KeyMsg) []tea.Cmd {
 			}
 			mm.filterActive = false
 			mm.filter.Blur()
-			mm.clampCurrent()
+			mm.rebuild()
 		default:
 			var cmd tea.Cmd
 			mm.filter, cmd = mm.filter.Update(msg)
 			cmds = append(cmds, cmd)
-			mm.clampCurrent()
+			mm.rebuild()
 		}
 		return cmds
 	}
@@ -320,22 +364,26 @@ func (mm *m) handleKey(msg tea.KeyMsg) []tea.Cmd {
 		case "esc", "backspace", "left", "h":
 			mm.runsActive = false
 		case "up", "k":
-			if mm.runsSel > 0 {
-				mm.runsSel--
-			}
+			mm.runsTbl.MoveUp(1)
 		case "down", "j":
-			if mm.runsSel < len(mm.runs)-1 {
-				mm.runsSel++
-			}
+			mm.runsTbl.MoveDown(1)
+		case "g", "home":
+			mm.runsTbl.GotoTop()
+		case "G", "end":
+			mm.runsTbl.GotoBottom()
+		case "<", ",":
+			mm.runsTbl.ScrollLeft()
+		case ">", ".":
+			mm.runsTbl.ScrollRight()
 		case "y":
-			if mm.runsSel < len(mm.runs) && mm.runs[mm.runsSel].Error != "" {
-				_ = clipboard.WriteAll(mm.runs[mm.runsSel].Error)
+			if r, ok := mm.selectedRun(); ok && r.Error != "" {
+				_ = clipboard.WriteAll(r.Error)
 				mm.setToast("Copied error message")
 				cmds = append(cmds, toastCmd(3*time.Second))
 			}
 		case "L":
-			if mm.runsSel < len(mm.runs) {
-				cmds = append(cmds, mm.jumpToRunLogsCmd(mm.runs[mm.runsSel]))
+			if r, ok := mm.selectedRun(); ok {
+				cmds = append(cmds, mm.jumpToRunLogsCmd(r))
 			}
 		case ui.KeyAbout:
 			mm.showAbout = true
@@ -348,19 +396,21 @@ func (mm *m) handleKey(msg tea.KeyMsg) []tea.Cmd {
 	case "q", "ctrl+c":
 		return []tea.Cmd{tea.Quit}
 	case "tab", "right", "l":
-		mm.tab = (mm.tab + 1) % tabCount
-		mm.resetFilter()
+		mm.switchTab(true)
 	case "shift+tab", "left", "h":
-		mm.tab = (mm.tab + tabCount - 1) % tabCount
-		mm.resetFilter()
+		mm.switchTab(false)
 	case "up", "k":
-		if mm.sel[mm.tab] > 0 {
-			mm.sel[mm.tab]--
-		}
+		mm.tbl.MoveUp(1)
 	case "down", "j":
-		if mm.sel[mm.tab] < mm.rowCount()-1 {
-			mm.sel[mm.tab]++
-		}
+		mm.tbl.MoveDown(1)
+	case "g", "home":
+		mm.tbl.GotoTop()
+	case "G", "end":
+		mm.tbl.GotoBottom()
+	case "<", ",":
+		mm.tbl.ScrollLeft()
+	case ">", ".":
+		mm.tbl.ScrollRight()
 	case "/":
 		mm.filterActive = true
 		mm.filter.Focus()
@@ -412,28 +462,6 @@ func (mm *m) openConsole(cmds *[]tea.Cmd) {
 		mm.setToast("Copied console URL")
 	}
 	*cmds = append(*cmds, toastCmd(3*time.Second))
-}
-
-func (mm *m) resetFilter() {
-	mm.filter.SetValue("")
-	mm.filterActive = false
-	mm.filter.Blur()
-	mm.clampCurrent()
-}
-
-func (mm *m) clampCurrent() {
-	if mm.sel[mm.tab] >= mm.rowCount() {
-		mm.sel[mm.tab] = max(0, mm.rowCount()-1)
-	}
-}
-
-func (mm *m) clampAll() {
-	for t := tab(0); t < tabCount; t++ {
-		n := len(mm.rowsForTab(t))
-		if mm.sel[t] >= n {
-			mm.sel[t] = max(0, n-1)
-		}
-	}
 }
 
 func max(a, b int) int {

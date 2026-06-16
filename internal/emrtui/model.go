@@ -61,7 +61,7 @@ type m struct {
 	steps        []Step
 	stepsLoading bool
 	stepsErr     error
-	stepsSel     int
+	stepsTbl     table.Model
 
 	// Cluster-detail overlay (d on a cluster).
 	detailActive  bool
@@ -80,7 +80,7 @@ type m struct {
 	yarnMetrics ClusterMetrics
 	yarnLoading bool
 	yarnErr     error
-	yarnSel     int
+	yarnTbl     table.Model
 
 	// HBase table browser (h on a cluster).
 	hbaseActive   bool
@@ -88,7 +88,7 @@ type m struct {
 	hbaseTables   []HBaseTable
 	hbaseLoading  bool
 	hbaseErr      error
-	hbaseSel      int
+	hbaseTbl      table.Model
 	hbaseConfirm  bool // row-count scan confirmation prompt
 	hbaseCounting bool
 
@@ -100,7 +100,7 @@ type m struct {
 	oozieCoords  bool // false = workflows tab, true = coordinators tab
 	oozieLoading bool
 	oozieErr     error
-	oozieSel     int
+	oozieTbl     table.Model
 
 	spinner   spinner.Model
 	toast     string
@@ -200,6 +200,10 @@ func NewModel(ctx context.Context, awsCfg *config.AWSConfig, regions []string, a
 		filter:     f,
 		spinner:    s,
 		tbl:        tbl,
+		stepsTbl:   newSubTable(stepColumns()),
+		yarnTbl:    newSubTable(yarnColumns()),
+		hbaseTbl:   newSubTable(hbaseColumns()),
+		oozieTbl:   newSubTable(oozieWFColumns()),
 		loading:    true,
 		sortCol:    -1,
 	}, nil
@@ -370,7 +374,7 @@ func (mm *m) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		mm.stepsLoading = false
 		mm.stepsErr = msg.err
 		mm.steps = msg.steps
-		mm.stepsSel = 0
+		mm.setRows(&mm.stepsTbl, len(msg.steps), func(i int) table.Row { return stepRow(msg.steps[i]) })
 
 	case appUIMsg:
 		mm.appUILoading = false
@@ -387,20 +391,20 @@ func (mm *m) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		mm.yarnErr = msg.err
 		mm.yarnApps = msg.apps
 		mm.yarnMetrics = msg.metrics
-		mm.yarnSel = 0
+		mm.setRows(&mm.yarnTbl, len(msg.apps), func(i int) table.Row { return yarnRow(msg.apps[i]) })
 
 	case hbaseMsg:
 		mm.hbaseLoading = false
 		mm.hbaseErr = msg.err
 		mm.hbaseTables = msg.tables
-		mm.hbaseSel = 0
+		mm.setRows(&mm.hbaseTbl, len(msg.tables), func(i int) table.Row { return hbaseRow(msg.tables[i]) })
 
 	case oozieMsg:
 		mm.oozieLoading = false
 		mm.oozieErr = msg.err
 		mm.oozieWF = msg.workflows
 		mm.oozieCoord = msg.coords
-		mm.oozieSel = 0
+		mm.setOozieRows()
 
 	case hbaseCountMsg:
 		mm.hbaseCounting = false
@@ -416,6 +420,11 @@ func (mm *m) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					break
 				}
 			}
+			// Re-render the ROWS column for the affected table, keeping the cursor.
+			cur := mm.hbaseTbl.Cursor()
+			mm.setRows(&mm.hbaseTbl, len(mm.hbaseTables), func(i int) table.Row { return hbaseRow(mm.hbaseTables[i]) })
+			mm.hbaseTbl.SetCursor(cur)
+
 			suffix := ""
 			if msg.capped {
 				suffix = "+ (capped)"
@@ -519,22 +528,26 @@ func (mm *m) handleKey(msg tea.KeyMsg) []tea.Cmd {
 		case "esc", "backspace", "left", "h":
 			mm.stepsActive = false
 		case "up", "k":
-			if mm.stepsSel > 0 {
-				mm.stepsSel--
-			}
+			mm.stepsTbl.MoveUp(1)
 		case "down", "j":
-			if mm.stepsSel < len(mm.steps)-1 {
-				mm.stepsSel++
-			}
+			mm.stepsTbl.MoveDown(1)
+		case "g", "home":
+			mm.stepsTbl.GotoTop()
+		case "G", "end":
+			mm.stepsTbl.GotoBottom()
+		case "<", ",":
+			mm.stepsTbl.ScrollLeft()
+		case ">", ".":
+			mm.stepsTbl.ScrollRight()
 		case "y":
-			if mm.stepsSel < len(mm.steps) && mm.steps[mm.stepsSel].FailureReason != "" {
-				_ = clipboard.WriteAll(mm.steps[mm.stepsSel].FailureReason)
+			if s, ok := mm.selectedStep(); ok && s.FailureReason != "" {
+				_ = clipboard.WriteAll(s.FailureReason)
 				mm.setToast("Copied failure reason")
 				cmds = append(cmds, toastCmd(3*time.Second))
 			}
 		case "L":
-			if mm.stepsSel < len(mm.steps) {
-				mm.jumpToStepLogs(mm.steps[mm.stepsSel], &cmds)
+			if s, ok := mm.selectedStep(); ok {
+				mm.jumpToStepLogs(s, &cmds)
 			}
 		case ui.KeyAbout:
 			mm.showAbout = true
@@ -550,13 +563,17 @@ func (mm *m) handleKey(msg tea.KeyMsg) []tea.Cmd {
 		case "esc", "backspace", "left", "h":
 			mm.yarnActive = false
 		case "up", "k":
-			if mm.yarnSel > 0 {
-				mm.yarnSel--
-			}
+			mm.yarnTbl.MoveUp(1)
 		case "down", "j":
-			if mm.yarnSel < len(mm.yarnApps)-1 {
-				mm.yarnSel++
-			}
+			mm.yarnTbl.MoveDown(1)
+		case "g", "home":
+			mm.yarnTbl.GotoTop()
+		case "G", "end":
+			mm.yarnTbl.GotoBottom()
+		case "<", ",":
+			mm.yarnTbl.ScrollLeft()
+		case ">", ".":
+			mm.yarnTbl.ScrollRight()
 		case "r":
 			mm.yarnLoading = true
 			mm.yarnErr = nil
@@ -574,9 +591,9 @@ func (mm *m) handleKey(msg tea.KeyMsg) []tea.Cmd {
 			switch msg.String() {
 			case "y", "Y", "enter":
 				mm.hbaseConfirm = false
-				if mm.hbaseSel < len(mm.hbaseTables) {
+				if t, ok := mm.selectedHbaseTable(); ok {
 					mm.hbaseCounting = true
-					cmds = append(cmds, mm.countHbaseRowsCmd(mm.hbaseTables[mm.hbaseSel]), mm.spinner.Tick)
+					cmds = append(cmds, mm.countHbaseRowsCmd(t), mm.spinner.Tick)
 				}
 			default:
 				mm.hbaseConfirm = false
@@ -589,16 +606,20 @@ func (mm *m) handleKey(msg tea.KeyMsg) []tea.Cmd {
 		case "esc", "backspace", "left":
 			mm.hbaseActive = false
 		case "up", "k":
-			if mm.hbaseSel > 0 {
-				mm.hbaseSel--
-			}
+			mm.hbaseTbl.MoveUp(1)
 		case "down", "j":
-			if mm.hbaseSel < len(mm.hbaseTables)-1 {
-				mm.hbaseSel++
-			}
+			mm.hbaseTbl.MoveDown(1)
+		case "g", "home":
+			mm.hbaseTbl.GotoTop()
+		case "G", "end":
+			mm.hbaseTbl.GotoBottom()
+		case "<", ",":
+			mm.hbaseTbl.ScrollLeft()
+		case ">", ".":
+			mm.hbaseTbl.ScrollRight()
 		case "c":
 			// Ask before scanning — a full-table read is read-only but not free.
-			if !mm.hbaseCounting && mm.hbaseSel < len(mm.hbaseTables) {
+			if _, ok := mm.selectedHbaseTable(); ok && !mm.hbaseCounting {
 				mm.hbaseConfirm = true
 			}
 		case "r":
@@ -620,15 +641,19 @@ func (mm *m) handleKey(msg tea.KeyMsg) []tea.Cmd {
 			mm.oozieActive = false
 		case "tab", "right":
 			mm.oozieCoords = !mm.oozieCoords
-			mm.oozieSel = 0
+			mm.setOozieRows()
 		case "up", "k":
-			if mm.oozieSel > 0 {
-				mm.oozieSel--
-			}
+			mm.oozieTbl.MoveUp(1)
 		case "down", "j":
-			if mm.oozieSel < mm.oozieRowCount()-1 {
-				mm.oozieSel++
-			}
+			mm.oozieTbl.MoveDown(1)
+		case "g", "home":
+			mm.oozieTbl.GotoTop()
+		case "G", "end":
+			mm.oozieTbl.GotoBottom()
+		case "<", ",":
+			mm.oozieTbl.ScrollLeft()
+		case ">", ".":
+			mm.oozieTbl.ScrollRight()
 		case "r":
 			mm.oozieLoading = true
 			mm.oozieErr = nil

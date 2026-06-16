@@ -7,7 +7,6 @@ import (
 	"time"
 
 	"github.com/ryandam9/aws_explorer/internal/costs"
-	"github.com/ryandam9/aws_explorer/internal/ui"
 )
 
 // stateClass buckets a Glue run/crawler/trigger state into a visual class, so a
@@ -47,20 +46,6 @@ func stateGlyph(state string) string {
 		return "✗"
 	default:
 		return "•"
-	}
-}
-
-// stateColor returns the theme colour role for a state's class.
-func stateColor(state string) string {
-	switch classifyState(state) {
-	case stateSuccess:
-		return ui.ColorSuccess()
-	case stateRunning:
-		return ui.ColorAccent()
-	case stateFailure:
-		return ui.ColorError()
-	default:
-		return ui.ColorText()
 	}
 }
 

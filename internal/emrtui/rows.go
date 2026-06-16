@@ -29,21 +29,6 @@ const (
 	appsCap = 22
 )
 
-// cell is one table cell: its text and an optional theme colour role ("" =
-// default text colour). Used by the drill-down sub-views (steps, YARN, HBase,
-// Oozie), which still render with the lightweight colSpec layout.
-type cell struct {
-	text  string
-	color string
-}
-
-// colSpec describes a column: its header and fixed width (0 = flexible, takes
-// the remaining width; at most one flex column per table).
-type colSpec struct {
-	title string
-	width int
-}
-
 // clusterColumns is the shared-table column set for the cluster list. Widths are
 // floors: the table grows each column to fit its content and scrolls
 // horizontally when the set overflows the panel. REGION is appended only when

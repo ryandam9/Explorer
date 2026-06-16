@@ -4,6 +4,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/ryandam9/aws_explorer/internal/table"
 )
 
 func TestFormatDuration(t *testing.T) {
@@ -97,45 +99,10 @@ func TestRunsTotals(t *testing.T) {
 	}
 }
 
-func TestResolveWidths(t *testing.T) {
-	specs := []colSpec{{"NAME", 0}, {"STATE", 10}, {"DUR", 6}}
-	// total 40: gaps=2 and one leading space are reserved, so the budget is 37;
-	// fixed=16, flex=37-16=21.
-	widths := resolveWidths(specs, 40)
-	if widths[0] != 21 || widths[1] != 10 || widths[2] != 6 {
-		t.Errorf("widths = %v, want [21 10 6]", widths)
-	}
-	// A rendered row (leading space + cells + inter-column gaps) must never
-	// exceed the panel, or it wraps fields onto the next line.
-	if rowWidth(widths) > 40 {
-		t.Errorf("row width %d exceeds total 40", rowWidth(widths))
-	}
-
-	// When the terminal is too narrow for the fixed columns, widths shrink to
-	// fit rather than overflowing — so the row still never exceeds the total.
-	tight := resolveWidths(specs, 18)
-	if rowWidth(tight) > 18 {
-		t.Errorf("tight widths %v overflow total 18 (row width %d)", tight, rowWidth(tight))
-	}
-}
-
-// rowWidth is the rendered width of a row: a leading space, each column, and one
-// space between columns.
-func rowWidth(widths []int) int {
-	total := 1
-	for i, w := range widths {
-		total += w
-		if i > 0 {
-			total++
-		}
-	}
-	return total
-}
-
 func TestRowMatches(t *testing.T) {
 	r := rowT{
 		region: "us-east-1",
-		cells:  []cell{{text: "nightly-orders-etl"}, {text: "✓ SUCCEEDED"}},
+		cells:  table.Row{"nightly-orders-etl", "✓ SUCCEEDED"},
 	}
 	if !rowMatches(r, "orders") {
 		t.Error("should match on name substring")

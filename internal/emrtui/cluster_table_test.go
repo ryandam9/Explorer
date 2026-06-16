@@ -25,6 +25,10 @@ func newClusterTestModel(w, h int) *m {
 			table.WithStyles(ui.TableStyles()),
 			table.WithFrozenColumns(1),
 		),
+		stepsTbl: newSubTable(stepColumns()),
+		yarnTbl:  newSubTable(yarnColumns()),
+		hbaseTbl: newSubTable(hbaseColumns()),
+		oozieTbl: newSubTable(oozieWFColumns()),
 		inv: Inventory{Clusters: []Cluster{
 			{Name: "data-platform-production-analytics-cluster-2026", ID: "j-2AB3CD4EF5", State: "WAITING", ReleaseLabel: "emr-7.1.0", Applications: "Spark, HBase, Hive, Hadoop, Tez, Livy", InstanceHours: 128},
 			{Name: "etl", ID: "j-9ZY8XW7VU6", State: "TERMINATED_WITH_ERRORS", ReleaseLabel: "emr-6.15.0", Applications: "Spark", InstanceHours: 12, StateReason: "boom"},
