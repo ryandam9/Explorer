@@ -1753,12 +1753,17 @@ a basename under `~/.aws_explorer/exports/<vpc-id>-<timestamp>.{md,html,svg}`:
 
 - **Markdown** (`.md`) — ideal for pasting into a support case or runbook.
 - **HTML** (`.html`) — styled, with a sticky table-of-contents and searchable,
-  paginated resource tables; leads with the architecture diagram.
+  paginated resource tables; leads with the architecture diagram and a checkbox
+  bar to **toggle diagram layers** — Subnets, Traffic & IGW, NAT gateways,
+  Security groups, Detail labels — implemented in pure CSS (`:has()`), so it
+  works offline with no JavaScript.
 - **SVG** (`.svg`) — a deterministic **architecture diagram**: the internet and
   its gateway, the VPC as a container, availability-zone columns of subnets
-  colour-coded public / private / isolated by their default route, NAT gateways
-  drawn in their subnet, and arrows for the traffic-flow paths (internet ⇄ IGW,
-  public → IGW, private → NAT → IGW). Pure function of the snapshot — no AI.
+  (wrapping into lanes when an AZ has many) colour-coded public / private /
+  isolated by their default route, NAT gateways drawn in their subnet,
+  per-subnet security-group badges, and arrows for the traffic-flow paths
+  (internet ⇄ IGW, public → IGW, private → NAT → IGW). Pure function of the
+  snapshot — no AI.
 
 The status bar shows the paths.
 

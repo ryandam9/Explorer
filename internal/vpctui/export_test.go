@@ -163,6 +163,11 @@ func TestExportHTMLStructure(t *testing.T) {
 		`--table:"Roboto Condensed"`,             // #212: and applied via the table font var
 		"max-height:80vh",                        // #212: plain/offline tables scroll within ~80vh
 		"position:sticky",                        // #212: header pinned during scroll
+		`<h2 id="architecture">`,                 // architecture section
+		`<div class="layer-toggles"`,             // layer checkbox bar
+		`id="lt-sg"`,                             // security-group toggle
+		`.arch:has(#lt-traffic:not(:checked))`,   // pure-CSS layer toggle (no JS)
+		`<g data-layer="traffic">`,               // the inline SVG carries the layers
 	} {
 		if !strings.Contains(html, want) {
 			t.Errorf("export HTML missing %q", want)
