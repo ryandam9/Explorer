@@ -1,0 +1,111 @@
+package emrtui
+
+import (
+	"strings"
+	"testing"
+
+	"github.com/charmbracelet/bubbles/textinput"
+	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/x/ansi"
+
+	"github.com/ryandam9/aws_explorer/internal/table"
+	"github.com/ryandam9/aws_explorer/internal/ui"
+)
+
+// newClusterTestModel builds an EMR model wired with the shared table and a
+// small inventory, sized to w×h, for the cluster-list tests.
+func newClusterTestModel(w, h int) *m {
+	mm := &m{
+		regions: []string{"us-east-1"},
+		filter:  textinput.New(),
+		sortCol: -1,
+		tbl: table.New(
+			table.WithColumns(clusterColumns(false)),
+			table.WithFocused(true),
+			table.WithStyles(ui.TableStyles()),
+			table.WithFrozenColumns(1),
+		),
+		stepsTbl: newSubTable(stepColumns()),
+		yarnTbl:  newSubTable(yarnColumns()),
+		hbaseTbl: newSubTable(hbaseColumns()),
+		oozieTbl: newSubTable(oozieWFColumns()),
+		inv: Inventory{Clusters: []Cluster{
+			{Name: "data-platform-production-analytics-cluster-2026", ID: "j-2AB3CD4EF5", State: "WAITING", ReleaseLabel: "emr-7.1.0", Applications: "Spark, HBase, Hive, Hadoop, Tez, Livy", InstanceHours: 128},
+			{Name: "etl", ID: "j-9ZY8XW7VU6", State: "TERMINATED_WITH_ERRORS", ReleaseLabel: "emr-6.15.0", Applications: "Spark", InstanceHours: 12, StateReason: "boom"},
+			{Name: "mid", ID: "j-5MID000000", State: "RUNNING", ReleaseLabel: "emr-7.0.0", Applications: "Spark", InstanceHours: 64},
+		}},
+	}
+	mm.width, mm.height = w, h
+	mm.rebuild()
+	return mm
+}
+
+// No rendered line may exceed the terminal width (the bug that motivated the
+// migration), and the status bar with its shortcuts must always be present.
+func TestClusterTableNeverWraps(t *testing.T) {
+	for _, w := range []int{200, 120, 100, 80, 60} {
+		mm := newClusterTestModel(w, 24)
+		out := mm.View()
+		for i, line := range strings.Split(out, "\n") {
+			if lw := ansi.StringWidth(line); lw > w {
+				t.Errorf("width %d: line %d overflows (%d > %d): %q", w, i, lw, w, line)
+			}
+		}
+		if !strings.Contains(out, "rows") || !strings.Contains(out, "quit") {
+			t.Errorf("width %d: status hints missing", w)
+		}
+	}
+}
+
+func TestClusterTableNavSelectsCluster(t *testing.T) {
+	mm := newClusterTestModel(120, 24)
+	if cl, ok := mm.selectedCluster(); !ok || cl.Name != mm.view[0].Name {
+		t.Fatalf("initial selection = %+v, ok=%v", cl, ok)
+	}
+	mm.handleKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("j")})
+	if got := mm.tbl.Cursor(); got != 1 {
+		t.Fatalf("cursor after j = %d, want 1", got)
+	}
+	if cl, _ := mm.selectedCluster(); cl.Name != mm.view[1].Name {
+		t.Errorf("selection after j = %q, want %q", cl.Name, mm.view[1].Name)
+	}
+}
+
+func TestClusterTableSortCycle(t *testing.T) {
+	mm := newClusterTestModel(120, 24)
+
+	mm.cycleSort() // → NAME ascending
+	if mm.sortCol != colName || !mm.sortAsc {
+		t.Fatalf("after first cycle sortCol=%d asc=%v, want NAME asc", mm.sortCol, mm.sortAsc)
+	}
+	if mm.view[0].Name != "data-platform-production-analytics-cluster-2026" {
+		t.Errorf("NAME asc first = %q", mm.view[0].Name)
+	}
+	if !strings.Contains(mm.tbl.View(), "NAME"+table.SortAscArrow) {
+		t.Errorf("header missing NAME sort arrow:\n%s", mm.tbl.View())
+	}
+
+	for mm.sortCol != colHRS { // advance to the numeric HRS column
+		mm.cycleSort()
+	}
+	if mm.sortAsc {
+		t.Error("HRS should default to descending (most hours first)")
+	}
+	if mm.view[0].InstanceHours != 128 {
+		t.Errorf("HRS desc first = %d hrs, want 128", mm.view[0].InstanceHours)
+	}
+
+	// Cycling past the last column returns to the natural order.
+	for mm.sortCol != -1 {
+		mm.cycleSort()
+	}
+}
+
+func TestClusterTableFilter(t *testing.T) {
+	mm := newClusterTestModel(120, 24)
+	mm.filter.SetValue("terminated")
+	mm.rebuild()
+	if len(mm.view) != 1 || mm.view[0].Name != "etl" {
+		t.Errorf("filter 'terminated' => %d rows %+v", len(mm.view), mm.view)
+	}
+}

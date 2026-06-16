@@ -4,8 +4,6 @@ import (
 	"fmt"
 	"strings"
 	"time"
-
-	"github.com/ryandam9/aws_explorer/internal/ui"
 )
 
 // stateClass buckets an EMR cluster or step state into a visual class, so a
@@ -48,19 +46,6 @@ func stateGlyph(state string) string {
 		return "✗"
 	default:
 		return "•"
-	}
-}
-
-func stateColor(state string) string {
-	switch classifyState(state) {
-	case stateSuccess:
-		return ui.ColorSuccess()
-	case stateRunning:
-		return ui.ColorAccent()
-	case stateFailure:
-		return ui.ColorError()
-	default:
-		return ui.ColorText()
 	}
 }
 

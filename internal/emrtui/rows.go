@@ -1,61 +1,69 @@
 package emrtui
 
 import (
+	"sort"
 	"strings"
 
 	"github.com/ryandam9/aws_explorer/internal/model"
+	"github.com/ryandam9/aws_explorer/internal/table"
 )
 
-// cell is one table cell: its text and an optional theme colour role ("" =
-// default text colour).
-type cell struct {
-	text  string
-	color string
-}
+// Cluster column indices, matching the order built in clusterColumns. Used by
+// the column sort so the comparator and the "default direction" logic stay in
+// step with the rendered layout.
+const (
+	colName int = iota
+	colID
+	colState
+	colRelease
+	colApps
+	colHRS
+	colRegion
+)
 
-// colSpec describes a column: its header and fixed width (0 = flexible, takes
-// the remaining width; at most one flex column per table).
-type colSpec struct {
-	title string
-	width int
-}
+// nameCap / appsCap bound the two free-form columns so one long value can't
+// dominate the table's width (names especially). Longer values are truncated
+// with an ellipsis; the full text is available in the detail overlay.
+const (
+	nameCap = 25
+	appsCap = 22
+)
 
-// rowT is a rendered cluster row plus the source identity needed for actions
-// (console links, step drill-down).
-type rowT struct {
-	cells   []cell
-	cluster *Cluster
-}
-
-// specsAndRows returns the column layout and the unfiltered cluster rows.
-func (mm *m) specsAndRows() ([]colSpec, []rowT) {
-	multi := len(mm.regions) > 1
-	specs := []colSpec{
-		{"NAME", 0}, {"ID", 14}, {"STATE", 22}, {"RELEASE", 11}, {"APPLICATIONS", 24}, {"HRS", 5},
+// clusterColumns is the shared-table column set for the cluster list. Widths are
+// floors: the table grows each column to fit its content and scrolls
+// horizontally when the set overflows the panel. REGION is appended only when
+// the scope spans more than one region.
+func clusterColumns(multi bool) []table.Column {
+	cols := []table.Column{
+		{Title: "NAME", Width: 8},
+		{Title: "ID", Width: 14},
+		{Title: "STATE", Width: 12},
+		{Title: "RELEASE", Width: 9},
+		{Title: "APPLICATIONS", Width: 12},
+		{Title: "HRS", Width: 4},
 	}
-	rows := make([]rowT, 0, len(mm.inv.Clusters))
-	for i := range mm.inv.Clusters {
-		cl := mm.inv.Clusters[i]
-		rows = append(rows, rowT{
-			cells: []cell{
-				{text: cl.Name},
-				{text: cl.ID},
-				{text: stateLabel(cl.State), color: stateColor(cl.State)},
-				{text: cl.ReleaseLabel},
-				{text: cl.Applications},
-				{text: instanceHours(cl.InstanceHours)},
-			},
-			cluster: &mm.inv.Clusters[i],
-		})
-	}
-
 	if multi {
-		specs = append(specs, colSpec{"REGION", 14})
-		for i := range rows {
-			rows[i].cells = append(rows[i].cells, cell{text: rows[i].cluster.Region})
-		}
+		cols = append(cols, table.Column{Title: "REGION", Width: 9})
 	}
-	return specs, rows
+	return cols
+}
+
+// clusterRow renders one cluster as a shared-table row. State carries a glyph
+// (✓/●/✗/•) so the row reads at a glance without per-cell colour, which the
+// shared table does not apply. NAME/APPLICATIONS are capped (see nameCap).
+func clusterRow(c Cluster, multi bool) table.Row {
+	r := table.Row{
+		truncate(c.Name, nameCap),
+		c.ID,
+		stateLabel(c.State),
+		c.ReleaseLabel,
+		truncate(c.Applications, appsCap),
+		instanceHours(c.InstanceHours),
+	}
+	if multi {
+		r = append(r, c.Region)
+	}
+	return r
 }
 
 func instanceHours(h int32) string {
@@ -87,41 +95,86 @@ func itoa(n int) string {
 	return string(b[i:])
 }
 
-// currentRows returns the filtered cluster rows.
-func (mm *m) currentRows() []rowT {
-	_, rows := mm.specsAndRows()
+// buildView returns the clusters to display: the inventory filtered by the
+// active filter term and ordered by the active column sort.
+func (mm *m) buildView() []Cluster {
 	term := strings.ToLower(strings.TrimSpace(mm.filter.Value()))
-	if term == "" {
-		return rows
-	}
-	var out []rowT
-	for _, r := range rows {
-		if rowMatches(r, term) {
-			out = append(out, r)
+	out := make([]Cluster, 0, len(mm.inv.Clusters))
+	for _, c := range mm.inv.Clusters {
+		if term == "" || clusterMatches(c, term) {
+			out = append(out, c)
 		}
 	}
+	mm.sortClusters(out)
 	return out
 }
 
-// rowMatches reports whether any cell contains term.
-func rowMatches(r rowT, term string) bool {
-	for _, c := range r.cells {
-		if strings.Contains(strings.ToLower(c.text), term) {
-			return true
-		}
+// sortClusters orders clusters in place by the selected column and direction.
+// sortCol -1 leaves the natural order (already name/region sorted by
+// Inventory.sort) untouched.
+func (mm *m) sortClusters(cs []Cluster) {
+	if mm.sortCol < 0 {
+		return
 	}
-	return false
+	col := mm.sortCol
+	sort.SliceStable(cs, func(i, j int) bool {
+		c := clusterCmp(cs[i], cs[j], col)
+		if c == 0 {
+			// Stable tiebreak so equal keys keep a predictable name order.
+			c = strings.Compare(strings.ToLower(cs[i].Name), strings.ToLower(cs[j].Name))
+		}
+		if mm.sortAsc {
+			return c < 0
+		}
+		return c > 0
+	})
 }
 
-func (mm *m) rowCount() int { return len(mm.currentRows()) }
+// clusterCmp compares two clusters by column, returning the usual -1/0/1. Text
+// columns compare case-insensitively; HRS compares numerically.
+func clusterCmp(a, b Cluster, col int) int {
+	switch col {
+	case colID:
+		return strings.Compare(a.ID, b.ID)
+	case colState:
+		return strings.Compare(a.State, b.State)
+	case colRelease:
+		return strings.Compare(a.ReleaseLabel, b.ReleaseLabel)
+	case colApps:
+		return strings.Compare(strings.ToLower(a.Applications), strings.ToLower(b.Applications))
+	case colHRS:
+		switch {
+		case a.InstanceHours < b.InstanceHours:
+			return -1
+		case a.InstanceHours > b.InstanceHours:
+			return 1
+		default:
+			return 0
+		}
+	case colRegion:
+		return strings.Compare(a.Region, b.Region)
+	default: // colName
+		return strings.Compare(strings.ToLower(a.Name), strings.ToLower(b.Name))
+	}
+}
+
+// clusterMatches reports whether the cluster matches term in any shown field.
+func clusterMatches(c Cluster, term string) bool {
+	hay := strings.ToLower(strings.Join([]string{
+		c.Name, c.ID, c.State, c.ReleaseLabel, c.Applications, c.Region,
+	}, " "))
+	return strings.Contains(hay, term)
+}
+
+func (mm *m) rowCount() int { return len(mm.view) }
 
 // selectedCluster returns the highlighted cluster.
 func (mm *m) selectedCluster() (Cluster, bool) {
-	rows := mm.currentRows()
-	if mm.sel >= len(rows) || rows[mm.sel].cluster == nil {
+	i := mm.tbl.Cursor()
+	if i < 0 || i >= len(mm.view) {
 		return Cluster{}, false
 	}
-	return *rows[mm.sel].cluster, true
+	return mm.view[i], true
 }
 
 // selectedResource returns the highlighted cluster as a model.Resource for

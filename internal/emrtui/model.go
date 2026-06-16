@@ -15,6 +15,7 @@ import (
 	"github.com/ryandam9/aws_explorer/internal/config"
 	"github.com/ryandam9/aws_explorer/internal/consolelink"
 	"github.com/ryandam9/aws_explorer/internal/emrconn"
+	"github.com/ryandam9/aws_explorer/internal/table"
 	"github.com/ryandam9/aws_explorer/internal/ui"
 )
 
@@ -39,7 +40,17 @@ type m struct {
 	loading bool
 	err     error
 
-	sel int
+	// Cluster list backed by the shared table widget. view holds the clusters
+	// currently shown (filtered + sorted), parallel to the table's rows, so the
+	// cursor maps straight back to a Cluster.
+	tbl  table.Model
+	view []Cluster
+
+	// Column sort for the cluster list: sortCol -1 keeps the natural (name,
+	// region) order; otherwise it is an index into the cluster columns and
+	// sortAsc flips the direction.
+	sortCol int
+	sortAsc bool
 
 	filter       textinput.Model
 	filterActive bool
@@ -50,7 +61,7 @@ type m struct {
 	steps        []Step
 	stepsLoading bool
 	stepsErr     error
-	stepsSel     int
+	stepsTbl     table.Model
 
 	// Cluster-detail overlay (d on a cluster).
 	detailActive  bool
@@ -69,7 +80,7 @@ type m struct {
 	yarnMetrics ClusterMetrics
 	yarnLoading bool
 	yarnErr     error
-	yarnSel     int
+	yarnTbl     table.Model
 
 	// HBase table browser (h on a cluster).
 	hbaseActive   bool
@@ -77,7 +88,7 @@ type m struct {
 	hbaseTables   []HBaseTable
 	hbaseLoading  bool
 	hbaseErr      error
-	hbaseSel      int
+	hbaseTbl      table.Model
 	hbaseConfirm  bool // row-count scan confirmation prompt
 	hbaseCounting bool
 
@@ -89,7 +100,7 @@ type m struct {
 	oozieCoords  bool // false = workflows tab, true = coordinators tab
 	oozieLoading bool
 	oozieErr     error
-	oozieSel     int
+	oozieTbl     table.Model
 
 	spinner   spinner.Model
 	toast     string
@@ -159,6 +170,14 @@ func NewModel(ctx context.Context, awsCfg *config.AWSConfig, regions []string, a
 	f.Placeholder = "Filter…"
 	f.Width = 30
 
+	activeRegions := client.Regions()
+	tbl := table.New(
+		table.WithColumns(clusterColumns(len(activeRegions) > 1)),
+		table.WithFocused(true),
+		table.WithStyles(ui.TableStyles()),
+		table.WithFrozenColumns(1), // pin NAME while scrolling columns
+	)
+
 	// Build the opt-in on-cluster dialer; a nil dialer (off/misconfigured) makes
 	// the live browsers render the connect helper rather than failing.
 	var dialer *emrconn.Dialer
@@ -172,7 +191,7 @@ func NewModel(ctx context.Context, awsCfg *config.AWSConfig, regions []string, a
 	return &m{
 		ctx:        ctx,
 		client:     client,
-		regions:    client.Regions(),
+		regions:    activeRegions,
 		allRegions: allRegions,
 		appCfg:     appCfg,
 		configPath: configPath,
@@ -180,8 +199,53 @@ func NewModel(ctx context.Context, awsCfg *config.AWSConfig, regions []string, a
 		dialerErr:  dialerErr,
 		filter:     f,
 		spinner:    s,
+		tbl:        tbl,
+		stepsTbl:   newSubTable(stepColumns()),
+		yarnTbl:    newSubTable(yarnColumns()),
+		hbaseTbl:   newSubTable(hbaseColumns()),
+		oozieTbl:   newSubTable(oozieWFColumns()),
 		loading:    true,
+		sortCol:    -1,
 	}, nil
+}
+
+// rebuild recomputes the filtered+sorted cluster view and pushes it into the
+// shared table, refreshing the sort-arrow header and preserving the cursor.
+func (mm *m) rebuild() {
+	mm.view = mm.buildView()
+
+	cols := clusterColumns(len(mm.regions) > 1)
+	table.ApplySortHeader(cols, mm.sortCol, mm.sortAsc, func(int) bool { return true })
+	mm.tbl.SetColumns(cols)
+
+	multi := len(mm.regions) > 1
+	rows := make([]table.Row, 0, len(mm.view))
+	for _, c := range mm.view {
+		rows = append(rows, clusterRow(c, multi))
+	}
+	mm.tbl.SetRows(rows)
+	mm.layoutTable()
+}
+
+// layoutTable sizes the cluster table to the current terminal. The cluster
+// list's chrome is: an optional region badge, the title and filter lines above,
+// and the panel border plus the column-scroll hint and status bar below.
+func (mm *m) layoutTable() {
+	if mm.width <= 0 || mm.height <= 0 {
+		return
+	}
+	mm.tbl.SetWidth(mm.width - 4) // panel border + padding
+	// 1 title + 1 filter + 2 panel border + 1 scroll hint + 1 status bar, plus a
+	// badge line whenever the region scope is spotlighted.
+	chrome := 6
+	if ui.RegionBadge(mm.regions, mm.allRegions) != "" {
+		chrome++
+	}
+	h := mm.height - chrome
+	if h < 3 {
+		h = 3
+	}
+	mm.tbl.SetHeight(h)
 }
 
 func (mm *m) Init() tea.Cmd {
@@ -281,6 +345,7 @@ func (mm *m) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.WindowSizeMsg:
 		mm.width = msg.Width
 		mm.height = msg.Height
+		mm.layoutTable()
 
 	case spinner.TickMsg:
 		var cmd tea.Cmd
@@ -302,14 +367,14 @@ func (mm *m) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			mm.err = msg.err
 		} else {
 			mm.inv = msg.inv
-			mm.clamp()
+			mm.rebuild()
 		}
 
 	case stepsMsg:
 		mm.stepsLoading = false
 		mm.stepsErr = msg.err
 		mm.steps = msg.steps
-		mm.stepsSel = 0
+		mm.setRows(&mm.stepsTbl, len(msg.steps), func(i int) table.Row { return stepRow(msg.steps[i]) })
 
 	case appUIMsg:
 		mm.appUILoading = false
@@ -326,20 +391,20 @@ func (mm *m) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		mm.yarnErr = msg.err
 		mm.yarnApps = msg.apps
 		mm.yarnMetrics = msg.metrics
-		mm.yarnSel = 0
+		mm.setRows(&mm.yarnTbl, len(msg.apps), func(i int) table.Row { return yarnRow(msg.apps[i]) })
 
 	case hbaseMsg:
 		mm.hbaseLoading = false
 		mm.hbaseErr = msg.err
 		mm.hbaseTables = msg.tables
-		mm.hbaseSel = 0
+		mm.setRows(&mm.hbaseTbl, len(msg.tables), func(i int) table.Row { return hbaseRow(msg.tables[i]) })
 
 	case oozieMsg:
 		mm.oozieLoading = false
 		mm.oozieErr = msg.err
 		mm.oozieWF = msg.workflows
 		mm.oozieCoord = msg.coords
-		mm.oozieSel = 0
+		mm.setOozieRows()
 
 	case hbaseCountMsg:
 		mm.hbaseCounting = false
@@ -355,6 +420,11 @@ func (mm *m) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					break
 				}
 			}
+			// Re-render the ROWS column for the affected table, keeping the cursor.
+			cur := mm.hbaseTbl.Cursor()
+			mm.setRows(&mm.hbaseTbl, len(mm.hbaseTables), func(i int) table.Row { return hbaseRow(mm.hbaseTables[i]) })
+			mm.hbaseTbl.SetCursor(cur)
+
 			suffix := ""
 			if msg.capped {
 				suffix = "+ (capped)"
@@ -440,12 +510,12 @@ func (mm *m) handleKey(msg tea.KeyMsg) []tea.Cmd {
 			}
 			mm.filterActive = false
 			mm.filter.Blur()
-			mm.clamp()
+			mm.rebuild()
 		default:
 			var cmd tea.Cmd
 			mm.filter, cmd = mm.filter.Update(msg)
 			cmds = append(cmds, cmd)
-			mm.clamp()
+			mm.rebuild()
 		}
 		return cmds
 	}
@@ -458,22 +528,26 @@ func (mm *m) handleKey(msg tea.KeyMsg) []tea.Cmd {
 		case "esc", "backspace", "left", "h":
 			mm.stepsActive = false
 		case "up", "k":
-			if mm.stepsSel > 0 {
-				mm.stepsSel--
-			}
+			mm.stepsTbl.MoveUp(1)
 		case "down", "j":
-			if mm.stepsSel < len(mm.steps)-1 {
-				mm.stepsSel++
-			}
+			mm.stepsTbl.MoveDown(1)
+		case "g", "home":
+			mm.stepsTbl.GotoTop()
+		case "G", "end":
+			mm.stepsTbl.GotoBottom()
+		case "<", ",":
+			mm.stepsTbl.ScrollLeft()
+		case ">", ".":
+			mm.stepsTbl.ScrollRight()
 		case "y":
-			if mm.stepsSel < len(mm.steps) && mm.steps[mm.stepsSel].FailureReason != "" {
-				_ = clipboard.WriteAll(mm.steps[mm.stepsSel].FailureReason)
+			if s, ok := mm.selectedStep(); ok && s.FailureReason != "" {
+				_ = clipboard.WriteAll(s.FailureReason)
 				mm.setToast("Copied failure reason")
 				cmds = append(cmds, toastCmd(3*time.Second))
 			}
 		case "L":
-			if mm.stepsSel < len(mm.steps) {
-				mm.jumpToStepLogs(mm.steps[mm.stepsSel], &cmds)
+			if s, ok := mm.selectedStep(); ok {
+				mm.jumpToStepLogs(s, &cmds)
 			}
 		case ui.KeyAbout:
 			mm.showAbout = true
@@ -489,13 +563,17 @@ func (mm *m) handleKey(msg tea.KeyMsg) []tea.Cmd {
 		case "esc", "backspace", "left", "h":
 			mm.yarnActive = false
 		case "up", "k":
-			if mm.yarnSel > 0 {
-				mm.yarnSel--
-			}
+			mm.yarnTbl.MoveUp(1)
 		case "down", "j":
-			if mm.yarnSel < len(mm.yarnApps)-1 {
-				mm.yarnSel++
-			}
+			mm.yarnTbl.MoveDown(1)
+		case "g", "home":
+			mm.yarnTbl.GotoTop()
+		case "G", "end":
+			mm.yarnTbl.GotoBottom()
+		case "<", ",":
+			mm.yarnTbl.ScrollLeft()
+		case ">", ".":
+			mm.yarnTbl.ScrollRight()
 		case "r":
 			mm.yarnLoading = true
 			mm.yarnErr = nil
@@ -513,9 +591,9 @@ func (mm *m) handleKey(msg tea.KeyMsg) []tea.Cmd {
 			switch msg.String() {
 			case "y", "Y", "enter":
 				mm.hbaseConfirm = false
-				if mm.hbaseSel < len(mm.hbaseTables) {
+				if t, ok := mm.selectedHbaseTable(); ok {
 					mm.hbaseCounting = true
-					cmds = append(cmds, mm.countHbaseRowsCmd(mm.hbaseTables[mm.hbaseSel]), mm.spinner.Tick)
+					cmds = append(cmds, mm.countHbaseRowsCmd(t), mm.spinner.Tick)
 				}
 			default:
 				mm.hbaseConfirm = false
@@ -528,16 +606,20 @@ func (mm *m) handleKey(msg tea.KeyMsg) []tea.Cmd {
 		case "esc", "backspace", "left":
 			mm.hbaseActive = false
 		case "up", "k":
-			if mm.hbaseSel > 0 {
-				mm.hbaseSel--
-			}
+			mm.hbaseTbl.MoveUp(1)
 		case "down", "j":
-			if mm.hbaseSel < len(mm.hbaseTables)-1 {
-				mm.hbaseSel++
-			}
+			mm.hbaseTbl.MoveDown(1)
+		case "g", "home":
+			mm.hbaseTbl.GotoTop()
+		case "G", "end":
+			mm.hbaseTbl.GotoBottom()
+		case "<", ",":
+			mm.hbaseTbl.ScrollLeft()
+		case ">", ".":
+			mm.hbaseTbl.ScrollRight()
 		case "c":
 			// Ask before scanning — a full-table read is read-only but not free.
-			if !mm.hbaseCounting && mm.hbaseSel < len(mm.hbaseTables) {
+			if _, ok := mm.selectedHbaseTable(); ok && !mm.hbaseCounting {
 				mm.hbaseConfirm = true
 			}
 		case "r":
@@ -559,15 +641,19 @@ func (mm *m) handleKey(msg tea.KeyMsg) []tea.Cmd {
 			mm.oozieActive = false
 		case "tab", "right":
 			mm.oozieCoords = !mm.oozieCoords
-			mm.oozieSel = 0
+			mm.setOozieRows()
 		case "up", "k":
-			if mm.oozieSel > 0 {
-				mm.oozieSel--
-			}
+			mm.oozieTbl.MoveUp(1)
 		case "down", "j":
-			if mm.oozieSel < mm.oozieRowCount()-1 {
-				mm.oozieSel++
-			}
+			mm.oozieTbl.MoveDown(1)
+		case "g", "home":
+			mm.oozieTbl.GotoTop()
+		case "G", "end":
+			mm.oozieTbl.GotoBottom()
+		case "<", ",":
+			mm.oozieTbl.ScrollLeft()
+		case ">", ".":
+			mm.oozieTbl.ScrollRight()
 		case "r":
 			mm.oozieLoading = true
 			mm.oozieErr = nil
@@ -583,13 +669,17 @@ func (mm *m) handleKey(msg tea.KeyMsg) []tea.Cmd {
 	case "q", "ctrl+c":
 		return []tea.Cmd{tea.Quit}
 	case "up", "k":
-		if mm.sel > 0 {
-			mm.sel--
-		}
+		mm.tbl.MoveUp(1)
 	case "down", "j":
-		if mm.sel < mm.rowCount()-1 {
-			mm.sel++
-		}
+		mm.tbl.MoveDown(1)
+	case "g", "home":
+		mm.tbl.GotoTop()
+	case "G", "end":
+		mm.tbl.GotoBottom()
+	case "<", ",":
+		mm.tbl.ScrollLeft()
+	case ">", ".":
+		mm.tbl.ScrollRight()
 	case "/":
 		mm.filterActive = true
 		mm.filter.Focus()
@@ -658,10 +748,32 @@ func (mm *m) handleKey(msg tea.KeyMsg) []tea.Cmd {
 		}
 	case "o":
 		mm.openConsole(&cmds)
+	case "S":
+		mm.cycleSort()
+	case "R":
+		if mm.sortCol >= 0 {
+			mm.sortAsc = !mm.sortAsc
+			mm.tbl.SetCursor(0)
+			mm.rebuild()
+		}
 	case ui.KeyAbout:
 		mm.showAbout = true
 	}
 	return cmds
+}
+
+// cycleSort advances the cluster-list sort: natural order → each column in
+// turn → back to natural order. Each column starts in its most useful
+// direction (descending for the numeric HRS column, ascending otherwise);
+// press R to flip it.
+func (mm *m) cycleSort() {
+	mm.sortCol++
+	if mm.sortCol >= len(clusterColumns(len(mm.regions) > 1)) {
+		mm.sortCol = -1
+	}
+	mm.sortAsc = mm.sortCol != colHRS
+	mm.tbl.SetCursor(0)
+	mm.rebuild()
 }
 
 // openConsole copies (and opens, when local) the console URL for the selected
@@ -696,19 +808,6 @@ func (mm *m) oozieRowCount() int {
 		return len(mm.oozieCoord)
 	}
 	return len(mm.oozieWF)
-}
-
-func (mm *m) clamp() {
-	if mm.sel >= mm.rowCount() {
-		mm.sel = max(0, mm.rowCount()-1)
-	}
-}
-
-func max(a, b int) int {
-	if a > b {
-		return a
-	}
-	return b
 }
 
 func (mm *m) PageTitle() string {
