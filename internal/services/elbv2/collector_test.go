@@ -60,8 +60,8 @@ func TestMapLoadBalancer_BasicFields(t *testing.T) {
 	if res.Service != "elbv2" {
 		t.Errorf("Service = %q, want %q", res.Service, "elbv2")
 	}
-	if res.Type != "loadbalancer" {
-		t.Errorf("Type = %q, want %q", res.Type, "loadbalancer")
+	if res.Type != "load-balancer" {
+		t.Errorf("Type = %q, want %q", res.Type, "load-balancer")
 	}
 	if res.ID != "arn:aws:elasticloadbalancing:us-east-1:123456789012:loadbalancer/app/my-alb/abc123" {
 		t.Errorf("ID = %q", res.ID)

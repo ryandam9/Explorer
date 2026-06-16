@@ -67,7 +67,7 @@ func (c *Collector) mapZone(zone types.HostedZone, detail services.DetailLevel) 
 
 	res := model.Resource{
 		Service: "route53",
-		Type:    "hostedZone",
+		Type:    "hosted-zone",
 		Region:  "global",
 		ID:      id,
 		Name:    name,

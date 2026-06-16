@@ -660,7 +660,7 @@ func consoleResourceFor(rt resourceType, region, id string) model.Resource {
 	case rtRDS:
 		svc, typ = "rds", "db"
 	case rtLoadBalancers:
-		svc, typ = "elbv2", "loadbalancer"
+		svc, typ = "elbv2", "load-balancer"
 	}
 	r := model.Resource{Service: svc, Type: typ, Region: region, ID: id, Name: id}
 	if strings.HasPrefix(id, "arn:") {

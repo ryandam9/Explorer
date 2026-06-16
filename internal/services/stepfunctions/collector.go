@@ -59,7 +59,7 @@ func (c *Collector) mapStateMachine(sm types.StateMachineListItem, region string
 	name := aws.ToString(sm.Name)
 	return model.Resource{
 		Service:   "stepfunctions",
-		Type:      "stateMachine",
+		Type:      "state-machine",
 		Region:    region,
 		ID:        name,
 		Name:      name,

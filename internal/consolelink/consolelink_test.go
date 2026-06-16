@@ -47,7 +47,7 @@ func TestURL_DeepLinks(t *testing.T) {
 			"#/topic/arn%3Aaws%3Asns%3Aus-east-1%3A123%3Aalerts"},
 		{"cw alarm", model.Resource{Service: "cloudwatch", Type: "alarm", Region: "us-east-1", ID: "high-cpu"},
 			"#alarmsV2:alarm/high-cpu"},
-		{"route53 zone", model.Resource{Service: "route53", Type: "hostedzone", ID: "Z123"},
+		{"route53 zone", model.Resource{Service: "route53", Type: "hosted-zone", ID: "Z123"},
 			"route53/v2/hostedzones#ListRecordSets/Z123"},
 		{"emr", model.Resource{Service: "emr", Type: "cluster", Region: "us-east-1", ID: "j-ABC"},
 			"/emr/home?region=us-east-1#/clusterDetails/j-ABC"},

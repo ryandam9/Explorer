@@ -122,7 +122,7 @@ func (c *Collector) mapBus(bus types.EventBus, region string) model.Resource {
 	name := aws.ToString(bus.Name)
 	return model.Resource{
 		Service: "eventbridge",
-		Type:    "eventBus",
+		Type:    "event-bus",
 		Region:  region,
 		ID:      name,
 		Name:    name,
