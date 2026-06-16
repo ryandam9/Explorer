@@ -183,15 +183,25 @@ type Model struct {
 	selectedBucketDetails *BucketDetails
 	// objectsNextToken is set when the current listing was cut off by the
 	// page window; "L" continues from it.
-	objectsNextToken  *string
-	detailsLoading    bool
-	showHelp          bool
-	showAbout         bool
-	showPreview       bool
-	previewKey        string
-	previewContent    string
-	previewLoading    bool
-	previewErr        error
+	objectsNextToken *string
+	detailsLoading   bool
+	showHelp         bool
+	showAbout        bool
+	showPreview      bool
+	previewKey       string
+	previewContent   string
+	previewLoading   bool
+	previewErr       error
+
+	// Full-screen CSV table view (a CSV/TSV object previewed with "p").
+	showCSV           bool
+	csvTable          table.Model
+	csvDelim          rune
+	csvAll            [][]string // parsed header + data rows
+	csvRowCap         int        // first-N/last-N window (0 = all)
+	csvRowCapSet      bool
+	csvTotal          int // total data rows parsed
+	csvHidden         int // rows omitted by the window
 	bucketRegionCache map[string]string
 	// bucketDetailsCache holds fetched bucket details for the session: each
 	// fetch costs ~19 API calls and is triggered by every selection change in
@@ -576,6 +586,40 @@ func (m *Model) fetchObjectPreview(key string) tea.Cmd {
 	return func() tea.Msg {
 		content, err := m.client.GetObjectPreview(bucket, key, 64*1024)
 		return objectPreviewMsg{key: key, content: content, err: err}
+	}
+}
+
+// openPreview starts previewing an object: a CSV/TSV opens in the full-screen
+// table view, anything else in the text-preview overlay. The content is fetched
+// asynchronously; the view shows a spinner until it arrives.
+func (m *Model) openPreview(key string) tea.Cmd {
+	m.previewKey = key
+	if looksLikeCSV(key) {
+		m.showCSV = true
+		m.showPreview = false
+	} else {
+		m.showPreview = true
+		m.showCSV = false
+	}
+	return m.fetchObjectPreview(key)
+}
+
+// initPreviewViewport builds the scrollable text viewport for a (non-CSV)
+// preview from the fetched content.
+func (m *Model) initPreviewViewport(content string, err error) {
+	panelW := min(100, max(40, m.width-12))
+	panelH := min(28, max(10, m.height-10))
+	vpW := panelW - 8 // border + padding + scrollbar gutter
+	vpH := panelH - 8 // title, blank lines, help text, border
+	if vpW < 10 {
+		vpW = 10
+	}
+	if vpH < 2 {
+		vpH = 2
+	}
+	m.previewViewport = viewport.New(vpW, vpH)
+	if err == nil && content != "" {
+		m.previewViewport.SetContent(content)
 	}
 }
 
@@ -983,6 +1027,10 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.width = msg.Width
 		m.height = msg.Height
 
+		if m.showCSV {
+			m.layoutCSVTable()
+		}
+
 		bucketTableHeight := m.height - 18
 		if bucketTableHeight < 5 {
 			bucketTableHeight = 5
@@ -1088,6 +1136,17 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if msg.String() == "esc" || msg.String() == ui.KeyAbout {
 				m.showAbout = false
 			}
+			return m, nil
+		}
+		if m.showCSV {
+			if msg.String() == "ctrl+c" {
+				return m, tea.Quit
+			}
+			if m.handleCSVKey(msg.String()) {
+				return m, nil
+			}
+			// Everything else (↑/↓, PgUp/PgDn, g/G…) drives the table viewport.
+			m.csvTable, _ = m.csvTable.Update(msg)
 			return m, nil
 		}
 		if m.showPreview {
@@ -1337,9 +1396,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case "p":
 			if m.state == stateObjectList && m.focus == focusObjects {
 				if key, ok := m.selectedObjectKey(); ok {
-					m.showPreview = true
-					m.previewKey = key
-					cmds = append(cmds, m.fetchObjectPreview(key))
+					cmds = append(cmds, m.openPreview(key))
 				}
 			}
 
@@ -1456,9 +1513,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 						m.prefixInput.SetValue(m.prefix)
 						cmds = append(cmds, m.loadObjects())
 					} else if key, ok := m.selectedObjectKey(); ok {
-						m.showPreview = true
-						m.previewKey = key
-						cmds = append(cmds, m.fetchObjectPreview(key))
+						cmds = append(cmds, m.openPreview(key))
 					}
 				}
 			}
@@ -1568,20 +1623,16 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.previewLoading = false
 			m.previewErr = msg.err
 			m.previewContent = msg.content
-			// Initialise the scrollable viewport for this preview.
-			panelW := min(100, max(40, m.width-12))
-			panelH := min(28, max(10, m.height-10))
-			vpW := panelW - 8 // subtract border + padding + scrollbar gutter
-			vpH := panelH - 8 // subtract title, blank lines, help text, border
-			if vpW < 10 {
-				vpW = 10
-			}
-			if vpH < 2 {
-				vpH = 2
-			}
-			m.previewViewport = viewport.New(vpW, vpH)
-			if msg.err == nil && msg.content != "" {
-				m.previewViewport.SetContent(msg.content)
+			switch {
+			case m.showCSV && msg.err == nil && m.initCSV(msg.content):
+				// CSV parsed: the full-screen table is ready.
+			case m.showCSV:
+				// A .csv that doesn't parse as a table — fall back to raw text.
+				m.showCSV = false
+				m.showPreview = true
+				m.initPreviewViewport(msg.content, msg.err)
+			default:
+				m.initPreviewViewport(msg.content, msg.err)
 			}
 		}
 
@@ -1709,6 +1760,13 @@ func (m *Model) View() string {
 	// Bucket detail full-screen view
 	if m.state == stateBucketDetail {
 		out := ui.AppStyle().Render(m.bucketDetailView())
+		return m.debug.Overlay(out, m.width, m.height)
+	}
+
+	// Full-screen CSV table view: a CSV can be very wide and very tall, so it
+	// gets the whole window rather than a narrow overlay.
+	if m.showCSV {
+		out := ui.AppStyle().Render(m.csvView())
 		return m.debug.Overlay(out, m.width, m.height)
 	}
 
@@ -2399,7 +2457,9 @@ func (m *Model) deleteConfirmView() string {
 const s3AboutText = "This is the dedicated S3 browser. The first screen lists your buckets " +
 	"(with details on d); Enter opens a bucket and you navigate its prefixes like " +
 	"folders, drilling into objects.\n\n" +
-	"On an object you can preview its contents (p), copy its S3 URI (y), open it " +
+	"On an object you can preview its contents (p) — a CSV or TSV opens in a " +
+	"full-screen, scrollable table with auto-detected delimiter (press s to change " +
+	"it, w to adjust how many rows are shown, t for raw text) — copy its S3 URI (y), open it " +
 	"in the AWS console (o), generate a 1-hour presigned URL (g) and download it " +
 	"(D). Use / to jump to a prefix, f to flatten the listing, s to sort, and L to " +
 	"load more when a listing is truncated.\n\n" +
@@ -2439,7 +2499,7 @@ func (m *Model) helpView() string {
 			"",
 			"Objects",
 			"  /                  Jump to prefix",
-			"  p                  Preview selected object",
+			"  p                  Preview object (CSV/TSV opens as a scrollable table)",
 			"  y                  Copy S3 URI to clipboard",
 			"  o                  Open bucket/object in the AWS console (copies the URL)",
 			"  g                  Generate presigned URL (1 hour)",
