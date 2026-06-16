@@ -7,6 +7,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/smithy-go"
 
 	"github.com/ryandam9/aws_explorer/internal/config"
@@ -406,5 +407,58 @@ func TestRegionScopeLabel(t *testing.T) {
 				t.Errorf("regionScopeLabel(%v, %v) = %q, want %q", tt.regions, tt.allRegions, got, tt.want)
 			}
 		})
+	}
+}
+
+// regionalFake is a non-global collector so an account can have multiple tasks
+// (one per region), letting the "report failure once" behavior be observed.
+type regionalFake struct{ name string }
+
+func (f *regionalFake) Name() string   { return f.name }
+func (f *regionalFake) IsGlobal() bool { return false }
+func (f *regionalFake) Collect(context.Context, services.CollectInput) ([]model.Resource, error) {
+	return nil, nil
+}
+
+func TestStreamRun_AccountConfigFailureSurfacedAndProgressCompletes(t *testing.T) {
+	orig := buildAccountConfig
+	buildAccountConfig = func(context.Context, *config.AWSConfig, string) (aws.Config, error) {
+		return aws.Config{}, errors.New("SharedConfigProfileNotExistError: profile \"bogus\" not found")
+	}
+	t.Cleanup(func() { buildAccountConfig = orig })
+
+	eng := newFakeEngine(&regionalFake{name: "fake"})
+	eng.ResolvedRegions = []string{"us-east-1", "eu-west-1"} // 2 tasks for the account
+	eng.Config.Accounts = []config.AccountConfig{{Name: "acctA", Profile: "bogus"}}
+
+	chunks := make(chan model.ResultChunk, 16)
+	go eng.StreamRun(context.Background(), chunks)
+	var resources []model.Resource
+	var errs []model.ExploreError
+	progress := 0
+	for c := range chunks {
+		resources = append(resources, c.Resources...)
+		errs = append(errs, c.Errors...)
+		if c.Progress != nil {
+			progress++
+		}
+	}
+
+	if len(resources) != 0 {
+		t.Fatalf("a failed account collects nothing, got %d resources", len(resources))
+	}
+	// Progress must reach every planned task (2 regions) so the meter completes.
+	if want := len(eng.PlannedTaskKeys()); progress != want {
+		t.Fatalf("progress markers = %d, want %d (one per planned task)", progress, want)
+	}
+	// The identical failure is reported exactly once, not once per task.
+	if len(errs) != 1 {
+		t.Fatalf("expected the account failure reported once, got %d: %v", len(errs), errs)
+	}
+	if errs[0].Code != "AccountCredentialsError" {
+		t.Errorf("Code = %q, want AccountCredentialsError", errs[0].Code)
+	}
+	if !strings.Contains(errs[0].Message, "acctA") {
+		t.Errorf("message should name the skipped account, got %q", errs[0].Message)
 	}
 }

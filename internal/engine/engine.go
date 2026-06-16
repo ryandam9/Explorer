@@ -241,8 +241,6 @@ func (e *Engine) PlannedTaskKeys() []string {
 	return keys
 }
 
-// EffectiveRegions returns the regions to scan: the resolved region list
-// narrowed by any filters.regions configured. It always returns at least one
 // TypedServices returns the names of the registered typed collectors — the
 // services whose inventory is complete regardless of tags, as opposed to those
 // reached only through the tag-based discovery sweep. Enabled-state is ignored;
@@ -256,6 +254,8 @@ func (e *Engine) TypedServices() []string {
 	return names
 }
 
+// EffectiveRegions returns the regions to scan: the resolved region list
+// narrowed by any filters.regions configured. It always returns at least one
 // region.
 func (e *Engine) EffectiveRegions() []string {
 	regions := e.ResolvedRegions
@@ -279,10 +279,19 @@ func (e *Engine) EffectiveRegions() []string {
 	return regions
 }
 
+// buildAccountConfig resolves an account's credentials; overridable in tests so
+// the credential-failure path can be exercised without real AWS calls.
+var buildAccountConfig = auth.BuildAWSConfig
+
 type accountSweep struct {
 	Name      string
 	AWSConfig aws.Config
 	AccountID string
+	// Err is non-nil when this account's credentials/config could not be built.
+	// The sweep is still scheduled so its planned tasks complete the progress
+	// meter, but it emits the failure (once) instead of collecting.
+	Err     error
+	errOnce *sync.Once
 }
 
 // accountName returns the display/progress name for a configured account
@@ -336,9 +345,14 @@ func (e *Engine) buildSweeps(ctx context.Context) []accountSweep {
 					}
 				}
 				var err error
-				accCfg, err = auth.BuildAWSConfig(ctx, spec, "us-east-1")
+				accCfg, err = buildAccountConfig(ctx, spec, "us-east-1")
 				if err != nil {
+					// Record the failure as a schedulable sweep rather than
+					// dropping it silently: StreamRun emits it as a visible scan
+					// error and still completes the account's planned tasks so
+					// the progress meter doesn't stall.
 					slog.Error("Failed to build AWS config for account", "name", name, "error", err)
+					results[i] = &accountSweep{Name: name, Err: err, errOnce: &sync.Once{}}
 					return
 				}
 			}
@@ -356,10 +370,13 @@ func (e *Engine) buildSweeps(ctx context.Context) []accountSweep {
 	e.sweepCfgs = make(map[string]aws.Config, len(results))
 	for _, sw := range results {
 		if sw == nil {
-			continue // credential failure already logged
+			continue
 		}
 		sweeps = append(sweeps, *sw)
-		e.sweepCfgs[sw.Name] = sw.AWSConfig
+		// Failed sweeps carry no usable config; don't register one for lookups.
+		if sw.Err == nil {
+			e.sweepCfgs[sw.Name] = sw.AWSConfig
+		}
 	}
 	e.sweepMu.Unlock()
 	return sweeps
@@ -431,6 +448,27 @@ func (e *Engine) StreamRun(ctx context.Context, chunks chan<- model.ResultChunk)
 						case chunks <- chunk:
 						case <-gCtx.Done():
 						}
+					}
+
+					// A sweep whose credentials/config failed to build can't
+					// collect anything. Report the failure once (it would be
+					// identical for every service/region of this account — see
+					// the deadline-storm guidance) while still emitting a
+					// progress marker for every planned task so the meter
+					// completes instead of stalling at < 100%.
+					if sw.Err != nil {
+						chunk := model.ResultChunk{
+							Progress: &model.TaskProgress{Service: sw.Name + "/" + s.Name(), Region: r},
+						}
+						sw.errOnce.Do(func() {
+							chunk.Errors = []model.ExploreError{{
+								Service: "account:" + sw.Name,
+								Code:    "AccountCredentialsError",
+								Message: fmt.Sprintf("account %q skipped: could not resolve credentials: %v", sw.Name, sw.Err),
+							}}
+						})
+						send(chunk)
+						return nil
 					}
 
 					input := services.CollectInput{
@@ -548,7 +586,11 @@ func (e *Engine) StreamRun(ctx context.Context, chunks chan<- model.ResultChunk)
 		}
 	}
 
-	g.Wait()
+	// Collector goroutines deliver every failure as a ResultChunk.Error and
+	// always return nil, so g.Wait() is only a completion barrier here — there
+	// is deliberately no error to propagate. If that convention ever changes,
+	// handle the returned error rather than dropping it.
+	_ = g.Wait()
 }
 
 func filterResources(resources []model.Resource, filters model.Filter) []model.Resource {
