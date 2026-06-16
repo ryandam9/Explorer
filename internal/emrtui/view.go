@@ -95,6 +95,12 @@ const emrAboutText = "This is the Amazon EMR dashboard. Each row is a cluster, c
 func (mm *m) detailBody() string {
 	cl := mm.detailCluster
 	var b strings.Builder
+	if !cl.DetailKnown {
+		// Enrichment failed for this cluster: the detail fields were never
+		// populated, so make clear they are unknown rather than empty.
+		b.WriteString(errLine("⚠ Detail unavailable — DescribeCluster was denied or throttled.") + "\n")
+		b.WriteString(muted("  The fields below the basics are unknown, not necessarily unset.") + "\n\n")
+	}
 	row := func(label, value string) {
 		if value == "" {
 			value = "—"
@@ -149,6 +155,15 @@ func boolLabel(b bool) string {
 	return "disabled"
 }
 
+// pluralizeClusters renders "1 cluster" / "N clusters" for the enrichment-gap
+// warning.
+func pluralizeClusters(n int) string {
+	if n == 1 {
+		return "1 cluster could not be enriched"
+	}
+	return fmt.Sprintf("%d clusters could not be enriched", n)
+}
+
 func (mm *m) renderTable() string {
 	var b strings.Builder
 	b.WriteString(lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color(ui.ColorHeading())).
@@ -161,6 +176,15 @@ func (mm *m) renderTable() string {
 		b.WriteString("  filter: " + lipgloss.NewStyle().Foreground(lipgloss.Color(ui.ColorAccent())).Render(v) + "  (/ to edit)\n")
 	} else {
 		b.WriteString("  (/ to filter)\n")
+	}
+
+	// Enrichment gap: some clusters were listed but DescribeCluster was
+	// denied/throttled, so their release/apps/log/security columns are unknown
+	// (blank ≠ "none"). Flag it in plain language rather than letting the gaps
+	// look like real values.
+	if n := mm.inv.EnrichFailures; n > 0 {
+		b.WriteString(errLine(fmt.Sprintf("  ⚠ %s — DescribeCluster denied/throttled; some columns are unknown (press d for detail).",
+			pluralizeClusters(n))) + "\n")
 	}
 
 	switch {

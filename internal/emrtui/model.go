@@ -266,6 +266,9 @@ func (mm *m) layoutTable() {
 	if ui.RegionBadge(mm.regions, mm.allRegions) != "" {
 		chrome++
 	}
+	if mm.inv.EnrichFailures > 0 {
+		chrome++ // the enrichment-gap warning line under the filter
+	}
 	h := mm.height - chrome
 	if h < 3 {
 		h = 3

@@ -187,6 +187,44 @@ func TestEMRStatusBarPinnedToBottom(t *testing.T) {
 	}
 }
 
+// TestEMREnrichmentGapSuppressesDetailFindings verifies an un-enriched cluster
+// (DescribeCluster denied) does not fire detail-derived findings on its blank
+// fields — blank means "unknown", not "none".
+func TestEMREnrichmentGapSuppressesDetailFindings(t *testing.T) {
+	mm := newClusterTestModel(120, 24)
+	mm.inv.Clusters = []Cluster{
+		{Name: "ghost", ID: "j-GHOST", Region: "us-east-1", State: "RUNNING", DetailKnown: false},
+	}
+	mm.inv.EnrichFailures = 1
+	mm.openFindings()
+	for _, f := range mm.findingList {
+		if f.ID == findings.CheckEMRNoLogURI || f.ID == findings.CheckEMRNoSecurityConf {
+			t.Errorf("un-enriched cluster should not fire detail-derived finding %s", f.ID)
+		}
+	}
+}
+
+// TestEMREnrichmentGapWarningRenders verifies the enrichment-gap warning shows
+// in the list and that reserving its line keeps the status bar on screen
+// (layout chrome accounts for it).
+func TestEMREnrichmentGapWarningRenders(t *testing.T) {
+	mm := newClusterTestModel(120, 24)
+	mm.inv.EnrichFailures = 2
+	mm.rebuild()
+	out := mm.View()
+	if !strings.Contains(out, "could not be enriched") {
+		t.Errorf("expected enrichment-gap warning, got:\n%s", out)
+	}
+	if !strings.Contains(out, "quit") {
+		t.Error("status bar missing — the warning line may have clipped it")
+	}
+	for i, line := range strings.Split(out, "\n") {
+		if lw := ansi.StringWidth(line); lw > 120 {
+			t.Errorf("line %d overflows (%d > 120): %q", i, lw, line)
+		}
+	}
+}
+
 func TestClusterTableFilter(t *testing.T) {
 	mm := newClusterTestModel(120, 24)
 	mm.filter.SetValue("terminated")

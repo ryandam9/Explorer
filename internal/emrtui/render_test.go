@@ -98,6 +98,9 @@ func TestApplyClusterDetail(t *testing.T) {
 	if c.SubnetID != "subnet-1" {
 		t.Errorf("SubnetID = %q", c.SubnetID)
 	}
+	if !c.DetailKnown {
+		t.Error("applyClusterDetail should mark DetailKnown")
+	}
 }
 
 func TestStepFromSummary(t *testing.T) {
