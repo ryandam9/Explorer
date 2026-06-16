@@ -91,7 +91,7 @@ const glueAboutText = "This is the AWS Glue dashboard. Tab across Jobs, Crawlers
 func (mm *m) renderTabBar() string {
 	var parts []string
 	for t := tab(0); t < tabCount; t++ {
-		label := fmt.Sprintf(" %s (%d) ", tabNames[t], len(mm.tabRows(t)))
+		label := fmt.Sprintf(" %s (%d) ", tabNames[t], mm.tabCount(t))
 		if t == mm.tab {
 			parts = append(parts, lipgloss.NewStyle().
 				Background(lipgloss.Color(ui.ColorHighlight())).
