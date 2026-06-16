@@ -9,6 +9,7 @@ import (
 	"github.com/atotto/clipboard"
 	"github.com/charmbracelet/bubbles/spinner"
 	"github.com/charmbracelet/bubbles/textinput"
+	"github.com/charmbracelet/bubbles/viewport"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 
@@ -80,9 +81,11 @@ type m struct {
 	stepsErr     error
 	stepsTbl     table.Model
 
-	// Cluster-detail overlay (d on a cluster).
+	// Cluster-detail overlay (d on a cluster). Scrollable: the detail can be
+	// taller than the screen (long log URIs, state reasons, EC2 attributes).
 	detailActive  bool
 	detailCluster Cluster
+	detailVP      viewport.Model
 
 	// Persistent application-UI picker (u on a cluster).
 	appUIActive  bool
@@ -503,13 +506,25 @@ func (mm *m) handleKey(msg tea.KeyMsg) []tea.Cmd {
 		return cmds
 	}
 
-	// Cluster-detail overlay: any key closes it (q still quits).
+	// Cluster-detail overlay: scrollable; Esc/d/Enter close, q quits.
 	if mm.detailActive {
 		switch msg.String() {
 		case "q", "ctrl+c":
 			return []tea.Cmd{tea.Quit}
-		default:
+		case "esc", "d", "enter", "backspace", "left":
 			mm.detailActive = false
+		case "up", "k":
+			mm.detailVP.LineUp(1)
+		case "down", "j":
+			mm.detailVP.LineDown(1)
+		case "pgup":
+			mm.detailVP.ViewUp()
+		case "pgdown", "pgdn", " ":
+			mm.detailVP.ViewDown()
+		case "g", "home":
+			mm.detailVP.GotoTop()
+		case "G", "end":
+			mm.detailVP.GotoBottom()
 		}
 		return cmds
 	}
@@ -779,8 +794,7 @@ func (mm *m) handleKey(msg tea.KeyMsg) []tea.Cmd {
 		}
 	case "d":
 		if cl, ok := mm.selectedCluster(); ok {
-			mm.detailActive = true
-			mm.detailCluster = cl
+			mm.openDetail(cl)
 		}
 	case "L":
 		if cl, ok := mm.selectedCluster(); ok {
@@ -843,6 +857,32 @@ func (mm *m) handleKey(msg tea.KeyMsg) []tea.Cmd {
 		mm.showAbout = true
 	}
 	return cmds
+}
+
+// openDetail opens the scrollable cluster-detail overlay for cl, resetting the
+// scroll to the top (the body is sized and filled at render time).
+func (mm *m) openDetail(cl Cluster) {
+	mm.detailActive = true
+	mm.detailCluster = cl
+	mm.detailVP.GotoTop()
+}
+
+// layoutDetailVP sizes the detail viewport to the current terminal, preserving
+// the scroll offset, and (re)wraps the body to the viewport width so long
+// values fold instead of running off the right edge.
+func (mm *m) layoutDetailVP() {
+	w := ui.AboutWidth(mm.width) - 4 // the box pads 2 columns on each side
+	if w < 28 {
+		w = 28
+	}
+	h := mm.height - 12 // border + padding + title + hint + centering margins
+	if h < 6 {
+		h = 6
+	}
+	off := mm.detailVP.YOffset
+	mm.detailVP = viewport.New(w, h)
+	mm.detailVP.SetContent(lipgloss.NewStyle().Width(w).Render(mm.detailBody()))
+	mm.detailVP.SetYOffset(off)
 }
 
 // openFindings computes the deterministic findings over the loaded inventory

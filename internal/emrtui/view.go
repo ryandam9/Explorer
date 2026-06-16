@@ -54,7 +54,7 @@ func (mm *m) View() string {
 
 	frame := mm.applyToast(ui.ClipToSize(body+sep+status, mm.width, mm.height))
 	if mm.detailActive {
-		frame = ui.OverlayCenter(frame, ui.AboutView("Cluster — "+mm.detailCluster.Name, mm.detailBody(), ui.AboutWidth(mm.width)), mm.width, mm.height)
+		frame = ui.OverlayCenter(frame, mm.detailOverlay(), mm.width, mm.height)
 	}
 	if mm.appUIActive {
 		frame = ui.OverlayCenter(frame, ui.AboutView("Application UIs — "+mm.appUICluster.Name, mm.appUIBody(), ui.AboutWidth(mm.width)), mm.width, mm.height)
@@ -90,6 +90,15 @@ const emrAboutText = "This is the Amazon EMR dashboard. Each row is a cluster, c
 	"tail (and again to hide it).\n\n" +
 	"Press S to cycle the column the list is sorted by (R reverses the direction), " +
 	"o to open a cluster in the AWS console, / to filter, and r to refresh."
+
+// detailOverlay renders the scrollable cluster-detail overlay: the viewport's
+// windowed body plus a scroll hint, inside the shared themed frame.
+func (mm *m) detailOverlay() string {
+	mm.layoutDetailVP() // size + fill the viewport, preserving the scroll offset
+	hint := muted("↑/↓ scroll · Esc close")
+	body := lipgloss.JoinVertical(lipgloss.Left, mm.detailVP.View(), "", hint)
+	return ui.HelpView("Cluster — "+mm.detailCluster.Name, body, mm.detailVP.Width+4)
+}
 
 // detailBody renders the cluster-detail overlay's contents.
 func (mm *m) detailBody() string {

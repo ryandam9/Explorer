@@ -11,6 +11,7 @@ import (
 	"github.com/atotto/clipboard"
 	"github.com/charmbracelet/bubbles/spinner"
 	"github.com/charmbracelet/bubbles/textinput"
+	"github.com/charmbracelet/bubbles/viewport"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 
@@ -96,6 +97,11 @@ type m struct {
 	detail        ResourceDetail
 	detailLoading bool
 	detailErr     error
+
+	// overlayVP scrolls whichever detail overlay (job definition or resource
+	// detail) is open, so long content (default arguments, connection rows) is
+	// reachable instead of overflowing. The two overlays are never open at once.
+	overlayVP viewport.Model
 
 	// Findings panel (f) — deterministic posture/cost checks over the loaded
 	// inventory. findingList is computed synchronously (no AWS call), parallel to
@@ -364,11 +370,17 @@ func (mm *m) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		mm.defLoading = false
 		mm.defErr = msg.err
 		mm.def = msg.def
+		if msg.err == nil {
+			mm.overlayVP.GotoTop() // new content starts at the top; render fills it
+		}
 
 	case detailMsg:
 		mm.detailLoading = false
 		mm.detailErr = msg.err
 		mm.detail = msg.detail
+		if msg.err == nil {
+			mm.overlayVP.GotoTop()
+		}
 
 	case tea.KeyMsg:
 		cmds = append(cmds, mm.handleKey(msg)...)
@@ -398,25 +410,19 @@ func (mm *m) handleKey(msg tea.KeyMsg) []tea.Cmd {
 		return cmds
 	}
 
-	// Job-definition overlay: any key closes it (q still quits). Checked before
-	// the other guards since it floats over the dashboard.
+	// Job-definition overlay: scrollable; Esc/d/Enter close, q quits. Checked
+	// before the other guards since it floats over the dashboard.
 	if mm.defActive {
-		switch msg.String() {
-		case "q", "ctrl+c":
+		if mm.closeOrScrollOverlay(msg, mm.defLoading, &mm.defActive) {
 			return []tea.Cmd{tea.Quit}
-		default:
-			mm.defActive = false
 		}
 		return cmds
 	}
 
-	// Resource-detail overlay: any key closes it (q still quits).
+	// Resource-detail overlay: scrollable; Esc/Enter close, q quits.
 	if mm.detailActive {
-		switch msg.String() {
-		case "q", "ctrl+c":
+		if mm.closeOrScrollOverlay(msg, mm.detailLoading, &mm.detailActive) {
 			return []tea.Cmd{tea.Quit}
-		default:
-			mm.detailActive = false
 		}
 		return cmds
 	}
@@ -571,6 +577,62 @@ func (mm *m) handleKey(msg tea.KeyMsg) []tea.Cmd {
 		mm.showAbout = true
 	}
 	return cmds
+}
+
+// closeOrScrollOverlay handles keys for a scrollable detail overlay: q/ctrl+c
+// signals quit (returns true); Esc/Enter close it; the rest scroll the shared
+// viewport once content has loaded. Shared by the job-definition and
+// resource-detail overlays.
+func (mm *m) closeOrScrollOverlay(msg tea.KeyMsg, loading bool, active *bool) bool {
+	switch msg.String() {
+	case "q", "ctrl+c":
+		return true
+	case "esc", "enter", "backspace", "left":
+		*active = false
+	case "up", "k":
+		if !loading {
+			mm.overlayVP.LineUp(1)
+		}
+	case "down", "j":
+		if !loading {
+			mm.overlayVP.LineDown(1)
+		}
+	case "pgup":
+		if !loading {
+			mm.overlayVP.ViewUp()
+		}
+	case "pgdown", "pgdn", " ":
+		if !loading {
+			mm.overlayVP.ViewDown()
+		}
+	case "g", "home":
+		if !loading {
+			mm.overlayVP.GotoTop()
+		}
+	case "G", "end":
+		if !loading {
+			mm.overlayVP.GotoBottom()
+		}
+	}
+	return false
+}
+
+// layoutOverlayVP sizes the shared overlay viewport to the terminal, preserving
+// the scroll offset, and wraps content to the viewport width so long values
+// fold instead of running off the edge.
+func (mm *m) layoutOverlayVP(content string) {
+	w := ui.AboutWidth(mm.width) - 4 // the box pads 2 columns on each side
+	if w < 28 {
+		w = 28
+	}
+	h := mm.height - 12 // border + padding + title + hint + centering margins
+	if h < 6 {
+		h = 6
+	}
+	off := mm.overlayVP.YOffset
+	mm.overlayVP = viewport.New(w, h)
+	mm.overlayVP.SetContent(lipgloss.NewStyle().Width(w).Render(content))
+	mm.overlayVP.SetYOffset(off)
 }
 
 // openFindings computes the deterministic findings over the loaded inventory

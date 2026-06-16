@@ -225,6 +225,38 @@ func TestEMREnrichmentGapWarningRenders(t *testing.T) {
 	}
 }
 
+// TestEMRDetailOverlayScrollsAndCloses verifies the cluster-detail overlay is
+// scrollable when its content is taller than the viewport, and closes on Esc.
+func TestEMRDetailOverlayScrollsAndCloses(t *testing.T) {
+	mm := newClusterTestModel(100, 16) // short height → detail taller than the viewport
+	cl, _ := mm.selectedCluster()
+	mm.handleKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("d")})
+	if !mm.detailActive {
+		t.Fatal("d should open the detail overlay")
+	}
+	out := mm.View() // sizes and fills the viewport
+	if !strings.Contains(out, "Cluster — "+cl.Name) {
+		t.Errorf("detail overlay missing title:\n%s", out)
+	}
+	if mm.detailVP.TotalLineCount() <= mm.detailVP.Height {
+		t.Fatalf("test needs content taller than the viewport (lines=%d height=%d)",
+			mm.detailVP.TotalLineCount(), mm.detailVP.Height)
+	}
+	mm.handleKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("j")})
+	if mm.detailVP.YOffset == 0 {
+		t.Error("j should scroll the detail viewport down")
+	}
+	for i, line := range strings.Split(out, "\n") {
+		if lw := ansi.StringWidth(line); lw > 100 {
+			t.Errorf("overlay line %d overflows (%d > 100): %q", i, lw, line)
+		}
+	}
+	mm.handleKey(tea.KeyMsg{Type: tea.KeyEsc})
+	if mm.detailActive {
+		t.Error("Esc should close the detail overlay")
+	}
+}
+
 func TestClusterTableFilter(t *testing.T) {
 	mm := newClusterTestModel(120, 24)
 	mm.filter.SetValue("terminated")
