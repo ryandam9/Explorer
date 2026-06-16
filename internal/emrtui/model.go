@@ -129,6 +129,14 @@ type m struct {
 	oozieErr     error
 	oozieTbl     table.Model
 
+	// Progressive load: ListSkeleton fills the list fast (phase 1), then each
+	// region's clusters are enriched in the background (phase 2), streaming
+	// columns in as they complete. loadGen tags each load so a refresh's
+	// stragglers can't patch a newer load; enrichPending counts the regions still
+	// enriching.
+	loadGen       int
+	enrichPending int
+
 	spinner   spinner.Model
 	toast     string
 	toastExp  time.Time
@@ -136,8 +144,17 @@ type m struct {
 }
 
 type invMsg struct {
+	gen int
 	inv Inventory
 	err error
+}
+
+// enrichMsg delivers one region's enriched clusters during phase 2.
+type enrichMsg struct {
+	gen      int
+	region   string
+	clusters []Cluster
+	fails    int
 }
 
 type stepsMsg struct {
@@ -280,16 +297,53 @@ func (mm *m) layoutTable() {
 }
 
 func (mm *m) Init() tea.Cmd {
-	return tea.Batch(mm.spinner.Tick, mm.loadInventoryCmd())
+	return tea.Batch(mm.spinner.Tick, mm.beginLoad())
 }
 
-func (mm *m) loadInventoryCmd() tea.Cmd {
+// beginLoad starts a fresh progressive load: it bumps the generation, clears the
+// inventory and returns the phase-1 (list skeleton) command.
+func (mm *m) beginLoad() tea.Cmd {
+	mm.loadGen++
+	mm.loading = true
+	mm.inv = Inventory{}
+	mm.enrichPending = 0
+	return mm.loadInventoryCmd(mm.loadGen)
+}
+
+// loadInventoryCmd is phase 1: list clusters across regions (cheap, no
+// enrichment) so the table appears immediately.
+func (mm *m) loadInventoryCmd(gen int) tea.Cmd {
 	return func() tea.Msg {
-		slog.Info("Loading EMR inventory", "regions", len(mm.regions))
+		slog.Info("Listing EMR clusters", "regions", len(mm.regions))
 		ctx, cancel := context.WithTimeout(mm.ctx, inventoryTimeout)
 		defer cancel()
-		inv, err := mm.client.LoadInventory(ctx, mm.showTerminated)
-		return invMsg{inv: inv, err: err}
+		inv, err := mm.client.ListSkeleton(ctx, mm.showTerminated)
+		return invMsg{gen: gen, inv: inv, err: err}
+	}
+}
+
+// enrichCmds is phase 2: one bounded-concurrency enrichment command per region,
+// each streaming its enriched clusters back via an enrichMsg.
+func (mm *m) enrichCmds(gen int) []tea.Cmd {
+	byRegion := map[string][]Cluster{}
+	for _, c := range mm.inv.Clusters {
+		byRegion[c.Region] = append(byRegion[c.Region], c)
+	}
+	cmds := make([]tea.Cmd, 0, len(byRegion))
+	for region, clusters := range byRegion {
+		cmds = append(cmds, mm.enrichRegionCmd(gen, region, clusters))
+	}
+	mm.enrichPending = len(cmds)
+	return cmds
+}
+
+func (mm *m) enrichRegionCmd(gen int, region string, clusters []Cluster) tea.Cmd {
+	return func() tea.Msg {
+		slog.Info("Enriching EMR clusters", "region", region, "count", len(clusters))
+		ctx, cancel := context.WithTimeout(mm.ctx, inventoryTimeout)
+		defer cancel()
+		enriched, fails := mm.client.EnrichRegion(ctx, region, clusters)
+		return enrichMsg{gen: gen, region: region, clusters: enriched, fails: fails}
 	}
 }
 
@@ -407,13 +461,24 @@ func (mm *m) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 
 	case invMsg:
+		if msg.gen != mm.loadGen {
+			break // a newer load superseded this one
+		}
 		mm.loading = false
 		if msg.err != nil {
 			mm.err = msg.err
 		} else {
 			mm.inv = msg.inv
 			mm.rebuild()
+			// Phase 2: enrich each region's clusters in the background.
+			cmds = append(cmds, mm.enrichCmds(msg.gen)...)
 		}
+
+	case enrichMsg:
+		if msg.gen != mm.loadGen {
+			break // stragglers from a superseded load
+		}
+		mm.applyEnrichment(msg)
 
 	case stepsMsg:
 		mm.stepsLoading = false
@@ -495,8 +560,7 @@ func (mm *m) handleKey(msg tea.KeyMsg) []tea.Cmd {
 			return []tea.Cmd{tea.Quit}
 		case "enter", "esc":
 			mm.err = nil
-			mm.loading = true
-			cmds = append(cmds, mm.loadInventoryCmd())
+			cmds = append(cmds, mm.beginLoad(), mm.spinner.Tick)
 		}
 		return cmds
 	}
@@ -873,9 +937,30 @@ func (mm *m) startReload(cmds *[]tea.Cmd) {
 	if mm.loading {
 		return
 	}
-	mm.loading = true
-	mm.inv = Inventory{}
-	*cmds = append(*cmds, mm.loadInventoryCmd(), mm.spinner.Tick)
+	*cmds = append(*cmds, mm.beginLoad(), mm.spinner.Tick)
+}
+
+// applyEnrichment patches one region's enriched clusters back into the inventory
+// by ID, accumulates any enrichment failures and re-renders. Decrements the
+// pending-region counter so the status bar can show when enrichment is done.
+func (mm *m) applyEnrichment(msg enrichMsg) {
+	byID := make(map[string]Cluster, len(msg.clusters))
+	for _, c := range msg.clusters {
+		byID[c.ID] = c
+	}
+	for i := range mm.inv.Clusters {
+		if mm.inv.Clusters[i].Region != msg.region {
+			continue
+		}
+		if e, ok := byID[mm.inv.Clusters[i].ID]; ok {
+			mm.inv.Clusters[i] = e
+		}
+	}
+	mm.inv.EnrichFailures += msg.fails
+	if mm.enrichPending > 0 {
+		mm.enrichPending--
+	}
+	mm.rebuild()
 }
 
 // openDetail opens the scrollable cluster-detail overlay for cl, resetting the

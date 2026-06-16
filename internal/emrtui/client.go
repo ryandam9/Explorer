@@ -231,10 +231,23 @@ func (c *Client) LoadInventory(ctx context.Context, includeTerminated bool) (Inv
 }
 
 // loadRegion lists clusters for one region and enriches each with DescribeCluster
-// (release label, applications, stop reason) under bounded concurrency. Unless
-// includeTerminated is set, ListClusters is filtered to the live states so the
-// terminated tail is neither listed nor enriched.
+// (release label, applications, stop reason). Used by the blocking LoadInventory
+// (the CLI twins); the dashboard instead lists then enriches progressively via
+// ListSkeleton + EnrichRegion.
 func (c *Client) loadRegion(ctx context.Context, region string, includeTerminated bool) ([]Cluster, int, error) {
+	clusters, err := c.listRegion(ctx, region, includeTerminated)
+	if err != nil {
+		return clusters, 0, err
+	}
+	fails := c.enrichClusters(ctx, region, clusters)
+	return clusters, fails, nil
+}
+
+// listRegion lists a region's clusters (summary fields only — name, ID, state,
+// created, normalized hours; no DescribeCluster detail). Unless includeTerminated
+// is set, ListClusters is filtered to the live states so the terminated tail is
+// neither listed nor enriched.
+func (c *Client) listRegion(ctx context.Context, region string, includeTerminated bool) ([]Cluster, error) {
 	cl := c.clientFor(region)
 	var clusters []Cluster
 
@@ -246,13 +259,21 @@ func (c *Client) loadRegion(ctx context.Context, region string, includeTerminate
 	for pag.HasMorePages() {
 		page, err := pag.NextPage(ctx)
 		if err != nil {
-			return clusters, 0, err
+			return clusters, err
 		}
 		for _, summary := range page.Clusters {
 			clusters = append(clusters, clusterFromSummary(region, summary))
 		}
 	}
+	return clusters, nil
+}
 
+// enrichClusters fills in each cluster's DescribeCluster detail in place under
+// bounded concurrency, returning the count that failed enrichment (denied or
+// throttled). A failed cluster keeps its skeleton fields and DetailKnown=false,
+// so a blank reads as "unknown", not "none".
+func (c *Client) enrichClusters(ctx context.Context, region string, clusters []Cluster) int {
+	cl := c.clientFor(region)
 	var (
 		wg          sync.WaitGroup
 		enrichFails atomic.Int32
@@ -269,9 +290,6 @@ func (c *Client) loadRegion(ctx context.Context, region string, includeTerminate
 			defer func() { <-sem }()
 			out, err := cl.DescribeCluster(ctx, &emr.DescribeClusterInput{ClusterId: aws.String(clusters[i].ID)})
 			if err != nil || out.Cluster == nil {
-				// Enrichment failed (denied/throttled) — leave the detail fields
-				// unset and record it so the dashboard can flag the gap rather than
-				// render blanks as "none".
 				if err != nil {
 					slog.Debug("EMR DescribeCluster failed", "cluster", clusters[i].ID, "region", region, "error", err.Error())
 				}
@@ -282,8 +300,52 @@ func (c *Client) loadRegion(ctx context.Context, region string, includeTerminate
 		}(i)
 	}
 	wg.Wait()
+	return int(enrichFails.Load())
+}
 
-	return clusters, int(enrichFails.Load()), nil
+// ListSkeleton lists clusters across every region without enrichment — the fast
+// first phase of the dashboard's progressive load. Per-region listing failures
+// are soft; an error is returned only when every region fails.
+func (c *Client) ListSkeleton(ctx context.Context, includeTerminated bool) (Inventory, error) {
+	var (
+		mu       sync.Mutex
+		inv      Inventory
+		firstErr error
+		failures int
+		wg       sync.WaitGroup
+	)
+	for _, region := range c.regions {
+		wg.Add(1)
+		go func(region string) {
+			defer wg.Done()
+			clusters, err := c.listRegion(ctx, region, includeTerminated)
+			mu.Lock()
+			defer mu.Unlock()
+			if err != nil {
+				failures++
+				if firstErr == nil {
+					firstErr = fmt.Errorf("%s: %w", region, err)
+				}
+				slog.Warn("EMR cluster listing failed", "region", region, "error", err.Error())
+				return
+			}
+			inv.Clusters = append(inv.Clusters, clusters...)
+		}(region)
+	}
+	wg.Wait()
+
+	if failures == len(c.regions) && firstErr != nil {
+		return Inventory{}, firstErr
+	}
+	inv.sort()
+	return inv, nil
+}
+
+// EnrichRegion enriches one region's clusters (the second, streaming phase of
+// the dashboard load), returning the enriched copies and the failure count.
+func (c *Client) EnrichRegion(ctx context.Context, region string, clusters []Cluster) ([]Cluster, int) {
+	fails := c.enrichClusters(ctx, region, clusters)
+	return clusters, fails
 }
 
 // Steps fetches a cluster's step history (newest first, capped to limit).

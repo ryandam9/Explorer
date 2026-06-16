@@ -470,7 +470,11 @@ func (mm *m) statusLeft() string {
 	if mm.showTerminated {
 		scope = "all states"
 	}
-	return fmt.Sprintf("Region: %s  ·  Clusters: %d (%s)", regionLabel, mm.rowCount(), scope)
+	left := fmt.Sprintf("Region: %s  ·  Clusters: %d (%s)", regionLabel, mm.rowCount(), scope)
+	if mm.enrichPending > 0 {
+		left += "  ·  enriching…" // phase 2 still filling RELEASE/APPLICATIONS
+	}
+	return left
 }
 
 func (mm *m) helpHints() []ui.KeyHint {

@@ -203,10 +203,30 @@ func resolveRegions(ctx context.Context, cfg aws.Config) []string {
 	return regions
 }
 
-// LoadInventory fans the per-resource listings out across every region in
-// parallel. Per-region failures are soft (opt-in regions commonly deny Glue);
-// an error is returned only when every region fails completely.
+// LoadInventory lists every resource across regions and enriches jobs with
+// their last-run state (the blocking path used by the CLI twins). Per-region
+// failures are soft; an error is returned only when every region fails.
 func (c *Client) LoadInventory(ctx context.Context) (Inventory, error) {
+	return c.gather(ctx, c.loadRegion)
+}
+
+// ListSkeleton lists every resource across regions but leaves jobs' last-run
+// state unenriched — the fast first phase of the dashboard's progressive load.
+func (c *Client) ListSkeleton(ctx context.Context) (Inventory, error) {
+	return c.gather(ctx, c.loadRegionSkeleton)
+}
+
+// EnrichRegion stamps a region's jobs with their latest run state (the
+// streaming second phase), returning the enriched jobs.
+func (c *Client) EnrichRegion(ctx context.Context, region string, jobs []Job) []Job {
+	c.enrichJobs(ctx, c.clientFor(region), jobs)
+	return jobs
+}
+
+// gather fans a per-region loader across every region in parallel and merges
+// the results. Per-region failures are soft; an error is returned only when
+// every region fails completely.
+func (c *Client) gather(ctx context.Context, load func(context.Context, string) (Inventory, error)) (Inventory, error) {
 	var (
 		mu       sync.Mutex
 		inv      Inventory
@@ -219,7 +239,7 @@ func (c *Client) LoadInventory(ctx context.Context) (Inventory, error) {
 		wg.Add(1)
 		go func(region string) {
 			defer wg.Done()
-			regional, err := c.loadRegion(ctx, region)
+			regional, err := load(ctx, region)
 			mu.Lock()
 			defer mu.Unlock()
 			if err != nil {
@@ -248,12 +268,22 @@ func (c *Client) LoadInventory(ctx context.Context) (Inventory, error) {
 	return inv, nil
 }
 
-// loadRegion gathers every resource type for one region. The six listings are
-// independent, so they run concurrently rather than one after another. Each is
-// best-effort: a failure in one is logged but the rest proceed, so a denied
-// GetTriggers (say) still yields jobs and crawlers. Each goroutine writes a
-// distinct Inventory field, so no locking is needed.
+// loadRegion gathers every resource type for one region, jobs fully enriched.
 func (c *Client) loadRegion(ctx context.Context, region string) (Inventory, error) {
+	return c.loadRegionWith(ctx, region, c.loadJobs)
+}
+
+// loadRegionSkeleton gathers every resource type for one region with jobs left
+// unenriched (last-run state filled later by EnrichRegion).
+func (c *Client) loadRegionSkeleton(ctx context.Context, region string) (Inventory, error) {
+	return c.loadRegionWith(ctx, region, c.listJobs)
+}
+
+// loadRegionWith gathers a region's six resource listings concurrently (they
+// are independent), using jobsLoader for the jobs listing. Each is best-effort:
+// a failure in one is logged but the rest proceed. Each goroutine writes a
+// distinct Inventory field, so no locking is needed.
+func (c *Client) loadRegionWith(ctx context.Context, region string, jobsLoader func(context.Context, *glue.Client, string) ([]Job, error)) (Inventory, error) {
 	cl := c.clientFor(region)
 	var inv Inventory
 
@@ -267,7 +297,7 @@ func (c *Client) loadRegion(ctx context.Context, region string) (Inventory, erro
 	}
 
 	run(func() {
-		jobs, err := c.loadJobs(ctx, cl, region)
+		jobs, err := jobsLoader(ctx, cl, region)
 		if err != nil {
 			slog.Warn("GetJobs failed", "region", region, "error", err.Error())
 		}
@@ -398,10 +428,21 @@ func (c *Client) loadDatabases(ctx context.Context, cl *glue.Client, region stri
 	return out
 }
 
-// loadJobs lists jobs and stamps each with its latest run state via a
-// bounded-concurrency GetJobRuns pass (the same best-effort enrichment the
-// collector does, but kept here so the TUI owns its own typed view).
+// loadJobs lists jobs and stamps each with its latest run state. Used by the
+// blocking LoadInventory (CLI twins); the dashboard instead lists then enriches
+// progressively (listJobs + EnrichRegion).
 func (c *Client) loadJobs(ctx context.Context, cl *glue.Client, region string) ([]Job, error) {
+	jobs, err := c.listJobs(ctx, cl, region)
+	if err != nil {
+		return jobs, err
+	}
+	c.enrichJobs(ctx, cl, jobs)
+	return jobs, nil
+}
+
+// listJobs lists a region's jobs without their last-run state (the fast first
+// phase). The last-run columns are filled later by enrichJobs.
+func (c *Client) listJobs(ctx context.Context, cl *glue.Client, region string) ([]Job, error) {
 	var jobs []Job
 	var token *string
 	for {
@@ -422,7 +463,13 @@ func (c *Client) loadJobs(ctx context.Context, cl *glue.Client, region string) (
 		}
 		token = page.NextToken
 	}
+	return jobs, nil
+}
 
+// enrichJobs stamps each job with its latest run state via a bounded-concurrency
+// GetJobRuns pass (best-effort: a denied/empty lookup just leaves the run
+// columns blank).
+func (c *Client) enrichJobs(ctx context.Context, cl *glue.Client, jobs []Job) {
 	var wg sync.WaitGroup
 	sem := make(chan struct{}, 8)
 	for i := range jobs {
@@ -444,7 +491,6 @@ func (c *Client) loadJobs(ctx context.Context, cl *glue.Client, region string) (
 		}(i)
 	}
 	wg.Wait()
-	return jobs, nil
 }
 
 // JobRuns fetches the most recent run history for a job (newest first).
