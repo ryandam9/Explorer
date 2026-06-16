@@ -1596,6 +1596,12 @@ func (m *Model) handleCategoryKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		if _, cached := m.resourceMaps[m.activeResource]; cached {
 			m.rebuildResourceTable()
 		}
+		// Move control to the resource table so the cursor lands on the first
+		// resource on the right (issue #248). initResourceTable just built a fresh
+		// table (cursor at the top), so the first row is selected as rows arrive.
+		m.focus = focusResourceTable
+		m.vpcTable.Blur()
+		m.resourceTable.Focus()
 		return m, m.loadResources(m.activeResource)
 	}
 	return m, nil
