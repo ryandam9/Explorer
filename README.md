@@ -815,6 +815,7 @@ Run history (Enter on a job):
 | `Enter` | On **Jobs**, open the selected job's run history; on the other tabs, open the selected resource's detail overlay (fetched on demand) |
 | `d` | Show the selected job's definition (role, version, worker, script, connections, args — secrets redacted); the overlay scrolls (`↑/↓`) when taller than the screen |
 | `f` | **Findings** — deterministic posture/cost checks (failing or stale jobs, failed crawls) over the loaded jobs & crawlers; `y` copies the suggested fix |
+| `S` / `R` | Cycle the active tab's sort column / reverse the direction (resets on a tab switch) |
 | `/` | Filter the current pane |
 | `o` | Open the selected resource in the AWS console |
 | `r` | Refresh |

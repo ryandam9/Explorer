@@ -158,7 +158,8 @@ const glueAboutText = "This is the AWS Glue dashboard. Tab across Jobs, Crawlers
 	"On the other tabs, press Enter for a detail overlay of the selected crawler, " +
 	"trigger, workflow, connection or database (configuration, targets/actions and " +
 	"last-run status, fetched on demand).\\n\\n" +
-	"Press o on any row to open it in the AWS console, / to filter, and r to refresh."
+	"Press S to cycle the column the active tab is sorted by (R reverses the " +
+	"direction), o on any row to open it in the AWS console, / to filter, and r to refresh."
 
 func (mm *m) renderTabBar() string {
 	var parts []string
@@ -336,7 +337,10 @@ func (mm *m) helpHints() []ui.KeyHint {
 	} else {
 		hints = append(hints, ui.H("Enter", "detail"))
 	}
-	hints = append(hints, ui.H("f", "findings"))
+	hints = append(hints, ui.H("f", "findings"), ui.H("S", "sort"))
+	if mm.sortCol >= 0 {
+		hints = append(hints, ui.H("R", "reverse"))
+	}
 	if hl, hr := mm.tbl.ColScrollInfo(); hl+hr > 0 {
 		hints = append(hints, ui.H("</>", "columns"))
 	}
