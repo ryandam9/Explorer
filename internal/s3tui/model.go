@@ -213,10 +213,12 @@ type Model struct {
 	csvRowCapSet bool
 	csvTotal     int // total data rows parsed
 	csvHidden    int // rows omitted by the window
+	csvHeaderRow int // 1-based header row; 0 = no header (synthesised column names)
 
-	csvDelimInput   textinput.Model // typed custom-delimiter prompt ("S")
-	csvDelimEditing bool
-	csvDelimErr     string
+	// Typed prompt shared by the "S" (delimiter) and "h" (header row) actions.
+	csvInput     textinput.Model
+	csvPrompt    csvPromptKind
+	csvPromptErr string
 
 	// Full-screen archive browser (a .tar/.tar.gz/.tgz object). Selecting a
 	// member opens its content in the CSV or text view.
@@ -1274,16 +1276,16 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if msg.String() == "ctrl+c" {
 				return m, tea.Quit
 			}
-			// The typed delimiter prompt captures keys while open.
-			if m.csvDelimEditing {
+			// The typed prompt (delimiter or header row) captures keys while open.
+			if m.csvPrompt != csvPromptNone {
 				switch msg.String() {
 				case "enter":
-					m.applyDelimiterInput()
+					m.applyCSVPrompt()
 				case "esc":
-					m.csvDelimEditing = false
-					m.csvDelimErr = ""
+					m.csvPrompt = csvPromptNone
+					m.csvPromptErr = ""
 				default:
-					m.csvDelimInput, _ = m.csvDelimInput.Update(msg)
+					m.csvInput, _ = m.csvInput.Update(msg)
 				}
 				return m, nil
 			}
@@ -2660,8 +2662,9 @@ const s3AboutText = "This is the dedicated S3 browser. The first screen lists yo
 	"(with details on d); Enter opens a bucket and you navigate its prefixes like " +
 	"folders, drilling into objects.\n\n" +
 	"On an object you can preview its contents (p) — a CSV or TSV opens in a " +
-	"full-screen, scrollable table with auto-detected delimiter (press s to change " +
-	"it, w to adjust how many rows are shown, t for raw text). A .gz is decompressed " +
+	"full-screen, scrollable table with auto-detected delimiter (press s/S to change " +
+	"it, h to set which row holds the column names — 0 for none, w to adjust how many " +
+	"rows are shown, t for raw text). A .gz is decompressed " +
 	"and shown by its inner type, and a .tar/.tar.gz/.tgz opens a browser of its " +
 	"members so you can open any file inside. You can also copy its S3 URI (y), open it " +
 	"in the AWS console (o), generate a 1-hour presigned URL (g) and download it " +
