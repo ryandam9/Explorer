@@ -152,6 +152,16 @@ main > p em { display:inline-block; background:var(--panel); border:2px solid va
 /* Architecture diagram — framed like a table, scrolls if wider than the column. */
 .diagram { overflow-x:auto; margin:.4rem 0 1.4rem; padding:1rem; background:var(--panel); border:3px solid var(--ink); box-shadow:var(--shadow); }
 .diagram svg { max-width:100%; height:auto; display:block; margin:0 auto; }
+/* Layer toggles — checkboxes that show/hide the SVG's <g data-layer> groups.
+   Pure CSS via :has() — no JavaScript, so it works offline and with JS off. */
+.layer-toggles { display:flex; flex-wrap:wrap; gap:.45rem .9rem; margin:.4rem 0 .8rem; font-weight:600; font-size:.85rem; }
+.layer-toggles label { display:inline-flex; align-items:center; gap:.35rem; background:var(--panel); border:2px solid var(--ink); box-shadow:var(--shadow-sm); padding:.18rem .55rem; cursor:pointer; user-select:none; }
+.layer-toggles input { accent-color:var(--ink); }
+.arch:has(#lt-subnet:not(:checked)) [data-layer="subnet"],
+.arch:has(#lt-labels:not(:checked)) [data-layer="labels"],
+.arch:has(#lt-sg:not(:checked)) [data-layer="sg"],
+.arch:has(#lt-nat:not(:checked)) [data-layer="nat"],
+.arch:has(#lt-traffic:not(:checked)) [data-layer="traffic"] { display:none; }
 a { color:var(--ink); font-weight:700; text-decoration:underline; text-decoration-thickness:2px; }
 code { background:var(--lime); border:2px solid var(--ink); padding:.05em .3em; font-family:var(--mono); font-size:.85em; }
 ul { padding-left:1.2rem; }
@@ -205,6 +215,13 @@ tbody tr:hover { background:var(--yellow); }
 <main>
 <section class="arch">
 <h2 id="architecture">Architecture</h2>
+<div class="layer-toggles" role="group" aria-label="Toggle diagram layers">
+<label><input type="checkbox" id="lt-subnet" checked> Subnets</label>
+<label><input type="checkbox" id="lt-traffic" checked> Traffic &amp; IGW</label>
+<label><input type="checkbox" id="lt-nat" checked> NAT gateways</label>
+<label><input type="checkbox" id="lt-sg" checked> Security groups</label>
+<label><input type="checkbox" id="lt-labels" checked> Detail labels</label>
+</div>
 <div class="diagram">{{.Diagram}}</div>
 </section>
 {{.Content}}

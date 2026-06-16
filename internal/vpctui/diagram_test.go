@@ -2,6 +2,7 @@ package vpctui
 
 import (
 	"encoding/xml"
+	"fmt"
 	"io"
 	"strconv"
 	"strings"
@@ -28,8 +29,11 @@ func diagramFixture() fullExport {
 				{ID: "rtb-priv", IsMain: true, Associations: []string{"subnet-priv-a", "subnet-priv-b"},
 					Routes: []Route{{Destination: "0.0.0.0/0", Target: "nat-1", State: "active"}}},
 			},
-			NatGateways:       []NatGWInfo{{ID: "nat-1", SubnetID: "subnet-pub-a", State: "available"}},
-			NetworkInterfaces: []ENIInfo{{ID: "eni-1", SubnetID: "subnet-priv-a"}, {ID: "eni-2", SubnetID: "subnet-priv-a"}},
+			NatGateways: []NatGWInfo{{ID: "nat-1", SubnetID: "subnet-pub-a", State: "available"}},
+			NetworkInterfaces: []ENIInfo{
+				{ID: "eni-1", SubnetID: "subnet-priv-a", SecurityGroups: []string{"sg-app", "sg-db"}},
+				{ID: "eni-2", SubnetID: "subnet-priv-a", SecurityGroups: []string{"sg-app"}},
+			},
 		},
 	}
 }
@@ -55,6 +59,13 @@ func TestVPCDiagramSVGStructure(t *testing.T) {
 		"Public subnet (→ IGW)", // legend
 		"Private subnet (→ NAT)",
 		"NAT gateway",
+		// Toggleable layer groups.
+		`<g data-layer="subnet">`,
+		`<g data-layer="labels">`,
+		`<g data-layer="sg">`,
+		`<g data-layer="nat">`,
+		`<g data-layer="traffic">`,
+		"SG sg-app", // security-group badge from the subnet's ENIs
 	} {
 		if !strings.Contains(svg, want) {
 			t.Errorf("diagram SVG missing %q", want)
@@ -106,12 +117,33 @@ func TestVPCDiagramSVGDeterministic(t *testing.T) {
 	}
 }
 
-// TestVPCDiagramSVGWithinViewBox checks no box or connector is drawn outside
-// the canvas — the guard against an off-canvas "junk" diagram. Rects and
-// lines/polylines are bounds-checked strictly; text anchor points loosely.
-func TestVPCDiagramSVGWithinViewBox(t *testing.T) {
-	svg := vpcDiagramSVG(diagramFixture())
+// bigFixture is a 40-subnet, 3-AZ VPC with an IGW and a NAT — the scale case.
+func bigFixture() fullExport {
+	f := fullExport{
+		VPC:  VPCInfo{ID: "vpc-big", CIDR: "10.0.0.0/16"},
+		Snap: vpcSnapshot{VPCID: "vpc-big", InternetGateways: []IGWInfo{{ID: "igw-9"}}, NatGateways: []NatGWInfo{{ID: "nat-9", SubnetID: "subnet-0"}}},
+	}
+	azs := []string{"eu-west-1a", "eu-west-1b", "eu-west-1c"}
+	pub := RouteTableInfo{ID: "rtb-pub", Routes: []Route{{Destination: "0.0.0.0/0", Target: "igw-9"}}}
+	priv := RouteTableInfo{ID: "rtb-priv", IsMain: true, Routes: []Route{{Destination: "0.0.0.0/0", Target: "nat-9"}}}
+	for i := 0; i < 40; i++ {
+		id := fmt.Sprintf("subnet-%d", i)
+		f.Snap.Subnets = append(f.Snap.Subnets, SubnetInfo{ID: id, CIDR: fmt.Sprintf("10.0.%d.0/24", i), AZ: azs[i%3]})
+		if i%2 == 0 {
+			pub.Associations = append(pub.Associations, id)
+		} else {
+			priv.Associations = append(priv.Associations, id)
+		}
+	}
+	f.Snap.RouteTables = []RouteTableInfo{pub, priv}
+	return f
+}
 
+// assertSVGWithinViewBox checks no box or connector is drawn outside the canvas
+// — the guard against an off-canvas "junk" diagram. Rects and lines/polylines
+// are bounds-checked strictly; text anchor points loosely.
+func assertSVGWithinViewBox(t *testing.T, svg string) {
+	t.Helper()
 	var w, h int
 	dec := xml.NewDecoder(strings.NewReader(svg))
 	num := func(attrs []xml.Attr, name string) (int, bool) {
@@ -191,6 +223,26 @@ func TestVPCDiagramSVGWithinViewBox(t *testing.T) {
 			if !within(x, y) {
 				t.Errorf("text anchor (%d,%d) outside viewBox %dx%d", x, y, w, h)
 			}
+		}
+	}
+}
+
+func TestVPCDiagramSVGWithinViewBox(t *testing.T) {
+	assertSVGWithinViewBox(t, vpcDiagramSVG(diagramFixture()))
+}
+
+// TestVPCDiagramSVGLargeWithinViewBox proves the lane-wrapping layout keeps a
+// 40-subnet VPC inside the canvas (no overlap/off-canvas at scale).
+func TestVPCDiagramSVGLargeWithinViewBox(t *testing.T) {
+	svg := vpcDiagramSVG(bigFixture())
+	assertSVGWithinViewBox(t, svg)
+	// Sanity: it should still be well-formed and contain all 40 subnets.
+	if c := strings.Count(svg, `data-layer="subnet"`); c != 1 {
+		t.Errorf("expected exactly one subnet layer group, got %d", c)
+	}
+	for _, id := range []string{"subnet-0", "subnet-39"} {
+		if !strings.Contains(svg, id) {
+			t.Errorf("large diagram missing %q", id)
 		}
 	}
 }

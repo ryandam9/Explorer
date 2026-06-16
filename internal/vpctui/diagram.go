@@ -12,35 +12,43 @@ import (
 // vpcDiagramSVG renders a deterministic, hand-laid-out SVG architecture diagram
 // of a VPC: the internet and its gateway at the top, the VPC as a container,
 // availability-zone columns of subnets inside it (colour-coded public / private
-// / isolated by their default route), NAT gateways drawn in their subnet, and
-// arrows for the traffic-flow paths — internet ⇄ IGW, public subnets → IGW,
-// private subnets → NAT → IGW. It is a pure function over the export snapshot
-// (no AWS calls, no AI), so it is stable for a given input and unit-testable.
+// / isolated by their default route), NAT gateways drawn in their subnet,
+// security-group badges (from each subnet's ENIs), and arrows for the
+// traffic-flow paths — internet ⇄ IGW, public subnets → IGW, private subnets →
+// NAT → IGW. It is a pure function over the export snapshot (no AWS calls, no
+// AI), so it is stable for a given input and unit-testable.
 //
-// The output is a standalone <svg> document (carries its own xmlns), so it both
-// embeds inline in the HTML report and writes to a .svg file as-is.
+// Toggleable parts are wrapped in <g data-layer="…"> groups (subnet, labels,
+// sg, nat, traffic) so the HTML report's checkbox bar can show/hide each layer
+// with a few lines of inline JS — no external library. The output is a
+// standalone <svg> (carries its own xmlns), so it embeds inline in the HTML
+// report and writes to a .svg file as-is.
+//
+// Tall AZ columns wrap into lanes (dgMaxRows per lane) so a 40-subnet VPC stays
+// a readable grid instead of one extreme ribbon.
 // ---------------------------------------------------------------------------
 
-// Diagram geometry (pixels). Hand-tuned so a typical 2-AZ VPC reads cleanly and
-// larger ones grow without overlap.
+// Diagram geometry (pixels).
 const (
 	dgMargin     = 36
 	dgInternetW  = 168
 	dgInternetH  = 56
 	dgIGWW       = 140
 	dgIGWH       = 48
-	dgGapNetIGW  = 44 // internet ↕ IGW connector length
-	dgGapIGWVPC  = 40 // IGW ↕ VPC top connector length
+	dgGapNetIGW  = 44
+	dgGapIGWVPC  = 40
 	dgVPCHeader  = 46
 	dgVPCPad     = 26
 	dgAZHeader   = 30
 	dgAZGap      = 28
+	dgLaneGap    = 16
 	dgSubnetW    = 252
-	dgSubnetH    = 98
+	dgSubnetH    = 124
 	dgSubnetGap  = 20
-	dgNatH       = 24
+	dgNatH       = 22
 	dgLegendH    = 64
-	dgRowUnderAZ = 10 // gap between an AZ header and its first subnet
+	dgRowUnderAZ = 10
+	dgMaxRows    = 8 // subnets per lane before an AZ column wraps into another lane
 )
 
 // dgPalette — the report's neo-brutalist colours, reused so the diagram matches
@@ -60,23 +68,24 @@ const (
 	dgIsoLine  = "#777777"
 	dgNatFill  = "#ffd6a5"
 	dgNatLine  = "#d97706"
+	dgSGFill   = "#eeeeee"
+	dgSGLine   = "#999999"
 )
 
-// dgEgress is a subnet's default-route (0.0.0.0/0) destination, used to classify
-// the subnet and to draw its traffic-flow arrow.
+// dgEgress is a subnet's default-route (0.0.0.0/0) destination.
 type dgEgress struct {
-	kind   string // "igw" public · "nat" private · "other" (tgw/pcx/…) · "none" isolated
-	target string // the route target id (igw-…, nat-…, tgw-…), for the label
+	kind   string // "igw" public · "nat" private · "other" · "none" isolated
+	target string
 }
 
-// dgSubnet is a laid-out subnet box.
-type dgSubnet struct {
+// placedSubnet is a subnet box with its computed position.
+type placedSubnet struct {
 	info   SubnetInfo
 	egress dgEgress
 	enis   int
-	nat    *NatGWInfo // non-nil when a NAT gateway lives in this subnet
+	sgs    []string
+	nat    *NatGWInfo
 	x, y   int
-	w, h   int
 }
 
 // vpcDiagramSVG builds the architecture diagram for the export.
@@ -84,33 +93,24 @@ func vpcDiagramSVG(data fullExport) string {
 	snap := data.Snap
 	egress := subnetEgress(snap)
 	eniCount := eniCountBySubnet(snap)
+	sgMap := subnetSGs(snap)
 
-	// NATs by the subnet they live in (to draw the NAT node) and by id (to aim
-	// private-subnet arrows at the right NAT).
 	natBySubnet := map[string]NatGWInfo{}
-	natByID := map[string]*dgSubnet{} // filled after layout
 	for i := range snap.NatGateways {
-		n := snap.NatGateways[i]
-		if n.SubnetID != "" {
-			natBySubnet[n.SubnetID] = n
+		if snap.NatGateways[i].SubnetID != "" {
+			natBySubnet[snap.NatGateways[i].SubnetID] = snap.NatGateways[i]
 		}
 	}
 
 	// Group subnets by AZ; order AZs, and within an AZ order public → private →
 	// other → isolated, then by ID, for a stable, readable layout.
-	byAZ := map[string][]dgSubnet{}
+	byAZ := map[string][]SubnetInfo{}
 	for _, s := range snap.Subnets {
-		eg := egress[s.ID]
-		ds := dgSubnet{info: s, egress: eg, enis: eniCount[s.ID], w: dgSubnetW, h: dgSubnetH}
-		if n, ok := natBySubnet[s.ID]; ok {
-			nn := n
-			ds.nat = &nn
-		}
 		az := s.AZ
 		if az == "" {
 			az = "(no AZ)"
 		}
-		byAZ[az] = append(byAZ[az], ds)
+		byAZ[az] = append(byAZ[az], s)
 	}
 	azs := make([]string, 0, len(byAZ))
 	for az := range byAZ {
@@ -120,38 +120,52 @@ func vpcDiagramSVG(data fullExport) string {
 	for _, az := range azs {
 		col := byAZ[az]
 		sort.SliceStable(col, func(i, j int) bool {
-			ri, rj := egressRank(col[i].egress.kind), egressRank(col[j].egress.kind)
+			ri, rj := egressRank(egress[col[i].ID].kind), egressRank(egress[col[j].ID].kind)
 			if ri != rj {
 				return ri < rj
 			}
-			return col[i].info.ID < col[j].info.ID
+			return col[i].ID < col[j].ID
 		})
 		byAZ[az] = col
 	}
 
 	hasIGW := len(snap.InternetGateways) > 0
 
-	// ---- layout ----------------------------------------------------------
-	numAZ := len(azs)
-	colInnerH := 0
-	for _, az := range azs {
+	// ---- layout pass 1: lane counts + widths ----------------------------
+	azLanes := map[string]int{}
+	maxRows := 0
+	totalInnerW := 0
+	for i, az := range azs {
 		n := len(byAZ[az])
-		h := dgAZHeader + dgRowUnderAZ
+		lanes := 1
 		if n > 0 {
-			h += n*dgSubnetH + (n-1)*dgSubnetGap
+			lanes = (n + dgMaxRows - 1) / dgMaxRows
 		}
-		if h > colInnerH {
-			colInnerH = h
+		azLanes[az] = lanes
+		rows := 0
+		if n > 0 {
+			rows = (n + lanes - 1) / lanes
 		}
+		if rows > maxRows {
+			maxRows = rows
+		}
+		azW := lanes*dgSubnetW + (lanes-1)*dgLaneGap
+		if i > 0 {
+			totalInnerW += dgAZGap
+		}
+		totalInnerW += azW
 	}
-	if colInnerH == 0 {
-		colInnerH = dgAZHeader + dgRowUnderAZ + 40 // "no subnets" note
+	if len(azs) == 0 {
+		totalInnerW = dgSubnetW
 	}
-	vpcInnerW := dgSubnetW
-	if numAZ > 0 {
-		vpcInnerW = numAZ*dgSubnetW + (numAZ-1)*dgAZGap
+	colInnerH := dgAZHeader + dgRowUnderAZ
+	if maxRows > 0 {
+		colInnerH += maxRows*dgSubnetH + (maxRows-1)*dgSubnetGap
+	} else {
+		colInnerH += 40
 	}
-	vpcW := vpcInnerW + 2*dgVPCPad
+
+	vpcW := totalInnerW + 2*dgVPCPad
 	vpcH := dgVPCHeader + dgVPCPad + colInnerH + dgVPCPad
 
 	contentW := vpcW
@@ -169,20 +183,54 @@ func vpcDiagramSVG(data fullExport) string {
 		vpcY = topY + dgInternetH + dgGapNetIGW + dgIGWH + dgGapIGWVPC
 	}
 	canvasH := vpcY + vpcH + dgLegendH + dgMargin
-
 	vpcX := centerX - vpcW/2
 
+	// ---- layout pass 2: positions ---------------------------------------
+	subTop := vpcY + dgVPCHeader + dgVPCPad + dgAZHeader + dgRowUnderAZ
+	type azHdr struct {
+		x, w int
+		name string
+	}
+	var headers []azHdr
+	var placed []placedSubnet
+	curX := vpcX + dgVPCPad
+	for _, az := range azs {
+		lanes := azLanes[az]
+		azW := lanes*dgSubnetW + (lanes-1)*dgLaneGap
+		headers = append(headers, azHdr{x: curX, w: azW, name: az})
+		for idx, s := range byAZ[az] {
+			lane := idx % lanes
+			row := idx / lanes
+			ps := placedSubnet{
+				info: s, egress: egress[s.ID], enis: eniCount[s.ID], sgs: sgMap[s.ID],
+				x: curX + lane*(dgSubnetW+dgLaneGap),
+				y: subTop + row*(dgSubnetH+dgSubnetGap),
+			}
+			if n, ok := natBySubnet[s.ID]; ok {
+				nn := n
+				ps.nat = &nn
+			}
+			placed = append(placed, ps)
+		}
+		curX += azW + dgAZGap
+	}
+	natByID := map[string]*placedSubnet{}
+	for i := range placed {
+		if placed[i].nat != nil {
+			natByID[placed[i].nat.ID] = &placed[i]
+		}
+	}
+
+	// ---- emit -----------------------------------------------------------
 	var b strings.Builder
 	fmt.Fprintf(&b, `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 %d %d" width="%d" height="%d" font-family="Roboto Condensed, ui-sans-serif, system-ui, Arial, sans-serif" role="img" aria-label="VPC architecture diagram for %s">`,
 		canvasW, canvasH, canvasW, canvasH, esc(data.VPC.ID))
 	b.WriteString("\n<defs>\n")
-	// A single ink arrowhead; lines carry their own colour, heads stay black.
 	b.WriteString(`<marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="` + dgInk + `"/></marker>` + "\n")
 	b.WriteString("</defs>\n")
-	// Background.
 	fmt.Fprintf(&b, `<rect x="0" y="0" width="%d" height="%d" fill="#fff8e7"/>`+"\n", canvasW, canvasH)
 
-	// ---- VPC container ---------------------------------------------------
+	// VPC container + AZ headers (always visible — structural).
 	b.WriteString("<!-- VPC container -->\n")
 	dgRect(&b, vpcX, vpcY, vpcW, vpcH, 10, dgVPCFill, dgInk, 4)
 	dgRect(&b, vpcX, vpcY, vpcW, dgVPCHeader, 10, dgVPCBand, dgInk, 4)
@@ -191,73 +239,71 @@ func vpcDiagramSVG(data fullExport) string {
 		vpcLabel += "  " + data.VPC.CIDR
 	}
 	dgText(&b, vpcX+16, vpcY+dgVPCHeader/2+5, 16, "700", "start", dgInk, esc(vpcLabel))
-
-	// Column x positions.
-	colX := func(i int) int { return vpcX + dgVPCPad + i*(dgSubnetW+dgAZGap) }
-	subTop := vpcY + dgVPCHeader + dgVPCPad + dgAZHeader + dgRowUnderAZ
-
-	if numAZ == 0 {
+	if len(azs) == 0 {
 		dgText(&b, vpcX+vpcW/2, vpcY+dgVPCHeader+40, 14, "400", "middle", dgIsoLine, "No subnets in this VPC")
 	}
-
-	// ---- AZ headers + subnet boxes --------------------------------------
-	for i, az := range azs {
-		x := colX(i)
-		b.WriteString("<!-- AZ " + xmlComment(az) + " -->\n")
-		dgRect(&b, x, vpcY+dgVPCHeader+dgVPCPad, dgSubnetW, dgAZHeader, 6, dgAZBand, dgInk, 2)
-		dgText(&b, x+dgSubnetW/2, vpcY+dgVPCHeader+dgVPCPad+dgAZHeader/2+5, 13, "700", "middle", dgInk, esc(az))
-
-		for j := range byAZ[az] {
-			ds := &byAZ[az][j]
-			ds.x = x
-			ds.y = subTop + j*(dgSubnetH+dgSubnetGap)
-			if ds.nat != nil {
-				natByID[ds.nat.ID] = ds
-			}
-			dgDrawSubnet(&b, ds)
-		}
+	headerY := vpcY + dgVPCHeader + dgVPCPad
+	for _, hd := range headers {
+		b.WriteString("<!-- AZ " + xmlComment(hd.name) + " -->\n")
+		dgRect(&b, hd.x, headerY, hd.w, dgAZHeader, 6, dgAZBand, dgInk, 2)
+		dgText(&b, hd.x+hd.w/2, headerY+dgAZHeader/2+5, 13, "700", "middle", dgInk, esc(hd.name))
 	}
 
-	// ---- traffic-flow arrows (drawn on top so heads stay visible) -------
-	b.WriteString("<!-- traffic-flow arrows -->\n")
+	// Layer: subnet boxes.
+	b.WriteString(`<g data-layer="subnet">` + "\n")
+	for i := range placed {
+		dgSubnetBox(&b, &placed[i])
+	}
+	b.WriteString("</g>\n")
+
+	// Layer: detail labels (CIDR / ENIs / egress tag).
+	b.WriteString(`<g data-layer="labels">` + "\n")
+	for i := range placed {
+		dgSubnetLabels(&b, &placed[i])
+	}
+	b.WriteString("</g>\n")
+
+	// Layer: security-group badges.
+	b.WriteString(`<g data-layer="sg">` + "\n")
+	for i := range placed {
+		dgSubnetSG(&b, &placed[i])
+	}
+	b.WriteString("</g>\n")
+
+	// Layer: NAT gateways.
+	b.WriteString(`<g data-layer="nat">` + "\n")
+	for i := range placed {
+		dgSubnetNat(&b, &placed[i])
+	}
+	b.WriteString("</g>\n")
+
+	// Layer: traffic flow (arrows + internet/IGW backbone).
+	b.WriteString(`<g data-layer="traffic">` + "\n")
 	vpcTopInner := vpcY + dgVPCHeader
-	for _, az := range azs {
-		for j := range byAZ[az] {
-			ds := byAZ[az][j]
-			cx := ds.x + ds.w/2
-			switch ds.egress.kind {
-			case "igw":
-				// Public subnet egresses to the internet via the IGW: arrow up to
-				// the VPC's top edge (where the IGW connects).
-				if hasIGW {
-					dgArrow(&b, cx, ds.y, cx, vpcTopInner+2, dgPubLine, false)
-				}
-			case "nat":
-				// Private subnet → its NAT gateway (orthogonal connector).
-				if tn, ok := natByID[ds.egress.target]; ok {
-					dgElbow(&b, cx, ds.y, tn.x+tn.w/2, tn.y+tn.h-dgNatH, dgPrivLine, true)
-				}
+	for i := range placed {
+		ps := placed[i]
+		cx := ps.x + dgSubnetW/2
+		switch ps.egress.kind {
+		case "igw":
+			if hasIGW {
+				dgArrow(&b, cx, ps.y, cx, vpcTopInner+2, dgPubLine, false)
+			}
+		case "nat":
+			if tn, ok := natByID[ps.egress.target]; ok {
+				dgElbow(&b, cx, ps.y, tn.x+dgSubnetW/2, tn.y+dgSubnetH-dgNatH, dgPrivLine, true)
 			}
 		}
 	}
-	// NAT gateways egress to the IGW: arrow up to the VPC top edge.
 	if hasIGW {
-		for _, ds := range natByID {
-			nx := ds.x + ds.w/2
-			dgArrow(&b, nx, ds.y+ds.h-dgNatH, nx, vpcTopInner+2, dgNatLine, false)
+		for _, ps := range natByID {
+			nx := ps.x + dgSubnetW/2
+			dgArrow(&b, nx, ps.y+dgSubnetH-dgNatH, nx, vpcTopInner+2, dgNatLine, false)
 		}
-	}
-
-	// ---- internet + IGW backbone ----------------------------------------
-	if hasIGW {
-		b.WriteString("<!-- internet & gateway -->\n")
 		netX := centerX - dgInternetW/2
 		dgRect(&b, netX, topY, dgInternetW, dgInternetH, 10, dgInternet, dgInk, 4)
 		dgText(&b, centerX, topY+dgInternetH/2+6, 18, "700", "middle", dgInk, "INTERNET")
-
 		igwY := topY + dgInternetH + dgGapNetIGW
 		igwX := centerX - dgIGWW/2
-		// Internet ⇄ IGW (bidirectional traffic).
 		dgArrow2(&b, centerX, topY+dgInternetH, centerX, igwY, dgInk)
 		dgRect(&b, igwX, igwY, dgIGWW, dgIGWH, 8, dgIGWFill, dgInk, 4)
 		igwLabel := "IGW"
@@ -265,45 +311,60 @@ func vpcDiagramSVG(data fullExport) string {
 			igwLabel = "IGW · " + id
 		}
 		dgText(&b, centerX, igwY+dgIGWH/2+5, 13, "700", "middle", dgInk, esc(igwLabel))
-		// IGW → VPC top edge.
 		dgArrow(&b, centerX, igwY+dgIGWH, centerX, vpcY, dgInk, false)
 	}
+	b.WriteString("</g>\n")
 
-	// ---- legend ----------------------------------------------------------
 	dgLegend(&b, dgMargin, vpcY+vpcH+18)
-
 	b.WriteString("</svg>")
 	return b.String()
 }
 
-// dgDrawSubnet emits one subnet box: a coloured fill by egress class, the
-// subnet name/ID, CIDR, ENI count and egress tag, plus a NAT pill when a NAT
-// gateway lives in it.
-func dgDrawSubnet(b *strings.Builder, ds *dgSubnet) {
-	fill, line := dgSubnetColors(ds.egress.kind)
-	dgRect(b, ds.x, ds.y, ds.w, ds.h, 6, fill, dgInk, 3)
-	// Left accent bar in the class colour.
-	fmt.Fprintf(b, `<rect x="%d" y="%d" width="6" height="%d" fill="%s"/>`+"\n", ds.x+3, ds.y+3, ds.h-6, line)
-
-	name := ds.info.Name
+// dgSubnetBox draws the subnet's coloured box, accent bar, name and ID.
+func dgSubnetBox(b *strings.Builder, ps *placedSubnet) {
+	fill, line := dgSubnetColors(ps.egress.kind)
+	dgRect(b, ps.x, ps.y, dgSubnetW, dgSubnetH, 6, fill, dgInk, 3)
+	fmt.Fprintf(b, `<rect x="%d" y="%d" width="6" height="%d" fill="%s"/>`+"\n", ps.x+3, ps.y+3, dgSubnetH-6, line)
+	name := ps.info.Name
 	if name == "" {
-		name = ds.info.ID
+		name = ps.info.ID
 	}
-	dgText(b, ds.x+18, ds.y+24, 14, "700", "start", dgInk, esc(dgTrunc(name, 28)))
-	dgText(b, ds.x+18, ds.y+44, 12, "400", "start", dgInk, esc(ds.info.ID))
-	cidr := ds.info.CIDR
+	dgText(b, ps.x+18, ps.y+22, 14, "700", "start", dgInk, esc(dgTrunc(name, 28)))
+	dgText(b, ps.x+18, ps.y+39, 12, "400", "start", dgInk, esc(ps.info.ID))
+}
+
+// dgSubnetLabels draws the CIDR/ENI line and the egress tag (detail labels).
+func dgSubnetLabels(b *strings.Builder, ps *placedSubnet) {
+	_, line := dgSubnetColors(ps.egress.kind)
+	cidr := ps.info.CIDR
 	if cidr == "" {
 		cidr = "—"
 	}
-	dgText(b, ds.x+18, ds.y+62, 12, "400", "start", dgInk, esc(cidr+"  ·  "+plural(ds.enis, "ENI", "ENIs")))
-	dgText(b, ds.x+18, ds.y+80, 11, "700", "start", line, esc(egressTag(ds.egress)))
+	dgText(b, ps.x+18, ps.y+57, 12, "400", "start", dgInk, esc(cidr+"  ·  "+plural(ps.enis, "ENI", "ENIs")))
+	dgText(b, ps.x+18, ps.y+74, 11, "700", "start", line, esc(egressTag(ps.egress)))
+}
 
-	if ds.nat != nil {
-		pillW := ds.w - 24
-		pillY := ds.y + ds.h - dgNatH - 6
-		dgRect(b, ds.x+12, pillY, pillW, dgNatH, 4, dgNatFill, dgNatLine, 2)
-		dgText(b, ds.x+ds.w/2, pillY+dgNatH/2+4, 11, "700", "middle", dgInk, esc("NAT · "+ds.nat.ID))
+// dgSubnetSG draws a compact security-group badge for the subnet's ENIs.
+func dgSubnetSG(b *strings.Builder, ps *placedSubnet) {
+	if len(ps.sgs) == 0 {
+		return
 	}
+	label := "SG " + strings.Join(ps.sgs, ", ")
+	if len(ps.sgs) > 2 {
+		label = fmt.Sprintf("SG %s +%d", strings.Join(ps.sgs[:2], ", "), len(ps.sgs)-2)
+	}
+	dgText(b, ps.x+18, ps.y+91, 10, "400", "start", dgSGLine, esc(dgTrunc(label, 34)))
+}
+
+// dgSubnetNat draws the NAT-gateway pill when one lives in the subnet.
+func dgSubnetNat(b *strings.Builder, ps *placedSubnet) {
+	if ps.nat == nil {
+		return
+	}
+	pillW := dgSubnetW - 24
+	pillY := ps.y + dgSubnetH - dgNatH - 4
+	dgRect(b, ps.x+12, pillY, pillW, dgNatH, 4, dgNatFill, dgNatLine, 2)
+	dgText(b, ps.x+dgSubnetW/2, pillY+dgNatH/2+4, 11, "700", "middle", dgInk, esc("NAT · "+ps.nat.ID))
 }
 
 // ---- small SVG helpers ----------------------------------------------------
@@ -318,7 +379,6 @@ func dgText(b *strings.Builder, x, y, size int, weight, anchor, fill, content st
 		x, y, size, weight, anchor, fill, content)
 }
 
-// dgArrow draws a straight connector with an arrowhead at the end.
 func dgArrow(b *strings.Builder, x1, y1, x2, y2 int, stroke string, dashed bool) {
 	dash := ""
 	if dashed {
@@ -328,15 +388,11 @@ func dgArrow(b *strings.Builder, x1, y1, x2, y2 int, stroke string, dashed bool)
 		x1, y1, x2, y2, stroke, dash)
 }
 
-// dgArrow2 draws a straight connector with arrowheads at both ends.
 func dgArrow2(b *strings.Builder, x1, y1, x2, y2 int, stroke string) {
 	fmt.Fprintf(b, `<line x1="%d" y1="%d" x2="%d" y2="%d" stroke="%s" stroke-width="2.5" marker-start="url(#arrow)" marker-end="url(#arrow)"/>`+"\n",
 		x1, y1, x2, y2, stroke)
 }
 
-// dgElbow draws an orthogonal (up-then-across-then-to-target) connector with an
-// arrowhead at the end — used for private-subnet → NAT arrows that may span
-// columns.
 func dgElbow(b *strings.Builder, x1, y1, x2, y2 int, stroke string, dashed bool) {
 	midY := y1 - dgSubnetGap/2
 	if midY < y2 {
@@ -350,8 +406,7 @@ func dgElbow(b *strings.Builder, x1, y1, x2, y2 int, stroke string, dashed bool)
 		x1, y1, x1, midY, x2, midY, x2, y2, stroke, dash)
 }
 
-// dgLegendItems is the colour key, shared by the width calc and the renderer so
-// the canvas is always wide enough to hold the legend.
+// dgLegendItems is the colour key, shared by the width calc and the renderer.
 var dgLegendItems = []struct{ fill, line, label string }{
 	{dgPubFill, dgPubLine, "Public subnet (→ IGW)"},
 	{dgPrivFill, dgPrivLine, "Private subnet (→ NAT)"},
@@ -359,11 +414,8 @@ var dgLegendItems = []struct{ fill, line, label string }{
 	{dgNatFill, dgNatLine, "NAT gateway"},
 }
 
-// dgLegendItemW estimates an item's footprint (swatch + gap + label + trailing
-// gap) at the legend's 12px font.
 func dgLegendItemW(label string) int { return 18 + 6 + len([]rune(label))*7 + 22 }
 
-// dgLegendWidth is the total legend footprint, so the canvas can fit it.
 func dgLegendWidth() int {
 	w := 0
 	for _, it := range dgLegendItems {
@@ -372,7 +424,6 @@ func dgLegendWidth() int {
 	return w
 }
 
-// dgLegend draws the colour key.
 func dgLegend(b *strings.Builder, x, y int) {
 	b.WriteString("<!-- legend -->\n")
 	cx := x
@@ -422,6 +473,35 @@ func subnetEgress(snap vpcSnapshot) map[string]dgEgress {
 			}
 		}
 		out[s.ID] = eg
+	}
+	return out
+}
+
+// subnetSGs maps each subnet to the sorted, unique security groups used by the
+// ENIs in it — the data behind the diagram's toggleable SG layer.
+func subnetSGs(snap vpcSnapshot) map[string][]string {
+	sets := map[string]map[string]bool{}
+	for _, e := range snap.NetworkInterfaces {
+		if e.SubnetID == "" {
+			continue
+		}
+		if sets[e.SubnetID] == nil {
+			sets[e.SubnetID] = map[string]bool{}
+		}
+		for _, sg := range e.SecurityGroups {
+			if sg != "" {
+				sets[e.SubnetID][sg] = true
+			}
+		}
+	}
+	out := make(map[string][]string, len(sets))
+	for sn, set := range sets {
+		ids := make([]string, 0, len(set))
+		for id := range set {
+			ids = append(ids, id)
+		}
+		sort.Strings(ids)
+		out[sn] = ids
 	}
 	return out
 }
