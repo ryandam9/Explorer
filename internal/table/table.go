@@ -53,6 +53,11 @@ type Model struct {
 	// selCellStyle caches the selected-row cell style derived from styles,
 	// rebuilt in SetStyles instead of per render.
 	selCellStyle lipgloss.Style
+	// altCellStyle caches the zebra (alternate-row) cell style, and zebra reports
+	// whether striping is active (Styles.RowAlt has a background). Both are
+	// rebuilt in SetStyles.
+	altCellStyle lipgloss.Style
+	zebra        bool
 
 	viewport viewport.Model
 	start    int
@@ -140,6 +145,11 @@ type Styles struct {
 	Cell     lipgloss.Style
 	Selected lipgloss.Style
 
+	// RowAlt, when it carries a background, zebra-stripes alternate (odd) data
+	// rows for readability. Its zero value (no background) leaves striping off, so
+	// tables that don't opt in render unchanged.
+	RowAlt lipgloss.Style
+
 	// ScrollTrack and ScrollThumb style the vertical scrollbar drawn down the
 	// right edge when there are more rows than fit. Zero values render an
 	// uncolored bar, which is still legible; ui.TableStyles themes them.
@@ -172,6 +182,16 @@ func (m *Model) refreshSelStyle() {
 		Foreground(m.styles.Selected.GetForeground()).
 		Background(m.styles.Selected.GetBackground()).
 		Bold(m.styles.Selected.GetBold())
+
+	// Zebra striping is active only when RowAlt has a real background; the
+	// alternate-row style is Cell with that background so padding is striped too.
+	altBg := m.styles.RowAlt.GetBackground()
+	if _, none := altBg.(lipgloss.NoColor); none {
+		m.zebra = false
+	} else {
+		m.zebra = true
+		m.altCellStyle = m.styles.Cell.Background(altBg)
+	}
 }
 
 // Option is used to set options in New. For example:
@@ -849,10 +869,14 @@ func (m *Model) renderRow(r int, vis []int) string {
 		truncated := m.colStyle(i).Render(runewidth.Truncate(value, m.cols[i].Width, "…"))
 
 		var renderedCell string
-		if r == m.cursor {
+		switch {
+		case r == m.cursor:
 			// Cached Cell-padding + Selected-colors style; see refreshSelStyle.
 			renderedCell = m.selCellStyle.Render(truncated)
-		} else {
+		case m.zebra && r%2 == 1:
+			// Zebra band on odd data rows (see refreshSelStyle).
+			renderedCell = m.altCellStyle.Render(truncated)
+		default:
 			renderedCell = m.styles.Cell.Render(truncated)
 		}
 		s = append(s, renderedCell)

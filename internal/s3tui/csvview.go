@@ -9,6 +9,7 @@ import (
 	"strings"
 	"unicode/utf8"
 
+	"github.com/atotto/clipboard"
 	"github.com/charmbracelet/bubbles/textinput"
 	"github.com/charmbracelet/bubbles/viewport"
 	"github.com/charmbracelet/lipgloss"
@@ -220,7 +221,7 @@ const defaultCSVRowCap = 100
 // the current row window. Safe to call after a delimiter or window change.
 func (m *Model) buildCSVTable() {
 	if len(m.csvAll) == 0 {
-		m.csvTable = table.New(table.WithStyles(ui.TableStyles()))
+		m.csvTable = table.New(table.WithStyles(ui.TableStylesZebra()))
 		return
 	}
 	header, data := m.headerAndData()
@@ -255,7 +256,7 @@ func (m *Model) buildCSVTable() {
 		table.WithColumns(cols),
 		table.WithRows(rows),
 		table.WithFocused(true),
-		table.WithStyles(ui.TableStyles()),
+		table.WithStyles(ui.TableStylesZebra()),
 		table.WithFrozenColumns(1), // pin the first column when scrolling wide tables
 	)
 	m.layoutCSVTable()
@@ -447,7 +448,12 @@ func (m *Model) applyHeaderRow() {
 // handleCSVKey routes a key press in the full-screen CSV view. It returns true
 // when the key was consumed.
 func (m *Model) handleCSVKey(key string) bool {
+	// Any key clears a lingering confirmation note (e.g. after a copy).
+	m.csvNote = ""
 	switch key {
+	case "y":
+		m.copyCSVAsMarkdown()
+		return true
 	case "esc", "q":
 		m.showCSV = false
 		m.csvAll = nil
@@ -486,6 +492,66 @@ func (m *Model) handleCSVKey(key string) bool {
 		return true
 	}
 	return false
+}
+
+// copyCSVAsMarkdown copies the on-screen table — the header plus the rows in the
+// current window (so the copy matches what the "w" window shows) — to the
+// clipboard as a GitHub-flavored Markdown table.
+func (m *Model) copyCSVAsMarkdown() {
+	header, _ := m.headerAndData()
+	md, rows := csvMarkdown(header, m.csvDisplay)
+	if md == "" {
+		m.csvNote = "Nothing to copy"
+		return
+	}
+	if err := clipboard.WriteAll(md); err != nil {
+		m.csvNote = "Copy failed: " + err.Error()
+		return
+	}
+	m.csvNote = fmt.Sprintf("Copied %d rows as Markdown", rows)
+}
+
+// csvMarkdown renders a header and its window rows as a GitHub-flavored Markdown
+// table, returning the text and the number of data rows written. nil rows (the
+// first/last window divider) are skipped. Pure, so it is unit-tested.
+func csvMarkdown(header []string, display [][]string) (string, int) {
+	if len(header) == 0 {
+		return "", 0
+	}
+	cols := make([]string, len(header))
+	seps := make([]string, len(header))
+	for i, h := range header {
+		if cols[i] = mdCell(h); cols[i] == "" {
+			cols[i] = fmt.Sprintf("col %d", i+1)
+		}
+		seps[i] = "---"
+	}
+
+	var b strings.Builder
+	b.WriteString("| " + strings.Join(cols, " | ") + " |\n")
+	b.WriteString("| " + strings.Join(seps, " | ") + " |\n")
+	rows := 0
+	for _, rec := range display {
+		if rec == nil {
+			continue // the first/last window divider, not a real row
+		}
+		cells := make([]string, len(cols))
+		for i := range cols {
+			if i < len(rec) {
+				cells[i] = mdCell(rec[i])
+			}
+		}
+		b.WriteString("| " + strings.Join(cells, " | ") + " |\n")
+		rows++
+	}
+	return b.String(), rows
+}
+
+// mdCell makes a value safe for one Markdown table cell: pipes escaped, newlines
+// and tabs flattened to spaces so the row stays on one line.
+func mdCell(s string) string {
+	r := strings.NewReplacer("\r", "", "\n", " ", "\t", " ", "|", "\\|")
+	return strings.TrimSpace(r.Replace(s))
 }
 
 // openCSVRecord shows the selected table row vertically as Col : value pairs —
@@ -583,8 +649,11 @@ func (m *Model) csvFooter() string {
 		}
 		return line
 	}
+	if m.csvNote != "" {
+		return ui.SuccessStyle().Render("✓ " + m.csvNote)
+	}
 	return ui.MutedStyle().Render(
-		"[↑/↓ PgUp/PgDn] rows   [Enter] row as record   [←/→] columns   [s]/[S] delimiter   [h] header row   [w] rows   [t] raw   [Esc] close")
+		"[↑/↓ PgUp/PgDn] rows   [Enter] row as record   [←/→] columns   [s]/[S] delimiter   [h] header row   [w] rows   [y] copy as Markdown   [t] raw   [Esc] close")
 }
 
 // csvRecordView renders the selected row vertically as Col : value pairs.

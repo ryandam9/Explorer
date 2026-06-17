@@ -39,6 +39,18 @@ func TableStyles() table.Styles {
 	return s
 }
 
+// TableStylesZebra is TableStyles with zebra striping enabled: alternate data
+// rows get a subtle background drawn in the theme's table-border colour. Used by
+// data-grid views (the CSV/TSV table) where tracing a value to its row matters
+// most; other tables keep the plain TableStyles so the look stays consistent.
+func TableStylesZebra() table.Styles {
+	s := TableStyles()
+	if bg := ColorTableBorder(); bg != "" {
+		s.RowAlt = lipgloss.NewStyle().Background(lipgloss.Color(bg))
+	}
+	return s
+}
+
 // TablePanelStyle returns the bordered panel every table is wrapped in, using
 // the tableBorder role (borderFocus when the table has focus).
 func TablePanelStyle(focused bool) lipgloss.Style {

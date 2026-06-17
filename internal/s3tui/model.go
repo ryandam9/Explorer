@@ -216,6 +216,7 @@ type Model struct {
 	csvHidden    int        // rows omitted by the window
 	csvHeaderRow int        // 1-based header row; 0 = no header (synthesised column names)
 	csvDisplay   [][]string // rows currently in the table (parallel to its cursor)
+	csvNote      string     // transient confirmation shown in the CSV footer (e.g. after copy)
 
 	// Single-row "record" view (Enter on a table row) — Col : value pairs.
 	csvRecordActive   bool
