@@ -42,6 +42,29 @@ func newClusterTestModel(w, h int) *m {
 	return mm
 }
 
+// NAME is the frozen column and the table scrolls horizontally, so a cluster's
+// full name must reach the row untruncated (no ellipsis), letting the table
+// size/scroll it rather than pre-clipping at a fixed cap.
+func TestClusterRowKeepsFullName(t *testing.T) {
+	long := "ebdc-sit-emr-cluster-zookeeper-20240524055632-backup"
+	row := clusterRow(Cluster{Name: long, ID: "j-1FS89Q", State: "RUNNING"}, false)
+	if row[colName] != long {
+		t.Errorf("NAME should be shown in full, got %q", row[colName])
+	}
+	if strings.Contains(row[colName], "…") {
+		t.Errorf("NAME must not be truncated with an ellipsis: %q", row[colName])
+	}
+}
+
+// On a wide-enough terminal the full (long) name is visible in the rendered
+// cluster list, not clipped with an ellipsis.
+func TestClusterListShowsFullNameWhenWide(t *testing.T) {
+	mm := newClusterTestModel(200, 24)
+	if !strings.Contains(mm.View(), "data-platform-production-analytics-cluster-2026") {
+		t.Errorf("wide render should show the full cluster name:\n%s", mm.View())
+	}
+}
+
 // No rendered line may exceed the terminal width (the bug that motivated the
 // migration), and the status bar with its shortcuts must always be present.
 func TestClusterTableNeverWraps(t *testing.T) {
