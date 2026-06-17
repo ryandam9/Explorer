@@ -23,13 +23,12 @@ const (
 	colRegion
 )
 
-// nameCap / appsCap bound the two free-form columns so one long value can't
-// dominate the table's width (names especially). Longer values are truncated
-// with an ellipsis; the full text is available in the detail overlay.
-const (
-	nameCap = 25
-	appsCap = 22
-)
+// appsCap bounds the free-form APPLICATIONS column so a long application list
+// can't dominate the table's width. The full text is available in the detail
+// overlay. NAME is intentionally *not* capped: it is the frozen first column,
+// so the shared table grows it to fit and scrolls the rest horizontally, and a
+// cluster's full name is the most useful thing to read at a glance.
+const appsCap = 22
 
 // clusterColumns is the shared-table column set for the cluster list. Widths are
 // floors: the table grows each column to fit its content and scrolls
@@ -53,10 +52,11 @@ func clusterColumns(multi bool) []table.Column {
 
 // clusterRow renders one cluster as a shared-table row. State carries a glyph
 // (✓/●/✗/•) so the row reads at a glance without per-cell colour, which the
-// shared table does not apply. NAME/APPLICATIONS are capped (see nameCap).
+// shared table does not apply. NAME is shown in full (frozen column + scroll);
+// APPLICATIONS is capped (see appsCap).
 func clusterRow(c Cluster, multi bool) table.Row {
 	r := table.Row{
-		truncate(c.Name, nameCap),
+		c.Name,
 		c.ID,
 		stateLabel(c.State),
 		c.ReleaseLabel,
