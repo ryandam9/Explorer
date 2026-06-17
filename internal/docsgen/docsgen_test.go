@@ -7,6 +7,8 @@ import (
 	"testing"
 
 	"github.com/spf13/cobra"
+
+	"github.com/ryandam9/aws_explorer/internal/ui"
 )
 
 // testTree builds a small command tree that exercises the generator: a root
@@ -182,7 +184,7 @@ func TestWriteHTML(t *testing.T) {
 		t.Error("expected a rendered HTML table in the bill page")
 	}
 	// The current page is marked active and template escaping did not choke.
-	if !strings.Contains(html, `class="active"`) {
+	if !strings.Contains(html, "nav active") {
 		t.Error("current page should carry an active nav class")
 	}
 	if strings.Contains(html, "ZgotmplZ") {
@@ -193,6 +195,23 @@ func TestWriteHTML(t *testing.T) {
 		if !strings.Contains(html, ">"+sec+"<") {
 			t.Errorf("nav missing section %q", sec)
 		}
+	}
+	// The page wears the app's themes: the default palette is selected and the
+	// switcher offers every built-in theme (issue #300).
+	if !strings.Contains(html, `data-theme="`+defaultDocTheme+`"`) {
+		t.Errorf("page should default to the %q theme", defaultDocTheme)
+	}
+	if !strings.Contains(html, `id="theme-select"`) {
+		t.Error("page should include the theme switcher")
+	}
+	for _, name := range ui.ThemeNames() {
+		if !strings.Contains(html, `value="`+name+`"`) {
+			t.Errorf("theme switcher missing option %q", name)
+		}
+	}
+	// The visible page title is rendered as an H1 header.
+	if !strings.Contains(html, "<h1>tool bill</h1>") {
+		t.Errorf("page missing H1 title header:\n%s", html)
 	}
 }
 
