@@ -92,3 +92,50 @@ func TestXMLDeclarationOnOwnLine(t *testing.T) {
 		t.Errorf("declaration should be on its own line:\n%s", out)
 	}
 }
+
+func TestSanitizeForDisplayCollapsesCarriageReturns(t *testing.T) {
+	// aws-cli style progress: repeated CR overwrites on one logical line, then a
+	// real newline. The preview should keep only the final segment per line — and
+	// crucially leave no CR for the terminal to act on.
+	in := "Completed 54.0 KiB/138.0 MiB\rCompleted 56.1 KiB/138.0 MiB\rupload: ./a to s3://b\nnext line"
+	got := sanitizeForDisplay(in)
+	want := "upload: ./a to s3://b\nnext line"
+	if got != want {
+		t.Errorf("progress collapse = %q, want %q", got, want)
+	}
+	if strings.ContainsRune(got, '\r') {
+		t.Errorf("sanitized text still contains a carriage return: %q", got)
+	}
+}
+
+func TestSanitizeForDisplayLineEndings(t *testing.T) {
+	if got := sanitizeForDisplay("a\r\nb\r\nc"); got != "a\nb\nc" {
+		t.Errorf("CRLF normalize = %q, want a\\nb\\nc", got)
+	}
+	// CR-only (classic Mac) line endings: CR is the newline, so nothing is lost.
+	if got := sanitizeForDisplay("a\rb\rc"); got != "a\nb\nc" {
+		t.Errorf("CR-only normalize = %q, want a\\nb\\nc", got)
+	}
+}
+
+func TestStripControlKeepsTextDropsControls(t *testing.T) {
+	// ANSI colour codes and a stray bell/escape are removed; tab and newline stay.
+	in := "\x1b[31mred\x1b[0m\ttabbed\x07\nplain"
+	got := stripControl(in)
+	want := "red\ttabbed\nplain"
+	if got != want {
+		t.Errorf("stripControl = %q, want %q", got, want)
+	}
+}
+
+func TestSanitizeThenHardWrapHasNoControlBleed(t *testing.T) {
+	// Defence in depth: after sanitizing, hard-wrapping must never emit a CR or
+	// ESC that could move the cursor out of the overlay box.
+	raw := "INFO\x1b[32m ok\x1b[0m progress\rdone with a very long tail that exceeds the wrap width easily\nsecond"
+	out := hardWrap(sanitizeForDisplay(raw), 20)
+	for _, r := range out {
+		if r == '\r' || r == 0x1b {
+			t.Fatalf("wrapped preview contains a control byte %#x: %q", r, out)
+		}
+	}
+}

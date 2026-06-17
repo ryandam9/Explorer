@@ -750,9 +750,11 @@ func (m *Model) initPreviewViewport(content string, err error) {
 	}
 	m.previewViewport = viewport.New(vpW, vpH)
 	if err == nil && content != "" {
-		// Pretty-print XML so a minified single-line document is readable, then
-		// wrap long lines so nothing is clipped off the right edge of the pane.
-		display := content
+		// Strip terminal control bytes (carriage returns, ANSI escapes) so progress
+		// output and coloured logs can't draw outside the overlay box. Then
+		// pretty-print XML so a minified single-line document is readable, and wrap
+		// long lines so nothing is clipped off the right edge of the pane.
+		display := sanitizeForDisplay(content)
 		if looksLikeXMLContent(display) {
 			if formatted, ok := formatXML(display); ok {
 				display = formatted
