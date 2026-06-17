@@ -1011,7 +1011,12 @@ func (c *S3Client) GetObjectRange(bucket, key string, maxBytes int64) ([]byte, b
 	return data, truncated, nil
 }
 
-func (c *S3Client) GetObjectPreview(bucket, key string, maxBytes int64) (string, error) {
+// GetObjectPreview downloads up to maxBytes of an object as text, reporting
+// whether the object was larger than the window (truncated). The truncation is
+// reported to the caller rather than baked into the returned text: a note
+// appended here would otherwise be swallowed into the last (now unclosed) XML
+// element when the cut lands mid-document, and rendered as that element's body.
+func (c *S3Client) GetObjectPreview(bucket, key string, maxBytes int64) (string, bool, error) {
 	ctx, cancel := c.requestContext()
 	defer cancel()
 
@@ -1024,24 +1029,31 @@ func (c *S3Client) GetObjectPreview(bucket, key string, maxBytes int64) (string,
 		Range:  aws.String(fmt.Sprintf("bytes=0-%d", maxBytes-1)),
 	})
 	if err != nil {
-		return "", err
+		return "", false, err
 	}
 	defer out.Body.Close()
 
 	data, err := io.ReadAll(io.LimitReader(out.Body, maxBytes))
 	if err != nil {
-		return "", err
+		return "", false, err
 	}
 	for _, b := range data {
 		if b == 0 {
-			return "Binary object preview omitted. Use metadata/details for inspection.", nil
+			return "Binary object preview omitted. Use metadata/details for inspection.", false, nil
 		}
 	}
-	preview := string(data)
-	if int64(len(data)) == maxBytes {
-		preview += "\n\n… preview truncated …"
+	// ContentRange ("bytes 0-N/total") gives the real object size; fall back to
+	// "filled the window" when it's absent so a file exactly maxBytes long isn't
+	// always flagged truncated.
+	truncated := int64(len(data)) == maxBytes
+	if cr := aws.ToString(out.ContentRange); cr != "" {
+		if i := strings.LastIndex(cr, "/"); i >= 0 {
+			if total, perr := strconv.ParseInt(cr[i+1:], 10, 64); perr == nil {
+				truncated = total > int64(len(data))
+			}
+		}
 	}
-	return preview, nil
+	return string(data), truncated, nil
 }
 
 func (c *S3Client) GetBucketPolicy(bucket string) (string, error) {

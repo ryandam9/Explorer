@@ -14,6 +14,7 @@ import (
 // bounded so a multi-gigabyte log archive can't exhaust memory; the UI shows a
 // "truncated" note when a cap is hit.
 const (
+	textPreviewCap     = 10 << 20 // bytes fetched for a plain text/XML/JSON preview
 	gzCompressedCap    = 4 << 20  // bytes fetched for a plain .gz preview
 	gzDecompressedCap  = 4 << 20  // decompressed bytes shown for a plain .gz
 	tarCompressedCap   = 32 << 20 // bytes fetched for a .tar(.gz) archive

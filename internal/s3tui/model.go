@@ -106,9 +106,10 @@ type objectDetailsMsg struct {
 }
 
 type objectPreviewMsg struct {
-	key     string
-	content string
-	err     error
+	key       string
+	content   string
+	truncated bool
+	err       error
 }
 
 // parquetPreviewMsg carries the rows read from a Parquet object for the table
@@ -212,6 +213,7 @@ type Model struct {
 	showPreview       bool
 	previewKey        string
 	previewContent    string
+	previewTruncated  bool // the object was larger than the preview window
 	previewLoading    bool
 	previewErr        error
 	previewNotTabular bool // user pressed "t" but the text isn't table-shaped
@@ -659,8 +661,8 @@ func (m *Model) fetchObjectPreview(key string) tea.Cmd {
 	m.previewContent = ""
 	bucket := m.bucket
 	return func() tea.Msg {
-		content, err := m.client.GetObjectPreview(bucket, key, 64*1024)
-		return objectPreviewMsg{key: key, content: content, err: err}
+		content, truncated, err := m.client.GetObjectPreview(bucket, key, textPreviewCap)
+		return objectPreviewMsg{key: key, content: content, truncated: truncated, err: err}
 	}
 }
 
@@ -798,6 +800,28 @@ func decompressedPreview(out []byte, truncated, isCSV bool) string {
 	return text
 }
 
+// buildPreviewDisplay turns fetched object bytes into the text shown in the
+// preview pane: control bytes are stripped (so progress output and coloured
+// logs can't draw outside the overlay), XML is pretty-printed (so a minified
+// single-line document is readable), and long lines are hard-wrapped to the
+// pane width. The truncation note is appended *after* formatting and wrapping
+// so it always lands on its own trailing line — never absorbed into the last
+// (now unclosed) XML element when the preview window cut the document
+// mid-element.
+func buildPreviewDisplay(content string, truncated bool, width int) string {
+	display := sanitizeForDisplay(content)
+	if looksLikeXMLContent(display) {
+		if formatted, ok := formatXML(display); ok {
+			display = formatted
+		}
+	}
+	display = hardWrap(display, width)
+	if truncated {
+		display += "\n\n… preview truncated …"
+	}
+	return display
+}
+
 // initPreviewViewport builds the scrollable text viewport for a (non-CSV)
 // preview from the fetched content.
 func (m *Model) initPreviewViewport(content string, err error) {
@@ -814,17 +838,7 @@ func (m *Model) initPreviewViewport(content string, err error) {
 	}
 	m.previewViewport = viewport.New(vpW, vpH)
 	if err == nil && content != "" {
-		// Strip terminal control bytes (carriage returns, ANSI escapes) so progress
-		// output and coloured logs can't draw outside the overlay box. Then
-		// pretty-print XML so a minified single-line document is readable, and wrap
-		// long lines so nothing is clipped off the right edge of the pane.
-		display := sanitizeForDisplay(content)
-		if looksLikeXMLContent(display) {
-			if formatted, ok := formatXML(display); ok {
-				display = formatted
-			}
-		}
-		m.previewViewport.SetContent(hardWrap(display, vpW))
+		m.previewViewport.SetContent(buildPreviewDisplay(content, m.previewTruncated, vpW))
 	}
 }
 
@@ -2049,6 +2063,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.previewLoading = false
 			m.previewErr = msg.err
 			m.previewContent = msg.content
+			m.previewTruncated = msg.truncated
 			switch {
 			case m.showCSV && msg.err == nil && m.initCSV(msg.content):
 				// CSV parsed: the full-screen table is ready.
