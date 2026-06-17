@@ -53,6 +53,7 @@ leave out falls back to a sensible related role (noted below).
 | `tableBorder` | Border drawn around table panels | `border` |
 | `tableSelectedBg` | Selected table-row background | `highlight` |
 | `tableSelectedText` | Text on the selected table row | `highlightText` |
+| `tableRowAltBg` | Zebra background for alternate rows (CSV/TSV table) | `tableBorder` |
 
 **Status bar & shortcut hints**
 
