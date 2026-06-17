@@ -3,12 +3,17 @@ package s3tui
 import (
 	"bytes"
 	"encoding/xml"
+	"regexp"
 	"strings"
 )
 
 // xmlBOM is the UTF-8 byte-order mark that prefixes many Windows/.NET XML
 // files; it must be stripped before the content reads as starting with "<".
 const xmlBOM = "\ufeff"
+
+// ansiEscape matches the common terminal escape sequences (CSI/SGR colour codes
+// and the OSC/two-byte forms) so they can be stripped from previewed text.
+var ansiEscape = regexp.MustCompile(`\x1b[@-Z\\-_]|\x1b\[[0-9;?]*[ -/]*[@-~]|\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)`)
 
 // looksLikeXMLContent reports whether content is (or starts as) an XML/HTML
 // document, so the preview can pretty-print it. A conservative check: after a
@@ -78,6 +83,51 @@ func declarationOnOwnLine(out string) string {
 // line (e.g. minified XML/JSON, or a wide log line) is fully visible in a
 // fixed-width preview pane instead of being silently clipped. width <= 0
 // returns s unchanged.
+// sanitizeForDisplay makes arbitrary object text safe to render inside the
+// preview overlay. Terminal control bytes — carriage returns from progress
+// output, ANSI escape sequences, stray C0 controls — otherwise reposition the
+// cursor and draw text outside the overlay box, corrupting the layout. The
+// classic case is an aws-cli "Completed … KiB\r" progress stream captured in a
+// logged stdout.gz: each '\r' snaps the cursor to column 0 of the terminal.
+func sanitizeForDisplay(s string) string {
+	// Normalize line endings. \r\n → \n; a CR-only file uses \r as its newline.
+	s = strings.ReplaceAll(s, "\r\n", "\n")
+	if strings.Contains(s, "\n") {
+		// Progress-style CR overwrites within a line: keep what a terminal would
+		// finally show — the text after the last CR on each line — so the progress
+		// spam collapses to its final state instead of bleeding out of the box.
+		lines := strings.Split(s, "\n")
+		for i, ln := range lines {
+			if idx := strings.LastIndexByte(ln, '\r'); idx >= 0 {
+				lines[i] = ln[idx+1:]
+			}
+		}
+		s = strings.Join(lines, "\n")
+	} else {
+		s = strings.ReplaceAll(s, "\r", "\n")
+	}
+	return stripControl(s)
+}
+
+// stripControl removes ANSI escape sequences and remaining C0/DEL control
+// characters (keeping tab and newline) so nothing in the text can move the
+// terminal cursor or change its colours while scrolling the preview.
+func stripControl(s string) string {
+	if i := strings.IndexByte(s, 0x1b); i >= 0 {
+		s = ansiEscape.ReplaceAllString(s, "")
+	}
+	return strings.Map(func(r rune) rune {
+		switch r {
+		case '\n', '\t':
+			return r
+		}
+		if r < 0x20 || r == 0x7f {
+			return -1 // drop other C0 controls and DEL
+		}
+		return r
+	}, s)
+}
+
 func hardWrap(s string, width int) string {
 	if width <= 0 {
 		return s
