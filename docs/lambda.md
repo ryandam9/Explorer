@@ -4,11 +4,12 @@
 **Layers** and **Event sources** (event-source mappings); each row shows health
 at a glance — a function's runtime, memory, timeout and state, a layer's latest
 version and compatible runtimes, an event-source mapping's source, state and
-batch size. Press **Enter** on a function to drill into its full configuration —
-role, memory, timeout, layers, VPC, dead-letter queue, reserved concurrency,
-**environment-variable keys** (values are never shown), code location and tags,
-fetched on demand. **Enter** on a layer or event source opens its detail from
-the loaded data.
+batch size. Press **Enter** on a function to open its full configuration as a
+**grid of panels** (btop-style, like `emr` describe) — Overview, Resources &
+limits, State, **VPC networking**, **Environment** (variable keys only — values
+are never shown), **Layers**, **Code package** and **Tags** — each a separately
+scrollable tile, fetched on demand. `Tab`/arrows move focus between tiles.
+**Enter** on a layer or event source opens its panels from the loaded data.
 
 ```bash
 ./bin/aws_explorer lambda [--region us-east-1 | --all-regions] [--theme <name>]
@@ -26,15 +27,16 @@ the loaded data.
 
 | Key | Action |
 |-----|--------|
-| `Tab` / `Shift+Tab` | Switch pane |
-| `↑/↓` (`j/k`) | Move selection |
-| `Enter` | Open the selected resource's detail overlay (functions fetch their full configuration on demand; layers and event sources render from loaded data). The overlay scrolls (`↑/↓`) when taller than the screen |
+| `Tab` / `Shift+Tab` | Switch pane (or, in the detail view, move focus between panels) |
+| `↑/↓` (`j/k`) | Move selection (or scroll the focused detail panel) |
+| `Enter` | Open the selected resource's **detail grid** — a full-screen set of per-section panels (functions fetch their configuration on demand; layers and event sources render from loaded data). `Tab`/arrows move between tiles; the focused tile scrolls |
 | `f` | **Findings** — deterministic runtime/health checks (deprecated or soon-deprecating runtimes, missing dead-letter queues, failed-state functions) over the loaded functions; `y` copies the suggested fix |
 | `L` | (Functions) open the function's CloudWatch logs (`/aws/lambda/<name>`) |
 | `S` / `R` | Cycle the active tab's sort column / reverse the direction (resets on a tab switch) |
 | `/` | Filter the current pane |
 | `o` | Open the selected resource in the AWS console |
 | `r` | Refresh |
+| `~` | Debug pane — a live view of what the tool is doing (the scan's activity log) |
 | `i` | About this page · `q` quit |
 
 The **Findings** panel reuses the same deterministic checks as `audit`

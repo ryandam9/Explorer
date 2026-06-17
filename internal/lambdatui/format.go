@@ -196,10 +196,26 @@ func sortedMapKeys(m map[string]string) []string {
 // muted note when none is configured.
 func dlqLabel(arn string) string {
 	if arn == "" {
-		return "none"
+		return "none configured"
 	}
 	if svc := arnService(arn); svc != "" {
 		return svc + ":" + lastSegment(arn)
 	}
 	return lastSegment(arn)
+}
+
+// emptyDash returns s, or an em dash when s is empty — for aligned detail rows.
+func emptyDash(s string) string {
+	if strings.TrimSpace(s) == "" {
+		return "—"
+	}
+	return s
+}
+
+// joinOrDash joins parts with ", ", or returns an em dash when empty.
+func joinOrDash(parts []string) string {
+	if len(parts) == 0 {
+		return "—"
+	}
+	return strings.Join(parts, ", ")
 }

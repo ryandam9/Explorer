@@ -161,10 +161,15 @@ because each tab has its own columns.
 ### AXE-047 — Function configuration detail overlay {#axe-047}
 
 > **Status: ✅ shipped** — `Enter` on a function fetches `GetFunction` on demand
-> and opens a scrollable overlay: runtime, package type, handler, memory,
-> timeout, ephemeral storage, code size, architectures, role, state + reason,
-> tracing, reserved concurrency, dead-letter queue, VPC, layers,
-> environment-variable **keys** (values never shown), code location and tags.
+> and opens a **full-screen, btop-style grid of per-section panels** (mirroring
+> the EMR describe view, `internal/lambdatui/detail_panels.go`): Overview,
+> Resources & limits, State & health, VPC networking, Environment, Layers, Code
+> package and Tags — each an independently scrollable tile. `Tab`/arrows move
+> focus between tiles; the focused tile scrolls; the grid collapses to one
+> scrolling pane on a short terminal so the status bar is never clipped (rule
+> #9). Layers and event-source mappings reuse the same grid, built synchronously
+> from the loaded inventory. Section building is pure and fixture-tested
+> (`detail_test.go`).
 
 **Privacy.** Environment-variable *values* are never collected onto the model or
 rendered — only the keys (and a count) — so a secret passed as an env var can't
@@ -172,9 +177,18 @@ leak onto the screen or into a screenshot. This is the Lambda analogue of the
 Glue/Glue-arg redaction rule.
 
 **Acceptance criteria.**
-- Every defined field renders; absent fields show "—".
+- Each concept (VPC, environment, code/repository, tags…) is its own panel;
+  absent fields show "—" and empty panels say so explicitly.
 - Env-var values never appear; reserved concurrency distinguishes "unreserved"
-  (no reservation) from a numeric reservation (including `0`).
+  (no reservation) from a numeric reservation (including the throttled `0`).
+- The grid reflows to 1/2/3 columns by width and falls back to a single
+  scrolling pane when too short, never clipping the status bar.
+
+**Debug pane.** The dashboard also embeds the shared `~` debug overlay
+(`internal/debugpane`) that every other TUI has — a live view of the scan's
+activity log — which the first cut omitted, so `~` did nothing while the
+inventory loaded. It now opens over any view (including mid-load) and falls
+through non-key messages so the load keeps progressing (rule #10).
 
 ### AXE-048 — Jump from a function to its CloudWatch logs {#axe-048}
 

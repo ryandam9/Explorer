@@ -16,6 +16,7 @@ import (
 
 	"github.com/ryandam9/aws_explorer/internal/config"
 	"github.com/ryandam9/aws_explorer/internal/consolelink"
+	"github.com/ryandam9/aws_explorer/internal/debugpane"
 	"github.com/ryandam9/aws_explorer/internal/findings"
 	"github.com/ryandam9/aws_explorer/internal/table"
 	"github.com/ryandam9/aws_explorer/internal/ui"
@@ -69,15 +70,20 @@ type m struct {
 	filter       textinput.Model
 	filterActive bool
 
-	// Resource-detail overlay (Enter on a row). Functions fetch GetFunction on
-	// demand (detailLoading true until the detailMsg lands); layers and event
-	// sources render synchronously from the loaded inventory.
-	detailActive  bool
-	detailTitle   string
-	detail        ResourceDetail
-	detailLoading bool
-	detailErr     error
-	overlayVP     viewport.Model
+	// Resource-detail view (Enter on a row): a full-screen, btop-style grid of
+	// per-section panels (overview, resources, VPC, environment, layers, code,
+	// tags…), one independently-scrollable tile each. Functions fetch GetFunction
+	// on demand (detailLoading until the detailMsg lands); layers and event
+	// sources build their sections synchronously from the loaded inventory.
+	// detailFocus is the focused tile; detailPanels holds one viewport per section.
+	detailActive   bool
+	detailTitle    string
+	detailKey      string // region/name of the function being described (stale-adopt guard)
+	detailSections []section
+	detailPanels   []viewport.Model
+	detailFocus    int
+	detailLoading  bool
+	detailErr      error
 
 	// Findings panel (f) — deterministic runtime/health checks over the loaded
 	// functions, computed synchronously (no AWS call).
@@ -87,6 +93,10 @@ type m struct {
 
 	// loadGen tags each load so a refresh's stragglers can't patch a newer load.
 	loadGen int
+
+	// debug is the shared "~" activity overlay (live view of the tool's scan
+	// logging), composited over the frame like every other TUI.
+	debug debugpane.Model
 
 	spinner   spinner.Model
 	toast     string
@@ -101,7 +111,8 @@ type invMsg struct {
 }
 
 type detailMsg struct {
-	detail ResourceDetail
+	key    string // region/name of the function this describes (guards stale adopts)
+	detail FunctionDetail
 	err    error
 }
 
@@ -217,12 +228,13 @@ func (mm *m) loadInventoryCmd(gen int) tea.Cmd {
 }
 
 func (mm *m) loadDetailCmd(region, name string) tea.Cmd {
+	key := region + "/" + name
 	return func() tea.Msg {
 		slog.Info("Loading Lambda function detail", "function", name, "region", region)
 		ctx, cancel := context.WithTimeout(mm.ctx, drillTimeout)
 		defer cancel()
 		d, err := mm.client.FunctionDetail(ctx, region, name)
-		return detailMsg{detail: d, err: err}
+		return detailMsg{key: key, detail: d, err: err}
 	}
 }
 
@@ -271,12 +283,22 @@ func (mm *m) setToast(s string) {
 func (mm *m) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	var cmds []tea.Cmd
 
+	// The debug overlay ("~") intercepts only its own key/mouse input; every other
+	// message (the streaming load, spinner ticks) falls through so background work
+	// keeps progressing while it is open (rule #10).
+	if mm.debug.Visible() {
+		if mm.debug.HandleInput(msg) {
+			return mm, nil
+		}
+	}
+
 	switch msg := msg.(type) {
 	case tea.WindowSizeMsg:
 		mm.width = msg.Width
 		mm.height = msg.Height
 
 	case spinner.TickMsg:
+		mm.debug.Refresh()
 		var cmd tea.Cmd
 		mm.spinner, cmd = mm.spinner.Update(msg)
 		cmds = append(cmds, cmd)
@@ -303,11 +325,14 @@ func (mm *m) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 
 	case detailMsg:
-		mm.detailLoading = false
-		mm.detailErr = msg.err
-		mm.detail = msg.detail
-		if msg.err == nil {
-			mm.overlayVP.GotoTop()
+		// A stale detail can arrive after the view was closed or moved to another
+		// function; only adopt it while the matching function detail is still open.
+		if mm.detailActive && mm.detailLoading && msg.key == mm.detailKey {
+			mm.detailLoading = false
+			mm.detailErr = msg.err
+			if msg.err == nil {
+				mm.setDetailSections(msg.detail.sections())
+			}
 		}
 
 	case tea.KeyMsg:
@@ -337,11 +362,37 @@ func (mm *m) handleKey(msg tea.KeyMsg) []tea.Cmd {
 		return cmds
 	}
 
-	// Resource-detail overlay: scrollable; Esc/Enter close, q quits. Checked
-	// before the other guards since it floats over the dashboard.
+	// Full-screen detail view: a grid of per-section panels. Tab/Shift+Tab (and
+	// arrows) move focus between tiles; the focused tile scrolls; Esc/Enter close.
+	// Checked before the other guards since it owns the whole screen.
 	if mm.detailActive {
-		if mm.closeOrScrollOverlay(msg, mm.detailLoading, &mm.detailActive) {
+		switch msg.String() {
+		case "q", "ctrl+c":
 			return []tea.Cmd{tea.Quit}
+		case "esc", "enter", "backspace":
+			mm.detailActive = false
+		case "tab", "right", "l", "n":
+			mm.focusPanel(mm.detailFocus + 1)
+		case "shift+tab", "left", "h", "p":
+			mm.focusPanel(mm.detailFocus - 1)
+		case "up", "k":
+			mm.scrollPanel(-1)
+		case "down", "j":
+			mm.scrollPanel(1)
+		case "pgup":
+			mm.scrollPanel(-panelPageStep)
+		case "pgdown", "pgdn", " ":
+			mm.scrollPanel(panelPageStep)
+		case "g", "home":
+			if p := mm.focusedPanel(); p != nil {
+				p.GotoTop()
+			}
+		case "G", "end":
+			if p := mm.focusedPanel(); p != nil {
+				p.GotoBottom()
+			}
+		case ui.KeyAbout:
+			mm.showAbout = true
 		}
 		return cmds
 	}
@@ -439,49 +490,59 @@ func (mm *m) handleKey(msg tea.KeyMsg) []tea.Cmd {
 		}
 	case "o":
 		mm.openConsole(&cmds)
+	case ui.KeyDebug:
+		mm.debug.Open(mm.width, mm.height)
 	case ui.KeyAbout:
 		mm.showAbout = true
 	}
 	return cmds
 }
 
-// openDetail opens the detail overlay for the selected row. Functions fetch
-// GetFunction on demand; layers and event sources render straight from the
-// loaded inventory.
+// openDetail opens the full-screen detail view for the selected row. Functions
+// fetch GetFunction on demand (the panels are built when the data arrives);
+// layers and event sources build their sections straight from the loaded
+// inventory, so their grid is ready immediately.
 func (mm *m) openDetail(cmds *[]tea.Cmd) {
 	r, ok := mm.selectedRow()
 	if !ok {
 		return
 	}
+	mm.detailActive = true
+	mm.detailErr = nil
+	mm.detailFocus = 0
+	mm.detailSections = nil
+	mm.detailPanels = nil
 	switch r.typ {
 	case "function":
-		mm.detailActive = true
 		mm.detailLoading = true
-		mm.detail = ResourceDetail{}
-		mm.detailErr = nil
 		mm.detailTitle = "Function — " + r.name
+		mm.detailKey = r.region + "/" + r.name
 		*cmds = append(*cmds, mm.loadDetailCmd(r.region, r.name), mm.spinner.Tick)
 	case "layer":
 		if r.layer == nil {
+			mm.detailActive = false
 			return
 		}
-		mm.detailActive = true
 		mm.detailLoading = false
-		mm.detailErr = nil
-		mm.detail = buildLayerDetail(*r.layer)
-		mm.detailTitle = mm.detail.Title
-		mm.overlayVP.GotoTop()
+		mm.detailTitle = "Layer — " + r.layer.Name
+		mm.setDetailSections(layerSections(*r.layer))
 	case "event-source-mapping":
 		if r.es == nil {
+			mm.detailActive = false
 			return
 		}
-		mm.detailActive = true
 		mm.detailLoading = false
-		mm.detailErr = nil
-		mm.detail = buildEventSourceDetail(*r.es)
-		mm.detailTitle = mm.detail.Title
-		mm.overlayVP.GotoTop()
+		mm.detailTitle = "Event source — " + r.es.FunctionName
+		mm.setDetailSections(eventSourceSections(*r.es))
 	}
+}
+
+// setDetailSections adopts a fresh set of sections and allocates one viewport per
+// section (sized lazily on the first render), resetting focus to the first tile.
+func (mm *m) setDetailSections(sections []section) {
+	mm.detailSections = sections
+	mm.detailPanels = make([]viewport.Model, len(sections))
+	mm.detailFocus = 0
 }
 
 // startReload kicks off an inventory reload unless one is already running, so a
@@ -491,61 +552,6 @@ func (mm *m) startReload(cmds *[]tea.Cmd) {
 		return
 	}
 	*cmds = append(*cmds, mm.beginLoad(), mm.spinner.Tick)
-}
-
-// closeOrScrollOverlay handles keys for the scrollable detail overlay: q/ctrl+c
-// signals quit (returns true); Esc/Enter close it; the rest scroll once content
-// has loaded.
-func (mm *m) closeOrScrollOverlay(msg tea.KeyMsg, loading bool, active *bool) bool {
-	switch msg.String() {
-	case "q", "ctrl+c":
-		return true
-	case "esc", "enter", "backspace", "left":
-		*active = false
-	case "up", "k":
-		if !loading {
-			mm.overlayVP.LineUp(1)
-		}
-	case "down", "j":
-		if !loading {
-			mm.overlayVP.LineDown(1)
-		}
-	case "pgup":
-		if !loading {
-			mm.overlayVP.ViewUp()
-		}
-	case "pgdown", "pgdn", " ":
-		if !loading {
-			mm.overlayVP.ViewDown()
-		}
-	case "g", "home":
-		if !loading {
-			mm.overlayVP.GotoTop()
-		}
-	case "G", "end":
-		if !loading {
-			mm.overlayVP.GotoBottom()
-		}
-	}
-	return false
-}
-
-// layoutOverlayVP sizes the shared overlay viewport to the terminal, preserving
-// the scroll offset, and wraps content to the viewport width so long values
-// fold instead of running off the edge.
-func (mm *m) layoutOverlayVP(content string) {
-	w := ui.AboutWidth(mm.width) - 4 // the box pads 2 columns on each side
-	if w < 28 {
-		w = 28
-	}
-	h := mm.height - 12 // border + padding + title + hint + centering margins
-	if h < 6 {
-		h = 6
-	}
-	off := mm.overlayVP.YOffset
-	mm.overlayVP = viewport.New(w, h)
-	mm.overlayVP.SetContent(lipgloss.NewStyle().Width(w).Render(content))
-	mm.overlayVP.SetYOffset(off)
 }
 
 // openFindings computes the deterministic findings over the loaded functions
@@ -589,6 +595,9 @@ func max(a, b int) int {
 
 func (mm *m) PageTitle() string {
 	base := "AWS Lambda"
+	if mm.detailActive {
+		return base + " › " + mm.detailTitle
+	}
 	if mm.findingsActive {
 		return base + " › Findings"
 	}
