@@ -47,6 +47,7 @@ const (
 	focusObjects
 	focusPrefixInput
 	focusBucketSearch
+	focusFind
 )
 
 // ---------------------------------------------------------------------------
@@ -271,6 +272,14 @@ type Model struct {
 	bucketSearch   textinput.Model
 	allBucketRows  []table.Row
 
+	// Type-ahead jump (":"): an inline prompt whose text moves the table cursor
+	// to the first row whose name contains it (no filtering). Shared by the
+	// bucket and object lists. finding gates the mode; findInput holds the query;
+	// findMatches is the number of rows that matched the last query.
+	finding     bool
+	findInput   textinput.Model
+	findMatches int
+
 	// Bucket detail full-screen view
 	detailBucket string
 	detailTabIdx int
@@ -398,6 +407,15 @@ func NewModel(ctx context.Context, awsCfg *config.AWSConfig, region, bucket, pre
 	m.bucketSearch.PlaceholderStyle = lipgloss.NewStyle().Foreground(lipgloss.Color(ui.ColorMuted()))
 	m.bucketSearch.Cursor.Style = lipgloss.NewStyle().Foreground(lipgloss.Color(ui.ColorAccent()))
 
+	m.findInput = textinput.New()
+	m.findInput.Placeholder = "type to jump to a match…"
+	m.findInput.CharLimit = 128
+	m.findInput.Width = 40
+	m.findInput.PromptStyle = lipgloss.NewStyle().Foreground(lipgloss.Color(ui.ColorAccent())).Bold(true)
+	m.findInput.TextStyle = lipgloss.NewStyle().Foreground(lipgloss.Color(ui.ColorText()))
+	m.findInput.PlaceholderStyle = lipgloss.NewStyle().Foreground(lipgloss.Color(ui.ColorMuted()))
+	m.findInput.Cursor.Style = lipgloss.NewStyle().Foreground(lipgloss.Color(ui.ColorAccent()))
+
 	m.deleteConfirm = textinput.New()
 	m.deleteConfirm.Placeholder = "Type 'delete' to confirm"
 	m.deleteConfirm.CharLimit = 32
@@ -511,7 +529,7 @@ func applyObjectSortHeader(cols []table.Column, sortCol int, asc bool) {
 func (m *Model) restyleForTheme() {
 	m.applyTableStyle(&m.bucketTable)
 	m.applyTableStyle(&m.objectTable)
-	for _, in := range []*textinput.Model{&m.prefixInput, &m.bucketSearch, &m.deleteConfirm} {
+	for _, in := range []*textinput.Model{&m.prefixInput, &m.bucketSearch, &m.findInput, &m.deleteConfirm} {
 		in.PromptStyle = lipgloss.NewStyle().Foreground(lipgloss.Color(ui.ColorAccent())).Bold(true)
 		in.TextStyle = lipgloss.NewStyle().Foreground(lipgloss.Color(ui.ColorText()))
 		in.PlaceholderStyle = lipgloss.NewStyle().Foreground(lipgloss.Color(ui.ColorMuted()))
@@ -1159,6 +1177,101 @@ func (m *Model) selectedObjectKey() (string, bool) {
 	return m.prefix + r["name"], true
 }
 
+// findNames returns the row names for the active list, parallel to the active
+// table's cursor index: bucket name for the bucket list, object/folder name for
+// the object list. Returns nil when no list is focused.
+func (m *Model) findNames() []string {
+	switch {
+	case m.state == stateBucketList:
+		rows := m.bucketTable.Rows()
+		names := make([]string, len(rows))
+		for i, r := range rows {
+			if len(r) > 1 {
+				names[i] = r[1] // col 0 is the sequence number, col 1 the name
+			}
+		}
+		return names
+	case m.state == stateObjectList:
+		names := make([]string, len(m.objectMaps))
+		for i, r := range m.objectMaps {
+			names[i] = r["name"]
+		}
+		return names
+	}
+	return nil
+}
+
+// startFind opens the type-ahead jump prompt for the current list.
+func (m *Model) startFind() {
+	m.finding = true
+	m.focus = focusFind
+	m.findMatches = 0
+	m.findInput.SetValue("")
+	m.findInput.Focus()
+}
+
+// closeFind dismisses the jump prompt, leaving the cursor where it landed.
+func (m *Model) closeFind() {
+	m.finding = false
+	m.findInput.Blur()
+	if m.state == stateBucketList {
+		m.focus = focusBuckets
+	} else {
+		m.focus = focusObjects
+	}
+}
+
+// jumpToMatch moves the active table's cursor to a row whose name contains
+// query (case-insensitive). dir is +1 to search forward from start, -1 to
+// search backward; the scan wraps around. It also records how many rows match
+// so the prompt can show a count. A blank query is a no-op.
+func (m *Model) jumpToMatch(query string, start, dir int) {
+	names := m.findNames()
+	q := strings.ToLower(strings.TrimSpace(query))
+	if q == "" || len(names) == 0 {
+		m.findMatches = 0
+		return
+	}
+	matches := 0
+	for _, n := range names {
+		if strings.Contains(strings.ToLower(n), q) {
+			matches++
+		}
+	}
+	m.findMatches = matches
+	if matches == 0 {
+		return
+	}
+
+	tbl := m.activeTableForFind()
+	if tbl == nil {
+		return
+	}
+	n := len(names)
+	if dir == 0 {
+		dir = 1
+	}
+	for i := 0; i < n; i++ {
+		idx := ((start+dir*i)%n + n) % n
+		if strings.Contains(strings.ToLower(names[idx]), q) {
+			tbl.SetCursor(idx)
+			return
+		}
+	}
+}
+
+// activeTableForFind returns the table the jump prompt drives. Unlike
+// activeTable it ignores focus, since focus is on the find input while jumping.
+func (m *Model) activeTableForFind() *table.Model {
+	switch m.state {
+	case stateBucketList:
+		return &m.bucketTable
+	case stateObjectList:
+		return &m.objectTable
+	}
+	return nil
+}
+
 // ---------------------------------------------------------------------------
 // Update
 // ---------------------------------------------------------------------------
@@ -1298,8 +1411,9 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 
 		// Global keys — skipped while typing into an input so that bucket
-		// names / prefixes containing these characters work as expected.
-		if !m.inBucketSearch && m.focus != focusPrefixInput {
+		// names / prefixes / jump queries containing these characters work as
+		// expected.
+		if !m.inBucketSearch && !m.finding && m.focus != focusPrefixInput {
 			switch msg.String() {
 			case "q", "ctrl+c":
 				return m, tea.Quit
@@ -1411,6 +1525,35 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				cmds = append(cmds, vpCmd)
 			}
 			return m, tea.Batch(cmds...)
+		}
+
+		// Type-ahead jump prompt (":"). Typing moves the cursor to the first
+		// matching row; ↑/↓ step through matches; Enter accepts (keeps the
+		// cursor); Esc cancels. The listing is never filtered.
+		if m.finding {
+			switch msg.String() {
+			case "esc", "enter":
+				m.closeFind()
+				return m, nil
+			case "down", "ctrl+n":
+				tbl := m.activeTableForFind()
+				if tbl != nil {
+					m.jumpToMatch(m.findInput.Value(), tbl.Cursor()+1, 1)
+				}
+				return m, nil
+			case "up", "ctrl+p":
+				tbl := m.activeTableForFind()
+				if tbl != nil {
+					m.jumpToMatch(m.findInput.Value(), tbl.Cursor()-1, -1)
+				}
+				return m, nil
+			default:
+				m.findInput, cmd = m.findInput.Update(msg)
+				cmds = append(cmds, cmd)
+				// Re-scan from the top so the highlight tracks the query live.
+				m.jumpToMatch(m.findInput.Value(), 0, 1)
+				return m, tea.Batch(cmds...)
+			}
 		}
 
 		// Bucket search overlay
@@ -1550,6 +1693,15 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					m.prefix = ""
 					cmds = append(cmds, m.loadBuckets())
 				}
+			}
+
+		case ":":
+			// Type-ahead jump: open the prompt on either list. Typing moves the
+			// highlight to the first row whose name contains the text.
+			if (m.state == stateBucketList && m.focus == focusBuckets) ||
+				(m.state == stateObjectList && m.focus == focusObjects) {
+				m.startFind()
+				return m, nil
 			}
 
 		case "/":
@@ -1967,7 +2119,12 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	}
 
 	// Route table updates
-	if m.focus == focusPrefixInput {
+	if m.finding {
+		// Keep the jump prompt's cursor blinking; key messages were already
+		// handled (and returned) by the find block above.
+		m.findInput, cmd = m.findInput.Update(msg)
+		cmds = append(cmds, cmd)
+	} else if m.focus == focusPrefixInput {
 		m.prefixInput, cmd = m.prefixInput.Update(msg)
 		cmds = append(cmds, cmd)
 	} else if m.inBucketSearch {
@@ -2147,6 +2304,31 @@ func (m *Model) View() string {
 		content = lipgloss.Place(m.width-4, max(8, m.height-8), lipgloss.Center, lipgloss.Top, searchBox)
 	}
 
+	// Type-ahead jump prompt — anchored at the bottom so it never hides the row
+	// it just jumped to.
+	if m.finding {
+		matchNote := ui.MutedStyle().Render("no match")
+		if m.findMatches > 0 {
+			suffix := "es"
+			if m.findMatches == 1 {
+				suffix = ""
+			}
+			matchNote = ui.SuccessStyle().Render(fmt.Sprintf("%d match%s", m.findMatches, suffix))
+		} else if strings.TrimSpace(m.findInput.Value()) == "" {
+			matchNote = ""
+		}
+		jumpBox := lipgloss.NewStyle().
+			BorderStyle(lipgloss.RoundedBorder()).
+			BorderForeground(lipgloss.Color(ui.ColorBorderFocus())).
+			Foreground(lipgloss.Color(ui.ColorText())).
+			Padding(0, 1).
+			Render(lipgloss.JoinVertical(lipgloss.Left,
+				lipgloss.JoinHorizontal(lipgloss.Left, ui.BoldStyle().Render("Jump to: "), m.findInput.View(), "  ", matchNote),
+				ui.MutedStyle().Render("[↑/↓] next/prev match   [Enter] keep   [Esc] cancel"),
+			))
+		content = lipgloss.Place(m.width-4, max(8, m.height-8), lipgloss.Center, lipgloss.Bottom, jumpBox)
+	}
+
 	out := ui.AppStyle().Render(lipgloss.JoinVertical(lipgloss.Left,
 		header,
 		ui.FeatherRail(max(12, m.width-4)),
@@ -2249,6 +2431,8 @@ func (m *Model) statusHints() []ui.KeyHint {
 		return []ui.KeyHint{ui.H("i/Esc", "close about")}
 	case m.showPreview:
 		return []ui.KeyHint{ui.H("↑/↓", "scroll"), ui.H("PgUp/PgDn", "page"), ui.H("Esc", "close")}
+	case m.finding:
+		return []ui.KeyHint{ui.H("type", "to jump"), ui.H("↑/↓", "next/prev"), ui.H("Enter", "keep"), ui.H("Esc", "cancel")}
 	case m.inBucketSearch:
 		return []ui.KeyHint{ui.H("type", "to filter"), ui.H("Enter", "open first match"), ui.H("Esc", "cancel")}
 	case m.focus == focusPrefixInput:
@@ -2270,6 +2454,7 @@ func (m *Model) statusHints() []ui.KeyHint {
 			ui.H("d", "details"),
 			ui.H("o", "console"),
 			ui.H("/", "search"),
+			ui.H(":", "jump"),
 		}
 		hints = append(hints, colScrollHints(&m.bucketTable)...)
 		return append(hints, ui.H("r", "refresh"), ui.H("S", "theme"), ui.H("~", "debug"), ui.H("i", "about"), ui.H("q", "quit"), ui.H("?", "help"))
@@ -2283,6 +2468,7 @@ func (m *Model) statusHints() []ui.KeyHint {
 		hints = append(hints, colScrollHints(&m.objectTable)...)
 		hints = append(hints,
 			ui.H("/", "prefix"),
+			ui.H(":", "jump"),
 			ui.H("D", "download"),
 		)
 		if m.allowDelete {
@@ -2788,6 +2974,7 @@ func (m *Model) helpView() string {
 			"",
 			"Buckets",
 			"  /                  Search/filter buckets",
+			"  :                  Jump to first bucket whose name contains the typed text",
 			"  d                  Full bucket detail view",
 			"  Tab / Shift+Tab    Switch tabs (in detail view)",
 			"  r                  Refresh bucket list",
@@ -2802,6 +2989,7 @@ func (m *Model) helpView() string {
 			"",
 			"Objects",
 			"  /                  Jump to prefix",
+			"  :                  Jump to first file/folder whose name contains the typed text",
 			"  p                  Preview object (CSV/Parquet→table, .gz→decompress, .tar→browse members)",
 			"  d                  Load extended metadata for the selected object (on demand)",
 			"  y                  Copy S3 URI to clipboard",
