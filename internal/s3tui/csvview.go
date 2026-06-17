@@ -730,7 +730,7 @@ func (m *Model) csvFooter() string {
 			"[↑/↓ PgUp/PgDn] rows   [Enter] row as record   [←/→] columns   [n] rows to read   [w] window   [y] copy as Markdown   [Esc] close")
 	}
 	return ui.MutedStyle().Render(
-		"[↑/↓ PgUp/PgDn] rows   [Enter] row as record   [←/→] columns   [s]/[S] delimiter   [h] header row   [w] rows   [y] copy as Markdown   [t] raw   [Esc] close")
+		"[↑/↓ PgUp/PgDn] rows   [Enter] row as record   [←/→] columns   [s]/[S] delimiter   [h] header row   [w] rows   [c] count all   [y] copy as Markdown   [t] raw   [Esc] close")
 }
 
 // csvRecordView renders the selected row vertically as Col : value pairs.
@@ -767,13 +767,33 @@ func (m *Model) csvInfoLine() string {
 	if m.csvHeaderRow == 0 {
 		headerPart = "header: none"
 	}
-	rowsPart := fmt.Sprintf("%d rows", m.csvTotal)
+	return fmt.Sprintf("delimiter: %s   ·   %s   ·   %s   ·   %s",
+		delimiterName(m.csvDelim), headerPart, colsPart, m.csvRowsPart())
+}
+
+// csvRowsPart describes how many rows the table holds and, honestly, whether
+// that is the whole object. The preview only reads the first 64 KB, so when
+// that was truncated the parsed count is a partial sample (marked "+ … sampled")
+// until the user runs the on-demand "c" count, which fills in the true total.
+func (m *Model) csvRowsPart() string {
+	// Window note (first-N/last-N) takes the lead when a window is active.
+	base := fmt.Sprintf("%d rows", m.csvTotal)
 	if m.csvHidden > 0 {
-		rowsPart = fmt.Sprintf("first %d + last %d of %d rows (%d hidden)",
+		base = fmt.Sprintf("first %d + last %d of %d rows (%d hidden)",
 			m.csvRowCap, m.csvRowCap, m.csvTotal, m.csvHidden)
 	}
-	return fmt.Sprintf("delimiter: %s   ·   %s   ·   %s   ·   %s",
-		delimiterName(m.csvDelim), headerPart, colsPart, rowsPart)
+	switch {
+	case m.csvCounting:
+		return base + "   ·   counting full total…"
+	case m.csvCountErr != nil:
+		return base + "   ·   count failed: " + summarizeS3Error(m.csvCountErr)
+	case m.csvRowCount >= 0:
+		return fmt.Sprintf("%s   ·   ~%d rows total (counted)", base, m.csvRowCount)
+	case m.previewTruncated:
+		return base + "+ sampled from first 64 KB ([c] to count all)"
+	default:
+		return base
+	}
 }
 
 // parquetInfoLine summarises the schema width and the read window for a Parquet

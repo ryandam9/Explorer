@@ -105,9 +105,17 @@ type objectDetailsMsg struct {
 }
 
 type objectPreviewMsg struct {
-	key     string
-	content string
-	err     error
+	key       string
+	content   string
+	truncated bool // the 64 KB preview window was cut off (object is larger)
+	err       error
+}
+
+// objectLineCountMsg carries the result of an on-demand full-object line count.
+type objectLineCountMsg struct {
+	key   string
+	count int64
+	err   error
 }
 
 // parquetPreviewMsg carries the rows read from a Parquet object for the table
@@ -227,6 +235,15 @@ type Model struct {
 	csvHeaderRow int        // 1-based header row; 0 = no header (synthesised column names)
 	csvDisplay   [][]string // rows currently in the table (parallel to its cursor)
 	csvNote      string     // transient confirmation shown in the CSV footer (e.g. after copy)
+
+	// previewTruncated marks that the 64 KB preview window was cut off, so the
+	// sampled row count is partial. csvRowCount holds the true line-count total
+	// once the user runs the on-demand "c" count (-1 = not counted); csvCounting
+	// is set while that streaming count is in flight.
+	previewTruncated bool
+	csvRowCount      int64
+	csvCounting      bool
+	csvCountErr      error
 
 	// Parquet preview reuses the full-screen table machinery above. When
 	// previewIsParquet is set, the schema is fixed (no delimiter/header
@@ -641,8 +658,38 @@ func (m *Model) fetchObjectPreview(key string) tea.Cmd {
 	m.previewContent = ""
 	bucket := m.bucket
 	return func() tea.Msg {
-		content, err := m.client.GetObjectPreview(bucket, key, 64*1024)
-		return objectPreviewMsg{key: key, content: content, err: err}
+		content, truncated, err := m.client.GetObjectPreview(bucket, key, 64*1024)
+		return objectPreviewMsg{key: key, content: content, truncated: truncated, err: err}
+	}
+}
+
+// startLineCount kicks off an on-demand full-object line count, unless one is
+// already running or has already completed for this object.
+func (m *Model) startLineCount() tea.Cmd {
+	if m.csvCounting || m.csvRowCount >= 0 || m.previewKey == "" {
+		return nil
+	}
+	return m.fetchLineCount(m.previewKey)
+}
+
+// fetchLineCount streams the whole object to count its lines (a "wc -l"),
+// filling in the true row total for a CSV whose preview was only a sample.
+func (m *Model) fetchLineCount(key string) tea.Cmd {
+	m.csvCounting = true
+	m.csvCountErr = nil
+	bucket := m.bucket
+	client := m.client
+	headerRow := m.csvHeaderRow
+	return func() tea.Msg {
+		lines, err := client.CountObjectLines(bucket, key)
+		if err == nil && headerRow > 0 {
+			// Lines before and including the header row aren't data records.
+			lines -= int64(headerRow)
+			if lines < 0 {
+				lines = 0
+			}
+		}
+		return objectLineCountMsg{key: key, count: lines, err: err}
 	}
 }
 
@@ -674,6 +721,10 @@ func (m *Model) openPreview(key string) tea.Cmd {
 	m.showPreview = false
 	m.showArchive = false
 	m.previewIsParquet = false
+	m.previewTruncated = false
+	m.csvRowCount = -1
+	m.csvCounting = false
+	m.csvCountErr = nil
 
 	switch {
 	case looksLikeParquet(key):
@@ -805,6 +856,9 @@ func (m *Model) initPreviewViewport(content string, err error) {
 			if formatted, ok := formatXML(display); ok {
 				display = formatted
 			}
+		}
+		if m.previewTruncated {
+			display += "\n\n… preview truncated …"
 		}
 		m.previewViewport.SetContent(hardWrap(display, vpW))
 	}
@@ -1362,6 +1416,14 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				}
 				return m, nil
 			}
+			// "c" counts the whole object's rows on demand (CSV only — Parquet
+			// already knows its total, and an archive member isn't a whole object).
+			if msg.String() == "c" && !m.previewIsParquet && !m.previewFromArchive {
+				if cmd := m.startLineCount(); cmd != nil {
+					return m, cmd
+				}
+				return m, nil
+			}
 			if m.handleCSVKey(msg.String()) {
 				return m, nil
 			}
@@ -1897,6 +1959,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.previewLoading = false
 			m.previewErr = msg.err
 			m.previewContent = msg.content
+			m.previewTruncated = msg.truncated
 			switch {
 			case m.showCSV && msg.err == nil && m.initCSV(msg.content):
 				// CSV parsed: the full-screen table is ready.
@@ -1907,6 +1970,15 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.initPreviewViewport(msg.content, msg.err)
 			default:
 				m.initPreviewViewport(msg.content, msg.err)
+			}
+		}
+
+	case objectLineCountMsg:
+		if msg.key == m.previewKey {
+			m.csvCounting = false
+			m.csvCountErr = msg.err
+			if msg.err == nil {
+				m.csvRowCount = msg.count
 			}
 		}
 

@@ -82,6 +82,13 @@ func (m *Model) openArchiveMember() {
 	m.previewFromArchive = true
 	m.previewLoading = false
 	m.showArchive = false
+	// decompressedPreview embeds its own truncation marker for member text, so
+	// don't let initPreviewViewport append a second one. The line-count action
+	// is disabled for members (not whole objects), so reset its state too.
+	m.previewTruncated = false
+	m.csvRowCount = -1
+	m.csvCounting = false
+	m.csvCountErr = nil
 
 	if err != nil {
 		m.previewErr = err

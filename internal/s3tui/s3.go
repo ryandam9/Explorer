@@ -1011,7 +1011,7 @@ func (c *S3Client) GetObjectRange(bucket, key string, maxBytes int64) ([]byte, b
 	return data, truncated, nil
 }
 
-func (c *S3Client) GetObjectPreview(bucket, key string, maxBytes int64) (string, error) {
+func (c *S3Client) GetObjectPreview(bucket, key string, maxBytes int64) (string, bool, error) {
 	ctx, cancel := c.requestContext()
 	defer cancel()
 
@@ -1024,24 +1024,74 @@ func (c *S3Client) GetObjectPreview(bucket, key string, maxBytes int64) (string,
 		Range:  aws.String(fmt.Sprintf("bytes=0-%d", maxBytes-1)),
 	})
 	if err != nil {
-		return "", err
+		return "", false, err
 	}
 	defer out.Body.Close()
 
 	data, err := io.ReadAll(io.LimitReader(out.Body, maxBytes))
 	if err != nil {
-		return "", err
+		return "", false, err
 	}
 	for _, b := range data {
 		if b == 0 {
-			return "Binary object preview omitted. Use metadata/details for inspection.", nil
+			return "Binary object preview omitted. Use metadata/details for inspection.", false, nil
 		}
 	}
-	preview := string(data)
-	if int64(len(data)) == maxBytes {
-		preview += "\n\n… preview truncated …"
+	// Report truncation as a flag rather than appending a marker to the bytes:
+	// the caller decides how to surface it (a note for the text view, nothing
+	// for the CSV table where a marker would be parsed as a spurious row).
+	truncated := int64(len(data)) == maxBytes
+	return string(data), truncated, nil
+}
+
+// CountObjectLines streams the whole object and counts newline-delimited lines
+// (a "wc -l" over S3). It reads in chunks without buffering the object, so it is
+// memory-light, but it transfers the entire object — callers expose it as an
+// explicit, on-demand action. A final line without a trailing newline is still
+// counted.
+func (c *S3Client) CountObjectLines(bucket, key string) (int64, error) {
+	ctx, cancel := context.WithTimeout(c.ctx, 10*time.Minute)
+	defer cancel()
+
+	out, err := c.client.GetObject(ctx, &s3.GetObjectInput{
+		Bucket: aws.String(bucket),
+		Key:    aws.String(key),
+	})
+	if err != nil {
+		return 0, err
 	}
-	return preview, nil
+	defer out.Body.Close()
+	return countLines(out.Body)
+}
+
+// countLines counts the newline-delimited lines in r, reading in chunks without
+// buffering the whole stream. A non-empty final line without a trailing newline
+// is counted; an empty stream is zero lines. Pure, so it is unit-tested.
+func countLines(r io.Reader) (int64, error) {
+	var count int64
+	var lastByte byte = '\n' // an empty stream has zero lines
+	buf := make([]byte, 256*1024)
+	for {
+		n, rerr := r.Read(buf)
+		for _, b := range buf[:n] {
+			if b == '\n' {
+				count++
+			}
+		}
+		if n > 0 {
+			lastByte = buf[n-1]
+		}
+		if rerr == io.EOF {
+			break
+		}
+		if rerr != nil {
+			return count, rerr
+		}
+	}
+	if lastByte != '\n' {
+		count++ // the final line had no trailing newline
+	}
+	return count, nil
 }
 
 func (c *S3Client) GetBucketPolicy(bucket string) (string, error) {
