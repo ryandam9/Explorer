@@ -5,6 +5,7 @@
 package table
 
 import (
+	"fmt"
 	"strings"
 
 	tea "github.com/charmbracelet/bubbletea"
@@ -40,6 +41,12 @@ type Model struct {
 	width      int
 	colOffset  int
 	frozenCols int
+
+	// colNumbers, when set, renders a second header line showing each column's
+	// 1-based position centered in brackets, e.g. "(1) (2) …". Useful for very
+	// wide tables (a 400-column CSV) where knowing the ordinal of a column is
+	// otherwise hard. Off by default; opt in with WithColNumbers / SetColNumbers.
+	colNumbers bool
 
 	// baseWidths holds each column's configured width, captured before any
 	// content-based auto-fit. It is the floor a column may shrink to; columns
@@ -357,6 +364,16 @@ func WithFocused(f bool) Option {
 	}
 }
 
+// WithColNumbers enables the second header line of 1-based column numbers.
+// Because the body viewport is always sized as the table height minus the
+// rendered header height, enabling this simply shifts one row from the body to
+// the header — no extra bookkeeping needed.
+func WithColNumbers(on bool) Option {
+	return func(m *Model) {
+		m.colNumbers = on
+	}
+}
+
 // WithStyles sets the table styles.
 func WithStyles(s Styles) Option {
 	return func(m *Model) {
@@ -663,6 +680,21 @@ func (m Model) ColScrollInfo() (hiddenLeft, hiddenRight int) {
 	return hiddenLeft, hiddenRight
 }
 
+// VisibleScrollableCols reports the 1-based indexes of the first and last
+// currently-visible scrollable (non-frozen) columns. ok is false when no
+// scrollable column is in view. Frozen leading columns are excluded so callers
+// can describe the scroll window ("cols 5-12") without the pinned column
+// distorting the range.
+func (m Model) VisibleScrollableCols() (first, last int, ok bool) {
+	vis := m.visibleCols()
+	_, frozen := m.layoutCols()
+	if len(vis) <= frozen {
+		return 0, 0, false
+	}
+	scroll := vis[frozen:]
+	return scroll[0] + 1, scroll[len(scroll)-1] + 1, true
+}
+
 // layoutCols returns the indexes of columns with a positive width (the ones
 // that actually render) and the effective number of frozen leading columns.
 func (m Model) layoutCols() (pos []int, frozen int) {
@@ -834,7 +866,22 @@ func (m Model) headersView() string {
 		renderedCell := m.colStyle(i).Render(runewidth.Truncate(col.Title, col.Width, "…"))
 		s = append(s, m.styles.Header.Render(renderedCell))
 	}
-	return m.clipToWidth(lipgloss.JoinHorizontal(lipgloss.Top, s...))
+	titles := m.clipToWidth(lipgloss.JoinHorizontal(lipgloss.Top, s...))
+	if !m.colNumbers {
+		return titles
+	}
+
+	// Second header line: each column's 1-based ordinal, centered in brackets
+	// and dimmed, aligned under its title using the same per-column width.
+	nums := make([]string, 0, len(vis))
+	for _, i := range vis {
+		col := m.cols[i]
+		label := runewidth.Truncate(fmt.Sprintf("(%d)", i+1), col.Width, "…")
+		cell := m.colStyle(i).Align(lipgloss.Center).Render(label)
+		nums = append(nums, m.styles.Header.Faint(true).Render(cell))
+	}
+	numLine := m.clipToWidth(lipgloss.JoinHorizontal(lipgloss.Top, nums...))
+	return lipgloss.JoinVertical(lipgloss.Left, titles, numLine)
 }
 
 // clipToWidth hard-truncates every line of s to the table's render width so a

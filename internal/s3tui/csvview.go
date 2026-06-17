@@ -280,6 +280,7 @@ func (m *Model) buildCSVTable() {
 		table.WithFocused(true),
 		table.WithStyles(ui.TableStylesZebra()),
 		table.WithFrozenColumns(1), // pin the first column when scrolling wide tables
+		table.WithColNumbers(true), // show (1) (2) … under each header for wide files
 	)
 	m.layoutCSVTable()
 }
@@ -761,7 +762,7 @@ func (m *Model) csvInfoLine() string {
 	// how many are shown and how to reach the rest.
 	colsPart := fmt.Sprintf("%d columns", cols)
 	if hl, hr := m.csvTable.ColScrollInfo(); hl+hr > 0 {
-		colsPart = fmt.Sprintf("%d of %d columns shown (←/→ for more)", cols-hl-hr, cols)
+		colsPart = m.colWindowInfo(header, cols)
 	}
 	headerPart := fmt.Sprintf("header: row %d", m.csvHeaderRow)
 	if m.csvHeaderRow == 0 {
@@ -776,12 +777,30 @@ func (m *Model) csvInfoLine() string {
 		delimiterName(m.csvDelim), headerPart, colsPart, rowsPart)
 }
 
+// colWindowInfo describes which columns are on screen when the table is wider
+// than the view: the visible scrollable range, the total, and the name of the
+// leftmost scrollable column as a "where am I" anchor for very wide files.
+func (m *Model) colWindowInfo(header []string, total int) string {
+	lo, hi, ok := m.csvTable.VisibleScrollableCols()
+	if !ok {
+		return fmt.Sprintf("%d columns", total)
+	}
+	out := fmt.Sprintf("cols %d-%d of %d (←/→ for more)", lo, hi, total)
+	if i := lo - 1; i >= 0 && i < len(header) {
+		if name := clipCell(strings.TrimSpace(header[i])); name != "" {
+			out += fmt.Sprintf("  ·  col %d: %s", lo, name)
+		}
+	}
+	return out
+}
+
 // parquetInfoLine summarises the schema width and the read window for a Parquet
 // preview, making clear how many of the file's rows are shown.
 func (m *Model) parquetInfoLine(cols int) string {
 	colsPart := fmt.Sprintf("%d columns", cols)
 	if hl, hr := m.csvTable.ColScrollInfo(); hl+hr > 0 {
-		colsPart = fmt.Sprintf("%d of %d columns shown (←/→ for more)", cols-hl-hr, cols)
+		header, _ := m.headerAndData()
+		colsPart = m.colWindowInfo(header, cols)
 	}
 	// csvTotal is the number of rows read; parquetFileRows is the file's total.
 	rowsPart := fmt.Sprintf("%d rows", m.csvTotal)
