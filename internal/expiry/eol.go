@@ -12,6 +12,16 @@ func d(y int, m time.Month, day int) time.Time {
 	return time.Date(y, m, day, 0, 0, 0, 0, time.UTC)
 }
 
+// LambdaRuntimeDeprecation returns the published deprecation date for a Lambda
+// runtime identifier and whether one is known. It is the single source of truth
+// for the runtime-EOL table (shared by the expiry report and the findings
+// linter), so the table is maintained in one place and under-warns — a runtime
+// missing from the table simply yields ok=false rather than a guess.
+func LambdaRuntimeDeprecation(runtime string) (time.Time, bool) {
+	date, ok := lambdaRuntimeDeprecation[runtime]
+	return date, ok
+}
+
 // lambdaRuntimeDeprecation maps a Lambda runtime identifier to its published
 // deprecation date (when function updates start being blocked).
 // Source: https://docs.aws.amazon.com/lambda/latest/dg/lambda-runtimes.html

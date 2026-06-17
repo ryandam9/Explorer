@@ -141,6 +141,16 @@ var checkRegistry = []CheckMeta{
 		"EMR cluster with no S3 log URI — logs are lost when nodes terminate", SevWarning},
 	{CheckEMRNoSecurityConf, "EMRClusterNoSecurityConfiguration",
 		"EMR cluster without a security configuration (encryption not enforced)", SevWarning},
+
+	// AWS Lambda category (AXE-049).
+	{CheckLambdaRuntimeDeprecated, "LambdaRuntimeDeprecated",
+		"Lambda function on a deprecated runtime — updates are blocked", SevWarning},
+	{CheckLambdaRuntimeDeprecating, "LambdaRuntimeDeprecating",
+		"Lambda function whose runtime is scheduled for deprecation soon", SevInfo},
+	{CheckLambdaNoDLQ, "LambdaNoDeadLetterQueue",
+		"Lambda function with no dead-letter queue for failed async invocations", SevInfo},
+	{CheckLambdaUnhealthy, "LambdaFunctionFailedState",
+		"Lambda function in a failed state or whose last update failed", SevWarning},
 }
 
 // Checks returns the registry of every known check, in declaration order.

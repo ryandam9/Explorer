@@ -20,7 +20,7 @@ import (
 
 // auditCategories lists the implemented finding categories. More join as the
 // roadmap lands (security, messaging, …); --only validates against this.
-var auditCategories = []string{"cost", "security", "iam", "messaging", "cloudtrail", "glue", "emr"}
+var auditCategories = []string{"cost", "security", "iam", "messaging", "cloudtrail", "glue", "emr", "lambda"}
 
 // auditExitFindings is the exit code when --fail-on is set and findings at or
 // above the threshold exist (operational errors exit 1, clean runs 0), so CI
@@ -77,8 +77,12 @@ burned on failed runs, over-provisioned jobs, jobs without a security
 configuration, and crawlers whose last crawl failed or that are stuck
 running.
 
+lambda — serverless health: functions on a deprecated runtime (updates
+blocked) or one approaching deprecation, functions with no dead-letter
+queue for failed async invocations, and functions stuck in a failed state.
+
 Every finding carries a stable check ID (e.g. COST-EBS-001, SEC-S3-001,
-IAM-KEY-001, MSG-SQS-001, CT-TRAIL-001, GLU-JOB-001).
+IAM-KEY-001, MSG-SQS-001, CT-TRAIL-001, GLU-JOB-001, LAM-RUN-001).
 
 For CI pipelines, --fail-on <severity> exits 2 when findings at or above the
 threshold exist (0 below it, 1 on operational errors), --ignore suppresses
@@ -109,6 +113,9 @@ cloudwatch:GetMetricData and are skipped without it.`,
 
   # Glue job/crawler health only
   aws_explorer audit --only glue
+
+  # Lambda runtime/health only
+  aws_explorer audit --only lambda
 
   # CI gate: exit 2 if any warning-or-worse finding exists
   aws_explorer audit --fail-on warning --ignore COST-EBS-002,SEC-EC2-001

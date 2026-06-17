@@ -202,6 +202,31 @@ EMR-category notes:
   (under-warn).
 - Uses `elasticmapreduce:{ListClusters,DescribeCluster,ListSteps}`.
 
+**Lambda category** (`--only lambda`; check IDs `LAM-*`) — runtime and health
+for AWS Lambda functions:
+
+| ID | Finding | Severity |
+|----|---------|----------|
+| `LAM-RUN-001` | Function on a deprecated runtime — updates are blocked | 🟡 warning |
+| `LAM-CFG-002` | Function in a failed state, or whose last update failed | 🟡 warning |
+| `LAM-RUN-002` | Function's runtime is scheduled for deprecation within 90 days | 🔵 info |
+| `LAM-CFG-001` | Function with no dead-letter queue for failed async invocations | 🔵 info |
+
+Lambda-category notes:
+
+- Runtime checks read the shared end-of-life table (`internal/expiry/eol.go`);
+  a runtime missing from it fires nothing (under-warn), and container-image
+  functions (no runtime identifier) are skipped.
+- `LAM-CFG-002` fires only when the list response reported a state; a sparse
+  response silences it rather than guessing.
+- `LAM-CFG-001` is informational and worded honestly — an on-failure
+  destination (which `ListFunctions` doesn't expose) is a valid alternative to
+  a dead-letter queue, so the finding reports what is known, not that events are
+  definitely dropped.
+- Everything comes from one paginated `lambda:ListFunctions` call — no
+  per-function fan-out. The same checks back the `lambda` dashboard's `f`
+  findings panel.
+
 † Traffic-based checks use CloudWatch metrics over a 14-day window and need
 `cloudwatch:GetMetricData`; without it they are skipped (with a note) while
 the rest of the audit runs. Resources younger than 14 days are never flagged

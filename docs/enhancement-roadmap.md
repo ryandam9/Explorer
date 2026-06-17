@@ -641,6 +641,14 @@ classification = pure function with fixtures.
 
 ### AXE-016 — Lambda triage view {#axe-016}
 
+> **Status: ✅ shipped (superseded by the Lambda dashboard).** Delivered as a
+> first-class `lambda` TUI (Functions / Layers / Event sources), a per-function
+> configuration detail overlay (reserved concurrency, dead-letter queue, event
+> sources, env-var keys), a `lambda` audit category and a logs jump — see
+> [docs/lambda-design.md](lambda-design.md) (Theme K, AXE-045…AXE-050). The
+> triage signals this item sketched (disabled mappings, failed state, missing
+> DLQ, deprecated runtimes) are now first-class tabs and findings.
+
 **Problem.** The classic silent Lambda failures: disabled event source
 mapping, reserved concurrency 0, growing DLQ.
 

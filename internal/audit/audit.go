@@ -45,7 +45,7 @@ func Stream(ctx context.Context, baseCfg aws.Config, regions []string, categorie
 	if len(regions) == 0 {
 		regions = []string{"us-east-1"}
 	}
-	wantCost, wantSecurity, wantIAM, wantMessaging, wantCloudTrail, wantGlue, wantEMR := false, false, false, false, false, false, false
+	wantCost, wantSecurity, wantIAM, wantMessaging, wantCloudTrail, wantGlue, wantEMR, wantLambda := false, false, false, false, false, false, false, false
 	for _, c := range categories {
 		switch c {
 		case "cost":
@@ -62,6 +62,8 @@ func Stream(ctx context.Context, baseCfg aws.Config, regions []string, categorie
 			wantGlue = true
 		case "emr":
 			wantEMR = true
+		case "lambda":
+			wantLambda = true
 		}
 	}
 
@@ -99,6 +101,11 @@ func Stream(ctx context.Context, baseCfg aws.Config, regions []string, categorie
 			if wantEMR {
 				snap, e := collectEMRRegion(gctx, baseCfg, region, perCallTimeout)
 				fs = append(fs, findings.AnalyzeEMR(snap)...)
+				errs = append(errs, e...)
+			}
+			if wantLambda {
+				snap, e := collectLambdaRegion(gctx, baseCfg, region, perCallTimeout)
+				fs = append(fs, findings.AnalyzeLambda(snap)...)
 				errs = append(errs, e...)
 			}
 			// IAM is account-global: collected once, in the first region's

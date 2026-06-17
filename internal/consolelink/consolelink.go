@@ -175,8 +175,19 @@ func deepLink(n linkInput) (string, bool) {
 		}
 
 	case "lambda":
-		return fmt.Sprintf("https://%s.console.aws.amazon.com/lambda/home?region=%s#/functions/%s",
-			n.region, n.region, q(lastSegment(n.name))), true
+		switch n.typ {
+		case "layer":
+			return fmt.Sprintf("https://%s.console.aws.amazon.com/lambda/home?region=%s#/layers/%s",
+				n.region, n.region, q(lastSegment(n.name))), true
+		case "event-source-mapping":
+			// Event source mappings have no standalone console page; land on the
+			// function list for the region.
+			return fmt.Sprintf("https://%s.console.aws.amazon.com/lambda/home?region=%s#/functions",
+				n.region, n.region), true
+		default:
+			return fmt.Sprintf("https://%s.console.aws.amazon.com/lambda/home?region=%s#/functions/%s",
+				n.region, n.region, q(lastSegment(n.name))), true
+		}
 
 	case "rds":
 		switch n.typ {
