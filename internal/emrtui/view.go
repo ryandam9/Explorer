@@ -22,7 +22,9 @@ func (mm *m) View() string {
 		sb.WriteString(badge + "\n")
 	}
 
-	if mm.stepsActive {
+	if mm.detailActive {
+		sb.WriteString(mm.renderDescribe())
+	} else if mm.stepsActive {
 		sb.WriteString(mm.renderSteps())
 	} else if mm.yarnActive {
 		sb.WriteString(mm.renderYARN())
@@ -53,9 +55,6 @@ func (mm *m) View() string {
 	}
 
 	frame := mm.applyToast(ui.ClipToSize(body+sep+status, mm.width, mm.height))
-	if mm.detailActive {
-		frame = ui.OverlayCenterBlank(mm.detailOverlay(), mm.width, mm.height)
-	}
 	if mm.appUIActive {
 		frame = ui.OverlayCenterBlank(ui.AboutView("Application UIs — "+mm.appUICluster.Name, mm.appUIBody(), ui.AboutWidth(mm.width)), mm.width, mm.height)
 	}
@@ -93,39 +92,6 @@ const emrAboutText = "This is the Amazon EMR dashboard. Each row is a cluster, c
 	"tail (and again to hide it).\n\n" +
 	"Press S to cycle the column the list is sorted by (R reverses the direction), " +
 	"o to open a cluster in the AWS console, / to filter, and r to refresh."
-
-// detailOverlay renders the scrollable cluster-describe overlay: the viewport's
-// windowed body plus a scroll hint, inside the shared themed frame.
-func (mm *m) detailOverlay() string {
-	mm.layoutDetailVP() // size + fill the viewport, preserving the scroll offset
-	hint := muted("↑/↓ scroll · Esc close")
-	body := lipgloss.JoinVertical(lipgloss.Left, mm.detailVP.View(), "", hint)
-	return ui.HelpView("Describe — "+mm.detailCluster.Name, body, mm.detailVP.Width+4)
-}
-
-// detailBody renders the cluster-describe overlay's contents: a spinner while
-// the describe loads, the error if it failed, otherwise the full sectioned
-// report (overview, configuration/OS, services, compute/memory/storage,
-// instances and VPC networking).
-func (mm *m) detailBody() string {
-	if mm.descLoading {
-		return mm.spinner.View() + " Describing " + mm.detailCluster.Name + " …\n\n" +
-			muted("  Gathering instance groups, storage, EC2 specs and VPC networking.")
-	}
-	if mm.descErr != nil {
-		return errLine("⚠ Could not describe cluster: "+mm.descErr.Error()) + "\n\n" +
-			muted("  Press Esc to close.")
-	}
-	var b strings.Builder
-	for i, s := range mm.desc.sections() {
-		if i > 0 {
-			b.WriteString("\n\n")
-		}
-		b.WriteString(heading(" "+s.Title) + "\n")
-		b.WriteString(s.Body)
-	}
-	return strings.TrimRight(b.String(), "\n")
-}
 
 // appUIBody renders the persistent application-UI picker overlay: a short menu
 // while idle, or a spinner while the presigned URL is being generated.
@@ -438,6 +404,13 @@ func boxStyle(width, height int) lipgloss.Style {
 }
 
 func (mm *m) statusLeft() string {
+	if mm.detailActive {
+		left := "Describe: " + mm.detailCluster.Name
+		if !mm.descLoading && mm.descErr == nil && len(mm.descSections) > 0 {
+			left += fmt.Sprintf("  ·  panel %d/%d", mm.descFocus+1, len(mm.descSections))
+		}
+		return left
+	}
 	if mm.stepsActive {
 		return fmt.Sprintf("Cluster: %s  ·  Steps: %d", mm.stepsCluster.Name, len(mm.steps))
 	}
@@ -470,6 +443,15 @@ func (mm *m) statusLeft() string {
 }
 
 func (mm *m) helpHints() []ui.KeyHint {
+	if mm.detailActive {
+		return []ui.KeyHint{
+			ui.H("Tab", "panel"),
+			ui.H("↑/↓", "scroll"),
+			ui.H("Esc", "back"),
+			ui.H("i", "about"),
+			ui.H("q", "quit"),
+		}
+	}
 	if mm.stepsActive {
 		return []ui.KeyHint{
 			ui.H("↑/↓", "steps"),
