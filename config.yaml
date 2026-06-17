@@ -7,6 +7,11 @@ app:
     # A leading "~" is expanded to your home directory; empty means the current
     # working directory. The directory is created automatically if it is missing.
     downloaddir: ""
+    # How much of a text/XML/JSON object the S3 browser reads when you preview it
+    # with "p". Accepts a human size ("10MB", "512KB") or a plain byte count;
+    # empty uses the default (10MB). Clamped to 4KB–64MB so previews stay bounded.
+    # Lower it to fetch less for very large files.
+    previewmaxsize: ""
 aws:
     profile: default
     authmethod: auto

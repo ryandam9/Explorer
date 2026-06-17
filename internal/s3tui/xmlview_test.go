@@ -46,6 +46,73 @@ func TestFormatXML(t *testing.T) {
 	}
 }
 
+// A namespaced document (e.g. ISO 20022 payment XML) must not have its single
+// xmlns declaration duplicated onto every element by the encoder round-trip.
+func TestFormatXMLNamespaceNotDuplicated(t *testing.T) {
+	doc := `<?xml version="1.0" encoding="UTF-8"?>` +
+		`<Document xmlns="urn:iso:std:iso:20022:tech:xsd:pain.002.001.03">` +
+		`<CstmrPmtStsRpt><GrpHdr><MsgId>ABC</MsgId></GrpHdr>` +
+		`<RmtInf><Ustrd>remittance</Ustrd></RmtInf></CstmrPmtStsRpt></Document>`
+	out, ok := formatXML(doc)
+	if !ok {
+		t.Fatal("namespaced XML should format")
+	}
+	if n := strings.Count(out, "xmlns="); n != 1 {
+		t.Errorf("xmlns should appear once, got %d:\n%s", n, out)
+	}
+	// The single declaration stays on the root element.
+	if !strings.Contains(out, `<Document xmlns="urn:iso:std:iso:20022:tech:xsd:pain.002.001.03">`) {
+		t.Errorf("root declaration missing/changed:\n%s", out)
+	}
+	if !strings.Contains(out, "<Ustrd>remittance</Ustrd>") {
+		t.Errorf("inner element should render without an xmlns:\n%s", out)
+	}
+}
+
+// Prefixed namespace declarations must survive the round-trip cleanly rather
+// than being mangled into the encoder's "_xmlns" artefact.
+func TestFormatXMLPrefixedNamespaceNotMangled(t *testing.T) {
+	out, ok := formatXML(`<ns:Doc xmlns:ns="urn:x"><ns:A>v</ns:A></ns:Doc>`)
+	if !ok {
+		t.Fatal("prefixed XML should format")
+	}
+	if strings.Contains(out, "_xmlns") {
+		t.Errorf("xmlns:prefix declaration was mangled:\n%s", out)
+	}
+	if !strings.Contains(out, `xmlns:ns="urn:x"`) {
+		t.Errorf("prefixed declaration missing:\n%s", out)
+	}
+}
+
+// When an XML preview is truncated mid-element, the "preview truncated" note
+// must be its own trailing line — not swallowed into the last open element's
+// text (the original bug: the note rendered as the <Ustrd> element's body).
+func TestBuildPreviewDisplayTruncationNoteNotAbsorbed(t *testing.T) {
+	// A document cut mid-element: <Ustrd> is never closed.
+	content := `<?xml version="1.0"?><Document xmlns="urn:x"><RmtInf><Ustrd>(h1)remediation pl`
+	out := buildPreviewDisplay(content, true, 200)
+
+	if !strings.HasSuffix(strings.TrimRight(out, "\n"), "… preview truncated …") {
+		t.Errorf("truncation note should be the trailing line:\n%s", out)
+	}
+	// The note must stand alone, not glued to the element text.
+	if strings.Contains(out, "remediation pl… preview truncated …") ||
+		strings.Contains(out, "remediation pl …") {
+		t.Errorf("note was absorbed into element text:\n%s", out)
+	}
+	// It still pretty-prints the part that parsed.
+	if !strings.Contains(out, "<RmtInf>") {
+		t.Errorf("parsed prefix should still render:\n%s", out)
+	}
+}
+
+func TestBuildPreviewDisplayNoNoteWhenComplete(t *testing.T) {
+	out := buildPreviewDisplay("<root><a>1</a></root>", false, 200)
+	if strings.Contains(out, "truncated") {
+		t.Errorf("complete preview should carry no truncation note:\n%s", out)
+	}
+}
+
 func TestHardWrap(t *testing.T) {
 	// A line longer than width is split; short lines and newlines are preserved.
 	got := hardWrap("abcdefghij\nshort", 5)

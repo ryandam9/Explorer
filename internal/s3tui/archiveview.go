@@ -93,6 +93,9 @@ func (m *Model) openArchiveMember() {
 	m.previewErr = nil
 	text := decompressedPreview(content, truncated, looksLikeCSV(name))
 	m.previewContent = text
+	// decompressedPreview already bakes any truncation note into text, so don't
+	// let initPreviewViewport add a second one.
+	m.previewTruncated = false
 
 	if looksLikeCSV(name) && m.initCSV(text) {
 		m.showCSV = true

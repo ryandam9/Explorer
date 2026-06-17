@@ -49,10 +49,39 @@ func formatXML(s string) (string, bool) {
 		if err != nil {
 			break // EOF, or the truncated/malformed tail of a preview
 		}
-		// Drop layout-only whitespace so the encoder's own indentation controls
-		// the result instead of doubling up blank space.
-		if cd, ok := tok.(xml.CharData); ok && strings.TrimSpace(string(cd)) == "" {
-			continue
+		switch t := tok.(type) {
+		case xml.CharData:
+			// Drop layout-only whitespace so the encoder's own indentation
+			// controls the result instead of doubling up blank space.
+			if strings.TrimSpace(string(t)) == "" {
+				continue
+			}
+		case xml.StartElement:
+			// The decoder resolves each element's namespace into Name.Space (the
+			// URI). Re-encoding that makes the encoder emit a fresh xmlns on every
+			// element — and a duplicate on the declaring element, which already
+			// carries an xmlns attribute. Clear the resolved URI so the original
+			// xmlns attributes (fixed up below) are the single source of the
+			// declaration. Start and end must match, so EndElement is cleared too.
+			t.Name.Space = ""
+			for i := range t.Attr {
+				a := &t.Attr[i]
+				switch {
+				case a.Name.Space == "xmlns":
+					// An "xmlns:prefix" declaration. The encoder's namespace
+					// machinery otherwise mangles it into "_xmlns:prefix"; emit it
+					// literally instead.
+					a.Name = xml.Name{Local: "xmlns:" + a.Name.Local}
+				case a.Name.Space != "":
+					// A namespaced attribute (e.g. xsi:type): drop the resolved URI
+					// so the encoder doesn't synthesise a bogus prefix for it.
+					a.Name.Space = ""
+				}
+			}
+			tok = t
+		case xml.EndElement:
+			t.Name.Space = ""
+			tok = t
 		}
 		if err := enc.EncodeToken(tok); err != nil {
 			break

@@ -37,6 +37,8 @@ app:
   maxConcurrency: 8           # max parallel collectors
   downloadDir: ""             # S3 browser download target ("D"); ~ expands to home,
                               # empty = current dir; created automatically if missing
+  previewMaxSize: ""          # S3 "p" preview read cap: "10MB"/"512KB"/bytes;
+                              # empty = 10MB default, clamped to 4KB–64MB
 
 aws:
   # Auth method: auto | profile | env | static | sts
