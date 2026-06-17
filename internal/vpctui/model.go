@@ -185,6 +185,11 @@ type Model struct {
 	resourceMaps    map[resourceType][]map[string]string
 	resourceLoading bool
 	resourceErr     error
+	// pendingResourceFocus records that the user pressed Enter on a resource
+	// type and wants focus moved to the resource table — but only once the
+	// load confirms the type actually has resources. Control stays in the
+	// category pane for an empty type (issue #298).
+	pendingResourceFocus bool
 
 	// Resource table column sorting: s cycles, R flips direction.
 	// sortCol -1 keeps API order; otherwise it indexes colFields.
@@ -1063,6 +1068,15 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.resourceMaps[msg.rt] = msg.maps
 			if msg.rt == m.activeResource {
 				m.rebuildResourceTable()
+				// A pending Enter jump only completes once we know the type has
+				// resources; an empty type keeps control in the category pane
+				// (#298). An error leaves the flag for the next attempt.
+				if m.pendingResourceFocus {
+					m.pendingResourceFocus = false
+					if len(msg.maps) > 0 {
+						m.focusResourceTable()
+					}
+				}
 			}
 		}
 
@@ -1560,6 +1574,14 @@ func (m *Model) clearResourceFilter() {
 	m.updateTableSizes()
 }
 
+// focusResourceTable moves keyboard control from the category pane to the
+// resource table on the right.
+func (m *Model) focusResourceTable() {
+	m.focus = focusResourceTable
+	m.vpcTable.Blur()
+	m.resourceTable.Focus()
+}
+
 func (m *Model) handleCategoryKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	key := msg.String()
 	switch key {
@@ -1571,9 +1593,7 @@ func (m *Model) handleCategoryKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.vpcTable.Focus()
 		return m, nil
 	case "tab", "right", "l":
-		m.focus = focusResourceTable
-		m.vpcTable.Blur()
-		m.resourceTable.Focus()
+		m.focusResourceTable()
 		return m, nil
 	case "up", "k":
 		m.activeSidebarIdx = nextSelectableIdx(m.sidebarItems, m.activeSidebarIdx, -1)
@@ -1594,15 +1614,20 @@ func (m *Model) handleCategoryKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.clearResourceFilter()
 		m.initResourceTable(m.activeResource)
 		m.updateTableSizes()
-		if _, cached := m.resourceMaps[m.activeResource]; cached {
+		if maps, cached := m.resourceMaps[m.activeResource]; cached {
 			m.rebuildResourceTable()
+			// Cached count is authoritative: jump only when the type has
+			// resources, otherwise keep control in the category pane (#298).
+			if len(maps) > 0 {
+				m.focusResourceTable()
+			}
+			return m, m.loadResources(m.activeResource)
 		}
-		// Move control to the resource table so the cursor lands on the first
-		// resource on the right (issue #248). initResourceTable just built a fresh
-		// table (cursor at the top), so the first row is selected as rows arrive.
-		m.focus = focusResourceTable
-		m.vpcTable.Blur()
-		m.resourceTable.Focus()
+		// Not cached yet: stay in the category pane while the load is in flight
+		// and decide whether to jump once the count is known (see the
+		// resourcesLoadedMsg handler). Moving the cursor onto the first row
+		// (issue #248) happens when rows arrive into the freshly built table.
+		m.pendingResourceFocus = true
 		return m, m.loadResources(m.activeResource)
 	}
 	return m, nil
