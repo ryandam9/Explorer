@@ -1,6 +1,7 @@
 package s3tui
 
 import (
+	"fmt"
 	"testing"
 
 	tea "github.com/charmbracelet/bubbletea"
@@ -112,5 +113,56 @@ func TestDetailsFetchedOnDemand(t *testing.T) {
 	m.Update(tea.KeyMsg{Type: tea.KeyUp})   // back to a.txt
 	if m.selectedDetails != det || m.detailsLoading {
 		t.Errorf("revisit should serve cache without fetching: details=%v loading=%v", m.selectedDetails, m.detailsLoading)
+	}
+}
+
+// Sorting reorders the list under a stationary cursor. Pressing "d" must still
+// fetch the row now under the cursor — and the result must be shown — rather
+// than being blocked or discarded because internal state lagged the sort.
+func TestDetailsFetchAfterSort(t *testing.T) {
+	m := newObjectListModel()
+	m.sortAsc = true // pressing R flips to descending so b.txt sorts to row 0
+	// Cursor on row 0. Reverse the sort so b.txt is now the row under the cursor.
+	m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("R")})
+	if got, _ := m.selectedObjectKey(); got != "logs/b.txt" {
+		t.Fatalf("after reverse-sort, row 0 should be b.txt, got %q", got)
+	}
+
+	// Pressing d must start a fetch for the now-selected object.
+	m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("d")})
+	if !m.detailsLoading {
+		t.Fatal("d after sort should start a fetch for the row under the cursor")
+	}
+
+	// And the arriving result must be shown for that object.
+	det := &ObjectDetails{ContentType: "application/json"}
+	m.Update(objectDetailsMsg{key: "logs/b.txt", details: det})
+	if m.selectedDetails != det {
+		t.Errorf("fetched details should be shown after a sort, got %v", m.selectedDetails)
+	}
+}
+
+// A failed metadata fetch (e.g. denied HeadObject) must surface the error and
+// stay retryable — not silently revert to the "press d" prompt.
+func TestDetailsFetchErrorIsSurfacedAndRetryable(t *testing.T) {
+	m := newObjectListModel() // cursor on a.txt
+
+	m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("d")})
+	m.Update(objectDetailsMsg{key: "logs/a.txt", err: fmt.Errorf("HeadObject: AccessDenied")})
+
+	if m.detailsErr == nil {
+		t.Fatal("a fetch error should be recorded so it can be shown")
+	}
+	if m.selectedDetails != nil {
+		t.Error("no details should be shown on error")
+	}
+	if _, cached := m.objectDetailsCache["logs/a.txt"]; cached {
+		t.Error("a failed fetch must not be cached (so d can retry)")
+	}
+
+	// Retry: d fetches again and clears the prior error.
+	m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("d")})
+	if !m.detailsLoading || m.detailsErr != nil {
+		t.Errorf("retry should re-fetch and clear the error: loading=%v err=%v", m.detailsLoading, m.detailsErr)
 	}
 }
