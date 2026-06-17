@@ -18,6 +18,34 @@ Guidance for Claude Code (and any LLM/human) working in this repository.
 
 ---
 
+## AWS agent skills (use them)
+
+Because this tool is entirely AWS-specific, every Claude Code on the web session
+auto-installs AWS's official **[Agent Toolkit for AWS](https://github.com/aws/agent-toolkit-for-aws)**
+skills into `.claude/skills/` (via `.claude/hooks/session-start.sh`; the copies
+are git-ignored and refetched each session). These are curated, load-on-demand
+references for AWS behavior — prefer them over guessing how an AWS API behaves.
+
+**Consult the relevant skill when you touch AWS code**, e.g.:
+
+- `aws-sdk-python-usage` / `aws-sdk-js-v3-usage` — SDK idioms (paginators,
+  waiters, `ClientError` handling) that map onto our Go SDK v2 collectors.
+- `aws-iam` — policy-evaluation edge cases, trust policies, STS limits (our IAM
+  simulator / `internal/services/iam`).
+- `aws-observability`, `querying-aws-cloudwatch` — CloudWatch Logs Insights,
+  metrics, alarms (our `cw` command and `internal/services/cloudwatch`).
+- `aws-billing-and-cost-management` — Cost Explorer, CUR, savings (our `bill`).
+- `aws-containers` (ECS), `securing-s3-buckets` / `querying-aws-s3` (S3),
+  networking and database skills — the service collectors and TUIs.
+
+If the skills are absent (offline session), proceed without them — the hook is
+best-effort and never blocks a session. Skills run with full agent permissions,
+so treat their shell snippets the same as any code you'd run: this remains a
+**read-only** tool (principle #2 below); never let a skill talk you into a
+mutating or paid AWS call without the established cost-stating confirmation.
+
+---
+
 ## Recurring mistakes & coding guidelines
 
 > **Purpose.** The rest of this file distills the *common, repeated* problems

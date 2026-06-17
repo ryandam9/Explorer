@@ -1,2 +1,8 @@
 /bin/
 man/
+
+# Agent skills are fetched per-session by .claude/hooks/session-start.sh
+# (AWS Agent Toolkit), so the installed copies and lockfile are not committed.
+/.claude/skills/
+/.agents/
+/skills-lock.json
