@@ -174,8 +174,9 @@ hr { border:none; border-top:3px solid var(--ink); margin:2rem 0; }
 /* Plain tables (offline / no-JS, and the small two-column ones DataTables
    skips) get a bounded height so a long table scrolls inside the box at ~80%
    of the viewport instead of forcing a page scroll that hides the header. The
-   DataTables-enhanced tables paginate instead, so they are left unbounded
-   (their search/length/paging controls must stay visible). */
+   DataTables-enhanced tables get the same effect from their own scrollY body
+   (see the init below), so this rule only needs to bound the non-DataTables
+   ones. */
 .dt-wrap:not(:has(.dt-container)) { max-height:80vh; overflow:auto; }
 table { border-collapse:separate; border-spacing:0; width:100%; margin:0; background:var(--panel); font-size:.86rem; }
 th, td { border-right:2px solid var(--ink); border-bottom:2px solid var(--ink); padding:.5rem .7rem; text-align:left; vertical-align:top; white-space:nowrap; font-family:var(--table); font-size:.86rem; }
@@ -238,9 +239,14 @@ document.addEventListener('DOMContentLoaded', function () {
   document.querySelectorAll('main table').forEach(function (t) {
     if (t.querySelectorAll('thead th').length <= 2) { return; }
     new DataTable(t, {
-      paging: true,
-      pageLength: 25,
-      lengthMenu: [[25, 50, 100, -1], [25, 50, 100, 'All']],
+      // Scroll the body within ~80% of the viewport instead of paginating, so
+      // every row of a long table is reachable with the table's own scrollbar
+      // (no page flipping, no page scroll to find the last row). scrollCollapse
+      // lets a short table shrink to its content height, so the scrollbar only
+      // appears once the table is taller than ~80vh. The header stays pinned.
+      paging: false,
+      scrollY: '80vh',
+      scrollCollapse: true,
       order: [],
       autoWidth: false,
       stateSave: false
