@@ -110,6 +110,16 @@ type objectPreviewMsg struct {
 	err     error
 }
 
+// parquetPreviewMsg carries the rows read from a Parquet object for the table
+// view: the schema column names, the row window, and the file's total row count.
+type parquetPreviewMsg struct {
+	key    string
+	header []string
+	rows   [][]string
+	total  int64
+	err    error
+}
+
 // archiveLoadedMsg carries a fetched-and-listed tar archive (data is the raw,
 // already-decompressed tar bytes used to extract members on demand).
 type archiveLoadedMsg struct {
@@ -217,6 +227,14 @@ type Model struct {
 	csvHeaderRow int        // 1-based header row; 0 = no header (synthesised column names)
 	csvDisplay   [][]string // rows currently in the table (parallel to its cursor)
 	csvNote      string     // transient confirmation shown in the CSV footer (e.g. after copy)
+
+	// Parquet preview reuses the full-screen table machinery above. When
+	// previewIsParquet is set, the schema is fixed (no delimiter/header
+	// controls), parquetFileRows is the file's total row count, and parquetRows
+	// is how many rows the next fetch should pull ("n" lets the user change it).
+	previewIsParquet bool
+	parquetFileRows  int64
+	parquetRows      int
 
 	// Single-row "record" view (Enter on a table row) — Col : value pairs.
 	csvRecordActive   bool
@@ -628,18 +646,45 @@ func (m *Model) fetchObjectPreview(key string) tea.Cmd {
 	}
 }
 
-// openPreview starts previewing an object. A tar archive opens the full-screen
-// member browser; a plain .gz is decompressed and shown as a CSV table or text
-// by its inner name; a CSV/TSV opens the table view; anything else opens the
-// text overlay. Content is fetched asynchronously with a spinner.
+// fetchParquetPreview reads the leading rows of a Parquet object for the table
+// view. The row count comes from m.parquetRows so the "n" prompt can re-fetch a
+// different window.
+func (m *Model) fetchParquetPreview(key string) tea.Cmd {
+	m.previewLoading = true
+	m.previewErr = nil
+	m.previewContent = ""
+	bucket := m.bucket
+	client := m.client
+	rows := m.parquetRows
+	return func() tea.Msg {
+		header, recs, total, err := client.GetObjectParquetPreview(bucket, key, rows)
+		return parquetPreviewMsg{key: key, header: header, rows: recs, total: total, err: err}
+	}
+}
+
+// openPreview starts previewing an object. A Parquet file reads its leading
+// rows into the full-screen table; a tar archive opens the full-screen member
+// browser; a plain .gz is decompressed and shown as a CSV table or text by its
+// inner name; a CSV/TSV opens the table view; anything else opens the text
+// overlay. Content is fetched asynchronously with a spinner.
 func (m *Model) openPreview(key string) tea.Cmd {
 	m.previewKey = key
 	m.previewFromArchive = false
 	m.showCSV = false
 	m.showPreview = false
 	m.showArchive = false
+	m.previewIsParquet = false
 
 	switch {
+	case looksLikeParquet(key):
+		// Parquet is binary with a schema; render it in the full-screen table
+		// view (reusing the CSV table) rather than the raw text overlay.
+		m.previewIsParquet = true
+		m.showCSV = true
+		if m.parquetRows <= 0 {
+			m.parquetRows = parquetDefaultRows
+		}
+		return m.fetchParquetPreview(key)
 	case looksLikeTar(key):
 		m.showArchive = true
 		m.archiveKey = key
@@ -1306,7 +1351,9 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if m.csvPrompt != csvPromptNone {
 				switch msg.String() {
 				case "enter":
-					m.applyCSVPrompt()
+					if cmd := m.applyCSVPrompt(); cmd != nil {
+						return m, cmd
+					}
 				case "esc":
 					m.csvPrompt = csvPromptNone
 					m.csvPromptErr = ""
@@ -1860,6 +1907,15 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.initPreviewViewport(msg.content, msg.err)
 			default:
 				m.initPreviewViewport(msg.content, msg.err)
+			}
+		}
+
+	case parquetPreviewMsg:
+		if msg.key == m.previewKey {
+			m.previewLoading = false
+			m.previewErr = msg.err
+			if msg.err == nil {
+				m.initParquet(msg.header, msg.rows, msg.total)
 			}
 		}
 
@@ -2746,7 +2802,7 @@ func (m *Model) helpView() string {
 			"",
 			"Objects",
 			"  /                  Jump to prefix",
-			"  p                  Preview object (CSV→table, .gz→decompress, .tar→browse members)",
+			"  p                  Preview object (CSV/Parquet→table, .gz→decompress, .tar→browse members)",
 			"  d                  Load extended metadata for the selected object (on demand)",
 			"  y                  Copy S3 URI to clipboard",
 			"  o                  Open bucket/object in the AWS console (copies the URL)",
