@@ -24,8 +24,9 @@ var emrCmd = &cobra.Command{
 	Long: `Start an interactive dashboard for Amazon EMR: clusters (with their release
 label, installed applications, size and state) and a per-cluster step history.
 Press Enter on a cluster to drill into its steps — state, duration and
-action-on-failure, with the failure reason inline on a failed step. Press d for
-the cluster detail (log URI, role, EC2 attributes).
+action-on-failure, with the failure reason inline on a failed step. Press d to
+describe the cluster in full: configuration, OS, compute layout (with memory,
+vCPU and EBS storage), running EC2 instances, services and VPC networking.
 
 Scope: --region pins a single region; --all-regions (or aws.allRegions in the
 config) sweeps every enabled region and adds a Region column; otherwise the
@@ -211,6 +212,42 @@ var emrAppsCmd = &cobra.Command{
 	},
 }
 
+var emrDescribeCmd = &cobra.Command{
+	Use:   "describe <cluster-id>",
+	Short: "Describe an EMR cluster (configuration, OS, compute, storage and networking)",
+	Long: `Describe one EMR cluster in full: its configuration and OS, its compute layout
+(instance groups/fleets with per-instance memory, vCPU and EBS storage), its
+running EC2 instances, the services installed on it, and its VPC networking —
+subnet, security-group rules, route table and network ACL.
+
+Every section is best-effort: a denied API call degrades that one section with a
+note and never aborts the describe. Networking and instance-type specs use
+read-only EC2 describe calls in addition to the EMR API.`,
+	Args: cobra.ExactArgs(1),
+	Example: `  aws_explorer emr describe j-1A2B3C4D5 -r us-east-1
+  aws_explorer emr describe j-1A2B3C4D5 -o json`,
+	RunE: func(cmd *cobra.Command, args []string) error {
+		format := strings.ToLower(outputFormat)
+		switch format {
+		case "", "table", "json", "ndjson":
+		default:
+			return fmt.Errorf("emr describe supports table (text), json or ndjson output, not %q", outputFormat)
+		}
+		ctx := context.Background()
+		SilenceScanLogs()
+		client, err := newEMRClient(ctx)
+		if err != nil {
+			return err
+		}
+		region := emrRegionForCommand(client)
+		desc, err := client.Describe(ctx, region, args[0])
+		if err != nil {
+			return fmt.Errorf("failed to describe cluster %q in %s: %w", args[0], region, err)
+		}
+		return emrtui.RenderDescribe(os.Stdout, desc, outputFormat)
+	},
+}
+
 var emrYarnCmd = &cobra.Command{
 	Use:   "yarn <cluster-id>",
 	Short: "List a cluster's live YARN applications (requires on-cluster access)",
@@ -385,6 +422,6 @@ func init() {
 
 	emrOozieCmd.Flags().BoolVar(&emrOozieCoordinators, "coordinators", false, "list coordinator jobs instead of workflows")
 
-	emrCmd.AddCommand(emrClustersCmd, emrStepsCmd, emrInstancesCmd, emrAppsCmd, emrYarnCmd, emrHBaseCmd, emrOozieCmd)
+	emrCmd.AddCommand(emrClustersCmd, emrStepsCmd, emrInstancesCmd, emrAppsCmd, emrDescribeCmd, emrYarnCmd, emrHBaseCmd, emrOozieCmd)
 	rootCmd.AddCommand(emrCmd)
 }

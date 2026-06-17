@@ -6,7 +6,9 @@ it (Spark, HBase, Hive, Oozie…), its size and how long ago it was created
 (**AGE**). Press **Enter** (or `s`) on a
 cluster to drill into its **step history** — state, duration and
 action-on-failure, with the failure reason inline on a failed step. Press `d`
-for the cluster detail (log URI, role, EC2 attributes).
+to **describe** the cluster in full — configuration, OS, compute layout (with
+per-instance memory, vCPU and EBS storage), running EC2 instances, installed
+services and VPC networking (subnet, security-group rules, routes, network ACL).
 
 ```bash
 ./bin/aws_explorer emr [--region us-east-1 | --all-regions] [--theme <name>]
@@ -37,7 +39,7 @@ Step history (Enter on a cluster):
 |-----|--------|
 | `↑/↓` (`j/k`) | Move selection |
 | `Enter` / `s` | Open the selected cluster's step history |
-| `d` | Show the selected cluster's detail (release, log URI, role, EC2 attributes); the overlay scrolls (`↑/↓`) when taller than the screen |
+| `d` | **Describe** the selected cluster — a scrollable, sectioned report (overview, configuration & OS, services, compute/memory/storage, EC2 instances, VPC networking, configurations); the overlay scrolls (`↑/↓`) when taller than the screen |
 | `f` | **Findings** — deterministic posture/cost checks (idle/long-running clusters, no log destination or security config, terminated-with-errors) over the loaded clusters; `y` copies the suggested fix |
 | `L` | Open the cluster's (or selected step's) logs in the S3 browser |
 | `u` | Open a persistent application UI (Spark History / YARN Timeline / Tez) |
@@ -59,6 +61,38 @@ terminated tail neither dominates the view nor costs a `DescribeCluster` each;
 press `t` to include it (the status bar shows `active` / `all states`). The CLI
 twin honours this too — `emr clusters --all-states`, or naming states with
 `--state`, fetches the full set.
+
+### Describe a cluster (`d`)
+
+`d` opens a comprehensive, scrollable description of the selected cluster,
+gathered on demand (so it is loaded once, not on every cursor move):
+
+- **Overview** — name, ID, state (and the state-change reason), region, creation
+  time, primary-node DNS, ARN.
+- **Configuration & OS** — release label, operating system (Amazon Linux, with
+  the OS release label and any custom AMI), processor architecture,
+  auto-terminate, termination protection, scale-down behaviour, EBS root-volume
+  size, log URI, security configuration, service role, instance profile and EC2
+  key.
+- **Services** — the installed applications and their versions.
+- **Compute, memory & storage** — each instance group (or fleet): node role,
+  instance type and market, running/requested counts, per-instance **memory**
+  and **vCPU** (resolved from EC2), and the attached **EBS** volumes (type, size,
+  IOPS).
+- **EC2 instances** — the cluster's running instances (EC2 id, type, state,
+  private DNS).
+- **Networking** — the cluster's **VPC**, subnet (CIDR, AZ, public-IP-on-launch),
+  the **security groups** EMR attached (managed primary/core-task, service
+  access, and any additional) with their **inbound/outbound rules**, the
+  subnet's effective **route table**, and its **network ACL** entries.
+- **Configurations** — the cluster's configuration classifications and their
+  properties (`spark-defaults`, `core-site`, …).
+
+Every section is **best-effort**: a denied or throttled API call degrades just
+that section and is recorded under a **Notes** block at the bottom, so a gap
+reads as "couldn't fetch" rather than "none". Memory/vCPU come from
+`ec2:DescribeInstanceTypes`; the networking section uses read-only `ec2:Describe*`
+calls in addition to the EMR API.
 
 The **Findings** panel reuses the same deterministic checks as `audit`
 (`EMR-COST-*`, `EMR-LOG-001`, `EMR-SEC-001`, `EMR-STEP-002`) over the data
@@ -137,6 +171,7 @@ aws_explorer emr clusters       [--all-regions] [--state RUNNING,WAITING] [-o ta
 aws_explorer emr steps <id>     [-r us-east-1] [--limit 50] [--status FAILED] [-o …]
 aws_explorer emr instances <id> [-r us-east-1] [--limit N] [-o …]
 aws_explorer emr apps <id>      [-r us-east-1] [-o …]
+aws_explorer emr describe <id>  [-r us-east-1] [-o table|json|ndjson]   # full describe (config, OS, compute, storage, networking)
 aws_explorer emr yarn <id>      [-r us-east-1] [-o …]   # live YARN apps (on-cluster)
 aws_explorer emr hbase <id>     [-r us-east-1] [-o …]   # HBase tables (on-cluster)
 aws_explorer emr oozie <id>     [-r us-east-1] [--coordinators] [-o …]   # Oozie jobs (on-cluster)
@@ -159,9 +194,13 @@ region in scope.
 
 **IAM permissions.** Read-only:
 `elasticmapreduce:{ListClusters,DescribeCluster,ListSteps,ListInstances}`, plus
+`elasticmapreduce:{ListInstanceGroups,ListInstanceFleets}` and
+`ec2:{DescribeInstanceTypes,DescribeSubnets,DescribeSecurityGroups,DescribeRouteTables,DescribeNetworkAcls}`
+for the `d` describe view's compute/storage/memory and networking sections, plus
 `elasticmapreduce:{CreatePersistentAppUI,DescribePersistentAppUI,GetPersistentAppUIPresignedURL}`
 for the `u` application-UI links, and the [S3 browser](s3.md)'s `s3:*`
-read actions for the `L` log jump. Per-region or per-cluster denials degrade
+read actions for the `L` log jump. The describe view's EC2/instance-group calls
+are best-effort — a denial degrades just that section with a note. Per-region or per-cluster denials degrade
 that part of the dashboard with a logged note and never abort the session. The
 `y` (YARN), `h` (HBase) and `z` (Oozie) browsers use no IAM — they talk to the
 on-cluster ResourceManager / HBase REST server / Oozie server — but need

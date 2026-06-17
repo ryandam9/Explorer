@@ -118,9 +118,12 @@ type Inventory struct {
 	EnrichFailures int
 }
 
-// Client holds one EMR client per region.
+// Client holds one EMR (and one EC2) client per region. The EC2 clients back
+// the cluster-describe view's networking section (subnets, security groups,
+// route tables, network ACLs) and the instance-type spec lookup (vCPU/memory).
 type Client struct {
 	clients map[string]*emr.Client
+	ec2s    map[string]*awsec2.Client
 	regions []string
 }
 
@@ -146,12 +149,14 @@ func NewClient(ctx context.Context, awsCfg *config.AWSConfig, regions []string, 
 	sort.Strings(regions)
 
 	clients := make(map[string]*emr.Client, len(regions))
+	ec2s := make(map[string]*awsec2.Client, len(regions))
 	for _, r := range regions {
 		rCfg := base.Copy()
 		rCfg.Region = r
 		clients[r] = emr.NewFromConfig(rCfg)
+		ec2s[r] = awsec2.NewFromConfig(rCfg)
 	}
-	return &Client{clients: clients, regions: regions}, nil
+	return &Client{clients: clients, ec2s: ec2s, regions: regions}, nil
 }
 
 // Regions returns the regions this client queries, sorted.
@@ -162,6 +167,18 @@ func (c *Client) clientFor(region string) *emr.Client {
 		return cl
 	}
 	for _, cl := range c.clients {
+		return cl
+	}
+	return nil
+}
+
+// ec2For returns the EC2 client for region (any region's client as a fallback),
+// or nil when none was built.
+func (c *Client) ec2For(region string) *awsec2.Client {
+	if cl, ok := c.ec2s[region]; ok {
+		return cl
+	}
+	for _, cl := range c.ec2s {
 		return cl
 	}
 	return nil

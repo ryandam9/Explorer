@@ -460,6 +460,76 @@ func RenderOozieCoordinators(w io.Writer, coords []OozieCoordinator, format stri
 	}
 }
 
+// --- Describe --------------------------------------------------------------
+
+// describeJSON is the machine-readable shape of a cluster description. It mirrors
+// ClusterDescription but with stable, lower-cased JSON keys for scripting.
+type describeJSON struct {
+	ID                 string                 `json:"id"`
+	Name               string                 `json:"name"`
+	Region             string                 `json:"region"`
+	ARN                string                 `json:"arn,omitempty"`
+	State              string                 `json:"state,omitempty"`
+	ReleaseLabel       string                 `json:"releaseLabel,omitempty"`
+	OSReleaseLabel     string                 `json:"osReleaseLabel,omitempty"`
+	OperatingSystem    string                 `json:"operatingSystem,omitempty"`
+	CustomAmiID        string                 `json:"customAmiId,omitempty"`
+	Architecture       string                 `json:"architecture,omitempty"`
+	EbsRootVolumeGiB   int32                  `json:"ebsRootVolumeGiB,omitempty"`
+	InstanceCollection string                 `json:"instanceCollectionType,omitempty"`
+	AutoTerminate      bool                   `json:"autoTerminate"`
+	TerminationProt    *bool                  `json:"terminationProtected,omitempty"`
+	ScaleDownBehavior  string                 `json:"scaleDownBehavior,omitempty"`
+	LogURI             string                 `json:"logUri,omitempty"`
+	ServiceRole        string                 `json:"serviceRole,omitempty"`
+	SecurityConfig     string                 `json:"securityConfiguration,omitempty"`
+	InstanceProfile    string                 `json:"iamInstanceProfile,omitempty"`
+	Applications       []AppInfo              `json:"applications,omitempty"`
+	Groups             []NodeGroup            `json:"instanceGroups,omitempty"`
+	Instances          []Instance             `json:"instances,omitempty"`
+	Network            NetworkInfo            `json:"network"`
+	Configurations     []ConfigClassification `json:"configurations,omitempty"`
+	Notes              []string               `json:"notes,omitempty"`
+}
+
+func describeToJSON(d ClusterDescription) describeJSON {
+	return describeJSON{
+		ID: d.Cluster.ID, Name: d.Cluster.Name, Region: d.Cluster.Region, ARN: d.Cluster.ARN,
+		State: d.Cluster.State, ReleaseLabel: d.ReleaseLabel, OSReleaseLabel: d.OSReleaseLabel,
+		OperatingSystem: osLabel(d), CustomAmiID: d.CustomAmiID, Architecture: architectureLabel(d.Groups),
+		EbsRootVolumeGiB: d.EbsRootVolumeGiB, InstanceCollection: d.InstanceCollection,
+		AutoTerminate: d.Cluster.AutoTerminate, TerminationProt: d.TerminationProt,
+		ScaleDownBehavior: d.ScaleDownBehavior, LogURI: d.Cluster.LogURI, ServiceRole: d.Cluster.ServiceRole,
+		SecurityConfig: d.Cluster.SecurityConfig, InstanceProfile: d.Cluster.InstanceProfile,
+		Applications: d.Applications, Groups: d.Groups, Instances: d.Instances, Network: d.Network,
+		Configurations: d.Configurations, Notes: d.Notes,
+	}
+}
+
+// RenderDescribe writes a full cluster description. The default (text) format is
+// the same sectioned report as the dashboard's d overlay, minus colour; json
+// emits the machine-readable shape.
+func RenderDescribe(w io.Writer, d ClusterDescription, format string) error {
+	switch strings.ToLower(format) {
+	case "json":
+		return writeJSON(w, describeToJSON(d))
+	case "ndjson":
+		return json.NewEncoder(w).Encode(describeToJSON(d))
+	default:
+		var b strings.Builder
+		for i, s := range d.sections() {
+			if i > 0 {
+				b.WriteString("\n\n")
+			}
+			b.WriteString(s.Title + "\n")
+			b.WriteString(s.Body)
+		}
+		b.WriteString("\n")
+		_, err := io.WriteString(w, b.String())
+		return err
+	}
+}
+
 // FilterStepsByStatus returns only the steps whose state matches status
 // (case-insensitive); an empty status returns all steps.
 func FilterStepsByStatus(steps []Step, status string) []Step {

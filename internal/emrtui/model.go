@@ -81,11 +81,17 @@ type m struct {
 	stepsErr     error
 	stepsTbl     table.Model
 
-	// Cluster-detail overlay (d on a cluster). Scrollable: the detail can be
-	// taller than the screen (long log URIs, state reasons, EC2 attributes).
+	// Cluster-detail / describe overlay (d on a cluster). Scrollable: the
+	// description (networking, instance groups, storage, configurations) is
+	// routinely taller than the screen. It is loaded asynchronously because it
+	// makes extra AWS calls (instance groups, instance-type specs, VPC
+	// networking) beyond the inventory enrichment.
 	detailActive  bool
 	detailCluster Cluster
 	detailVP      viewport.Model
+	descLoading   bool
+	descErr       error
+	desc          ClusterDescription
 
 	// Persistent application-UI picker (u on a cluster).
 	appUIActive  bool
@@ -160,6 +166,14 @@ type enrichMsg struct {
 type stepsMsg struct {
 	cluster Cluster
 	steps   []Step
+	err     error
+}
+
+// descMsg delivers a cluster's full description (or the error that aborted it)
+// for the detail overlay.
+type descMsg struct {
+	cluster Cluster
+	desc    ClusterDescription
 	err     error
 }
 
@@ -357,6 +371,18 @@ func (mm *m) loadStepsCmd(cl Cluster) tea.Cmd {
 	}
 }
 
+// loadDescribeCmd fetches a cluster's full description (instance groups,
+// instance-type specs, EC2 instances and VPC networking) for the detail overlay.
+func (mm *m) loadDescribeCmd(cl Cluster) tea.Cmd {
+	return func() tea.Msg {
+		slog.Info("Describing EMR cluster", "cluster", cl.ID, "region", cl.Region)
+		ctx, cancel := context.WithTimeout(mm.ctx, drillTimeout)
+		defer cancel()
+		desc, err := mm.client.Describe(ctx, cl.Region, cl.ID)
+		return descMsg{cluster: cl, desc: desc, err: err}
+	}
+}
+
 func (mm *m) loadYarnCmd(cl Cluster) tea.Cmd {
 	return func() tea.Msg {
 		if mm.dialer == nil {
@@ -485,6 +511,16 @@ func (mm *m) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		mm.stepsErr = msg.err
 		mm.steps = msg.steps
 		mm.setRows(&mm.stepsTbl, len(msg.steps), func(i int) table.Row { return stepRow(msg.steps[i]) })
+
+	case descMsg:
+		// Ignore a stale describe if the overlay was closed or moved to another
+		// cluster while this one was loading.
+		if mm.detailActive && mm.detailCluster.ID == msg.cluster.ID {
+			mm.descLoading = false
+			mm.descErr = msg.err
+			mm.desc = msg.desc
+			mm.detailVP.GotoTop()
+		}
 
 	case appUIMsg:
 		mm.appUILoading = false
@@ -863,7 +899,7 @@ func (mm *m) handleKey(msg tea.KeyMsg) []tea.Cmd {
 		}
 	case "d":
 		if cl, ok := mm.selectedCluster(); ok {
-			mm.openDetail(cl)
+			mm.openDetail(cl, &cmds)
 		}
 	case "L":
 		if cl, ok := mm.selectedCluster(); ok {
@@ -963,12 +999,16 @@ func (mm *m) applyEnrichment(msg enrichMsg) {
 	mm.rebuild()
 }
 
-// openDetail opens the scrollable cluster-detail overlay for cl, resetting the
-// scroll to the top (the body is sized and filled at render time).
-func (mm *m) openDetail(cl Cluster) {
+// openDetail opens the scrollable cluster-describe overlay for cl and kicks off
+// the asynchronous describe load (the body is sized and filled at render time).
+func (mm *m) openDetail(cl Cluster, cmds *[]tea.Cmd) {
 	mm.detailActive = true
 	mm.detailCluster = cl
+	mm.desc = ClusterDescription{}
+	mm.descErr = nil
+	mm.descLoading = true
 	mm.detailVP.GotoTop()
+	*cmds = append(*cmds, mm.loadDescribeCmd(cl), mm.spinner.Tick)
 }
 
 // layoutDetailVP sizes the detail viewport to the current terminal, preserving

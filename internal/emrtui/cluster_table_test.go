@@ -229,18 +229,36 @@ func TestEMREnrichmentGapWarningRenders(t *testing.T) {
 	}
 }
 
-// TestEMRDetailOverlayScrollsAndCloses verifies the cluster-detail overlay is
-// scrollable when its content is taller than the viewport, and closes on Esc.
+// TestEMRDetailOverlayScrollsAndCloses verifies the cluster-describe overlay
+// shows a loading state, renders the loaded description (scrollable when taller
+// than the viewport), and closes on Esc.
 func TestEMRDetailOverlayScrollsAndCloses(t *testing.T) {
 	mm := newClusterTestModel(100, 16) // short height → detail taller than the viewport
 	cl, _ := mm.selectedCluster()
 	mm.handleKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("d")})
 	if !mm.detailActive {
-		t.Fatal("d should open the detail overlay")
+		t.Fatal("d should open the describe overlay")
 	}
+	if !mm.descLoading {
+		t.Error("d should start the asynchronous describe load")
+	}
+	if out := mm.View(); !strings.Contains(out, "Describing") {
+		t.Errorf("overlay should show a loading state before the describe arrives:\n%s", out)
+	}
+
+	// Deliver the loaded description for the selected cluster.
+	mm.Update(descMsg{cluster: cl, desc: richTestDescription(cl)})
+	if mm.descLoading {
+		t.Error("descMsg should clear the loading state")
+	}
+
 	out := mm.View() // sizes and fills the viewport
-	if !strings.Contains(out, "Cluster — "+cl.Name) {
-		t.Errorf("detail overlay missing title:\n%s", out)
+	if !strings.Contains(out, "Describe — "+cl.Name) {
+		t.Errorf("describe overlay missing title:\n%s", out)
+	}
+	// The networking section is below the fold; assert it is in the full body.
+	if body := mm.detailBody(); !strings.Contains(body, "Networking") || !strings.Contains(body, "sg-master") {
+		t.Errorf("describe body missing the networking section:\n%s", body)
 	}
 	if mm.detailVP.TotalLineCount() <= mm.detailVP.Height {
 		t.Fatalf("test needs content taller than the viewport (lines=%d height=%d)",
@@ -257,7 +275,45 @@ func TestEMRDetailOverlayScrollsAndCloses(t *testing.T) {
 	}
 	mm.handleKey(tea.KeyMsg{Type: tea.KeyEsc})
 	if mm.detailActive {
-		t.Error("Esc should close the detail overlay")
+		t.Error("Esc should close the describe overlay")
+	}
+}
+
+// richTestDescription returns a populated ClusterDescription for cl, with enough
+// content (multiple groups, instances and full networking) to exceed a short
+// viewport.
+func richTestDescription(cl Cluster) ClusterDescription {
+	yes := true
+	return ClusterDescription{
+		Cluster:          cl,
+		ReleaseLabel:     "emr-7.1.0",
+		OSReleaseLabel:   "2.0.20240131.0",
+		EbsRootVolumeGiB: 50,
+		TerminationProt:  &yes,
+		Applications:     []AppInfo{{Name: "Spark", Version: "3.5.0"}, {Name: "Hive", Version: "3.1.3"}},
+		Groups: []NodeGroup{
+			{Role: "MASTER", InstanceType: "m5.xlarge", Market: "ON_DEMAND", Requested: 1, Running: 1,
+				VCPUs: 4, MemoryMiB: 16384, Architecture: "x86_64", SpecsKnown: true,
+				EBSVolumes: []EBSVolume{{Device: "/dev/sdb", VolumeType: "gp3", SizeGiB: 64}}},
+			{Role: "CORE", InstanceType: "r5.2xlarge", Market: "SPOT", Requested: 4, Running: 3,
+				VCPUs: 8, MemoryMiB: 65536, Architecture: "x86_64", SpecsKnown: true,
+				EBSVolumes: []EBSVolume{{Device: "/dev/sdb", VolumeType: "gp3", SizeGiB: 256, Iops: 3000}}},
+		},
+		Instances: []Instance{
+			{EC2ID: "i-0aaa", Type: "m5.xlarge", State: "RUNNING", PrivateDNS: "ip-10-0-1-10.ec2.internal"},
+			{EC2ID: "i-0bbb", Type: "r5.2xlarge", State: "RUNNING", PrivateDNS: "ip-10-0-1-11.ec2.internal"},
+		},
+		Network: NetworkInfo{
+			SubnetID: "subnet-123", VPCID: "vpc-abc", CIDR: "10.0.1.0/24", AZ: "us-east-1a",
+			MapPublicIP: &yes, SubnetKnown: true,
+			SecurityGroups: []SecurityGroupRef{
+				{ID: "sg-master", Name: "ElasticMapReduce-master", Kind: "EMR-managed (primary)", Known: true,
+					Rules: []SGRule{{Direction: "inbound", Protocol: "tcp", Ports: "8088", Source: "10.0.0.0/16"}}},
+			},
+			RouteTableID: "rtb-1", Routes: []RouteEntry{{Destination: "0.0.0.0/0", Target: "igw-1", State: "active"}},
+			NaclID:      "acl-1",
+			NaclEntries: []NaclEntry{{Direction: "inbound", RuleNumber: 100, Protocol: "all", Ports: "all", CIDR: "0.0.0.0/0", Action: "allow"}},
+		},
 	}
 }
 
