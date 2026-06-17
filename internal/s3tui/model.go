@@ -208,6 +208,7 @@ type Model struct {
 	// page window; "L" continues from it.
 	objectsNextToken  *string
 	detailsLoading    bool
+	detailsErr        error // last on-demand metadata fetch error for the selection
 	showHelp          bool
 	showAbout         bool
 	showPreview       bool
@@ -1200,6 +1201,26 @@ func (m *Model) selectedObjectKey() (string, bool) {
 	return m.prefix + r["name"], true
 }
 
+// syncSelectionDetails points lastSelectedKey/selectedDetails at the row under
+// the cursor, serving any already-fetched metadata from the cache. Call it
+// whenever the selection or the row ordering changes (cursor move, sort, load)
+// so the details panel and the "d" fetch always track the visible row — never a
+// stale one. Without this, sorting reorders the list under a stationary cursor,
+// leaving the panel (and the on-demand fetch's result-matching) pointing at the
+// object that *used* to be there.
+func (m *Model) syncSelectionDetails() {
+	// A pending error belongs to the row that was selected when it happened.
+	m.detailsErr = nil
+	key, ok := m.selectedObjectKey()
+	if !ok {
+		m.lastSelectedKey = ""
+		m.selectedDetails = nil
+		return
+	}
+	m.lastSelectedKey = key
+	m.selectedDetails = m.objectDetailsCache[key]
+}
+
 // findNames returns the row names for the active list, parallel to the active
 // table's cursor index: bucket name for the bucket list, object/folder name for
 // the object list. Returns nil when no list is focused.
@@ -1765,9 +1786,12 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			} else if m.state == stateObjectList && m.focus == focusObjects {
 				// On-demand object metadata: fetch the selected file's extended
 				// details (content-type, encryption, tags, ACL…) only when asked.
-				// Return so "d" isn't also forwarded to the table (its keymap binds
-				// d to half-page-down).
-				if key, ok := m.selectedObjectKey(); ok && m.selectedDetails == nil && !m.detailsLoading {
+				// Gate on the cache for the *current* key (not m.selectedDetails,
+				// which can lag the cursor after a sort) so "d" always fetches an
+				// uncached object. Return so "d" isn't also forwarded to the table
+				// (its keymap binds d to half-page-down).
+				if key, ok := m.selectedObjectKey(); ok && m.objectDetailsCache[key] == nil && !m.detailsLoading {
+					m.detailsErr = nil // clear any prior failure before retrying
 					cmds = append(cmds, m.fetchObjectDetails(key))
 				}
 				return m, tea.Batch(cmds...)
@@ -1800,6 +1824,9 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.sortObjects(m.objectMaps)
 				m.updateObjectColumns()
 				m.objectTable.SetRows(m.buildObjectRows())
+				// The cursor stays put but the row under it changed; re-point the
+				// details panel at whatever is now selected.
+				m.syncSelectionDetails()
 				return m, nil
 			}
 
@@ -1809,6 +1836,9 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.sortObjects(m.objectMaps)
 				m.updateObjectColumns()
 				m.objectTable.SetRows(m.buildObjectRows())
+				// The cursor stays put but the row under it changed; re-point the
+				// details panel at whatever is now selected.
+				m.syncSelectionDetails()
 				return m, nil
 			}
 
@@ -2037,23 +2067,28 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.updateObjectColumns()
 		m.objectTable.SetRows(m.buildObjectRows())
 
-		m.lastSelectedKey = ""
-		m.selectedDetails = nil
-
-		if len(m.objectMaps) > 0 && m.objectMaps[0]["type"] != "DIR" {
-			// On-demand: show cached metadata if we have it, but don't fetch on
-			// load. The user requests it with "d".
-			m.lastSelectedKey = m.prefix + m.objectMaps[0]["name"]
-			m.selectedDetails = m.objectDetailsCache[m.lastSelectedKey]
-		}
+		// Point the details panel at whatever row the cursor lands on, serving
+		// cached metadata if present. On-demand: nothing is fetched on load.
+		m.syncSelectionDetails()
 
 	case objectDetailsMsg:
 		m.detailsLoading = false
 		if msg.err == nil && msg.details != nil {
 			m.objectDetailsCache[msg.key] = msg.details // serve revisits from cache
 		}
-		if msg.key == m.lastSelectedKey && msg.err == nil {
-			m.selectedDetails = msg.details
+		// Show the result only if the user is still on that object. Compare against
+		// the live selection (re-derived from the cursor) rather than a stored key
+		// so a sort or scroll between request and response doesn't drop the result.
+		if cur, ok := m.selectedObjectKey(); ok && cur == msg.key {
+			if msg.err != nil {
+				// Surface the failure instead of silently reverting to the "press d"
+				// prompt — otherwise a denied/timed-out HeadObject looks like "d did
+				// nothing". The error isn't cached, so "d" retries it.
+				m.detailsErr = msg.err
+			} else {
+				m.detailsErr = nil
+				m.selectedDetails = msg.details
+			}
 		}
 
 	case bucketDetailsMsg:
@@ -2174,20 +2209,10 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		cmds = append(cmds, cmd)
 
 		if m.focus == focusObjects && prevRow != m.objectTable.Cursor() {
-			idx := m.objectTable.Cursor()
-			if idx >= 0 && idx < len(m.objectMaps) {
-				r := m.objectMaps[idx]
-				if r["type"] != "DIR" {
-					m.lastSelectedKey = m.prefix + r["name"]
-					// On-demand: don't fetch metadata while scrolling. Serve it from
-					// the cache if this key was fetched before; otherwise leave it for
-					// the user to request with "d".
-					m.selectedDetails = m.objectDetailsCache[m.lastSelectedKey]
-				} else {
-					m.lastSelectedKey = ""
-					m.selectedDetails = nil
-				}
-			}
+			// On-demand: don't fetch metadata while scrolling. Serve it from the
+			// cache if this key was fetched before; otherwise leave it for the user
+			// to request with "d".
+			m.syncSelectionDetails()
 		}
 	}
 
@@ -2676,6 +2701,9 @@ func (m *Model) objectListView() string {
 		} else {
 			if m.detailsLoading {
 				metaText = m.loadingLine("Loading object metadata…")
+			} else if m.detailsErr != nil {
+				metaText = ui.ErrorStyle().Render("Metadata unavailable: "+m.detailsErr.Error()) +
+					"\n" + ui.MutedStyle().Render("Press d to retry.")
 			} else if m.selectedDetails == nil {
 				metaText = ui.MutedStyle().Render("Press d to load metadata (content-type, encryption, tags, ACL…)")
 			} else {
