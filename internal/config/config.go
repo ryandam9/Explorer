@@ -167,6 +167,11 @@ type AppConfig struct {
 	// A leading "~" is expanded to the user's home directory. Empty means the
 	// current working directory ("."). The directory is created if missing.
 	DownloadDir string `mapstructure:"downloadDir"`
+	// PreviewMaxSize caps how much of a text/XML/JSON object the S3 browser reads
+	// when previewing it with "p". Accepts a human-readable size such as "10MB",
+	// "512KB", or a plain byte count; empty uses the built-in default. The value
+	// is clamped to a sane range — previews are always bounded.
+	PreviewMaxSize string `mapstructure:"previewMaxSize"`
 }
 
 type AWSConfig struct {

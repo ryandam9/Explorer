@@ -7,6 +7,7 @@ import (
 	"errors"
 	"io"
 	"path"
+	"strconv"
 	"strings"
 )
 
@@ -14,13 +15,71 @@ import (
 // bounded so a multi-gigabyte log archive can't exhaust memory; the UI shows a
 // "truncated" note when a cap is hit.
 const (
-	textPreviewCap     = 10 << 20 // bytes fetched for a plain text/XML/JSON preview
+	textPreviewCap     = 10 << 20 // default bytes fetched for a text/XML/JSON preview
 	gzCompressedCap    = 4 << 20  // bytes fetched for a plain .gz preview
 	gzDecompressedCap  = 4 << 20  // decompressed bytes shown for a plain .gz
 	tarCompressedCap   = 32 << 20 // bytes fetched for a .tar(.gz) archive
 	tarDecompressedCap = 96 << 20
 	memberPreviewCap   = 4 << 20 // decompressed bytes shown for one archive member
 )
+
+// Bounds for a user-configured text preview cap: a tiny window is useless and
+// an unbounded one defeats the point of a bounded preview (CLAUDE.md §14/§5).
+const (
+	minTextPreviewCap = 4 << 10  // 4 KB floor
+	maxTextPreviewCap = 64 << 20 // 64 MB ceiling
+)
+
+// parsePreviewCap turns a human-readable size ("10MB", "512KB", "1048576") into
+// a byte count for the text preview window. An empty/blank or unparseable value
+// falls back to the built-in default; the result is clamped to [min,max] so the
+// preview stays bounded no matter what the config says.
+func parsePreviewCap(s string) int64 {
+	n, ok := parseByteSize(s)
+	if !ok {
+		return textPreviewCap
+	}
+	if n < minTextPreviewCap {
+		return minTextPreviewCap
+	}
+	if n > maxTextPreviewCap {
+		return maxTextPreviewCap
+	}
+	return n
+}
+
+// parseByteSize parses a size like "10MB", "512 KB", "1.5mb", or a bare byte
+// count ("1048576"). It accepts B/KB/MB/GB (decimal, 1 KB = 1024 B to match how
+// object sizes are shown elsewhere). ok is false for empty or malformed input.
+func parseByteSize(s string) (int64, bool) {
+	s = strings.TrimSpace(s)
+	if s == "" {
+		return 0, false
+	}
+	upper := strings.ToUpper(s)
+	mult := int64(1)
+	switch {
+	case strings.HasSuffix(upper, "GB"):
+		mult, upper = 1<<30, strings.TrimSpace(strings.TrimSuffix(upper, "GB"))
+	case strings.HasSuffix(upper, "MB"):
+		mult, upper = 1<<20, strings.TrimSpace(strings.TrimSuffix(upper, "MB"))
+	case strings.HasSuffix(upper, "KB"):
+		mult, upper = 1<<10, strings.TrimSpace(strings.TrimSuffix(upper, "KB"))
+	case strings.HasSuffix(upper, "B"):
+		upper = strings.TrimSpace(strings.TrimSuffix(upper, "B"))
+	}
+	if upper == "" {
+		return 0, false
+	}
+	// Allow a fractional value with a unit, e.g. "1.5MB".
+	if f, err := strconv.ParseFloat(upper, 64); err == nil {
+		if f <= 0 {
+			return 0, false
+		}
+		return int64(f * float64(mult)), true
+	}
+	return 0, false
+}
 
 // looksLikeGzip reports whether key is a plain gzip stream (a single compressed
 // file), as opposed to a gzipped tar archive.

@@ -213,7 +213,8 @@ type Model struct {
 	showPreview       bool
 	previewKey        string
 	previewContent    string
-	previewTruncated  bool // the object was larger than the preview window
+	previewMaxBytes   int64 // text/XML preview window, from config (App.PreviewMaxSize)
+	previewTruncated  bool  // the object was larger than the preview window
 	previewLoading    bool
 	previewErr        error
 	previewNotTabular bool // user pressed "t" but the text isn't table-shaped
@@ -385,6 +386,10 @@ func NewModel(ctx context.Context, awsCfg *config.AWSConfig, region, bucket, pre
 		allowDelete:        allowDelete,
 		configPath:         configPath,
 		cfg:                cfg,
+	}
+	m.previewMaxBytes = textPreviewCap
+	if cfg != nil {
+		m.previewMaxBytes = parsePreviewCap(cfg.App.PreviewMaxSize)
 	}
 	m.settings = ui.NewSettingsModel(0, 0, configPath, cfg)
 
@@ -660,8 +665,12 @@ func (m *Model) fetchObjectPreview(key string) tea.Cmd {
 	m.previewErr = nil
 	m.previewContent = ""
 	bucket := m.bucket
+	maxBytes := m.previewMaxBytes
+	if maxBytes <= 0 {
+		maxBytes = textPreviewCap
+	}
 	return func() tea.Msg {
-		content, truncated, err := m.client.GetObjectPreview(bucket, key, textPreviewCap)
+		content, truncated, err := m.client.GetObjectPreview(bucket, key, maxBytes)
 		return objectPreviewMsg{key: key, content: content, truncated: truncated, err: err}
 	}
 }
