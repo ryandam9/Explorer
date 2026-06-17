@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="color-scheme" content="dark">
-<title>Audit &amp; Bill TUIs · aws_explorer documentation</title>
+<title>aws_explorer glue crawlers · aws_explorer documentation</title>
 <style>
 :root {
   --bg: #0d110f;
@@ -420,7 +420,7 @@ footer .birds { color:var(--accent); }
 <a class="nav" href="guide-vpc.html">VPC explorer TUI</a>
 <a class="nav" href="guide-s3.html">S3 browser TUI</a>
 <a class="nav" href="guide-cloudwatch.html">CloudWatch Logs TUI</a>
-<a class="nav active" href="guide-reports.html" aria-current="page">Audit &amp; Bill TUIs</a>
+<a class="nav" href="guide-reports.html">Audit &amp; Bill TUIs</a>
 <a class="nav" href="guide-shortcuts.html">Keyboard shortcut cheat sheet</a>
 <h3>Command reference</h3>
 <a class="nav" href="cli.html">aws_explorer</a>
@@ -444,7 +444,7 @@ footer .birds { color:var(--accent); }
 <a class="nav" href="expiring.html">aws_explorer expiring</a>
 <a class="nav" href="find.html">aws_explorer find</a>
 <a class="nav" href="glue.html">aws_explorer glue</a>
-<a class="nav" href="glue_crawlers.html">aws_explorer glue crawlers</a>
+<a class="nav active" href="glue_crawlers.html" aria-current="page">aws_explorer glue crawlers</a>
 <a class="nav" href="glue_jobs.html">aws_explorer glue jobs</a>
 <a class="nav" href="glue_runs.html">aws_explorer glue runs</a>
 <a class="nav" href="glue_triggers.html">aws_explorer glue triggers</a>
@@ -463,154 +463,83 @@ footer .birds { color:var(--accent); }
 </nav>
 <main>
 <header class="page-header">
-<p class="eyebrow">Guides</p>
-<h1>Audit &amp; Bill TUIs</h1>
+<p class="eyebrow">Command reference</p>
+<h1>aws_explorer glue crawlers</h1>
 <div class="rail" aria-hidden="true"></div>
 </header>
 <div class="content">
-<p>Two report commands have a <code>--tui</code> mode that turns a one-shot report into an
-explorable, filterable screen: the cost/security <strong>audit</strong> and the live
-<strong>bill</strong>.</p>
+<p>List Glue crawlers with their last-crawl status</p>
 
-<h2 id="audit-tui">Audit TUI</h2>
+<h2 id="usage">Usage</h2>
 
-<p><code>aws_explorer audit --tui</code> streams findings in per region as the scan runs.
-Each finding carries a stable check ID (e.g. <code>COST-EBS-001</code>, <code>SEC-S3-001</code>), a
-severity, the resource, and — for cost findings — an estimated monthly cost,
-with a running total of potential savings in the header. See the
-<a href="audit.html"><code>audit</code> command reference</a> for categories and flags.</p>
+<pre><code>aws_explorer glue crawlers
+</code></pre>
+
+<h2 id="global-flags">Global flags</h2>
 
 <table>
 <thead>
 <tr>
-<th>Key</th>
-<th>Action</th>
+<th>Flag</th>
+<th>Default</th>
+<th>Description</th>
 </tr>
 </thead>
 
 <tbody>
 <tr>
-<td><code>↑</code> / <code>↓</code> / <code>j</code> / <code>k</code></td>
-<td>Navigate findings</td>
+<td><code>--all-regions</code></td>
+<td>—</td>
+<td>scan all available AWS regions</td>
 </tr>
 
 <tr>
-<td><code>Enter</code></td>
-<td>Detail overlay for the selected finding (why + how to fix)</td>
+<td><code>--auth-method</code></td>
+<td>—</td>
+<td>auth method: auto, profile, env, static, sts (overrides aws.authMethod in config)</td>
 </tr>
 
 <tr>
-<td><code>/</code></td>
-<td>Filter (matches any field, live <code>matched/total</code>)</td>
+<td><code>--config</code></td>
+<td>—</td>
+<td>config file (default: ./config.yaml, then the user config dir, then built-in defaults)</td>
 </tr>
 
 <tr>
-<td><code>s</code> / <code>R</code></td>
-<td>Sort by the next column / reverse</td>
+<td><code>--no-header</code></td>
+<td>—</td>
+<td>omit the header row in table and csv output</td>
 </tr>
 
 <tr>
-<td><code>r</code></td>
-<td>Reset filter and sort</td>
+<td><code>--output</code> / <code>-o</code></td>
+<td>table</td>
+<td>output format: table, json, ndjson, csv</td>
 </tr>
 
 <tr>
-<td><code>&lt;</code> / <code>&gt;</code></td>
-<td>Scroll columns on narrow terminals</td>
+<td><code>--profile</code></td>
+<td>—</td>
+<td>AWS named profile (overrides aws.profile in config)</td>
 </tr>
 
 <tr>
-<td><code>y</code></td>
-<td>Copy the finding&rsquo;s ARN / resource</td>
+<td><code>--region</code> / <code>-r</code></td>
+<td>—</td>
+<td>scan only this region (overrides aws.regions, &ndash;all-regions and region filters)</td>
 </tr>
 
 <tr>
-<td><code>C</code></td>
-<td>Export the current view to CSV</td>
-</tr>
-
-<tr>
-<td><code>e</code></td>
-<td>Show collection errors (skipped checks)</td>
-</tr>
-
-<tr>
-<td><code>?</code> / <code>q</code></td>
-<td>Help / quit</td>
+<td><code>--role-arn</code></td>
+<td>—</td>
+<td>IAM role ARN to assume via STS (sets auth method to sts)</td>
 </tr>
 </tbody>
 </table>
 
-<h2 id="bill-tui">Bill TUI</h2>
+<hr />
 
-<p><code>aws_explorer bill --tui</code> is a <strong>live</strong> screen: it re-fetches the account&rsquo;s
-cost from the AWS Cost Explorer API on a fixed interval (<code>--interval</code>, default
-5m), so activity that incurs cost surfaces without restarting. A <code>CHANGE</code>
-column shows what each line moved since the previous refresh, and <code>x</code> drills into a
-service&rsquo;s per-resource costs (resource ID/ARN) when the account has
-resource-level data enabled. See the <a href="bill.html"><code>bill</code> command reference</a>.</p>
-
-<blockquote>
-<p><strong>PAID feature.</strong> Cost Explorer bills <strong>$0.01 per request</strong>, including every
-automatic refresh. The live screen carries a <code>PAID</code> badge and names the
-cadence; the minimum interval is 1 minute. Raise <code>--interval</code> to spend less.</p>
-</blockquote>
-
-<table>
-<thead>
-<tr>
-<th>Key</th>
-<th>Action</th>
-</tr>
-</thead>
-
-<tbody>
-<tr>
-<td><code>↑</code> / <code>↓</code></td>
-<td>Navigate bill lines</td>
-</tr>
-
-<tr>
-<td><code>Enter</code></td>
-<td>Detail overlay for the selected line</td>
-</tr>
-
-<tr>
-<td><code>x</code></td>
-<td>Per-resource breakdown for the selected service</td>
-</tr>
-
-<tr>
-<td><code>u</code></td>
-<td>Refresh now (one paid request)</td>
-</tr>
-
-<tr>
-<td><code>/</code></td>
-<td>Filter by service, usage type or unit</td>
-</tr>
-
-<tr>
-<td><code>s</code> / <code>R</code></td>
-<td>Sort by the next column / reverse</td>
-</tr>
-
-<tr>
-<td><code>y</code></td>
-<td>Copy the selected service and usage type</td>
-</tr>
-
-<tr>
-<td><code>C</code></td>
-<td>Export the current view to CSV</td>
-</tr>
-
-<tr>
-<td><code>?</code> / <code>q</code></td>
-<td>Help / quit</td>
-</tr>
-</tbody>
-</table>
+<p>_Part of <a href="cli.html"><code>aws_explorer</code></a>._</p>
 
 </div>
 <footer>
