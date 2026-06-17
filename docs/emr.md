@@ -39,7 +39,7 @@ Step history (Enter on a cluster):
 |-----|--------|
 | `↑/↓` (`j/k`) | Move selection |
 | `Enter` / `s` | Open the selected cluster's step history |
-| `d` | **Describe** the selected cluster — a scrollable, sectioned report (overview, configuration & OS, services, compute/memory/storage, EC2 instances, VPC networking, configurations); the overlay scrolls (`↑/↓`) when taller than the screen |
+| `d` | **Describe** the selected cluster — a full-screen, btop-style grid of panels (overview, configuration & OS, services, compute/memory/storage, EC2 instances, VPC networking, configurations). `Tab`/`Shift+Tab` (or `←/→`) move focus between panels; the focused panel scrolls (`↑/↓`, `PgUp/PgDn`, `g/G`). `Esc` closes. On a small terminal it collapses to one scrolling pane |
 | `f` | **Findings** — deterministic posture/cost checks (idle/long-running clusters, no log destination or security config, terminated-with-errors) over the loaded clusters; `y` copies the suggested fix |
 | `L` | Open the cluster's (or selected step's) logs in the S3 browser |
 | `u` | Open a persistent application UI (Spark History / YARN Timeline / Tez) |
@@ -64,8 +64,13 @@ twin honours this too — `emr clusters --all-states`, or naming states with
 
 ### Describe a cluster (`d`)
 
-`d` opens a comprehensive, scrollable description of the selected cluster,
-gathered on demand (so it is loaded once, not on every cursor move):
+`d` opens a comprehensive description of the selected cluster, gathered on
+demand (loaded once, not on every cursor move), laid out **btop-style** as a
+full-screen grid of bordered panels — one per section. `Tab`/`Shift+Tab` (or
+`←/→`) move focus between panels; the focused panel scrolls independently
+(`↑/↓`, `PgUp/PgDn`, `g/G`) and shows a scrollbar when its content overflows.
+On a terminal too short for the grid it collapses to a single scrolling pane so
+nothing is clipped. The panels are:
 
 - **Overview** — name, ID, state (and the state-change reason), region, creation
   time, primary-node DNS, ARN.

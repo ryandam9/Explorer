@@ -49,20 +49,20 @@ func (mm *m) View() string {
 	frame := mm.applyToast(ui.ClipToSize(body+sep+status, mm.width, mm.height))
 	if mm.defActive {
 		if mm.defLoading || mm.defErr != nil {
-			frame = ui.OverlayCenter(frame, ui.AboutView("Job definition", mm.defBody(), ui.AboutWidth(mm.width)), mm.width, mm.height)
+			frame = ui.OverlayCenterBlank(ui.AboutView("Job definition", mm.defBody(), ui.AboutWidth(mm.width)), mm.width, mm.height)
 		} else {
-			frame = ui.OverlayCenter(frame, mm.scrollOverlay("Job — "+mm.def.Name, mm.defBody()), mm.width, mm.height)
+			frame = ui.OverlayCenterBlank(mm.scrollOverlay("Job — "+mm.def.Name, mm.defBody()), mm.width, mm.height)
 		}
 	}
 	if mm.detailActive {
 		if mm.detailLoading || mm.detailErr != nil {
-			frame = ui.OverlayCenter(frame, ui.AboutView(mm.detailTitle, mm.detailBody(), ui.AboutWidth(mm.width)), mm.width, mm.height)
+			frame = ui.OverlayCenterBlank(ui.AboutView(mm.detailTitle, mm.detailBody(), ui.AboutWidth(mm.width)), mm.width, mm.height)
 		} else {
-			frame = ui.OverlayCenter(frame, mm.scrollOverlay(mm.detailTitle, mm.detailBody()), mm.width, mm.height)
+			frame = ui.OverlayCenterBlank(mm.scrollOverlay(mm.detailTitle, mm.detailBody()), mm.width, mm.height)
 		}
 	}
 	if mm.showAbout {
-		frame = ui.OverlayCenter(frame, ui.AboutView("About — AWS Glue", glueAboutText, ui.AboutWidth(mm.width)), mm.width, mm.height)
+		frame = ui.OverlayCenterBlank(ui.AboutView("About — AWS Glue", glueAboutText, ui.AboutWidth(mm.width)), mm.width, mm.height)
 	}
 	return frame
 }

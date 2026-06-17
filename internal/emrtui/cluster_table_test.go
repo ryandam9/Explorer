@@ -229,21 +229,18 @@ func TestEMREnrichmentGapWarningRenders(t *testing.T) {
 	}
 }
 
-// TestEMRDetailOverlayScrollsAndCloses verifies the cluster-describe overlay
-// shows a loading state, renders the loaded description (scrollable when taller
-// than the viewport), and closes on Esc.
-func TestEMRDetailOverlayScrollsAndCloses(t *testing.T) {
-	mm := newClusterTestModel(100, 16) // short height → detail taller than the viewport
+// TestEMRDescribePanels verifies the full-screen, btop-style describe view: a
+// loading state, then a panel grid (with the section titles), Tab to move focus,
+// per-panel scroll, no overflow, and Esc to close.
+func TestEMRDescribePanels(t *testing.T) {
+	mm := newClusterTestModel(120, 24)
 	cl, _ := mm.selectedCluster()
 	mm.handleKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("d")})
-	if !mm.detailActive {
-		t.Fatal("d should open the describe overlay")
-	}
-	if !mm.descLoading {
-		t.Error("d should start the asynchronous describe load")
+	if !mm.detailActive || !mm.descLoading {
+		t.Fatal("d should open the describe view and start the async load")
 	}
 	if out := mm.View(); !strings.Contains(out, "Describing") {
-		t.Errorf("overlay should show a loading state before the describe arrives:\n%s", out)
+		t.Errorf("describe should show a loading state first:\n%s", out)
 	}
 
 	// Deliver the loaded description for the selected cluster.
@@ -251,31 +248,75 @@ func TestEMRDetailOverlayScrollsAndCloses(t *testing.T) {
 	if mm.descLoading {
 		t.Error("descMsg should clear the loading state")
 	}
+	if len(mm.descPanels) != len(mm.descSections) || len(mm.descSections) == 0 {
+		t.Fatalf("panels not built: %d panels for %d sections", len(mm.descPanels), len(mm.descSections))
+	}
 
-	out := mm.View() // sizes and fills the viewport
-	if !strings.Contains(out, "Describe — "+cl.Name) {
-		t.Errorf("describe overlay missing title:\n%s", out)
-	}
-	// The networking section is below the fold; assert it is in the full body.
-	if body := mm.detailBody(); !strings.Contains(body, "Networking") || !strings.Contains(body, "sg-master") {
-		t.Errorf("describe body missing the networking section:\n%s", body)
-	}
-	if mm.detailVP.TotalLineCount() <= mm.detailVP.Height {
-		t.Fatalf("test needs content taller than the viewport (lines=%d height=%d)",
-			mm.detailVP.TotalLineCount(), mm.detailVP.Height)
-	}
-	mm.handleKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("j")})
-	if mm.detailVP.YOffset == 0 {
-		t.Error("j should scroll the detail viewport down")
-	}
-	for i, line := range strings.Split(out, "\n") {
-		if lw := ansi.StringWidth(line); lw > 100 {
-			t.Errorf("overlay line %d overflows (%d > 100): %q", i, lw, line)
+	out := mm.View()
+	for _, want := range []string{"Describe — " + cl.Name, "Overview", "Networking", "Compute, memory & storage"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("describe grid missing %q:\n%s", want, out)
 		}
 	}
+	for i, line := range strings.Split(out, "\n") {
+		if lw := ansi.StringWidth(line); lw > 120 {
+			t.Errorf("describe line %d overflows (%d > 120): %q", i, lw, line)
+		}
+	}
+
+	// Tab moves focus to the next panel.
+	mm.handleKey(tea.KeyMsg{Type: tea.KeyTab})
+	if mm.descFocus != 1 {
+		t.Errorf("Tab should advance the focused panel to 1, got %d", mm.descFocus)
+	}
+	// Shift+Tab wraps back to the first.
+	mm.handleKey(tea.KeyMsg{Type: tea.KeyShiftTab})
+	if mm.descFocus != 0 {
+		t.Errorf("Shift+Tab should return focus to 0, got %d", mm.descFocus)
+	}
+
+	// The focused panel scrolls (the Overview panel content exceeds its tile).
+	mm.View() // ensure the panel viewport is sized/filled
+	mm.handleKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("j")})
+	if p := mm.focusedPanel(); p == nil || p.YOffset == 0 {
+		t.Error("j should scroll the focused panel down")
+	}
+
 	mm.handleKey(tea.KeyMsg{Type: tea.KeyEsc})
 	if mm.detailActive {
-		t.Error("Esc should close the describe overlay")
+		t.Error("Esc should close the describe view")
+	}
+}
+
+// TestEMRDescribeSinglePaneFallback verifies that on a terminal too short for a
+// tiled grid the describe view falls back to one scrolling pane (so nothing is
+// clipped) and the status bar stays on the bottom line.
+func TestEMRDescribeSinglePaneFallback(t *testing.T) {
+	mm := newClusterTestModel(100, 16) // narrow + short → single-pane fallback
+	cl, _ := mm.selectedCluster()
+	mm.handleKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("d")})
+	mm.Update(descMsg{cluster: cl, desc: richTestDescription(cl)})
+
+	if _, _, single := mm.describeLayout(); !single {
+		t.Fatal("a 100x16 terminal should use the single-pane fallback")
+	}
+	out := mm.View()
+	lines := strings.Split(out, "\n")
+	if len(lines) != mm.height {
+		t.Errorf("rendered %d lines, want %d (status bar must reach the bottom)", len(lines), mm.height)
+	}
+	if last := lines[len(lines)-1]; !strings.Contains(last, "quit") {
+		t.Errorf("status bar not on the bottom line; last = %q", last)
+	}
+	for i, line := range lines {
+		if lw := ansi.StringWidth(line); lw > 100 {
+			t.Errorf("fallback line %d overflows (%d > 100): %q", i, lw, line)
+		}
+	}
+	// The single pane still scrolls.
+	mm.handleKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("j")})
+	if p := mm.focusedPanel(); p == nil || p.YOffset == 0 {
+		t.Error("j should scroll the single fallback pane")
 	}
 }
 

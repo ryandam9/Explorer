@@ -802,7 +802,7 @@ func (m *model) View() string {
 
 	frame := m.applyToast(sb.String())
 	if m.showAbout {
-		frame = ui.OverlayCenter(frame, ui.AboutView("About — CloudWatch Logs", cwAboutText, ui.AboutWidth(m.width)), m.width, m.height)
+		frame = ui.OverlayCenterBlank(ui.AboutView("About — CloudWatch Logs", cwAboutText, ui.AboutWidth(m.width)), m.width, m.height)
 	}
 	return m.debug.Overlay(frame, m.width, m.height)
 }

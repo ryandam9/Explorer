@@ -34,11 +34,11 @@ func (m Model) View() string {
 
 	switch m.overlay {
 	case overlayDetail:
-		view = ui.OverlayCenter(view, m.detailOverlay(), m.width, m.height)
+		view = ui.OverlayCenterBlank(m.detailOverlay(), m.width, m.height)
 	case overlayHelp:
-		view = ui.OverlayCenter(view, m.helpOverlay(), m.width, m.height)
+		view = ui.OverlayCenterBlank(m.helpOverlay(), m.width, m.height)
 	case overlayAbout:
-		view = ui.OverlayCenter(view, ui.AboutView("About — CloudTrail Lake", lakeAboutText, ui.AboutWidth(m.width)), m.width, m.height)
+		view = ui.OverlayCenterBlank(ui.AboutView("About — CloudTrail Lake", lakeAboutText, ui.AboutWidth(m.width)), m.width, m.height)
 	}
 	return m.debug.Overlay(view, m.width, m.height)
 }

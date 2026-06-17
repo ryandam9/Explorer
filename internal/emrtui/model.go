@@ -81,17 +81,21 @@ type m struct {
 	stepsErr     error
 	stepsTbl     table.Model
 
-	// Cluster-detail / describe overlay (d on a cluster). Scrollable: the
-	// description (networking, instance groups, storage, configurations) is
-	// routinely taller than the screen. It is loaded asynchronously because it
+	// Cluster describe view (d on a cluster): a full-screen, btop-style grid of
+	// per-section panels (overview, config/OS, compute/memory/storage,
+	// networking, instances, services). It is loaded asynchronously because it
 	// makes extra AWS calls (instance groups, instance-type specs, VPC
-	// networking) beyond the inventory enrichment.
+	// networking) beyond the inventory enrichment. Each panel is independently
+	// scrollable; descFocus is the focused panel and descPanels holds one
+	// viewport per section (rebuilt on load / resize, scroll offsets preserved).
 	detailActive  bool
 	detailCluster Cluster
-	detailVP      viewport.Model
 	descLoading   bool
 	descErr       error
 	desc          ClusterDescription
+	descSections  []descSection
+	descPanels    []viewport.Model
+	descFocus     int
 
 	// Persistent application-UI picker (u on a cluster).
 	appUIActive  bool
@@ -513,13 +517,17 @@ func (mm *m) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		mm.setRows(&mm.stepsTbl, len(msg.steps), func(i int) table.Row { return stepRow(msg.steps[i]) })
 
 	case descMsg:
-		// Ignore a stale describe if the overlay was closed or moved to another
+		// Ignore a stale describe if the view was closed or moved to another
 		// cluster while this one was loading.
 		if mm.detailActive && mm.detailCluster.ID == msg.cluster.ID {
 			mm.descLoading = false
 			mm.descErr = msg.err
 			mm.desc = msg.desc
-			mm.detailVP.GotoTop()
+			mm.descFocus = 0
+			if msg.err == nil {
+				mm.descSections = msg.desc.sections()
+				mm.descPanels = make([]viewport.Model, len(mm.descSections))
+			}
 		}
 
 	case appUIMsg:
@@ -606,25 +614,36 @@ func (mm *m) handleKey(msg tea.KeyMsg) []tea.Cmd {
 		return cmds
 	}
 
-	// Cluster-detail overlay: scrollable; Esc/d/Enter close, q quits.
+	// Full-screen describe view: a grid of per-section panels. Tab/Shift+Tab (and
+	// arrows) move focus between panels; the focused panel scrolls; Esc/d closes.
 	if mm.detailActive {
 		switch msg.String() {
 		case "q", "ctrl+c":
 			return []tea.Cmd{tea.Quit}
-		case "esc", "d", "enter", "backspace", "left":
+		case "esc", "d", "backspace":
 			mm.detailActive = false
+		case "tab", "right", "l", "n":
+			mm.focusPanel(mm.descFocus + 1)
+		case "shift+tab", "left", "h", "p":
+			mm.focusPanel(mm.descFocus - 1)
 		case "up", "k":
-			mm.detailVP.LineUp(1)
+			mm.scrollPanel(-1)
 		case "down", "j":
-			mm.detailVP.LineDown(1)
+			mm.scrollPanel(1)
 		case "pgup":
-			mm.detailVP.ViewUp()
+			mm.scrollPanel(-panelPageStep)
 		case "pgdown", "pgdn", " ":
-			mm.detailVP.ViewDown()
+			mm.scrollPanel(panelPageStep)
 		case "g", "home":
-			mm.detailVP.GotoTop()
+			if p := mm.focusedPanel(); p != nil {
+				p.GotoTop()
+			}
 		case "G", "end":
-			mm.detailVP.GotoBottom()
+			if p := mm.focusedPanel(); p != nil {
+				p.GotoBottom()
+			}
+		case ui.KeyAbout:
+			mm.showAbout = true
 		}
 		return cmds
 	}
@@ -999,34 +1018,18 @@ func (mm *m) applyEnrichment(msg enrichMsg) {
 	mm.rebuild()
 }
 
-// openDetail opens the scrollable cluster-describe overlay for cl and kicks off
-// the asynchronous describe load (the body is sized and filled at render time).
+// openDetail opens the full-screen cluster-describe view for cl and kicks off
+// the asynchronous describe load (the panels are built when the data arrives).
 func (mm *m) openDetail(cl Cluster, cmds *[]tea.Cmd) {
 	mm.detailActive = true
 	mm.detailCluster = cl
 	mm.desc = ClusterDescription{}
+	mm.descSections = nil
+	mm.descPanels = nil
+	mm.descFocus = 0
 	mm.descErr = nil
 	mm.descLoading = true
-	mm.detailVP.GotoTop()
 	*cmds = append(*cmds, mm.loadDescribeCmd(cl), mm.spinner.Tick)
-}
-
-// layoutDetailVP sizes the detail viewport to the current terminal, preserving
-// the scroll offset, and (re)wraps the body to the viewport width so long
-// values fold instead of running off the right edge.
-func (mm *m) layoutDetailVP() {
-	w := ui.AboutWidth(mm.width) - 4 // the box pads 2 columns on each side
-	if w < 28 {
-		w = 28
-	}
-	h := mm.height - 12 // border + padding + title + hint + centering margins
-	if h < 6 {
-		h = 6
-	}
-	off := mm.detailVP.YOffset
-	mm.detailVP = viewport.New(w, h)
-	mm.detailVP.SetContent(lipgloss.NewStyle().Width(w).Render(mm.detailBody()))
-	mm.detailVP.SetYOffset(off)
 }
 
 // openFindings computes the deterministic findings over the loaded inventory
@@ -1090,6 +1093,9 @@ func (mm *m) oozieRowCount() int {
 
 func (mm *m) PageTitle() string {
 	base := "Amazon EMR"
+	if mm.detailActive {
+		return base + " › " + mm.detailCluster.Name + " › describe"
+	}
 	if mm.stepsActive {
 		return base + " › " + mm.stepsCluster.Name + " › steps"
 	}

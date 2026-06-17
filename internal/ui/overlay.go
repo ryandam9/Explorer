@@ -47,3 +47,19 @@ func OverlayCenter(bg, fg string, width, height int) string {
 	y := (height - lipgloss.Height(fg)) / 2
 	return Overlay(bg, fg, x, y)
 }
+
+// OverlayCenterBlank centers fg on an otherwise-blank width×height screen, so a
+// mouse text-selection over a modal overlay picks up only its content — never
+// the underlying view behind it (issue #284). The rows around the overlay are
+// empty, so dragging across them selects nothing meaningful.
+//
+// Use this for modal overlays (about/help/detail/preview/pickers/confirms,
+// settings). Use the see-through OverlayCenter only for HUD panels that must
+// stay readable over the live app (the debug pane).
+func OverlayCenterBlank(fg string, width, height int) string {
+	if height < 1 {
+		height = 1
+	}
+	bg := strings.Repeat("\n", height-1) // height empty lines
+	return OverlayCenter(bg, fg, width, height)
+}
