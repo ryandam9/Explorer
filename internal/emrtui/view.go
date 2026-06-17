@@ -54,19 +54,19 @@ func (mm *m) View() string {
 
 	frame := mm.applyToast(ui.ClipToSize(body+sep+status, mm.width, mm.height))
 	if mm.detailActive {
-		frame = ui.OverlayCenter(frame, mm.detailOverlay(), mm.width, mm.height)
+		frame = ui.OverlayCenterBlank(mm.detailOverlay(), mm.width, mm.height)
 	}
 	if mm.appUIActive {
-		frame = ui.OverlayCenter(frame, ui.AboutView("Application UIs — "+mm.appUICluster.Name, mm.appUIBody(), ui.AboutWidth(mm.width)), mm.width, mm.height)
+		frame = ui.OverlayCenterBlank(ui.AboutView("Application UIs — "+mm.appUICluster.Name, mm.appUIBody(), ui.AboutWidth(mm.width)), mm.width, mm.height)
 	}
 	if t, ok := mm.selectedHbaseTable(); mm.hbaseConfirm && ok {
 		body := fmt.Sprintf("Count the rows in %q?\n\nThis opens an HBase scanner and reads the whole table "+
 			"(up to %s rows). It is read-only but can be slow and load the cluster on a large table.\n\n"+
 			"y / Enter — scan now      any other key — cancel", t.Qualified, itoa(scannerCap))
-		frame = ui.OverlayCenter(frame, ui.AboutView("Count rows — full scan", body, ui.AboutWidth(mm.width)), mm.width, mm.height)
+		frame = ui.OverlayCenterBlank(ui.AboutView("Count rows — full scan", body, ui.AboutWidth(mm.width)), mm.width, mm.height)
 	}
 	if mm.showAbout {
-		frame = ui.OverlayCenter(frame, ui.AboutView("About — Amazon EMR", emrAboutText, ui.AboutWidth(mm.width)), mm.width, mm.height)
+		frame = ui.OverlayCenterBlank(ui.AboutView("About — Amazon EMR", emrAboutText, ui.AboutWidth(mm.width)), mm.width, mm.height)
 	}
 	return frame
 }
