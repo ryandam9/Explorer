@@ -75,8 +75,11 @@ const emrAboutText = "This is the Amazon EMR dashboard. Each row is a cluster, c
 	"state, showing its release label, the applications installed on it " +
 	"(Spark, HBase, Hive, Oozie…) and its size.\n\n" +
 	"Press Enter (or s) on a cluster to see its step history: state, duration and " +
-	"action-on-failure, with the failure reason inline on a failed step. Press d for " +
-	"the cluster detail (release, log URI, role, EC2 attributes), and f for the " +
+	"action-on-failure, with the failure reason inline on a failed step. Press d to " +
+	"describe the cluster in full — configuration and OS, compute layout (instance " +
+	"groups with per-instance memory, vCPU and EBS storage), running EC2 instances, " +
+	"installed services and VPC networking (subnet, security-group rules, routes, " +
+	"network ACL) — and f for the " +
 	"findings panel — deterministic posture/cost checks (idle/long-running clusters, " +
 	"no log destination or security configuration, terminated-with-errors) over the " +
 	"loaded clusters.\n\n" +
@@ -91,47 +94,36 @@ const emrAboutText = "This is the Amazon EMR dashboard. Each row is a cluster, c
 	"Press S to cycle the column the list is sorted by (R reverses the direction), " +
 	"o to open a cluster in the AWS console, / to filter, and r to refresh."
 
-// detailOverlay renders the scrollable cluster-detail overlay: the viewport's
+// detailOverlay renders the scrollable cluster-describe overlay: the viewport's
 // windowed body plus a scroll hint, inside the shared themed frame.
 func (mm *m) detailOverlay() string {
 	mm.layoutDetailVP() // size + fill the viewport, preserving the scroll offset
 	hint := muted("↑/↓ scroll · Esc close")
 	body := lipgloss.JoinVertical(lipgloss.Left, mm.detailVP.View(), "", hint)
-	return ui.HelpView("Cluster — "+mm.detailCluster.Name, body, mm.detailVP.Width+4)
+	return ui.HelpView("Describe — "+mm.detailCluster.Name, body, mm.detailVP.Width+4)
 }
 
-// detailBody renders the cluster-detail overlay's contents.
+// detailBody renders the cluster-describe overlay's contents: a spinner while
+// the describe loads, the error if it failed, otherwise the full sectioned
+// report (overview, configuration/OS, services, compute/memory/storage,
+// instances and VPC networking).
 func (mm *m) detailBody() string {
-	cl := mm.detailCluster
+	if mm.descLoading {
+		return mm.spinner.View() + " Describing " + mm.detailCluster.Name + " …\n\n" +
+			muted("  Gathering instance groups, storage, EC2 specs and VPC networking.")
+	}
+	if mm.descErr != nil {
+		return errLine("⚠ Could not describe cluster: "+mm.descErr.Error()) + "\n\n" +
+			muted("  Press Esc to close.")
+	}
 	var b strings.Builder
-	if !cl.DetailKnown {
-		// Enrichment failed for this cluster: the detail fields were never
-		// populated, so make clear they are unknown rather than empty.
-		b.WriteString(errLine("⚠ Detail unavailable — DescribeCluster was denied or throttled.") + "\n")
-		b.WriteString(muted("  The fields below the basics are unknown, not necessarily unset.") + "\n\n")
-	}
-	row := func(label, value string) {
-		if value == "" {
-			value = "—"
+	for i, s := range mm.desc.sections() {
+		if i > 0 {
+			b.WriteString("\n\n")
 		}
-		b.WriteString(fmt.Sprintf("%-18s %s\n", label, value))
+		b.WriteString(heading(" "+s.Title) + "\n")
+		b.WriteString(s.Body)
 	}
-	row("Cluster ID", cl.ID)
-	row("State", stateLabel(cl.State))
-	if cl.StateReason != "" {
-		row("State reason", cl.StateReason)
-	}
-	row("Release", cl.ReleaseLabel)
-	row("Applications", cl.Applications)
-	row("Auto-terminate", boolLabel(cl.AutoTerminate))
-	row("Normalized hrs", instanceHours(cl.InstanceHours))
-	row("Master DNS", cl.MasterDNS)
-	row("Log URI", cl.LogURI)
-	row("Service role", cl.ServiceRole)
-	row("Security config", cl.SecurityConfig)
-	row("Subnet", cl.SubnetID)
-	row("Availability zone", cl.AvailabilityAZ)
-	row("EC2 key", cl.KeyName)
 	return strings.TrimRight(b.String(), "\n")
 }
 
@@ -527,7 +519,7 @@ func (mm *m) helpHints() []ui.KeyHint {
 	hints := []ui.KeyHint{
 		ui.H("↑/↓", "rows"),
 		ui.H("Enter", "steps"),
-		ui.H("d", "detail"),
+		ui.H("d", "describe"),
 		ui.H("f", "findings"),
 		ui.H("L", "logs"),
 		ui.H("u", "app UIs"),
