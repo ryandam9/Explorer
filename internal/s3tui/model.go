@@ -832,12 +832,26 @@ func buildPreviewDisplay(content string, truncated bool, width int) string {
 	return display
 }
 
+// previewPanelSize returns the object-preview overlay's outer panel dimensions.
+// The text/XML/log preview deliberately fills almost the whole terminal — only a
+// small margin all round — so long lines (minified XML, log lines) get as much
+// width as possible before they have to wrap, and tall terminals show more rows.
+// Both initPreviewViewport (which hard-wraps content to the inner width) and
+// previewView (which renders the panel) size from this one helper so the wrap
+// width and the rendered panel width stay in lockstep. The bounds match the
+// centring region in View (m.width-4 × m.height-8) less a couple of cells/rows so
+// the bordered panel never collides with the feather rail or the status bar.
+func (m *Model) previewPanelSize() (panelW, panelH int) {
+	panelW = max(40, m.width-6)
+	panelH = max(10, m.height-10)
+	return panelW, panelH
+}
+
 // initPreviewViewport builds the scrollable text viewport for a (non-CSV)
 // preview from the fetched content.
 func (m *Model) initPreviewViewport(content string, err error) {
 	m.previewNotTabular = false
-	panelW := min(100, max(40, m.width-12))
-	panelH := min(28, max(10, m.height-10))
+	panelW, panelH := m.previewPanelSize()
 	vpW := panelW - 8 // border + padding + scrollbar gutter
 	vpH := panelH - 8 // title, blank lines, help text, border
 	if vpW < 10 {
@@ -3094,8 +3108,7 @@ func (m *Model) previewView() string {
 		body = lipgloss.JoinHorizontal(lipgloss.Top, m.previewViewport.View(), " ", bar)
 	}
 
-	width := min(100, max(40, m.width-12))
-	height := min(28, max(10, m.height-10))
+	width, height := m.previewPanelSize()
 	title := ui.PanelTitleStyle().Render("OBJECT PREVIEW: " + m.previewKey)
 	hint := "[↑/↓/PgUp/PgDn] Scroll  [t] View as table  [Esc] Close"
 	if m.previewNotTabular {
