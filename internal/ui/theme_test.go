@@ -109,6 +109,8 @@ func TestGranularRoleFallbacks(t *testing.T) {
 		{"TableBorder->Border", ColorTableBorder(), base.Border},
 		{"TableSelectedBg->Highlight", ColorTableSelectedBg(), base.Highlight},
 		{"TableSelectedText->HighlightText", ColorTableSelectedText(), base.HighlightText},
+		// Zebra background falls back through tableBorder to the base border.
+		{"TableRowAltBg->TableBorder->Border", ColorTableRowAltBg(), base.Border},
 		// Multi-hop chains: hintKey -> statusBarText -> highlightText, and
 		// success -> accent -> heading.
 		{"HintKey->StatusBarText->HighlightText", ColorHintKey(), base.HighlightText},
@@ -166,6 +168,7 @@ func TestInitFromConfigOverridesRoles(t *testing.T) {
 	InitFromConfig(configUI("override-probe", map[string]string{
 		"tableheaderbg":     "#aaaaaa", // lower-cased, as viper delivers it
 		"tableSelectedText": "#bbbbbb",
+		"tablerowaltbg":     "#cccccc", // the zebra row colour, set from config
 		"notARole":          "#ffffff", // silently ignored
 	}))
 
@@ -176,6 +179,9 @@ func TestInitFromConfigOverridesRoles(t *testing.T) {
 	}
 	if c.TableSelectedText != "#bbbbbb" {
 		t.Errorf("TableSelectedText = %q, want #bbbbbb", c.TableSelectedText)
+	}
+	if c.TableRowAltBg != "#cccccc" {
+		t.Errorf("TableRowAltBg = %q, want #cccccc", c.TableRowAltBg)
 	}
 	if c.Heading != "#101010" {
 		t.Errorf("Heading = %q, want untouched #101010", c.Heading)

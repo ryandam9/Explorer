@@ -40,6 +40,7 @@ type ThemeColors struct {
 	TableBorder       string // border drawn around table panels
 	TableSelectedBg   string // selected table row background
 	TableSelectedText string // selected table row text
+	TableRowAltBg     string // zebra background for alternate (odd) data rows
 
 	// Status bar roles, including the context-shortcut hints rendered in it.
 	StatusBarBg   string // status bar background
@@ -96,6 +97,7 @@ var Roles = []RoleSpec{
 	{"tableBorder", "table panel border", func(c *ThemeColors) *string { return &c.TableBorder }, "border"},
 	{"tableSelectedBg", "selected row background", func(c *ThemeColors) *string { return &c.TableSelectedBg }, "highlight"},
 	{"tableSelectedText", "selected row text", func(c *ThemeColors) *string { return &c.TableSelectedText }, "highlightText"},
+	{"tableRowAltBg", "zebra row background", func(c *ThemeColors) *string { return &c.TableRowAltBg }, "tableBorder"},
 	{"statusBarBg", "status bar background", func(c *ThemeColors) *string { return &c.StatusBarBg }, "highlight"},
 	{"statusBarText", "status bar text", func(c *ThemeColors) *string { return &c.StatusBarText }, "highlightText"},
 	{"hintKey", "shortcut key in status bar", func(c *ThemeColors) *string { return &c.HintKey }, "statusBarText"},
@@ -325,6 +327,7 @@ func ColorTableText() string         { return ResolveRole("tableText") }
 func ColorTableBorder() string       { return ResolveRole("tableBorder") }
 func ColorTableSelectedBg() string   { return ResolveRole("tableSelectedBg") }
 func ColorTableSelectedText() string { return ResolveRole("tableSelectedText") }
+func ColorTableRowAltBg() string     { return ResolveRole("tableRowAltBg") }
 func ColorStatusBarBg() string       { return ResolveRole("statusBarBg") }
 func ColorStatusBarText() string     { return ResolveRole("statusBarText") }
 func ColorHintKey() string           { return ResolveRole("hintKey") }
