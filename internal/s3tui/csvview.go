@@ -12,6 +12,7 @@ import (
 	"github.com/atotto/clipboard"
 	"github.com/charmbracelet/bubbles/textinput"
 	"github.com/charmbracelet/bubbles/viewport"
+	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 
 	"github.com/ryandam9/aws_explorer/internal/table"
@@ -40,6 +41,7 @@ const (
 	csvPromptNone csvPromptKind = iota
 	csvPromptDelim
 	csvPromptHeader
+	csvPromptParquetRows
 )
 
 func maxCols(recs [][]string) int {
@@ -184,6 +186,7 @@ func (m *Model) initCSV(content string) bool {
 	if !ok {
 		return false
 	}
+	m.previewIsParquet = false
 	m.csvAll = recs
 	m.csvHeaderRow = 1 // row 1 is the header by default (reset per file)
 	m.csvRecordActive = false
@@ -193,6 +196,25 @@ func (m *Model) initCSV(content string) bool {
 	}
 	m.buildCSVTable()
 	return true
+}
+
+// initParquet loads the rows read from a Parquet object into the shared table.
+// The schema column names become the header row, so the existing table, record
+// view, row-window and copy-as-Markdown machinery all work unchanged.
+func (m *Model) initParquet(header []string, rows [][]string, total int64) {
+	all := make([][]string, 0, len(rows)+1)
+	all = append(all, header)
+	all = append(all, rows...)
+	m.csvAll = all
+	m.csvHeaderRow = 1 // the synthesised schema row is the header
+	m.csvDelim = ','   // unused for parquet, kept for a stable info line
+	m.csvRecordActive = false
+	m.parquetFileRows = total
+	if m.csvRowCap == 0 && !m.csvRowCapSet {
+		m.csvRowCap = defaultCSVRowCap
+		m.csvRowCapSet = true
+	}
+	m.buildCSVTable()
 }
 
 // headerAndData splits the parsed records into the header row and the data rows
@@ -389,6 +411,10 @@ func (m *Model) startCSVPrompt(kind csvPromptKind) {
 		ti.Prompt = "header row (0 = none): "
 		ti.SetValue(strconv.Itoa(m.csvHeaderRow))
 		ti.CursorEnd()
+	case csvPromptParquetRows:
+		ti.Prompt = "rows to read: "
+		ti.SetValue(strconv.Itoa(m.parquetRows))
+		ti.CursorEnd()
 	}
 	ti.Focus()
 	m.csvInput = ti
@@ -397,14 +423,18 @@ func (m *Model) startCSVPrompt(kind csvPromptKind) {
 }
 
 // applyCSVPrompt commits the open prompt; it stays open with an explanation on
-// invalid input.
-func (m *Model) applyCSVPrompt() {
+// invalid input. It returns a command when the action needs follow-up work
+// (the Parquet row count re-fetches from S3); otherwise nil.
+func (m *Model) applyCSVPrompt() tea.Cmd {
 	switch m.csvPrompt {
 	case csvPromptDelim:
 		m.applyDelimiter()
 	case csvPromptHeader:
 		m.applyHeaderRow()
+	case csvPromptParquetRows:
+		return m.applyParquetRows()
 	}
+	return nil
 }
 
 func (m *Model) applyDelimiter() {
@@ -445,6 +475,24 @@ func (m *Model) applyHeaderRow() {
 	m.csvPromptErr = ""
 }
 
+// applyParquetRows reads the requested row count and re-fetches the Parquet
+// preview with the new window. Returns the fetch command on success.
+func (m *Model) applyParquetRows() tea.Cmd {
+	n, err := strconv.Atoi(strings.TrimSpace(m.csvInput.Value()))
+	if err != nil || n <= 0 {
+		m.csvPromptErr = "enter a positive number of rows"
+		return nil
+	}
+	if n > parquetMaxRowsLimit {
+		m.csvPromptErr = fmt.Sprintf("max %d rows", parquetMaxRowsLimit)
+		return nil
+	}
+	m.parquetRows = n
+	m.csvPrompt = csvPromptNone
+	m.csvPromptErr = ""
+	return m.fetchParquetPreview(m.previewKey)
+}
+
 // handleCSVKey routes a key press in the full-screen CSV view. It returns true
 // when the key was consumed.
 func (m *Model) handleCSVKey(key string) bool {
@@ -457,6 +505,7 @@ func (m *Model) handleCSVKey(key string) bool {
 	case "esc", "q":
 		m.showCSV = false
 		m.csvAll = nil
+		m.previewIsParquet = false
 		// A member opened from an archive returns to the member list.
 		if m.previewFromArchive {
 			m.previewFromArchive = false
@@ -464,20 +513,40 @@ func (m *Model) handleCSVKey(key string) bool {
 		}
 		return true
 	case "t":
+		// Parquet is binary — there is no raw-text view to toggle to.
+		if m.previewIsParquet {
+			return true
+		}
 		// Toggle to the raw-text preview of the same object.
 		m.showCSV = false
 		m.showPreview = true
 		m.initPreviewViewport(m.previewContent, m.previewErr)
 		return true
 	case "s":
+		if m.previewIsParquet {
+			return true // delimiter is meaningless for a typed Parquet schema
+		}
 		m.cycleCSVDelimiter()
 		return true
 	case "S":
+		if m.previewIsParquet {
+			return true
+		}
 		m.startCSVPrompt(csvPromptDelim)
 		return true
 	case "h":
+		if m.previewIsParquet {
+			return true // the schema is the header; it can't be reassigned
+		}
 		m.startCSVPrompt(csvPromptHeader)
 		return true
+	case "n":
+		// Parquet only: re-fetch a different number of rows from the file.
+		if m.previewIsParquet {
+			m.startCSVPrompt(csvPromptParquetRows)
+			return true
+		}
+		return false
 	case "w":
 		m.cycleCSVRowCap()
 		return true
@@ -615,10 +684,14 @@ func (m *Model) openCSVRecord() {
 // csvView renders the full-screen CSV table window (or the single-row record
 // view when active).
 func (m *Model) csvView() string {
-	title := ui.PanelTitleStyle().Render("CSV TABLE: " + m.previewKey)
+	label, loading := "CSV TABLE: ", "Loading CSV…"
+	if m.previewIsParquet {
+		label, loading = "PARQUET: ", "Reading Parquet…"
+	}
+	title := ui.PanelTitleStyle().Render(label + m.previewKey)
 
 	if m.previewLoading {
-		return lipgloss.JoinVertical(lipgloss.Left, title, "", m.loadingLine("Loading CSV…"))
+		return lipgloss.JoinVertical(lipgloss.Left, title, "", m.loadingLine(loading))
 	}
 	if m.csvRecordActive {
 		return m.csvRecordView()
@@ -652,6 +725,10 @@ func (m *Model) csvFooter() string {
 	if m.csvNote != "" {
 		return ui.SuccessStyle().Render("✓ " + m.csvNote)
 	}
+	if m.previewIsParquet {
+		return ui.MutedStyle().Render(
+			"[↑/↓ PgUp/PgDn] rows   [Enter] row as record   [←/→] columns   [n] rows to read   [w] window   [y] copy as Markdown   [Esc] close")
+	}
 	return ui.MutedStyle().Render(
 		"[↑/↓ PgUp/PgDn] rows   [Enter] row as record   [←/→] columns   [s]/[S] delimiter   [h] header row   [w] rows   [y] copy as Markdown   [t] raw   [Esc] close")
 }
@@ -677,6 +754,9 @@ func (m *Model) csvRecordView() string {
 func (m *Model) csvInfoLine() string {
 	header, _ := m.headerAndData()
 	cols := len(header)
+	if m.previewIsParquet {
+		return m.parquetInfoLine(cols)
+	}
 	// Make horizontal scrolling discoverable: when columns are off-screen, say
 	// how many are shown and how to reach the rest.
 	colsPart := fmt.Sprintf("%d columns", cols)
@@ -694,4 +774,23 @@ func (m *Model) csvInfoLine() string {
 	}
 	return fmt.Sprintf("delimiter: %s   ·   %s   ·   %s   ·   %s",
 		delimiterName(m.csvDelim), headerPart, colsPart, rowsPart)
+}
+
+// parquetInfoLine summarises the schema width and the read window for a Parquet
+// preview, making clear how many of the file's rows are shown.
+func (m *Model) parquetInfoLine(cols int) string {
+	colsPart := fmt.Sprintf("%d columns", cols)
+	if hl, hr := m.csvTable.ColScrollInfo(); hl+hr > 0 {
+		colsPart = fmt.Sprintf("%d of %d columns shown (←/→ for more)", cols-hl-hr, cols)
+	}
+	// csvTotal is the number of rows read; parquetFileRows is the file's total.
+	rowsPart := fmt.Sprintf("%d rows", m.csvTotal)
+	if m.parquetFileRows > int64(m.csvTotal) {
+		rowsPart = fmt.Sprintf("first %d of %d rows ([n] to change)", m.csvTotal, m.parquetFileRows)
+	}
+	if m.csvHidden > 0 {
+		rowsPart = fmt.Sprintf("first %d + last %d of %d read (%d hidden, %d in file)",
+			m.csvRowCap, m.csvRowCap, m.csvTotal, m.csvHidden, m.parquetFileRows)
+	}
+	return fmt.Sprintf("parquet   ·   %s   ·   %s", colsPart, rowsPart)
 }
