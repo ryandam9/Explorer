@@ -7,6 +7,7 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 
 	"github.com/ryandam9/aws_explorer/internal/loggroup"
+	"github.com/ryandam9/aws_explorer/internal/ui"
 )
 
 // cwJumpDoneMsg is delivered after the suspended CloudWatch Logs TUI exits,
@@ -69,8 +70,8 @@ func (m *Model) jumpToLogsCmd(region, group string) tea.Cmd {
 	if m.awsCfg != nil && m.awsCfg.Profile != "" {
 		args = append(args, "--profile", m.awsCfg.Profile)
 	}
-	if m.configPath != "" {
-		args = append(args, "--config", m.configPath)
+	if cp := ui.ConfigArgPath(m.configPath); cp != "" {
+		args = append(args, "--config", cp)
 	}
 	return tea.ExecProcess(exec.Command(self, args...), func(err error) tea.Msg {
 		return cwJumpDoneMsg{err: err}

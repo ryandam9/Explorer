@@ -249,7 +249,7 @@ func (mm *m) jumpToLogsCmd(group, region string) tea.Cmd {
 	if mm.appCfg != nil {
 		profile = mm.appCfg.AWS.Profile
 	}
-	args := cwJumpArgs(group, region, profile, mm.configPath)
+	args := cwJumpArgs(group, region, profile, ui.ConfigArgPath(mm.configPath))
 	return tea.ExecProcess(exec.Command(self, args...), func(err error) tea.Msg {
 		return cwJumpDoneMsg{err: err}
 	})

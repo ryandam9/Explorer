@@ -363,7 +363,7 @@ func (mm *m) jumpToRunLogsCmd(run JobRun) tea.Cmd {
 	if mm.appCfg != nil {
 		profile = mm.appCfg.AWS.Profile
 	}
-	args := cwJumpArgs(run.LogGroup, run.ID, mm.runsJob.Region, profile, mm.configPath)
+	args := cwJumpArgs(run.LogGroup, run.ID, mm.runsJob.Region, profile, ui.ConfigArgPath(mm.configPath))
 	return tea.ExecProcess(exec.Command(self, args...), func(err error) tea.Msg {
 		return cwJumpDoneMsg{err: err}
 	})

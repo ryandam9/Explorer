@@ -1,8 +1,12 @@
 package emrtui
 
 import (
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/ryandam9/aws_explorer/internal/ui"
 )
 
 func TestS3LogTarget(t *testing.T) {
@@ -71,5 +75,33 @@ func TestS3JumpArgs(t *testing.T) {
 	}
 	if strings.Contains(joined, "--region") {
 		t.Errorf("global region should be omitted: %v", args)
+	}
+}
+
+// TestS3JumpDropsMissingConfig is a regression guard for the bug where the
+// dashboard forwarded its resolved config path to the child s3/cw process even
+// when running on built-in defaults (no file on disk). An explicit --config is
+// fatal-if-missing, so every "jump to logs" press made the child abort with
+// "Error reading config file: ... no such file or directory". The jump now runs
+// the path through ui.ConfigArgPath; this exercises that exact composition.
+func TestS3JumpDropsMissingConfig(t *testing.T) {
+	dir := t.TempDir()
+	missing := filepath.Join(dir, "config.yaml") // never created — built-in defaults
+	existing := filepath.Join(dir, "real.yaml")
+	if err := os.WriteFile(existing, []byte("ui: {}\n"), 0o644); err != nil {
+		t.Fatalf("seeding config: %v", err)
+	}
+
+	// Built-in defaults: the non-existent path must not be forwarded, or the
+	// child s3 process would die before it could browse the logs.
+	args := s3JumpArgs("b", "p/", "us-east-1", "", ui.ConfigArgPath(missing))
+	if strings.Contains(strings.Join(args, " "), "--config") {
+		t.Errorf("missing config must not be forwarded: %v", args)
+	}
+
+	// A real config file is still forwarded so the child shares the user's settings.
+	args = s3JumpArgs("b", "p/", "us-east-1", "", ui.ConfigArgPath(existing))
+	if !strings.Contains(strings.Join(args, " "), "--config "+existing) {
+		t.Errorf("existing config should be forwarded: %v", args)
 	}
 }
