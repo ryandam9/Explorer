@@ -507,6 +507,7 @@ func (m *Model) handleCSVKey(key string) bool {
 		m.showCSV = false
 		m.csvAll = nil
 		m.previewIsParquet = false
+		m.previewIsFixed = false
 		// A member opened from an archive returns to the member list.
 		if m.previewFromArchive {
 			m.previewFromArchive = false
@@ -519,25 +520,33 @@ func (m *Model) handleCSVKey(key string) bool {
 			return true
 		}
 		// Toggle to the raw-text preview of the same object.
+		m.previewIsFixed = false
 		m.showCSV = false
 		m.showPreview = true
 		m.initPreviewViewport(m.previewContent, m.previewErr)
 		return true
-	case "s":
+	case "L":
+		// Re-apply (or apply) a local fixed-width layout file to the same object.
 		if m.previewIsParquet {
-			return true // delimiter is meaningless for a typed Parquet schema
+			return true // a typed Parquet schema needs no positional layout
+		}
+		m.startLayoutPrompt()
+		return true
+	case "s":
+		if m.previewIsParquet || m.previewIsFixed {
+			return true // delimiter is meaningless for a typed/positional schema
 		}
 		m.cycleCSVDelimiter()
 		return true
 	case "S":
-		if m.previewIsParquet {
+		if m.previewIsParquet || m.previewIsFixed {
 			return true
 		}
 		m.startCSVPrompt(csvPromptDelim)
 		return true
 	case "h":
-		if m.previewIsParquet {
-			return true // the schema is the header; it can't be reassigned
+		if m.previewIsParquet || m.previewIsFixed {
+			return true // the layout defines the columns; the header is fixed
 		}
 		m.startCSVPrompt(csvPromptHeader)
 		return true
@@ -688,6 +697,8 @@ func (m *Model) csvView() string {
 	label, loading := "CSV TABLE: ", "Loading CSV…"
 	if m.previewIsParquet {
 		label, loading = "PARQUET: ", "Reading Parquet…"
+	} else if m.previewIsFixed {
+		label = "FIXED-WIDTH: "
 	}
 	title := ui.PanelTitleStyle().Render(label + m.previewKey)
 
@@ -716,6 +727,9 @@ func (m *Model) csvView() string {
 
 // csvFooter is the typed prompt while editing, otherwise the key hints.
 func (m *Model) csvFooter() string {
+	if m.enteringLayout {
+		return layoutPromptLine(m.layoutInput.View(), m.layoutErr)
+	}
 	if m.csvPrompt != csvPromptNone {
 		line := m.csvInput.View() + ui.MutedStyle().Render("   Enter apply · Esc cancel")
 		if m.csvPromptErr != "" {
@@ -730,8 +744,22 @@ func (m *Model) csvFooter() string {
 		return ui.MutedStyle().Render(
 			"[↑/↓ PgUp/PgDn] rows   [Enter] row as record   [←/→] columns   [n] rows to read   [w] window   [y] copy as Markdown   [Esc] close")
 	}
+	if m.previewIsFixed {
+		return ui.MutedStyle().Render(
+			"[↑/↓ PgUp/PgDn] rows   [Enter] row as record   [←/→] columns   [w] window   [y] copy as Markdown   [L] re-apply layout   [t] raw   [Esc] close")
+	}
 	return ui.MutedStyle().Render(
 		"[↑/↓ PgUp/PgDn] rows   [Enter] row as record   [←/→] columns   [s]/[S] delimiter   [h] header row   [w] rows   [y] copy as Markdown   [t] raw   [Esc] close")
+}
+
+// layoutPromptLine renders the shared local-layout-file prompt with apply/cancel
+// hints and any error.
+func layoutPromptLine(inputView, errMsg string) string {
+	line := inputView + ui.MutedStyle().Render("   Enter apply · Esc cancel")
+	if errMsg != "" {
+		line += "   " + ui.ErrorStyle().Render(errMsg)
+	}
+	return line
 }
 
 // csvRecordView renders the selected row vertically as Col : value pairs.
@@ -757,6 +785,9 @@ func (m *Model) csvInfoLine() string {
 	cols := len(header)
 	if m.previewIsParquet {
 		return m.parquetInfoLine(cols)
+	}
+	if m.previewIsFixed {
+		return m.fixedInfoLine(cols)
 	}
 	// Make horizontal scrolling discoverable: when columns are off-screen, say
 	// how many are shown and how to reach the rest.

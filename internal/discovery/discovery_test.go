@@ -57,3 +57,23 @@ func TestMapResource_BadARN(t *testing.T) {
 		t.Error("expected ok=false for unparseable ARN")
 	}
 }
+
+// The Tagging API reports EMR under the ARN namespace "elasticmapreduce";
+// the typed collector emits "emr". They must canonicalize to the same name so
+// the summary does not list the service twice (#1 doubt).
+func TestMapResource_CanonicalizesServiceNamespace(t *testing.T) {
+	cases := map[string]string{
+		"arn:aws:elasticmapreduce:us-east-1:123456789012:cluster/j-ABC123":                  "emr",
+		"arn:aws:elasticloadbalancing:us-east-1:123456789012:loadbalancer/app/my-lb/abc123": "elbv2",
+		"arn:aws:s3:::my-bucket": "s3",
+	}
+	for arn, want := range cases {
+		r, ok := mapResource("us-east-1", rgttypes.ResourceTagMapping{ResourceARN: aws.String(arn)})
+		if !ok {
+			t.Fatalf("mapResource(%q) ok=false", arn)
+		}
+		if r.Service != want {
+			t.Errorf("mapResource(%q) Service = %q, want %q", arn, r.Service, want)
+		}
+	}
+}

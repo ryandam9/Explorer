@@ -241,6 +241,19 @@ type Model struct {
 	parquetFileRows  int64
 	parquetRows      int
 
+	// Fixed-width preview reuses the same full-screen table machinery. When
+	// previewIsFixed is set, the schema comes from a local layout file
+	// (name,start,length per line) rather than a delimiter, so the delimiter
+	// and header-row controls are disabled (like Parquet). fixedBadRows counts
+	// rows whose byte length did not match the layout. The layout-file prompt is
+	// an overlay that can be opened over either the text or the table preview.
+	previewIsFixed bool
+	fixedBadRows   int
+	layoutInput    textinput.Model
+	enteringLayout bool
+	layoutErr      string
+	lastLayoutPath string
+
 	// Single-row "record" view (Enter on a table row) — Col : value pairs.
 	csvRecordActive   bool
 	csvRecordViewport viewport.Model
@@ -704,6 +717,7 @@ func (m *Model) openPreview(key string) tea.Cmd {
 	m.showPreview = false
 	m.showArchive = false
 	m.previewIsParquet = false
+	m.previewIsFixed = false
 
 	switch {
 	case looksLikeParquet(key):
@@ -1468,6 +1482,24 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 
+		// Local layout-file prompt for the fixed-width preview. It overlays
+		// whichever preview (text or table) is behind it, so it is handled
+		// before those views and before the global keys (a path may contain
+		// any character).
+		if m.enteringLayout {
+			switch msg.String() {
+			case "enter":
+				m.applyLayoutPrompt()
+			case "esc":
+				m.enteringLayout = false
+				m.layoutErr = ""
+			default:
+				m.layoutInput, cmd = m.layoutInput.Update(msg)
+				cmds = append(cmds, cmd)
+			}
+			return m, tea.Batch(cmds...)
+		}
+
 		// Global keys — skipped while typing into an input so that bucket
 		// names / prefixes / jump queries containing these characters work as
 		// expected.
@@ -1574,6 +1606,13 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				} else {
 					m.previewNotTabular = true
 				}
+				return m, nil
+			}
+			// "L" parses the object as fixed-width columns using a local layout
+			// file the user names (name,start,length per line) — for flat files
+			// with no delimiter.
+			if msg.String() == "L" && !m.previewLoading && m.previewErr == nil {
+				m.startLayoutPrompt()
 				return m, nil
 			}
 			// Forward all other keys to the preview viewport for scrolling.
@@ -3110,8 +3149,10 @@ func (m *Model) previewView() string {
 
 	width, height := m.previewPanelSize()
 	title := ui.PanelTitleStyle().Render("OBJECT PREVIEW: " + m.previewKey)
-	hint := "[↑/↓/PgUp/PgDn] Scroll  [t] View as table  [Esc] Close"
-	if m.previewNotTabular {
+	hint := "[↑/↓/PgUp/PgDn] Scroll  [t] View as table  [L] Fixed-width layout  [Esc] Close"
+	if m.enteringLayout {
+		hint = layoutPromptLine(m.layoutInput.View(), m.layoutErr)
+	} else if m.previewNotTabular {
 		hint += "   " + ui.ErrorStyle().Render("not delimited — staying in text")
 	}
 	return lipgloss.NewStyle().
