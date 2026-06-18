@@ -65,6 +65,9 @@ func TestMapResource_CanonicalizesServiceNamespace(t *testing.T) {
 	cases := map[string]string{
 		"arn:aws:elasticmapreduce:us-east-1:123456789012:cluster/j-ABC123":                  "emr",
 		"arn:aws:elasticloadbalancing:us-east-1:123456789012:loadbalancer/app/my-lb/abc123": "elbv2",
+		"arn:aws:elasticfilesystem:us-east-1:123456789012:file-system/fs-0abc":              "efs",
+		"arn:aws:events:us-east-1:123456789012:rule/my-rule":                                "eventbridge",
+		"arn:aws:states:us-east-1:123456789012:stateMachine:my-sm":                          "stepfunctions",
 		"arn:aws:s3:::my-bucket": "s3",
 	}
 	for arn, want := range cases {

@@ -108,15 +108,23 @@ func ParseARN(arn string) (ARN, bool) {
 // CanonicalService maps an AWS ARN service namespace to the canonical name the
 // typed collectors use. The Resource Groups Tagging API reports a resource by
 // its ARN namespace (e.g. "elasticmapreduce"), while the typed collectors emit
-// a shorter name ("emr"); without this mapping the same service shows up twice
-// in the summary — once per code path. Unknown namespaces are returned
-// lower-cased unchanged, so this only ever merges known aliases.
+// the shorter name the AWS CLI uses ("emr"); without this mapping the same
+// service shows up twice in the summary — once per code path. The canonical
+// form is the collector/CLI name (also the console-link key), so the ARN
+// namespace is normalized to it. Unknown namespaces are returned lower-cased
+// unchanged, so this only ever merges known aliases.
 func CanonicalService(s string) string {
 	switch strings.ToLower(s) {
 	case "elasticmapreduce":
 		return "emr"
 	case "elasticloadbalancing", "elasticloadbalancingv2":
 		return "elbv2"
+	case "elasticfilesystem":
+		return "efs"
+	case "events":
+		return "eventbridge"
+	case "states":
+		return "stepfunctions"
 	default:
 		return strings.ToLower(s)
 	}
