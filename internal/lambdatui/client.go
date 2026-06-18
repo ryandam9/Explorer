@@ -294,18 +294,18 @@ func (c *Client) loadEventSources(ctx context.Context, cl *lambda.Client, region
 }
 
 // FunctionDetail fetches a function's full configuration on demand (one
-// GetFunction call), flattened for the detail overlay with environment-variable
-// values redacted. Reserved concurrency, code location and tags come only from
+// GetFunction call), flattened for the detail grid with environment-variable
+// values omitted. Reserved concurrency, code location and tags come only from
 // GetFunction, so the panel fetches it rather than reusing the list view.
-func (c *Client) FunctionDetail(ctx context.Context, region, name string) (ResourceDetail, error) {
+func (c *Client) FunctionDetail(ctx context.Context, region, name string) (FunctionDetail, error) {
 	out, err := c.clientFor(region).GetFunction(ctx, &lambda.GetFunctionInput{FunctionName: aws.String(name)})
 	if err != nil {
-		return ResourceDetail{}, err
+		return FunctionDetail{}, err
 	}
 	if out.Configuration == nil {
-		return ResourceDetail{}, fmt.Errorf("function %q not found", name)
+		return FunctionDetail{}, fmt.Errorf("function %q not found", name)
 	}
-	return buildFunctionDetail(region, name, out), nil
+	return flattenFunction(region, name, out), nil
 }
 
 func mapFunction(region string, fn lambdatypes.FunctionConfiguration) Function {

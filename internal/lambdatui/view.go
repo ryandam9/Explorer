@@ -21,7 +21,9 @@ func (mm *m) View() string {
 		sb.WriteString(badge + "\n")
 	}
 
-	if mm.findingsActive {
+	if mm.detailActive {
+		sb.WriteString(mm.renderDetail())
+	} else if mm.findingsActive {
 		sb.WriteString(mm.renderFindings())
 	} else {
 		sb.WriteString(mm.renderTabBar() + "\n")
@@ -41,76 +43,30 @@ func (mm *m) View() string {
 	}
 
 	frame := mm.applyToast(ui.ClipToSize(body+sep+status, mm.width, mm.height))
-	if mm.detailActive {
-		if mm.detailLoading || mm.detailErr != nil {
-			frame = ui.OverlayCenterBlank(ui.AboutView(mm.detailTitle, mm.detailBody(), ui.AboutWidth(mm.width)), mm.width, mm.height)
-		} else {
-			frame = ui.OverlayCenterBlank(mm.scrollOverlay(mm.detailTitle, mm.detailBody()), mm.width, mm.height)
-		}
-	}
 	if mm.showAbout {
 		frame = ui.OverlayCenterBlank(ui.AboutView("About — AWS Lambda", lambdaAboutText, ui.AboutWidth(mm.width)), mm.width, mm.height)
 	}
+	// The debug pane floats over everything (including the detail grid), so its
+	// live activity is visible even while the inventory is still loading.
+	frame = mm.debug.Overlay(frame, mm.width, mm.height)
 	return frame
-}
-
-// scrollOverlay renders a loaded detail overlay: it sizes and fills the shared
-// viewport (preserving the scroll offset), then frames the windowed body plus a
-// scroll hint to match the help overlay.
-func (mm *m) scrollOverlay(title, content string) string {
-	mm.layoutOverlayVP(content)
-	hint := lipgloss.NewStyle().Foreground(lipgloss.Color(ui.ColorMuted())).Render("↑/↓ scroll · Esc close")
-	body := lipgloss.JoinVertical(lipgloss.Left, mm.overlayVP.View(), "", hint)
-	return ui.HelpView(title, body, mm.overlayVP.Width+4)
-}
-
-// detailBody renders the detail overlay's contents (loading / error / rows). A
-// row's shape selects its rendering: an aligned label/value line, a section
-// header, an indented bullet, or a blank separator.
-func (mm *m) detailBody() string {
-	if mm.detailLoading {
-		return mm.spinner.View() + " Loading function detail…"
-	}
-	if mm.detailErr != nil {
-		return "Could not load details: " + mm.detailErr.Error()
-	}
-	if len(mm.detail.Rows) == 0 {
-		return "No additional details available."
-	}
-	var b strings.Builder
-	for _, r := range mm.detail.Rows {
-		switch {
-		case r.Section:
-			b.WriteString(r.Label + "\n")
-		case r.Label == "" && r.Value == "":
-			b.WriteString("\n")
-		case r.Label == "":
-			b.WriteString("  " + r.Value + "\n")
-		default:
-			value := r.Value
-			if value == "" {
-				value = "—"
-			}
-			b.WriteString(fmt.Sprintf("%-20s %s\n", r.Label, value))
-		}
-	}
-	return strings.TrimRight(b.String(), "\n")
 }
 
 const lambdaAboutText = "This is the AWS Lambda dashboard. Tab across Functions, Layers and Event " +
 	"sources; each row shows health at a glance — a function's runtime, memory, " +
 	"timeout and state, a layer's latest version and compatible runtimes, an event-" +
 	"source mapping's source, state and batch size.\n\n" +
-	"Press Enter on a function to see its full configuration (role, memory, timeout, " +
-	"layers, VPC, dead-letter queue, reserved concurrency, environment-variable keys, " +
-	"code location and tags — fetched on demand; env-var values are never shown). " +
-	"Enter on a layer or event source opens its detail from the loaded data.\n\n" +
+	"Press Enter on a function to open its full configuration as a grid of panels — " +
+	"overview, resources & limits, state, VPC networking, environment-variable keys " +
+	"(values are never shown), layers, code package and tags — each a separately " +
+	"scrollable tile (fetched on demand). Tab/arrows move between tiles. Enter on a " +
+	"layer or event source opens its panels from the loaded data.\n\n" +
 	"Press f for the findings panel — deterministic runtime/health checks (deprecated " +
 	"or soon-deprecating runtimes, missing dead-letter queues, failed-state functions) " +
 	"over the loaded functions; y copies the suggested fix.\n\n" +
 	"On a function, L opens its CloudWatch logs (/aws/lambda/<name>). Press S to cycle " +
 	"the column the active tab is sorted by (R reverses the direction), o on any row to " +
-	"open it in the AWS console, / to filter, and r to refresh."
+	"open it in the AWS console, / to filter, r to refresh, and ~ for the live debug pane."
 
 func (mm *m) renderTabBar() string {
 	var parts []string
@@ -215,6 +171,12 @@ func boxStyle(width, height int) lipgloss.Style {
 }
 
 func (mm *m) statusLeft() string {
+	if mm.detailActive {
+		if mm.detailLoading {
+			return mm.detailTitle + "  ·  loading…"
+		}
+		return fmt.Sprintf("%s  ·  panel %d/%d", mm.detailTitle, mm.detailFocus+1, len(mm.detailSections))
+	}
 	if mm.findingsActive {
 		return "Findings: " + findings.Summary(mm.findingList)
 	}
@@ -226,6 +188,15 @@ func (mm *m) statusLeft() string {
 }
 
 func (mm *m) helpHints() []ui.KeyHint {
+	if mm.detailActive {
+		return []ui.KeyHint{
+			ui.H("Tab", "panel"),
+			ui.H("↑/↓", "scroll"),
+			ui.H("Esc", "back"),
+			ui.H("i", "about"),
+			ui.H("q", "quit"),
+		}
+	}
 	if mm.findingsActive {
 		return []ui.KeyHint{
 			ui.H("↑/↓", "findings"),
@@ -254,6 +225,7 @@ func (mm *m) helpHints() []ui.KeyHint {
 		ui.H("/", "filter"),
 		ui.H("o", "console"),
 		ui.H("r", "refresh"),
+		ui.H("~", "debug"),
 		ui.H("i", "about"),
 		ui.H("q", "quit"),
 	)

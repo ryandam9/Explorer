@@ -114,7 +114,7 @@ func TestEventSourceLabel(t *testing.T) {
 }
 
 func TestDLQLabel(t *testing.T) {
-	if got := dlqLabel(""); got != "none" {
+	if got := dlqLabel(""); got != "none configured" {
 		t.Errorf("empty dlq = %q", got)
 	}
 	if got := dlqLabel("arn:aws:sqs:us-east-1:123:dead-letters"); got != "sqs:dead-letters" {
