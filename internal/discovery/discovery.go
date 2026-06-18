@@ -130,7 +130,10 @@ func mapResource(scanRegion string, mapping rgttypes.ResourceTagMapping) (model.
 	}
 
 	return model.Resource{
-		Service:   parsed.Service,
+		// Canonicalize the ARN service namespace so a resource found only via
+		// the Tagging API (e.g. "elasticmapreduce") groups with its typed
+		// collector ("emr") instead of appearing as a separate service.
+		Service:   awsutil.CanonicalService(parsed.Service),
 		Type:      parsed.ResourceType,
 		Region:    region,
 		AccountID: parsed.AccountID,

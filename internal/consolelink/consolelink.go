@@ -9,6 +9,7 @@ import (
 	"net/url"
 	"strings"
 
+	"github.com/ryandam9/aws_explorer/internal/awsutil"
 	"github.com/ryandam9/aws_explorer/internal/model"
 )
 
@@ -103,16 +104,10 @@ func splitResource(resource string) (typ, id string) {
 }
 
 // canonicalService maps ARN service namespaces to the names the typed
-// collectors use.
+// collectors use, shared with the discovery sweep so links and the summary's
+// service grouping agree on one name per service.
 func canonicalService(s string) string {
-	switch strings.ToLower(s) {
-	case "elasticloadbalancing":
-		return "elbv2"
-	case "elasticmapreduce":
-		return "emr"
-	default:
-		return strings.ToLower(s)
-	}
+	return awsutil.CanonicalService(s)
 }
 
 // lastSegment trims any path from an ID ("service-role/my-role" → "my-role"),
