@@ -3667,8 +3667,8 @@ func (m tuiModel) jumpToLogsCmd(region, group string) tea.Cmd {
 	if m.cfg != nil && m.cfg.AWS.Profile != "" {
 		args = append(args, "--profile", m.cfg.AWS.Profile)
 	}
-	if m.configPath != "" {
-		args = append(args, "--config", m.configPath)
+	if cp := ui.ConfigArgPath(m.configPath); cp != "" {
+		args = append(args, "--config", cp)
 	}
 	return tea.ExecProcess(exec.Command(self, args...), func(err error) tea.Msg {
 		return cwJumpDoneMsg{err: err}

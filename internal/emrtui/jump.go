@@ -7,6 +7,8 @@ import (
 	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
+
+	"github.com/ryandam9/aws_explorer/internal/ui"
 )
 
 // s3JumpDoneMsg is delivered after the suspended s3 TUI exits.
@@ -76,7 +78,7 @@ func (mm *m) jumpToS3LogsCmd(bucket, prefix, region string) tea.Cmd {
 	if mm.appCfg != nil {
 		profile = mm.appCfg.AWS.Profile
 	}
-	args := s3JumpArgs(bucket, prefix, region, profile, mm.configPath)
+	args := s3JumpArgs(bucket, prefix, region, profile, ui.ConfigArgPath(mm.configPath))
 	return tea.ExecProcess(exec.Command(self, args...), func(err error) tea.Msg {
 		return s3JumpDoneMsg{err: err}
 	})
