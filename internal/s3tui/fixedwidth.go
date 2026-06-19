@@ -237,7 +237,10 @@ func (m *Model) fixedInfoLine(cols int) string {
 	colsPart := fmt.Sprintf("%d columns", dataCols)
 	if hl, hr := m.csvTable.ColScrollInfo(); hl+hr > 0 {
 		header, _ := m.headerAndData()
-		colsPart = m.colWindowInfo(header, cols)
+		// The leading "!" marker column is not a data column: report dataCols as
+		// the total and shift the visible range down by 1 so the numbers match
+		// the header's "(1) (2) …" line.
+		colsPart = m.colWindowInfo(header, dataCols, 1)
 	}
 	rowsPart := fmt.Sprintf("%d rows", m.csvTotal)
 	if m.csvHidden > 0 {

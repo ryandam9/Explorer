@@ -802,7 +802,7 @@ func (m *Model) csvInfoLine() string {
 	// how many are shown and how to reach the rest.
 	colsPart := fmt.Sprintf("%d columns", cols)
 	if hl, hr := m.csvTable.ColScrollInfo(); hl+hr > 0 {
-		colsPart = m.colWindowInfo(header, cols)
+		colsPart = m.colWindowInfo(header, cols, 0)
 	}
 	headerPart := fmt.Sprintf("header: row %d", m.csvHeaderRow)
 	if m.csvHeaderRow == 0 {
@@ -820,15 +820,22 @@ func (m *Model) csvInfoLine() string {
 // colWindowInfo describes which columns are on screen when the table is wider
 // than the view: the visible scrollable range, the total, and the name of the
 // leftmost scrollable column as a "where am I" anchor for very wide files.
-func (m *Model) colWindowInfo(header []string, total int) string {
+//
+// markerCols is the number of leading non-data marker columns (e.g. the
+// fixed-width "!" malformed-row flag) that precede the real columns. Their
+// width is excluded from the reported numbers so the displayed column ordinals
+// match the "(1) (2) …" header line and the "N columns" count. header still
+// includes the marker columns, so the absolute index is used to look up the
+// anchor column's name.
+func (m *Model) colWindowInfo(header []string, total, markerCols int) string {
 	lo, hi, ok := m.csvTable.VisibleScrollableCols()
 	if !ok {
 		return fmt.Sprintf("%d columns", total)
 	}
-	out := fmt.Sprintf("cols %d-%d of %d (←/→ for more)", lo, hi, total)
+	out := fmt.Sprintf("cols %d-%d of %d (←/→ for more)", lo-markerCols, hi-markerCols, total)
 	if i := lo - 1; i >= 0 && i < len(header) {
 		if name := clipCell(strings.TrimSpace(header[i])); name != "" {
-			out += fmt.Sprintf("  ·  col %d: %s", lo, name)
+			out += fmt.Sprintf("  ·  col %d: %s", lo-markerCols, name)
 		}
 	}
 	return out
@@ -840,7 +847,7 @@ func (m *Model) parquetInfoLine(cols int) string {
 	colsPart := fmt.Sprintf("%d columns", cols)
 	if hl, hr := m.csvTable.ColScrollInfo(); hl+hr > 0 {
 		header, _ := m.headerAndData()
-		colsPart = m.colWindowInfo(header, cols)
+		colsPart = m.colWindowInfo(header, cols, 0)
 	}
 	// csvTotal is the number of rows read; parquetFileRows is the file's total.
 	rowsPart := fmt.Sprintf("%d rows", m.csvTotal)
