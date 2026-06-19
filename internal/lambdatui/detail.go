@@ -9,6 +9,8 @@ import (
 
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/service/lambda"
+
+	"github.com/ryandam9/aws_explorer/internal/ui"
 )
 
 // section is one titled block of a detail view. Body is already-assembled plain
@@ -308,7 +310,10 @@ func indentJSON(s string) string {
 	if err := json.Indent(&buf, []byte(s), "", "  "); err != nil {
 		return "  " + strings.TrimSpace(s)
 	}
-	lines := strings.Split(buf.String(), "\n")
+	// Syntax-highlight the JSON, then add a two-space margin to each line so it
+	// lines up with the other detail bodies (JSON tokens never span lines, so
+	// prefixing per line keeps the colour spans intact).
+	lines := strings.Split(ui.HighlightLang(buf.String(), "json"), "\n")
 	for i, ln := range lines {
 		lines[i] = "  " + ln
 	}

@@ -2867,9 +2867,10 @@ func (m tuiModel) renderDetail(r model.Resource, width int) string {
 			return "JSON error: " + err.Error()
 		}
 		header := detailSectionStyle().Render("RAW JSON") + "\n\n"
-		// Soft-wrap long lines to the panel width; the viewport does not
-		// scroll horizontally.
-		return header + lipgloss.NewStyle().Width(width).Render(string(data))
+		// Syntax-highlight, then soft-wrap to the panel width (lipgloss wrapping
+		// is ANSI-aware, so the colours survive); the viewport does not scroll
+		// horizontally.
+		return header + lipgloss.NewStyle().Width(width).Render(ui.HighlightLang(string(data), "json"))
 	}
 
 	var b strings.Builder

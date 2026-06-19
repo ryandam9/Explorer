@@ -4,6 +4,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/charmbracelet/x/ansi"
 )
 
 func sectionTitled(secs []section, title string) (section, bool) {
@@ -69,9 +71,10 @@ func titlesOf(secs []section) []string {
 }
 
 func TestResourcePolicyBody(t *testing.T) {
-	// A real policy is pretty-printed (indented, multi-line).
+	// A real policy is pretty-printed (indented, multi-line) and syntax-
+	// highlighted; strip the ANSI to assert on the text.
 	pol := `{"Version":"2012-10-17","Statement":[{"Effect":"Allow","Principal":{"Service":"s3.amazonaws.com"},"Action":"lambda:InvokeFunction"}]}`
-	body := resourcePolicyBody(FunctionDetail{ResourcePolicy: pol})
+	body := ansi.Strip(resourcePolicyBody(FunctionDetail{ResourcePolicy: pol}))
 	if !strings.Contains(body, "\"Version\": \"2012-10-17\"") || !strings.Contains(body, "lambda:InvokeFunction") {
 		t.Errorf("policy not pretty-printed:\n%s", body)
 	}

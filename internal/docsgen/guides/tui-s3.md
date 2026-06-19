@@ -69,9 +69,14 @@ configuration.
 | `r` | Refresh (re-fetch this bucket's details) |
 | `Esc` | Back to the bucket list |
 
-`p` and `c` open a scrollable, full-screen JSON viewer; press `y` there to copy
-the document to the clipboard. When the bucket has no policy / CORS configuration
-(or access is denied) the viewer says so rather than showing an empty pane.
+`p` and `c` open a scrollable, full-screen, syntax-highlighted JSON viewer; press
+`y` there to copy the document to the clipboard. When the bucket has no policy /
+CORS configuration (or access is denied) the viewer says so rather than showing
+an empty pane.
+
+Object previews are syntax-highlighted too: opening a recognised source or data
+file (by extension) or an XML document colours it for readability; plain text and
+logs are shown as-is.
 
 ## Table preview shortcuts
 

@@ -39,6 +39,14 @@ func HighlightLang(code, lang string) string {
 	return highlightWith(lexers.Get(lang), code)
 }
 
+// HighlightByExt colours code only when filename's extension maps to a known
+// lexer — it never falls back to content analysis. Use it for previews of
+// arbitrary files, where plain text and logs should stay uncoloured rather than
+// be guessed at. Returns code unchanged when the extension isn't recognised.
+func HighlightByExt(code, filename string) string {
+	return highlightWith(lexers.Match(filename), code)
+}
+
 func highlightWith(lexer chroma.Lexer, code string) string {
 	if lexer == nil {
 		return code

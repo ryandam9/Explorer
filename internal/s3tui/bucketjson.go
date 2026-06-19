@@ -8,6 +8,7 @@ import (
 	"github.com/atotto/clipboard"
 	"github.com/charmbracelet/bubbles/viewport"
 	"github.com/charmbracelet/lipgloss"
+	"github.com/charmbracelet/x/ansi"
 
 	"github.com/ryandam9/aws_explorer/internal/ui"
 )
@@ -33,9 +34,11 @@ func (m *Model) bucketDetailPanelSize() (width, height int) {
 // hard-wrapped, scrollable content. raw is the document to show; when it is
 // empty, emptyMsg explains why (no policy, access denied, …).
 func (m *Model) openBucketJSON(title, raw, emptyMsg string) {
-	text := emptyMsg
+	// plain is the text kept for copy (no ANSI); display is syntax-highlighted.
+	plain, display := emptyMsg, emptyMsg
 	if strings.TrimSpace(raw) != "" {
-		text = prettyJSON(raw)
+		plain = prettyJSON(raw)
+		display = ui.HighlightLang(plain, "json")
 	}
 
 	width, height := m.bucketDetailPanelSize()
@@ -48,11 +51,11 @@ func (m *Model) openBucketJSON(title, raw, emptyMsg string) {
 		vpH = 2
 	}
 	vp := viewport.New(vpW, vpH)
-	vp.SetContent(hardWrap(text, vpW))
+	vp.SetContent(ansi.Hardwrap(display, vpW, false)) // ANSI-aware so highlight survives
 
 	m.bucketJSONViewport = vp
 	m.bucketJSONTitle = title
-	m.bucketJSONContent = text
+	m.bucketJSONContent = plain // copy yields clean JSON
 	m.bucketJSONNote = ""
 	m.showBucketJSON = true
 }
