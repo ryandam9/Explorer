@@ -78,12 +78,31 @@ type m struct {
 	// detailFocus is the focused tile; detailPanels holds one viewport per section.
 	detailActive   bool
 	detailTitle    string
-	detailKey      string // region/name of the function being described (stale-adopt guard)
+	detailKey      string         // region/name of the function being described (stale-adopt guard)
+	detailFunc     FunctionDetail // the loaded detail (for the code browser's CodeLocation)
 	detailSections []section
 	detailPanels   []viewport.Model
 	detailFocus    int
 	detailLoading  bool
 	detailErr      error
+
+	// Code browser (v on a function detail): an opt-in download of the
+	// deployment package, then a file list plus a scrollable source viewer.
+	// Because it fetches the package over the network (outside the AWS API) it is
+	// gated behind a confirmation modal (codeConfirm) that states the size.
+	codeConfirm  bool // confirmation modal shown before downloading
+	codeActive   bool // the browser is open
+	codeLoading  bool // download/unzip in flight
+	codeErr      error
+	codeKey      string // region/name guard for the async download
+	codeTitle    string
+	codeSizeNote string // human size shown in the confirmation
+	codeFiles    []codeFile
+	codeTbl      table.Model
+	codeViewing  bool // a file is open in the viewport
+	codeViewport viewport.Model
+	codeFileName string
+	codeFileIdx  int
 
 	// Findings panel (f) — deterministic runtime/health checks over the loaded
 	// functions, computed synchronously (no AWS call).
@@ -115,6 +134,15 @@ type detailMsg struct {
 	detail FunctionDetail
 	err    error
 }
+
+type codeMsg struct {
+	key   string // region/name guard so a stale download can't patch a newer view
+	files []codeFile
+	err   error
+}
+
+// codeDownloadTimeout bounds the package download + unzip.
+const codeDownloadTimeout = 60 * time.Second
 
 // cwJumpDoneMsg is delivered after the suspended cw TUI exits.
 type cwJumpDoneMsg struct{ err error }
@@ -331,7 +359,18 @@ func (mm *m) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			mm.detailLoading = false
 			mm.detailErr = msg.err
 			if msg.err == nil {
+				mm.detailFunc = msg.detail
 				mm.setDetailSections(msg.detail.sections())
+			}
+		}
+
+	case codeMsg:
+		// Adopt only while the matching code browser is still open and loading.
+		if mm.codeActive && mm.codeLoading && msg.key == mm.codeKey {
+			mm.codeLoading = false
+			mm.codeErr = msg.err
+			if msg.err == nil {
+				mm.setCodeFiles(msg.files)
 			}
 		}
 
@@ -391,9 +430,29 @@ func (mm *m) handleKey(msg tea.KeyMsg) []tea.Cmd {
 			if p := mm.focusedPanel(); p != nil {
 				p.GotoBottom()
 			}
+		case "v":
+			mm.requestCode(&cmds)
 		case ui.KeyAbout:
 			mm.showAbout = true
 		}
+		return cmds
+	}
+
+	// Code browser confirmation modal: a deliberate y/Esc gate before the
+	// network download.
+	if mm.codeConfirm {
+		switch msg.String() {
+		case "y", "enter":
+			mm.startCodeDownload(&cmds)
+		case "esc", "n", "q":
+			mm.codeConfirm = false
+		}
+		return cmds
+	}
+
+	// Code browser: a file list, or a scrolling source viewer when a file is open.
+	if mm.codeActive {
+		mm.handleCodeKey(msg, &cmds)
 		return cmds
 	}
 
@@ -512,6 +571,7 @@ func (mm *m) openDetail(cmds *[]tea.Cmd) {
 	mm.detailFocus = 0
 	mm.detailSections = nil
 	mm.detailPanels = nil
+	mm.detailFunc = FunctionDetail{} // repopulated only when a function's detail loads
 	switch r.typ {
 	case "function":
 		mm.detailLoading = true
@@ -595,6 +655,9 @@ func max(a, b int) int {
 
 func (mm *m) PageTitle() string {
 	base := "AWS Lambda"
+	if mm.codeActive {
+		return base + " › " + mm.codeTitle
+	}
 	if mm.detailActive {
 		return base + " › " + mm.detailTitle
 	}

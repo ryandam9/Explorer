@@ -61,6 +61,7 @@ type FunctionDetail struct {
 
 	RepositoryType string
 	ImageURI       string
+	CodeLocation   string // presigned S3 URL to download the Zip deployment package
 
 	// Resource-based policy (who may invoke the function), from lambda:GetPolicy.
 	// ResourcePolicy is the JSON document ("" when the function has none).
@@ -130,6 +131,7 @@ func flattenFunction(region, name string, out *lambda.GetFunctionOutput) Functio
 	if code := out.Code; code != nil {
 		d.RepositoryType = aws.ToString(code.RepositoryType)
 		d.ImageURI = aws.ToString(code.ImageUri)
+		d.CodeLocation = aws.ToString(code.Location)
 	}
 	if len(out.Tags) > 0 {
 		d.Tags = out.Tags
@@ -275,6 +277,9 @@ func codeBody(d FunctionDetail) string {
 		b.WriteString(dkv("Image URI", d.ImageURI) + "\n")
 	} else {
 		b.WriteString(dkv("Code size", formatCodeSize(d.CodeSize)) + "\n")
+		if d.CodeLocation != "" {
+			b.WriteString(dkv("Source", "press v to download & browse") + "\n")
+		}
 	}
 	b.WriteString(dkv("KMS key", d.KMSKeyArn) + "\n")
 	b.WriteString(dkv("Signing profile", d.SigningPro) + "\n")
