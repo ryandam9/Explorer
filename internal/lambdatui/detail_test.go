@@ -29,7 +29,7 @@ func TestFunctionSections(t *testing.T) {
 	secs := d.sections()
 
 	// Each requested concept is its own panel.
-	for _, want := range []string{"Overview", "Resources & limits", "State & health", "VPC networking", "Layers", "Code package", "Dead-letter queue"} {
+	for _, want := range []string{"Overview", "Resources & limits", "State & health", "VPC networking", "Layers", "Code package", "Resource policy", "Dead-letter queue"} {
 		if _, ok := sectionTitled(secs, want); !ok {
 			t.Errorf("missing section %q (got %d sections)", want, len(secs))
 		}
@@ -66,6 +66,36 @@ func titlesOf(secs []section) []string {
 		out[i] = s.Title
 	}
 	return out
+}
+
+func TestResourcePolicyBody(t *testing.T) {
+	// A real policy is pretty-printed (indented, multi-line).
+	pol := `{"Version":"2012-10-17","Statement":[{"Effect":"Allow","Principal":{"Service":"s3.amazonaws.com"},"Action":"lambda:InvokeFunction"}]}`
+	body := resourcePolicyBody(FunctionDetail{ResourcePolicy: pol})
+	if !strings.Contains(body, "\"Version\": \"2012-10-17\"") || !strings.Contains(body, "lambda:InvokeFunction") {
+		t.Errorf("policy not pretty-printed:\n%s", body)
+	}
+	if !strings.Contains(body, "\n") {
+		t.Errorf("expected multi-line JSON, got %q", body)
+	}
+
+	// No policy → an explanatory note, not blank.
+	if got := resourcePolicyBody(FunctionDetail{}); !strings.Contains(got, "no resource-based policy") {
+		t.Errorf("empty policy = %q", got)
+	}
+
+	// A read error (e.g. access denied) is surfaced and kept distinct from "none".
+	denied := resourcePolicyBody(FunctionDetail{ResourcePolicyErr: "Access denied: not permitted to read the resource policy (lambda:GetPolicy)."})
+	if !strings.Contains(denied, "Access denied") {
+		t.Errorf("denied policy = %q", denied)
+	}
+}
+
+func TestIndentJSONNonJSON(t *testing.T) {
+	// Non-JSON input is shown as-is (trimmed), never dropped.
+	if got := indentJSON("  not json  "); got != "  not json" {
+		t.Errorf("non-JSON indentJSON = %q", got)
+	}
 }
 
 func TestVPCBodyNotAttached(t *testing.T) {
