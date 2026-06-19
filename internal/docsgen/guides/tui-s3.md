@@ -55,6 +55,24 @@ Press `o` anywhere to open the current selection (bucket, bucket+prefix, or
 object) in the AWS console — the URL is copied, and a browser opens when the
 session is local.
 
+## Bucket detail shortcuts
+
+Press `d` on a bucket to open its detail view — a tabbed summary (Overview,
+Access & Security, Data Protection, Operational, Tags) of the bucket's
+configuration.
+
+| Key | Action |
+|-----|--------|
+| `Tab` / `Shift+Tab` | Switch between detail tabs |
+| `p` | View the full bucket policy as pretty-printed JSON |
+| `c` | View the full CORS configuration as pretty-printed JSON |
+| `r` | Refresh (re-fetch this bucket's details) |
+| `Esc` | Back to the bucket list |
+
+`p` and `c` open a scrollable, full-screen JSON viewer; press `y` there to copy
+the document to the clipboard. When the bucket has no policy / CORS configuration
+(or access is denied) the viewer says so rather than showing an empty pane.
+
 ## Table preview shortcuts
 
 Previewing a delimited (CSV/TSV/…), Parquet, or fixed-width object opens a

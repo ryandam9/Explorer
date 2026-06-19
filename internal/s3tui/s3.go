@@ -2,6 +2,7 @@ package s3tui
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -453,6 +454,8 @@ func (c *S3Client) FetchBucketDetails(bucket string) *BucketDetails {
 		encryption        = "None"
 		tags              map[string]string
 		policy            = "Error/Denied"
+		rawPolicy         string
+		corsJSON          string
 		lifecycleRules    int
 		publicAccessBlock = "None"
 		aclSummary        string
@@ -502,6 +505,7 @@ func (c *S3Client) FetchBucketDetails(bucket string) *BucketDetails {
 				policy = "Access Denied"
 			} else if p != "" {
 				policy = "Set (Available)"
+				rawPolicy = p // kept for the full-screen JSON viewer
 			} else {
 				policy = "None"
 			}
@@ -541,7 +545,7 @@ func (c *S3Client) FetchBucketDetails(bucket string) *BucketDetails {
 
 	go func() {
 		defer wg.Done()
-		cors = c.getBucketCORS(bucket)
+		cors, corsJSON = c.getBucketCORS(bucket)
 	}()
 
 	go func() {
@@ -615,6 +619,8 @@ func (c *S3Client) FetchBucketDetails(bucket string) *BucketDetails {
 		Replication:        replication,
 		MultipartUploads:   multipartUploads,
 		IntelligentTiering: intelligentTier,
+		RawPolicy:          rawPolicy,
+		CORSJSON:           corsJSON,
 	}
 }
 
@@ -678,18 +684,27 @@ func (c *S3Client) getBucketOwnershipControls(bucket string) string {
 	return "Not set"
 }
 
-func (c *S3Client) getBucketCORS(bucket string) string {
+// getBucketCORS returns a short summary for the detail tab and the CORS rules
+// marshalled to indented JSON for the full-screen viewer (empty when there is
+// no configuration or the call failed).
+func (c *S3Client) getBucketCORS(bucket string) (summary, jsonText string) {
 	ctx, cancel := c.requestContext()
 	defer cancel()
 
 	out, err := c.client.GetBucketCors(ctx, &s3.GetBucketCorsInput{Bucket: aws.String(bucket)})
 	if err != nil {
 		if hasAPIErrorCode(err, "NoSuchCORSConfiguration") {
-			return "Not configured"
+			return "Not configured", ""
 		}
-		return "—"
+		if hasAPIErrorCode(err, "AccessDenied") {
+			return "Access Denied", ""
+		}
+		return "—", ""
 	}
-	return fmt.Sprintf("%d rule(s)", len(out.CORSRules))
+	if b, err := json.MarshalIndent(out.CORSRules, "", "  "); err == nil {
+		jsonText = string(b)
+	}
+	return fmt.Sprintf("%d rule(s)", len(out.CORSRules)), jsonText
 }
 
 func (c *S3Client) getBucketWebsite(bucket string) string {

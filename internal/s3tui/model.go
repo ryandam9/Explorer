@@ -75,6 +75,13 @@ type BucketDetails struct {
 	Replication        string
 	MultipartUploads   int
 	IntelligentTiering string
+
+	// Raw configuration kept for the full-screen JSON viewers (the summary
+	// fields above stay short for the detail tabs). RawPolicy is the bucket
+	// policy document as returned by S3 ("" when there is none); CORSJSON is the
+	// CORS rules marshalled to JSON ("" when not configured).
+	RawPolicy string
+	CORSJSON  string
 }
 
 // ---------------------------------------------------------------------------
@@ -307,6 +314,14 @@ type Model struct {
 	// Bucket detail full-screen view
 	detailBucket string
 	detailTabIdx int
+
+	// Full-screen JSON viewer overlaid on the bucket detail view (bucket policy
+	// or CORS configuration), shown with pretty-printed, scrollable JSON.
+	showBucketJSON     bool
+	bucketJSONTitle    string
+	bucketJSONContent  string // the formatted text (for copy)
+	bucketJSONViewport viewport.Model
+	bucketJSONNote     string // transient note (e.g. after copy)
 
 	// Object browser extras
 	flatMode     bool
@@ -1733,6 +1748,20 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 		// Bucket detail view
 		if m.state == stateBucketDetail {
+			// The JSON viewer (bucket policy / CORS) captures keys while open.
+			if m.showBucketJSON {
+				switch msg.String() {
+				case "esc", "q":
+					m.showBucketJSON = false
+				case "y":
+					m.copyBucketJSON()
+				default:
+					m.bucketJSONNote = ""
+					m.bucketJSONViewport, cmd = m.bucketJSONViewport.Update(msg)
+					cmds = append(cmds, cmd)
+				}
+				return m, tea.Batch(cmds...)
+			}
 			switch msg.String() {
 			case "esc":
 				m.state = stateBucketList
@@ -1749,6 +1778,14 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				delete(m.bucketDetailsCache, m.detailBucket)
 				m.selectedBucketDetails = nil
 				return m, m.fetchBucketDetails(m.detailBucket)
+			case "p":
+				// View the full bucket policy as pretty-printed JSON.
+				m.openBucketPolicyJSON()
+				return m, nil
+			case "c":
+				// View the full CORS configuration as pretty-printed JSON.
+				m.openBucketCORSJSON()
+				return m, nil
 			}
 			return m, nil
 		}
@@ -1843,6 +1880,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				if len(row) > 0 {
 					m.detailBucket = row[1]
 					m.detailTabIdx = 0
+					m.showBucketJSON = false
 					m.state = stateBucketDetail
 					// Trigger fetch if needed
 					if m.selectedBucketDetails == nil || m.bucket != row[1] {
@@ -2319,9 +2357,13 @@ func (m *Model) View() string {
 		return "Initializing…"
 	}
 
-	// Bucket detail full-screen view
+	// Bucket detail full-screen view (with the JSON viewer overlaid when open).
 	if m.state == stateBucketDetail {
-		out := ui.AppStyle().Render(m.bucketDetailView())
+		view := m.bucketDetailView()
+		if m.showBucketJSON {
+			view = m.bucketJSONView()
+		}
+		out := ui.AppStyle().Render(view)
 		return m.debug.Overlay(out, m.width, m.height)
 	}
 
@@ -2538,6 +2580,8 @@ func (m *Model) renderStatusBar() string {
 func (m *Model) statusHints() []ui.KeyHint {
 	// Overlays and inputs capture the keyboard, so only their keys are shown.
 	switch {
+	case m.showBucketJSON:
+		return []ui.KeyHint{ui.H("↑/↓", "scroll"), ui.H("PgUp/PgDn", "page"), ui.H("y", "copy"), ui.H("Esc", "back")}
 	case m.confirmingDelete:
 		return []ui.KeyHint{ui.H("type 'delete'", ""), ui.H("Enter", "confirm"), ui.H("Esc", "cancel")}
 	case m.showPresigned:
@@ -2562,6 +2606,8 @@ func (m *Model) statusHints() []ui.KeyHint {
 	case stateBucketDetail:
 		return []ui.KeyHint{
 			ui.H("Tab/Shift+Tab", "switch tab"),
+			ui.H("p", "policy JSON"),
+			ui.H("c", "CORS JSON"),
 			ui.H("r", "refresh"),
 			ui.H("Esc", "back"),
 			ui.H("q", "quit"),
@@ -2947,6 +2993,8 @@ func (m *Model) bucketDetailView() string {
 				ui.BoldStyle().Render("Ownership Controls:  ")+orDash(d.OwnershipControls),
 				ui.BoldStyle().Render("Policy:              ")+orDash(policyTrunc),
 				ui.BoldStyle().Render("Policy Status:       ")+orDash(d.PolicyStatus),
+				"",
+				ui.MutedStyle().Render("[p] view full bucket policy as JSON"),
 			)
 		case 2: // Data Protection
 			body = lipgloss.JoinVertical(lipgloss.Left,
@@ -2965,6 +3013,8 @@ func (m *Model) bucketDetailView() string {
 				ui.BoldStyle().Render("Transfer Accel.:      ")+orDash(d.Acceleration),
 				ui.BoldStyle().Render("Intelligent Tiering:  ")+orDash(d.IntelligentTiering),
 				ui.BoldStyle().Render("Multipart Uploads:    ")+fmt.Sprintf("%d in-progress", d.MultipartUploads),
+				"",
+				ui.MutedStyle().Render("[c] view full CORS configuration as JSON"),
 			)
 		case 4: // Tags
 			if len(d.Tags) == 0 {
