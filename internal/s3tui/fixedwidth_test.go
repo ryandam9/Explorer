@@ -2,6 +2,7 @@ package s3tui
 
 import (
 	"reflect"
+	"strings"
 	"testing"
 )
 
@@ -71,6 +72,35 @@ func TestBuildFixedRecords(t *testing.T) {
 	}
 	if bad != 2 {
 		t.Errorf("badRows = %d, want 2", bad)
+	}
+}
+
+// When the fixed-width table is scrolled wider than the view, the "cols X-Y of
+// N" info line must count only data columns — the leading "!" marker column is
+// not a data column and must not inflate the total or shift the numbers.
+func TestFixedInfoLineExcludesMarkerColumn(t *testing.T) {
+	fields := []fixedField{
+		{name: "alpha", start: 1, length: 12},
+		{name: "bravo", start: 13, length: 12},
+		{name: "charlie", start: 25, length: 12},
+		{name: "delta", start: 37, length: 12},
+		{name: "echo", start: 49, length: 12},
+	}
+	content := "alphavalue01bravovalue01charlievalu1deltavalue01echovalue001\n" +
+		"alphavalue02bravovalue02charlievalu2deltavalue02echovalue002\n"
+	recs, bad := buildFixedRecords(content, fields)
+
+	m := &Model{width: 40, height: 20}
+	m.initFixed(recs, bad)
+	m.csvTable.ScrollRight() // hide a leading data column so the window info shows
+
+	info := m.csvInfoLine()
+	// Five data columns, not six — the "!" marker must not be counted.
+	if !strings.Contains(info, "of 5") {
+		t.Errorf("info line should report 5 data columns: %q", info)
+	}
+	if strings.Contains(info, "of 6") || strings.Contains(info, "col 6:") {
+		t.Errorf("info line should not count the marker column: %q", info)
 	}
 }
 

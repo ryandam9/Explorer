@@ -44,6 +44,93 @@ const (
 	csvPromptParquetRows
 )
 
+// colFilter selects which columns the table preview shows, for wide files where
+// many columns are entirely empty. The default (colFilterAll) shows the dataset
+// as-is; the other two narrow the view to populated or empty columns.
+type colFilter int
+
+const (
+	colFilterAll      colFilter = iota // every column (default)
+	colFilterWithData                  // only columns that contain data
+	colFilterEmpty                     // only columns that are entirely empty
+)
+
+// colFilterLabel is the short phrase shown in the info line for each mode.
+func colFilterLabel(f colFilter) string {
+	switch f {
+	case colFilterWithData:
+		return "columns with data"
+	case colFilterEmpty:
+		return "empty columns"
+	default:
+		return "all columns"
+	}
+}
+
+// colHasData reports whether any data row holds a non-blank value for column
+// col. The window-divider rows (nil) are skipped, and emptiness is judged after
+// trimming so spaces count as empty (the "no data at all" case).
+func colHasData(data [][]string, col int) bool {
+	for _, rec := range data {
+		if rec == nil {
+			continue
+		}
+		if col < len(rec) && strings.TrimSpace(rec[col]) != "" {
+			return true
+		}
+	}
+	return false
+}
+
+// filterColIndices returns the header column indices to display under filter f,
+// computed over all data rows. A leading fixed-width "!" marker column (present
+// only when hasMarker) is always kept — it is a status column, not data.
+func filterColIndices(header []string, data [][]string, f colFilter, hasMarker bool) []int {
+	out := make([]int, 0, len(header))
+	for i := range header {
+		if f == colFilterAll || (hasMarker && i == 0) {
+			out = append(out, i)
+			continue
+		}
+		has := colHasData(data, i)
+		if (f == colFilterWithData && has) || (f == colFilterEmpty && !has) {
+			out = append(out, i)
+		}
+	}
+	return out
+}
+
+// dataColCount is the number of real data columns in idx, excluding a leading
+// fixed-width marker column when hasMarker is set.
+func dataColCount(idx []int, hasMarker bool) int {
+	n := len(idx)
+	if hasMarker {
+		for _, i := range idx {
+			if i == 0 {
+				return n - 1
+			}
+		}
+	}
+	return n
+}
+
+// visibleColIndices returns the header indices to show under the active column
+// filter for the current dataset.
+func (m *Model) visibleColIndices(header []string, data [][]string) []int {
+	return filterColIndices(header, data, m.csvColFilter, m.previewIsFixed)
+}
+
+// dataOrdinal is a column's 1-based position among the data columns (the number
+// shown on the table's "(1) (2) …" line), independent of any column filtering.
+// For fixed-width the leading "!" marker occupies header index 0, so a data
+// column's ordinal is its header index; otherwise it is index+1.
+func (m *Model) dataOrdinal(headerIdx int) int {
+	if m.previewIsFixed {
+		return headerIdx
+	}
+	return headerIdx + 1
+}
+
 func maxCols(recs [][]string) int {
 	n := 0
 	for _, r := range recs {
@@ -188,7 +275,8 @@ func (m *Model) initCSV(content string) bool {
 	}
 	m.previewIsParquet = false
 	m.csvAll = recs
-	m.csvHeaderRow = 1 // row 1 is the header by default (reset per file)
+	m.csvHeaderRow = 1            // row 1 is the header by default (reset per file)
+	m.csvColFilter = colFilterAll // show every column by default (reset per file)
 	m.csvRecordActive = false
 	if m.csvRowCap == 0 && !m.csvRowCapSet {
 		m.csvRowCap = defaultCSVRowCap
@@ -206,8 +294,9 @@ func (m *Model) initParquet(header []string, rows [][]string, total int64) {
 	all = append(all, header)
 	all = append(all, rows...)
 	m.csvAll = all
-	m.csvHeaderRow = 1 // the synthesised schema row is the header
-	m.csvDelim = ','   // unused for parquet, kept for a stable info line
+	m.csvHeaderRow = 1            // the synthesised schema row is the header
+	m.csvColFilter = colFilterAll // show every column by default (reset per file)
+	m.csvDelim = ','              // unused for parquet, kept for a stable info line
 	m.csvRecordActive = false
 	m.parquetFileRows = total
 	if m.csvRowCap == 0 && !m.csvRowCapSet {
@@ -252,23 +341,46 @@ func (m *Model) buildCSVTable() {
 	m.csvHidden = hidden
 	m.csvDisplay = display // keep the on-screen rows for the record view
 
-	cols := make([]table.Column, len(header))
-	for i, h := range header {
-		title := clipCell(strings.TrimSpace(h))
+	// Which columns to show under the active filter (emptiness judged over all
+	// data, not just the on-screen window). Cached so the record and copy views
+	// show the same columns.
+	vis := m.visibleColIndices(header, data)
+	// A delimiter/header change can leave an active filter matching no columns;
+	// fall back to "all" so the table never renders blank.
+	if m.csvColFilter != colFilterAll && dataColCount(vis, m.previewIsFixed) == 0 {
+		m.csvColFilter = colFilterAll
+		vis = m.visibleColIndices(header, data)
+	}
+	m.csvVisCols = vis
+
+	cols := make([]table.Column, len(vis))
+	for n, i := range vis {
+		title := clipCell(strings.TrimSpace(header[i]))
 		if title == "" {
 			title = fmt.Sprintf("col %d", i+1)
 		}
-		cols[i] = table.Column{Title: title, Width: 4}
+		col := table.Column{Title: title, Width: 4}
+		// The fixed-width preview prepends a "!" malformed-row marker column; it
+		// is not a data column, so exclude it from the "(1) (2) …" numbering and
+		// let the first real column be (1).
+		if m.previewIsFixed && i == 0 && title == fixedMarkerCol {
+			col.NoNumber = true
+		} else {
+			// Show each column's original file position so filtering away the
+			// empty columns doesn't renumber the survivors.
+			col.Number = m.dataOrdinal(i)
+		}
+		cols[n] = col
 	}
 
 	rows := make([]table.Row, 0, len(display))
 	for _, rec := range display {
-		row := make(table.Row, len(header))
-		for i := range header {
+		row := make(table.Row, len(vis))
+		for n, i := range vis {
 			if rec == nil {
-				row[i] = "⋯"
+				row[n] = "⋯"
 			} else if i < len(rec) {
-				row[i] = clipCell(rec[i])
+				row[n] = clipCell(rec[i])
 			}
 		}
 		rows = append(rows, row)
@@ -325,6 +437,32 @@ func (m *Model) cycleCSVRowCap() {
 	m.csvRowCap = csvRowCaps[(idx+1)%len(csvRowCaps)]
 	m.csvRowCapSet = true
 	m.buildCSVTable()
+}
+
+// cycleCSVColFilter advances the column filter (all → with-data → empty → all)
+// and rebuilds. A mode that would show no data columns is skipped, with a note,
+// so the table never goes blank — e.g. "empty columns" is skipped when every
+// column is populated.
+func (m *Model) cycleCSVColFilter() {
+	header, data := m.headerAndData()
+	skipped := ""
+	for step := 1; step <= 3; step++ {
+		cand := colFilter((int(m.csvColFilter) + step) % 3)
+		if cand != colFilterAll {
+			idx := filterColIndices(header, data, cand, m.previewIsFixed)
+			if dataColCount(idx, m.previewIsFixed) == 0 {
+				skipped = "no " + colFilterLabel(cand)
+				continue // never show a blank table
+			}
+		}
+		m.csvColFilter = cand
+		m.buildCSVTable()
+		// Explain a skip only when we fell all the way back to "all".
+		if cand == colFilterAll && skipped != "" {
+			m.csvNote = skipped
+		}
+		return
+	}
 }
 
 func indexRune(rs []rune, r rune) int {
@@ -560,6 +698,10 @@ func (m *Model) handleCSVKey(key string) bool {
 	case "w":
 		m.cycleCSVRowCap()
 		return true
+	case "c":
+		// Cycle the column filter: all → only-with-data → only-empty → all.
+		m.cycleCSVColFilter()
+		return true
 	case "left", "<", ",":
 		m.csvTable.ScrollLeft()
 		return true
@@ -578,7 +720,9 @@ func (m *Model) handleCSVKey(key string) bool {
 // clipboard as a GitHub-flavored Markdown table.
 func (m *Model) copyCSVAsMarkdown() {
 	header, _ := m.headerAndData()
-	md, rows := csvMarkdown(header, m.csvDisplay)
+	// Copy exactly the columns the table shows (honoring the column filter).
+	vh, vrows := projectCols(header, m.csvDisplay, m.csvVisCols)
+	md, rows := csvMarkdown(vh, vrows)
 	if md == "" {
 		m.csvNote = "Nothing to copy"
 		return
@@ -626,6 +770,32 @@ func csvMarkdown(header []string, display [][]string) (string, int) {
 	return b.String(), rows
 }
 
+// projectCols reduces header and rows to the given column indices, preserving
+// order, so the record and copy views show exactly the table's filtered columns.
+// Window-divider rows (nil) are preserved as nil.
+func projectCols(header []string, rows [][]string, cols []int) ([]string, [][]string) {
+	h := make([]string, len(cols))
+	for n, i := range cols {
+		if i >= 0 && i < len(header) {
+			h[n] = header[i]
+		}
+	}
+	out := make([][]string, len(rows))
+	for r, rec := range rows {
+		if rec == nil {
+			continue // leave nil to mark the window divider
+		}
+		row := make([]string, len(cols))
+		for n, i := range cols {
+			if i >= 0 && i < len(rec) {
+				row[n] = rec[i]
+			}
+		}
+		out[r] = row
+	}
+	return h, out
+}
+
 // mdCell makes a value safe for one Markdown table cell: pipes escaped, newlines
 // and tabs flattened to spaces so the row stays on one line.
 func mdCell(s string) string {
@@ -646,10 +816,24 @@ func (m *Model) openCSVRecord() {
 	}
 	header, _ := m.headerAndData()
 
+	// Show the same columns the table shows (honoring the column filter), minus
+	// any fixed-width "!" marker column — that is a row-status flag, not a field.
+	cols := make([]int, 0, len(m.csvVisCols))
+	for _, h := range m.csvVisCols {
+		if m.previewIsFixed && h == 0 {
+			continue
+		}
+		cols = append(cols, h)
+	}
+
 	// Width to which column names are padded, so the colons line up.
 	labelW := 0
-	for _, h := range header {
-		if w := len([]rune(strings.TrimSpace(h))); w > labelW {
+	for _, h := range cols {
+		name := ""
+		if h < len(header) {
+			name = strings.TrimSpace(header[h])
+		}
+		if w := len([]rune(name)); w > labelW {
 			labelW = w
 		}
 	}
@@ -657,30 +841,35 @@ func (m *Model) openCSVRecord() {
 		labelW = 32
 	}
 
-	n := len(header)
-	if len(rec) > n {
-		n = len(rec)
+	// Leading column number ("1:", "2:" …) is the column's original file
+	// position, right-aligned so the colons line up; sized to the largest shown.
+	maxOrd := 0
+	for _, h := range cols {
+		if o := m.dataOrdinal(h); o > maxOrd {
+			maxOrd = o
+		}
 	}
-	// Leading column number ("1:", "2:" …), right-aligned so the colons line up
-	// regardless of how many columns the record has.
-	seqW := len(strconv.Itoa(n))
+	seqW := len(strconv.Itoa(maxOrd))
+	if seqW < 1 {
+		seqW = 1
+	}
 	var b strings.Builder
-	for j := 0; j < n; j++ {
+	for _, h := range cols {
 		name := ""
-		if j < len(header) {
-			name = strings.TrimSpace(header[j])
+		if h < len(header) {
+			name = strings.TrimSpace(header[h])
 		}
 		if name == "" {
-			name = fmt.Sprintf("col %d", j+1)
+			name = fmt.Sprintf("col %d", h+1)
 		}
 		if r := []rune(name); len(r) > labelW {
 			name = string(r[:labelW])
 		}
 		val := ""
-		if j < len(rec) {
-			val = strings.ReplaceAll(rec[j], "\r", "")
+		if h < len(rec) {
+			val = strings.ReplaceAll(rec[h], "\r", "")
 		}
-		fmt.Fprintf(&b, "%*d: %-*s : %s\n", seqW, j+1, labelW, name, val)
+		fmt.Fprintf(&b, "%*d: %-*s : %s\n", seqW, m.dataOrdinal(h), labelW, name, val)
 	}
 
 	vpW := m.tableViewWidth()
@@ -745,14 +934,14 @@ func (m *Model) csvFooter() string {
 	}
 	if m.previewIsParquet {
 		return ui.MutedStyle().Render(
-			"[↑/↓ PgUp/PgDn] rows   [Enter] row as record   [←/→] columns   [n] rows to read   [w] window   [y] copy as Markdown   [Esc] close")
+			"[↑/↓ PgUp/PgDn] rows   [Enter] row as record   [←/→] columns   [c] col filter   [n] rows to read   [w] window   [y] copy as Markdown   [Esc] close")
 	}
 	if m.previewIsFixed {
 		return ui.MutedStyle().Render(
-			"[↑/↓ PgUp/PgDn] rows   [Enter] row as record   [←/→] columns   [w] window   [y] copy as Markdown   [L] re-apply layout   [t] raw   [Esc] close")
+			"[↑/↓ PgUp/PgDn] rows   [Enter] row as record   [←/→] columns   [c] col filter   [w] window   [y] copy as Markdown   [L] re-apply layout   [t] raw   [Esc] close")
 	}
 	return ui.MutedStyle().Render(
-		"[↑/↓ PgUp/PgDn] rows   [Enter] row as record   [←/→] columns   [s]/[S] delimiter   [h] header row   [w] rows   [y] copy as Markdown   [t] raw   [Esc] close")
+		"[↑/↓ PgUp/PgDn] rows   [Enter] row as record   [←/→] columns   [c] col filter   [s]/[S] delimiter   [h] header row   [w] rows   [y] copy as Markdown   [t] raw   [Esc] close")
 }
 
 // layoutPromptLine renders the shared local-layout-file prompt with apply/cancel
@@ -792,12 +981,8 @@ func (m *Model) csvInfoLine() string {
 	if m.previewIsFixed {
 		return m.fixedInfoLine(cols)
 	}
-	// Make horizontal scrolling discoverable: when columns are off-screen, say
-	// how many are shown and how to reach the rest.
-	colsPart := fmt.Sprintf("%d columns", cols)
-	if hl, hr := m.csvTable.ColScrollInfo(); hl+hr > 0 {
-		colsPart = m.colWindowInfo(header, cols)
-	}
+	// Make horizontal scrolling discoverable and report the column filter.
+	colsPart := m.colsSummary(header, cols)
 	headerPart := fmt.Sprintf("header: row %d", m.csvHeaderRow)
 	if m.csvHeaderRow == 0 {
 		headerPart = "header: none"
@@ -811,31 +996,67 @@ func (m *Model) csvInfoLine() string {
 		delimiterName(m.csvDelim), headerPart, colsPart, rowsPart)
 }
 
+// colsSummary is the column dimension of the info line, shared by the CSV,
+// Parquet and fixed-width views. totalData is the number of data columns in the
+// file (excluding any fixed-width marker column). It reports the active column
+// filter and count, and — when the table is scrolled horizontally — which
+// columns are on screen.
+func (m *Model) colsSummary(header []string, totalData int) string {
+	kept := dataColCount(m.csvVisCols, m.previewIsFixed)
+	if hl, hr := m.csvTable.ColScrollInfo(); hl+hr > 0 {
+		out := m.colWindowInfo(header, totalData)
+		if m.csvColFilter != colFilterAll {
+			out += "  ·  " + colFilterLabel(m.csvColFilter)
+		}
+		return out
+	}
+	if m.csvColFilter != colFilterAll {
+		return fmt.Sprintf("%d of %d %s", kept, totalData, colFilterLabel(m.csvColFilter))
+	}
+	return fmt.Sprintf("%d columns", kept)
+}
+
 // colWindowInfo describes which columns are on screen when the table is wider
-// than the view: the visible scrollable range, the total, and the name of the
-// leftmost scrollable column as a "where am I" anchor for very wide files.
-func (m *Model) colWindowInfo(header []string, total int) string {
+// than the view: the visible scrollable range, the total data-column count, and
+// the name of the leftmost scrollable column as a "where am I" anchor for very
+// wide files. The on-screen positions (1-based into the shown columns) are
+// mapped back through csvVisCols to each column's original data ordinal, so the
+// numbers match the "(1) (2) …" header line even when a fixed-width marker
+// column is pinned or empty columns have been filtered out.
+func (m *Model) colWindowInfo(header []string, totalData int) string {
 	lo, hi, ok := m.csvTable.VisibleScrollableCols()
 	if !ok {
-		return fmt.Sprintf("%d columns", total)
+		return fmt.Sprintf("%d columns", totalData)
 	}
-	out := fmt.Sprintf("cols %d-%d of %d (←/→ for more)", lo, hi, total)
-	if i := lo - 1; i >= 0 && i < len(header) {
-		if name := clipCell(strings.TrimSpace(header[i])); name != "" {
-			out += fmt.Sprintf("  ·  col %d: %s", lo, name)
-		}
+	loOrd, anchor := m.shownColInfo(header, lo)
+	hiOrd, _ := m.shownColInfo(header, hi)
+	out := fmt.Sprintf("cols %d-%d of %d (←/→ for more)", loOrd, hiOrd, totalData)
+	if anchor != "" {
+		out += fmt.Sprintf("  ·  col %d: %s", loOrd, anchor)
 	}
 	return out
+}
+
+// shownColInfo maps a 1-based position among the shown columns to that column's
+// original data ordinal and trimmed name.
+func (m *Model) shownColInfo(header []string, shownPos int) (ordinal int, name string) {
+	i := shownPos - 1
+	if i < 0 || i >= len(m.csvVisCols) {
+		return shownPos, ""
+	}
+	h := m.csvVisCols[i]
+	ordinal = m.dataOrdinal(h)
+	if h >= 0 && h < len(header) {
+		name = clipCell(strings.TrimSpace(header[h]))
+	}
+	return ordinal, name
 }
 
 // parquetInfoLine summarises the schema width and the read window for a Parquet
 // preview, making clear how many of the file's rows are shown.
 func (m *Model) parquetInfoLine(cols int) string {
-	colsPart := fmt.Sprintf("%d columns", cols)
-	if hl, hr := m.csvTable.ColScrollInfo(); hl+hr > 0 {
-		header, _ := m.headerAndData()
-		colsPart = m.colWindowInfo(header, cols)
-	}
+	header, _ := m.headerAndData()
+	colsPart := m.colsSummary(header, cols)
 	// csvTotal is the number of rows read; parquetFileRows is the file's total.
 	rowsPart := fmt.Sprintf("%d rows", m.csvTotal)
 	if m.parquetFileRows > int64(m.csvTotal) {

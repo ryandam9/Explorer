@@ -233,6 +233,13 @@ type Model struct {
 	csvDisplay   [][]string // rows currently in the table (parallel to its cursor)
 	csvNote      string     // transient confirmation shown in the CSV footer (e.g. after copy)
 
+	// csvColFilter hides columns by whether they contain data, for wide files
+	// where many columns are entirely empty. csvVisCols is the resulting list of
+	// header column indices currently shown (cached by buildCSVTable so the
+	// record and copy views stay consistent with the table).
+	csvColFilter colFilter
+	csvVisCols   []int
+
 	// Parquet preview reuses the full-screen table machinery above. When
 	// previewIsParquet is set, the schema is fixed (no delimiter/header
 	// controls), parquetFileRows is the file's total row count, and parquetRows
