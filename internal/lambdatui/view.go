@@ -21,7 +21,9 @@ func (mm *m) View() string {
 		sb.WriteString(badge + "\n")
 	}
 
-	if mm.detailActive {
+	if mm.codeActive {
+		sb.WriteString(mm.renderCode())
+	} else if mm.detailActive {
 		sb.WriteString(mm.renderDetail())
 	} else if mm.findingsActive {
 		sb.WriteString(mm.renderFindings())
@@ -43,6 +45,9 @@ func (mm *m) View() string {
 	}
 
 	frame := mm.applyToast(ui.ClipToSize(body+sep+status, mm.width, mm.height))
+	if mm.codeConfirm {
+		frame = ui.OverlayCenterBlank(mm.renderCodeConfirm(), mm.width, mm.height)
+	}
 	if mm.showAbout {
 		frame = ui.OverlayCenterBlank(ui.AboutView("About — AWS Lambda", lambdaAboutText, ui.AboutWidth(mm.width)), mm.width, mm.height)
 	}
@@ -58,9 +63,11 @@ const lambdaAboutText = "This is the AWS Lambda dashboard. Tab across Functions,
 	"source mapping's source, state and batch size.\n\n" +
 	"Press Enter on a function to open its full configuration as a grid of panels — " +
 	"overview, resources & limits, state, VPC networking, environment-variable keys " +
-	"(values are never shown), layers, code package and tags — each a separately " +
-	"scrollable tile (fetched on demand). Tab/arrows move between tiles. Enter on a " +
-	"layer or event source opens its panels from the loaded data.\n\n" +
+	"(values are never shown), layers, code package, resource policy and tags — each a " +
+	"separately scrollable tile (fetched on demand). Tab/arrows move between tiles. On a " +
+	"Zip function, v downloads the deployment package (opt-in, after a confirmation) and " +
+	"lets you browse and read its source files. Enter on a layer or event source opens " +
+	"its panels from the loaded data.\n\n" +
 	"Press f for the findings panel — deterministic runtime/health checks (deprecated " +
 	"or soon-deprecating runtimes, missing dead-letter queues, failed-state functions) " +
 	"over the loaded functions; y copies the suggested fix.\n\n" +
@@ -171,6 +178,15 @@ func boxStyle(width, height int) lipgloss.Style {
 }
 
 func (mm *m) statusLeft() string {
+	if mm.codeActive {
+		if mm.codeLoading {
+			return mm.codeTitle + "  ·  downloading…"
+		}
+		if mm.codeViewing {
+			return mm.codeTitle + "  ·  " + mm.codeFileName
+		}
+		return fmt.Sprintf("%s  ·  %d files", mm.codeTitle, len(mm.codeFiles))
+	}
 	if mm.detailActive {
 		if mm.detailLoading {
 			return mm.detailTitle + "  ·  loading…"
@@ -188,10 +204,17 @@ func (mm *m) statusLeft() string {
 }
 
 func (mm *m) helpHints() []ui.KeyHint {
+	if mm.codeActive {
+		if mm.codeViewing {
+			return []ui.KeyHint{ui.H("↑/↓", "scroll"), ui.H("y", "copy"), ui.H("Esc", "back"), ui.H("q", "quit")}
+		}
+		return []ui.KeyHint{ui.H("↑/↓", "files"), ui.H("Enter", "open"), ui.H("y", "copy"), ui.H("Esc", "back"), ui.H("q", "quit")}
+	}
 	if mm.detailActive {
 		return []ui.KeyHint{
 			ui.H("Tab", "panel"),
 			ui.H("↑/↓", "scroll"),
+			ui.H("v", "view code"),
 			ui.H("Esc", "back"),
 			ui.H("i", "about"),
 			ui.H("q", "quit"),
