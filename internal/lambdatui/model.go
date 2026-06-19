@@ -103,6 +103,7 @@ type m struct {
 	codeViewport viewport.Model
 	codeFileName string
 	codeFileIdx  int
+	codeFileText string // the open file's display text (syntax-highlighted)
 
 	// Findings panel (f) — deterministic runtime/health checks over the loaded
 	// functions, computed synchronously (no AWS call).

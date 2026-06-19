@@ -66,8 +66,8 @@ const lambdaAboutText = "This is the AWS Lambda dashboard. Tab across Functions,
 	"(values are never shown), layers, code package, resource policy and tags — each a " +
 	"separately scrollable tile (fetched on demand). Tab/arrows move between tiles. On a " +
 	"Zip function, v downloads the deployment package (opt-in, after a confirmation) and " +
-	"lets you browse and read its source files. Enter on a layer or event source opens " +
-	"its panels from the loaded data.\n\n" +
+	"lets you browse and read its syntax-highlighted source files. Enter on a layer or " +
+	"event source opens its panels from the loaded data.\n\n" +
 	"Press f for the findings panel — deterministic runtime/health checks (deprecated " +
 	"or soon-deprecating runtimes, missing dead-letter queues, failed-state functions) " +
 	"over the loaded functions; y copies the suggested fix.\n\n" +
