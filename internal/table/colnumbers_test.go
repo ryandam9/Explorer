@@ -67,6 +67,33 @@ func TestColNumbersUseAbsoluteIndexWhenScrolled(t *testing.T) {
 	}
 }
 
+// A NoNumber column (e.g. a leading "!" marker) must not get an ordinal, and
+// the first real data column must be numbered (1), not (2).
+func TestColNumbersSkipNoNumberColumn(t *testing.T) {
+	cols := []Column{
+		{Title: "!", Width: 4, NoNumber: true},
+		{Title: "id", Width: 6},
+		{Title: "name", Width: 10},
+		{Title: "amt", Width: 8},
+	}
+	m := New(WithColumns(cols), WithRows([]Row{{"", "1", "ann", "10"}}), WithColNumbers(true))
+	m.SetWidth(60) // wide enough to show every column
+
+	lines := strings.Split(m.headersView(), "\n")
+	if len(lines) != 2 {
+		t.Fatalf("headersView lines = %d, want 2:\n%s", len(lines), m.headersView())
+	}
+	// The three real columns are numbered 1..3; there is no (4).
+	for _, n := range []string{"(1)", "(2)", "(3)"} {
+		if !strings.Contains(lines[1], n) {
+			t.Errorf("number line missing %s: %q", n, lines[1])
+		}
+	}
+	if strings.Contains(lines[1], "(4)") {
+		t.Errorf("marker column should not produce a 4th ordinal: %q", lines[1])
+	}
+}
+
 func TestVisibleScrollableCols(t *testing.T) {
 	cols := []Column{
 		{Title: "#", Width: 4},

@@ -78,6 +78,12 @@ type Row []string
 type Column struct {
 	Title string
 	Width int
+
+	// NoNumber excludes this column from the "(1) (2) …" ordinal header line
+	// (see colNumbers). Use it for status/marker columns that are not part of
+	// the data's column numbering — e.g. a leading "!" malformed-row flag —
+	// so the first real data column is numbered (1) rather than (2).
+	NoNumber bool
 }
 
 // KeyMap defines keybindings. It satisfies to the help.KeyMap interface, which
@@ -873,15 +879,35 @@ func (m Model) headersView() string {
 
 	// Second header line: each column's 1-based ordinal, centered in brackets
 	// and dimmed, aligned under its title using the same per-column width.
+	// Columns flagged NoNumber (e.g. a leading "!" marker) are left blank and
+	// don't consume an ordinal, so the first real data column is numbered (1).
 	nums := make([]string, 0, len(vis))
 	for _, i := range vis {
 		col := m.cols[i]
-		label := runewidth.Truncate(fmt.Sprintf("(%d)", i+1), col.Width, "…")
+		label := ""
+		if !col.NoNumber {
+			label = runewidth.Truncate(fmt.Sprintf("(%d)", m.colOrdinal(i)), col.Width, "…")
+		}
 		cell := m.colStyle(i).Align(lipgloss.Center).Render(label)
 		nums = append(nums, m.styles.Header.Faint(true).Render(cell))
 	}
 	numLine := m.clipToWidth(lipgloss.JoinHorizontal(lipgloss.Top, nums...))
 	return lipgloss.JoinVertical(lipgloss.Left, titles, numLine)
+}
+
+// colOrdinal returns the 1-based data-column ordinal for column idx: the count
+// of numbered (non-NoNumber) columns up to and including idx. With no NoNumber
+// columns this is simply idx+1, so the number stays the column's absolute index
+// even when the table is scrolled. NoNumber columns are skipped, so a leading
+// marker column doesn't shift the real columns' numbering.
+func (m Model) colOrdinal(idx int) int {
+	n := 0
+	for i := 0; i <= idx && i < len(m.cols); i++ {
+		if !m.cols[i].NoNumber {
+			n++
+		}
+	}
+	return n
 }
 
 // clipToWidth hard-truncates every line of s to the table's render width so a

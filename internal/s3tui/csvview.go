@@ -259,6 +259,12 @@ func (m *Model) buildCSVTable() {
 			title = fmt.Sprintf("col %d", i+1)
 		}
 		cols[i] = table.Column{Title: title, Width: 4}
+		// The fixed-width preview prepends a "!" malformed-row marker column; it
+		// is not a data column, so exclude it from the "(1) (2) …" numbering and
+		// let the first real column be (1).
+		if m.previewIsFixed && i == 0 && title == fixedMarkerCol {
+			cols[i].NoNumber = true
+		}
 	}
 
 	rows := make([]table.Row, 0, len(display))
