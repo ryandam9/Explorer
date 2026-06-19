@@ -3,6 +3,8 @@ package s3tui
 import (
 	"strings"
 	"testing"
+
+	"github.com/charmbracelet/x/ansi"
 )
 
 func TestLooksLikeXMLContent(t *testing.T) {
@@ -90,7 +92,8 @@ func TestFormatXMLPrefixedNamespaceNotMangled(t *testing.T) {
 func TestBuildPreviewDisplayTruncationNoteNotAbsorbed(t *testing.T) {
 	// A document cut mid-element: <Ustrd> is never closed.
 	content := `<?xml version="1.0"?><Document xmlns="urn:x"><RmtInf><Ustrd>(h1)remediation pl`
-	out := buildPreviewDisplay(content, true, 200)
+	// XML previews are syntax-highlighted; strip the ANSI to assert on the text.
+	out := ansi.Strip(buildPreviewDisplay(content, "doc.xml", true, 200))
 
 	if !strings.HasSuffix(strings.TrimRight(out, "\n"), "… preview truncated …") {
 		t.Errorf("truncation note should be the trailing line:\n%s", out)
@@ -107,7 +110,7 @@ func TestBuildPreviewDisplayTruncationNoteNotAbsorbed(t *testing.T) {
 }
 
 func TestBuildPreviewDisplayNoNoteWhenComplete(t *testing.T) {
-	out := buildPreviewDisplay("<root><a>1</a></root>", false, 200)
+	out := ansi.Strip(buildPreviewDisplay("<root><a>1</a></root>", "doc.xml", false, 200))
 	if strings.Contains(out, "truncated") {
 		t.Errorf("complete preview should carry no truncation note:\n%s", out)
 	}

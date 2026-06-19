@@ -5,6 +5,8 @@ import (
 	"bytes"
 	"strings"
 	"testing"
+
+	"github.com/charmbracelet/x/ansi"
 )
 
 // makeZip builds an in-memory zip from name→content pairs for the unzip tests.
@@ -104,6 +106,21 @@ func TestCodeFileContent(t *testing.T) {
 	}
 	if !strings.Contains(got, "truncated") {
 		t.Errorf("missing truncation note: %q", got)
+	}
+}
+
+// codeDisplay syntax-highlights source (losslessly — the text survives stripping
+// the colour) and shows a placeholder for binary entries.
+func TestCodeDisplay(t *testing.T) {
+	mm := &m{}
+	src := "def f():\n    return 1\n"
+	got := ansi.Strip(mm.codeDisplay(codeFile{Name: "app.py", Data: []byte(src)}))
+	if got != src {
+		t.Errorf("highlighted source not lossless:\n got %q\nwant %q", got, src)
+	}
+	bin := mm.codeDisplay(codeFile{Name: "x.bin", Data: []byte{0, 1, 2}, Binary: true, Size: 3})
+	if !strings.Contains(bin, "binary file") {
+		t.Errorf("binary file = %q", bin)
 	}
 }
 

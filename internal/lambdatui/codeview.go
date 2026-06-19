@@ -146,10 +146,26 @@ func (mm *m) openCodeFile() {
 	}
 	mm.codeFileIdx = i
 	mm.codeFileName = mm.codeFiles[i].Name
+	mm.codeFileText = mm.codeDisplay(mm.codeFiles[i])
 	w, h := mm.codeViewportSize()
 	mm.codeViewport = viewport.New(w, h)
-	mm.codeViewport.SetContent(lipgloss.NewStyle().Width(w).Render(codeFileContent(mm.codeFiles[i])))
+	mm.codeViewport.SetContent(lipgloss.NewStyle().Width(w).Render(mm.codeFileText))
 	mm.codeViewing = true
+}
+
+// codeDisplay is the text shown for a file: syntax-highlighted source (via the
+// shared ui.Highlight component), or a placeholder for binary/empty entries. The
+// highlight is computed once here (not per frame) and only re-wrapped on render.
+func (mm *m) codeDisplay(f codeFile) string {
+	if f.Binary || len(f.Data) == 0 {
+		return codeFileContent(f)
+	}
+	out := ui.Highlight(sanitizeCode(string(f.Data)), f.Name)
+	if f.Truncated {
+		out += fmt.Sprintf("\n\n… truncated — showing the first %s of %s",
+			formatCodeSize(maxCodeFileBytes), formatCodeSize(f.Size))
+	}
+	return out
 }
 
 // copyCodeFile copies the selected/open file's text to the clipboard.
@@ -221,7 +237,7 @@ func (mm *m) renderCodeFile(title string) string {
 	w, h := mm.codeViewportSize()
 	off := mm.codeViewport.YOffset
 	vp := viewport.New(w, h)
-	vp.SetContent(lipgloss.NewStyle().Width(w).Render(codeFileContent(mm.codeFiles[mm.codeFileIdx])))
+	vp.SetContent(lipgloss.NewStyle().Width(w).Render(mm.codeFileText))
 	vp.SetYOffset(off)
 	mm.codeViewport = vp
 

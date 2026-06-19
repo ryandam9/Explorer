@@ -19,6 +19,7 @@ import (
 	"github.com/charmbracelet/bubbles/viewport"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
+	"github.com/charmbracelet/x/ansi"
 	"github.com/ryandam9/aws_explorer/internal/config"
 	"github.com/ryandam9/aws_explorer/internal/consolelink"
 	"github.com/ryandam9/aws_explorer/internal/csvexport"
@@ -864,14 +865,18 @@ func decompressedPreview(out []byte, truncated, isCSV bool) string {
 // so it always lands on its own trailing line — never absorbed into the last
 // (now unclosed) XML element when the preview window cut the document
 // mid-element.
-func buildPreviewDisplay(content string, truncated bool, width int) string {
+func buildPreviewDisplay(content, key string, truncated bool, width int) string {
 	display := sanitizeForDisplay(content)
 	if looksLikeXMLContent(display) {
 		if formatted, ok := formatXML(display); ok {
-			display = formatted
+			display = ui.HighlightLang(formatted, "xml")
 		}
+	} else {
+		// Syntax-highlight recognised source/data files (by extension). Plain
+		// text and logs have no lexer match and stay uncoloured.
+		display = ui.HighlightByExt(display, key)
 	}
-	display = hardWrap(display, width)
+	display = ansi.Hardwrap(display, width, false) // ANSI-aware so highlight survives
 	if truncated {
 		display += "\n\n… preview truncated …"
 	}
@@ -908,7 +913,7 @@ func (m *Model) initPreviewViewport(content string, err error) {
 	}
 	m.previewViewport = viewport.New(vpW, vpH)
 	if err == nil && content != "" {
-		m.previewViewport.SetContent(buildPreviewDisplay(content, m.previewTruncated, vpW))
+		m.previewViewport.SetContent(buildPreviewDisplay(content, m.previewKey, m.previewTruncated, vpW))
 	}
 }
 
