@@ -2,12 +2,13 @@
 // a tabbed Bubble Tea TUI over functions, layers and event-source mappings,
 // with an on-demand per-function configuration drill-down (memory, timeout,
 // role, layers, VPC, env-var keys, dead-letter queue, reserved concurrency,
-// code location and tags — secret-looking values redacted) and a deterministic
-// runtime/health findings panel.
+// code location, resource-based policy and tags — secret-looking values
+// redacted) and a deterministic runtime/health findings panel.
 package lambdatui
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"sort"
@@ -19,6 +20,7 @@ import (
 	"github.com/aws/aws-sdk-go-v2/service/lambda"
 	lambdatypes "github.com/aws/aws-sdk-go-v2/service/lambda/types"
 	"github.com/aws/aws-sdk-go-v2/service/sts"
+	"github.com/aws/smithy-go"
 
 	"github.com/ryandam9/aws_explorer/internal/auth"
 	"github.com/ryandam9/aws_explorer/internal/awsutil"
@@ -298,14 +300,45 @@ func (c *Client) loadEventSources(ctx context.Context, cl *lambda.Client, region
 // values omitted. Reserved concurrency, code location and tags come only from
 // GetFunction, so the panel fetches it rather than reusing the list view.
 func (c *Client) FunctionDetail(ctx context.Context, region, name string) (FunctionDetail, error) {
-	out, err := c.clientFor(region).GetFunction(ctx, &lambda.GetFunctionInput{FunctionName: aws.String(name)})
+	cl := c.clientFor(region)
+	out, err := cl.GetFunction(ctx, &lambda.GetFunctionInput{FunctionName: aws.String(name)})
 	if err != nil {
 		return FunctionDetail{}, err
 	}
 	if out.Configuration == nil {
 		return FunctionDetail{}, fmt.Errorf("function %q not found", name)
 	}
-	return flattenFunction(region, name, out), nil
+	d := flattenFunction(region, name, out)
+
+	// Resource-based policy (best-effort): a function with none returns
+	// ResourceNotFoundException — that is "no policy", not a failure. A denied
+	// call leaves the fact unknown (recorded as an error note) rather than
+	// asserting there is no policy, and never fails the whole detail load.
+	if pol, perr := cl.GetPolicy(ctx, &lambda.GetPolicyInput{FunctionName: aws.String(name)}); perr == nil {
+		d.ResourcePolicy = aws.ToString(pol.Policy)
+	} else if !apiErrorCodeIs(perr, "ResourceNotFoundException") {
+		if apiErrorCodeIs(perr, "AccessDeniedException", "AccessDenied") {
+			d.ResourcePolicyErr = "Access denied: not permitted to read the resource policy (lambda:GetPolicy)."
+		} else {
+			d.ResourcePolicyErr = "Could not read the resource policy: " + perr.Error()
+			slog.Warn("Lambda GetPolicy failed", "region", region, "function", name, "error", perr.Error())
+		}
+	}
+	return d, nil
+}
+
+// apiErrorCodeIs reports whether err is a smithy API error with one of codes.
+func apiErrorCodeIs(err error, codes ...string) bool {
+	var apiErr smithy.APIError
+	if !errors.As(err, &apiErr) {
+		return false
+	}
+	for _, code := range codes {
+		if apiErr.ErrorCode() == code {
+			return true
+		}
+	}
+	return false
 }
 
 func mapFunction(region string, fn lambdatypes.FunctionConfiguration) Function {

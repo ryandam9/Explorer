@@ -1,6 +1,8 @@
 package lambdatui
 
 import (
+	"bytes"
+	"encoding/json"
 	"fmt"
 	"strings"
 	"time"
@@ -59,6 +61,13 @@ type FunctionDetail struct {
 
 	RepositoryType string
 	ImageURI       string
+
+	// Resource-based policy (who may invoke the function), from lambda:GetPolicy.
+	// ResourcePolicy is the JSON document ("" when the function has none).
+	// ResourcePolicyErr is set when the policy could not be read (e.g. access
+	// denied), keeping "unknown" distinct from "no policy".
+	ResourcePolicy    string
+	ResourcePolicyErr string
 
 	Tags map[string]string
 }
@@ -187,6 +196,9 @@ func (d FunctionDetail) sections() []section {
 	// Code package / repository.
 	out = append(out, section{Title: "Code package", Body: codeBody(d)})
 
+	// Resource-based policy (who may invoke the function).
+	out = append(out, section{Title: "Resource policy", Body: resourcePolicyBody(d)})
+
 	// Dead-letter queue.
 	out = append(out, section{Title: "Dead-letter queue", Body: "  " + dlqLabel(d.DLQTarget)})
 
@@ -268,6 +280,34 @@ func codeBody(d FunctionDetail) string {
 	b.WriteString(dkv("Signing profile", d.SigningPro) + "\n")
 	b.WriteString(dkv("Signing job", d.SigningJob))
 	return b.String()
+}
+
+// resourcePolicyBody renders the function's resource-based policy as
+// pretty-printed JSON, or an explanatory line when there is none / it could not
+// be read (so "access denied" is never mistaken for "no policy").
+func resourcePolicyBody(d FunctionDetail) string {
+	if d.ResourcePolicyErr != "" {
+		return "  " + d.ResourcePolicyErr
+	}
+	if strings.TrimSpace(d.ResourcePolicy) == "" {
+		return "  (no resource-based policy — only the account's own principals can invoke it)"
+	}
+	return indentJSON(d.ResourcePolicy)
+}
+
+// indentJSON pretty-prints a JSON document with a two-space left margin so it
+// lines up with the other detail bodies. Non-JSON input is shown as-is (trimmed)
+// rather than dropped.
+func indentJSON(s string) string {
+	var buf bytes.Buffer
+	if err := json.Indent(&buf, []byte(s), "", "  "); err != nil {
+		return "  " + strings.TrimSpace(s)
+	}
+	lines := strings.Split(buf.String(), "\n")
+	for i, ln := range lines {
+		lines[i] = "  " + ln
+	}
+	return strings.Join(lines, "\n")
 }
 
 func tagsTitle(tags map[string]string) string {
