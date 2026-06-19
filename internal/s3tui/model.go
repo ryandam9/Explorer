@@ -772,6 +772,11 @@ func (m *Model) fetchGzipPreview(key string) tea.Cmd {
 		if err != nil {
 			return objectPreviewMsg{key: key, err: err}
 		}
+		if len(data) == 0 {
+			// Zero-byte object: nothing to decompress. Show the empty notice
+			// rather than letting gunzip fail on the empty stream.
+			return objectPreviewMsg{key: key, content: ""}
+		}
 		out, truncated, err := gunzip(data, gzDecompressedCap)
 		if err != nil {
 			return objectPreviewMsg{key: key, err: err}
@@ -790,6 +795,11 @@ func (m *Model) fetchArchive(key string) tea.Cmd {
 		data, truncated, err := client.GetObjectRange(bucket, key, tarCompressedCap)
 		if err != nil {
 			return archiveLoadedMsg{key: key, err: err}
+		}
+		if len(data) == 0 {
+			// Zero-byte object: no archive to read. Report an empty member list
+			// instead of failing decompression/tar parsing on an empty stream.
+			return archiveLoadedMsg{key: key, members: nil, truncated: false}
 		}
 		raw := data
 		if gzipped {
@@ -3049,7 +3059,7 @@ const s3AboutText = "This is the dedicated S3 browser. The first screen lists yo
 	"On an object you can preview its contents (p) — a CSV/TSV/.dat opens in a " +
 	"full-screen, scrollable table with auto-detected delimiter (press s/S to change " +
 	"it, h to set which row holds the column names — 0 for none, w to adjust how many " +
-	"rows are shown, Enter to read the highlighted row vertically as Col : value pairs, " +
+	"rows are shown, Enter to read the highlighted row vertically as numbered Col : value pairs, " +
 	"t for raw text). In any text preview, press t to view it as a " +
 	"table (handy for .txt/.log exports). A .gz is decompressed " +
 	"and shown by its inner type, and a .tar/.tar.gz/.tgz opens a browser of its " +
