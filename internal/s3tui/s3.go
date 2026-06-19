@@ -95,6 +95,14 @@ func hasAPIErrorCode(err error, codes ...string) bool {
 	return false
 }
 
+// isEmptyObjectRangeErr reports whether err is S3's reply to a ranged GET of a
+// zero-byte object. A "bytes=0-N" range can't be satisfied when the object has
+// no bytes, so S3 returns 416 InvalidRange. That's not a failure — the object
+// is simply empty — so callers treat it as empty content rather than an error.
+func isEmptyObjectRangeErr(err error) bool {
+	return hasAPIErrorCode(err, "InvalidRange")
+}
+
 func (c *S3Client) GetBucketRegion(bucket, defaultRegion string) string {
 	ctx, cancel := c.requestContext()
 	defer cancel()
@@ -990,6 +998,9 @@ func (c *S3Client) GetObjectRange(bucket, key string, maxBytes int64) ([]byte, b
 		Range:  aws.String(fmt.Sprintf("bytes=0-%d", maxBytes-1)),
 	})
 	if err != nil {
+		if isEmptyObjectRangeErr(err) {
+			return nil, false, nil
+		}
 		return nil, false, err
 	}
 	defer out.Body.Close()
@@ -1029,6 +1040,9 @@ func (c *S3Client) GetObjectPreview(bucket, key string, maxBytes int64) (string,
 		Range:  aws.String(fmt.Sprintf("bytes=0-%d", maxBytes-1)),
 	})
 	if err != nil {
+		if isEmptyObjectRangeErr(err) {
+			return "", false, nil
+		}
 		return "", false, err
 	}
 	defer out.Body.Close()

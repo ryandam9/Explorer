@@ -25,6 +25,23 @@ func TestCSVRecordView(t *testing.T) {
 	}
 }
 
+// Each line in the vertical record view is prefixed with its column number.
+func TestCSVRecordSequenceNumbers(t *testing.T) {
+	m := &Model{width: 80, height: 20, showCSV: true}
+	if !m.initCSV("id,name,city\n1,alice,sydney\n2,bob,perth\n") {
+		t.Fatal("initCSV should parse")
+	}
+	m.csvTable.SetCursor(0) // the "alice" row
+	m.openCSVRecord()
+
+	view := m.csvRecordViewport.View()
+	for _, want := range []string{"1: id", "2: name", "3: city"} {
+		if !strings.Contains(view, want) {
+			t.Errorf("record view missing column number %q:\n%s", want, view)
+		}
+	}
+}
+
 func TestCSVRecordSkipsDivider(t *testing.T) {
 	var b strings.Builder
 	b.WriteString("a,b\n")

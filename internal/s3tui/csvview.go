@@ -661,6 +661,9 @@ func (m *Model) openCSVRecord() {
 	if len(rec) > n {
 		n = len(rec)
 	}
+	// Leading column number ("1:", "2:" …), right-aligned so the colons line up
+	// regardless of how many columns the record has.
+	seqW := len(strconv.Itoa(n))
 	var b strings.Builder
 	for j := 0; j < n; j++ {
 		name := ""
@@ -677,7 +680,7 @@ func (m *Model) openCSVRecord() {
 		if j < len(rec) {
 			val = strings.ReplaceAll(rec[j], "\r", "")
 		}
-		fmt.Fprintf(&b, "%-*s : %s\n", labelW, name, val)
+		fmt.Fprintf(&b, "%*d: %-*s : %s\n", seqW, j+1, labelW, name, val)
 	}
 
 	vpW := m.tableViewWidth()
