@@ -54,3 +54,30 @@ See the [`s3` command reference](s3.md) for every flag.
 Press `o` anywhere to open the current selection (bucket, bucket+prefix, or
 object) in the AWS console — the URL is copied, and a browser opens when the
 session is local.
+
+## Table preview shortcuts
+
+Previewing a delimited (CSV/TSV/…), Parquet, or fixed-width object opens a
+full-screen table. A second header line shows each column's number — its
+original position in the file — so wide files stay navigable.
+
+| Key | Action |
+|-----|--------|
+| `↑` / `↓` · `PgUp` / `PgDn` | Scroll rows |
+| `←` / `→` | Scroll columns (the first column stays pinned) |
+| `Enter` | Show the selected row as a vertical record (Col : value) |
+| `c` | Cycle the column filter: all columns → only columns with data → only empty columns |
+| `w` | Cycle the row window (first/last N rows) |
+| `s` / `S` | Auto-detect / type the delimiter (delimited files only) |
+| `h` | Set the header row, or `0` for none (delimited files only) |
+| `n` | Choose how many rows to read (Parquet only) |
+| `L` | Apply a local fixed-width layout file (`name,start,length` per line) |
+| `y` | Copy the visible columns and rows as a Markdown table |
+| `t` | Toggle between the table and the raw-text preview |
+| `Esc` | Close the preview |
+
+The `c` column filter is handy for very wide files (hundreds of columns) where
+many columns are entirely empty: it narrows the view to just the populated
+columns (or, conversely, just the empty ones) while preserving each surviving
+column's original number. A mode that would show no columns is skipped, so the
+table never goes blank.

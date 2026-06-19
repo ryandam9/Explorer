@@ -84,6 +84,13 @@ type Column struct {
 	// the data's column numbering — e.g. a leading "!" malformed-row flag —
 	// so the first real data column is numbered (1) rather than (2).
 	NoNumber bool
+
+	// Number, when > 0, is the explicit 1-based ordinal shown on the "(1) (2) …"
+	// header line instead of the column's computed position. Callers use it to
+	// keep a column's original file position visible after intervening columns
+	// have been filtered out (e.g. showing only the populated columns of a
+	// 400-column file). 0 means "use the computed ordinal" (the default).
+	Number int
 }
 
 // KeyMap defines keybindings. It satisfies to the help.KeyMap interface, which
@@ -886,7 +893,11 @@ func (m Model) headersView() string {
 		col := m.cols[i]
 		label := ""
 		if !col.NoNumber {
-			label = runewidth.Truncate(fmt.Sprintf("(%d)", m.colOrdinal(i)), col.Width, "…")
+			n := col.Number
+			if n <= 0 {
+				n = m.colOrdinal(i)
+			}
+			label = runewidth.Truncate(fmt.Sprintf("(%d)", n), col.Width, "…")
 		}
 		cell := m.colStyle(i).Align(lipgloss.Center).Render(label)
 		nums = append(nums, m.styles.Header.Faint(true).Render(cell))

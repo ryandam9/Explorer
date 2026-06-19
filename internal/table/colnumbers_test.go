@@ -94,6 +94,32 @@ func TestColNumbersSkipNoNumberColumn(t *testing.T) {
 	}
 }
 
+// An explicit Column.Number overrides the computed ordinal, so a column keeps
+// its original file position after intervening columns are filtered out.
+func TestColNumbersExplicitNumber(t *testing.T) {
+	cols := []Column{
+		{Title: "a", Width: 6, Number: 1},
+		{Title: "c", Width: 6, Number: 3},
+		{Title: "z", Width: 6, Number: 26},
+	}
+	m := New(WithColumns(cols), WithRows([]Row{{"1", "3", "26"}}), WithColNumbers(true))
+	m.SetWidth(60)
+
+	lines := strings.Split(m.headersView(), "\n")
+	if len(lines) != 2 {
+		t.Fatalf("want 2 header lines, got %d", len(lines))
+	}
+	for _, n := range []string{"(1)", "(3)", "(26)"} {
+		if !strings.Contains(lines[1], n) {
+			t.Errorf("number line missing %s: %q", n, lines[1])
+		}
+	}
+	// The computed-ordinal value (2) must not appear — the explicit numbers win.
+	if strings.Contains(lines[1], "(2)") {
+		t.Errorf("explicit numbers should override computed ordinal: %q", lines[1])
+	}
+}
+
 func TestVisibleScrollableCols(t *testing.T) {
 	cols := []Column{
 		{Title: "#", Width: 4},

@@ -213,8 +213,9 @@ func (m *Model) initFixed(recs [][]string, badRows int) {
 	m.previewIsParquet = false
 	m.previewIsFixed = true
 	m.csvAll = recs
-	m.csvHeaderRow = 1 // the synthesised column-name row is the header
-	m.csvDelim = ','   // unused for fixed-width, kept for a stable info line
+	m.csvHeaderRow = 1            // the synthesised column-name row is the header
+	m.csvColFilter = colFilterAll // show every column by default (reset per file)
+	m.csvDelim = ','              // unused for fixed-width, kept for a stable info line
 	m.csvRecordActive = false
 	m.fixedBadRows = badRows
 	if m.csvRowCap == 0 && !m.csvRowCapSet {
@@ -234,14 +235,10 @@ func (m *Model) fixedInfoLine(cols int) string {
 	if dataCols < 0 {
 		dataCols = 0
 	}
-	colsPart := fmt.Sprintf("%d columns", dataCols)
-	if hl, hr := m.csvTable.ColScrollInfo(); hl+hr > 0 {
-		header, _ := m.headerAndData()
-		// The leading "!" marker column is not a data column: report dataCols as
-		// the total and shift the visible range down by 1 so the numbers match
-		// the header's "(1) (2) …" line.
-		colsPart = m.colWindowInfo(header, dataCols, 1)
-	}
+	header, _ := m.headerAndData()
+	// The leading "!" marker column is not a data column; colsSummary counts and
+	// numbers only the real columns (and reports the active column filter).
+	colsPart := m.colsSummary(header, dataCols)
 	rowsPart := fmt.Sprintf("%d rows", m.csvTotal)
 	if m.csvHidden > 0 {
 		rowsPart = fmt.Sprintf("first %d + last %d of %d rows (%d hidden)",
