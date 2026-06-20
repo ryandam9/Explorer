@@ -204,6 +204,20 @@ func TestExportMarkdownCleanVPC(t *testing.T) {
 	}
 }
 
+// A failed resource listing must be flagged in the report, so an empty section
+// isn't mistaken for "none present".
+func TestExportMarkdownPartialData(t *testing.T) {
+	data := fullExport{
+		VPC:        VPCInfo{ID: "vpc-x"},
+		Snap:       vpcSnapshot{VPCID: "vpc-x"},
+		LoadErrors: []string{"rds", "lambda"},
+	}
+	md := exportMarkdown(data, nil, time.Now())
+	if !strings.Contains(md, "Partial data") || !strings.Contains(md, "rds, lambda") {
+		t.Errorf("expected a partial-data warning naming the failed listings:\n%s", md)
+	}
+}
+
 func TestWriteExportRoundTrip(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
 	data := exportSnap()

@@ -2970,6 +2970,11 @@ func (m *Model) objectListView() string {
 						customMetaStr,
 					),
 				)
+				// Flag any secondary field that failed to load so its "—"/"None"
+				// isn't read as fact (§6a).
+				if le := m.selectedDetails.LoadError; le != "" {
+					metaText += "\n" + ui.ErrorStyle().Render("⚠ could not read: "+le+" (press d to retry)")
+				}
 			}
 		}
 	}

@@ -65,6 +65,11 @@ type fullExport struct {
 	VPNConnections            []VPNConnectionInfo
 	CustomerGateways          []CustomerGatewayInfo
 	TransitGatewayAttachments []TransitGatewayAttachmentInfo
+
+	// LoadErrors names resource listings that failed (e.g. permissions/region),
+	// so the report flags partial data instead of an empty section reading as
+	// "none present" (§6a).
+	LoadErrors []string
 }
 
 // exportMarkdown builds the complete Markdown report for a VPC.
@@ -79,6 +84,12 @@ func exportMarkdown(data fullExport, findings []Finding, generatedAt time.Time) 
 	}
 	b.WriteString("# " + title + "\n\n")
 	b.WriteString("_Generated " + reportTime(generatedAt) + "_\n\n")
+
+	// Flag partial data so an empty section isn't read as "none present".
+	if len(data.LoadErrors) > 0 {
+		b.WriteString("> ⚠ **Partial data** — these resource listings failed and may be incomplete: " +
+			strings.Join(data.LoadErrors, ", ") + ".\n\n")
+	}
 
 	// VPC attributes.
 	writeVPCSection(&b, data.VPC)
