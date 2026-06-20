@@ -90,3 +90,50 @@ Accepted targets (full ARN or bare ID):
 `eks:{ListClusters,DescribeCluster,ListNodegroups,DescribeNodegroup}`,
 `elasticloadbalancing:{DescribeLoadBalancers,DescribeListeners}`. Any denial
 skips that source with a note.
+
+# Related (bidirectional)
+
+`related` generalizes `whereused` to **both directions** for **any** resource:
+what a resource *uses* (forward — its execution role, KMS key, security groups,
+…) **and** what *uses* it (reverse — the `whereused` answer). It reuses the same
+account scan, so it sees the same relationship types `whereused` does (today:
+Lambda/EC2/ECS/EKS roles, EBS/RDS/Secrets/SQS/Lambda KMS keys, ENI security
+groups, ELBv2 listener certs, IAM trust principals); coverage grows under the
+[related-resources epic](https://github.com/ryandam9/aws_explorer/issues/336).
+
+```bash
+./bin/aws_explorer related <arn-or-id> [--depth N] [--direction both|uses|usedby] [--all-regions] [-o table|json|ndjson|csv]
+```
+
+```
+Related: app (iam-role)
+
+Uses (depends on) →
+SNO  SERVICE  TYPE  RESOURCE  REGION  VIA
+1    iam      role  source    -       trust policy principal
+
+Only relationships this tool extracts are shown; un-collected link types won't appear.
+
+Used by ←
+SNO  SERVICE  TYPE             RESOURCE     REGION      VIA
+1    ecs      task-definition  web          us-east-1   ECS task role
+2    lambda   function         checkout     us-east-1   execution role
+
+Reference types checked: Lambda execution roles, EC2 instance profiles, ECS task and execution roles, EKS cluster and node-group roles, IAM role trust policies.
+
+Only relationships this tool extracts are shown; un-collected link types won't appear.
+```
+
+| Flag | Default | Description |
+|------|---------|-------------|
+| `--depth` | `1` | how many hops to follow (1–5); e.g. `--depth 2` walks a Lambda → its role → that role's trust principals |
+| `--direction` | `both` | `both`, `uses` (forward only), or `usedby` (reverse only) |
+| `--output` / `-o` | `table` | `table`, `json`, `ndjson`, `csv` (CSV cells sanitized against formula injection) |
+
+> **Scoped, honest results.** Like `whereused`, an empty side means "none of the
+> relationship types this tool collects" — never "this resource is isolated".
+> The caveat is printed on every run, and the reverse direction lists the
+> reference types checked for recognized kinds. Best-effort: a denied/failed API
+> call narrows what was checked (reported on stderr) and never aborts the run.
+
+**IAM permissions.** Same as `whereused` above (the two share one account scan).
