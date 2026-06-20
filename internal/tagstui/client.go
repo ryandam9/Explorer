@@ -61,10 +61,10 @@ func (c *Client) TagValues(ctx context.Context, key string) ([]string, []model.E
 	return discovery.TagValues(ctx, c.base, c.regions, maxConcurrency, key)
 }
 
-// Resources lists the resources matching the given tag filters (AND across
-// keys; OR across a key's values; empty values = "key present").
-func (c *Client) Resources(ctx context.Context, filters map[string][]string) ([]model.Resource, []model.ExploreError) {
-	return discovery.DiscoverWithFilters(ctx, c.base, c.regions, maxConcurrency, filters)
+// Resources lists the resources matching any of the AND-groups (groups are
+// ORed, deduped by ARN), optionally scoped to resourceTypes (e.g. "ec2:instance").
+func (c *Client) Resources(ctx context.Context, groups []map[string][]string, resourceTypes []string) ([]model.Resource, []model.ExploreError) {
+	return discovery.DiscoverUnion(ctx, c.base, c.regions, maxConcurrency, groups, resourceTypes)
 }
 
 // CountResources counts the resources matching the filters. complete is false

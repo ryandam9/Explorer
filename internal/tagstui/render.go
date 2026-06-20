@@ -13,10 +13,6 @@ import (
 	"github.com/ryandam9/aws_explorer/internal/model"
 )
 
-// ParseFilter exposes the "Key=Value[,Key2=Value2]" parser to the CLI twins
-// (repeat a key to OR its values; a bare key matches any value).
-func ParseFilter(expr string) map[string][]string { return parseFilterExpr(expr) }
-
 func writeJSON(w io.Writer, v any) error {
 	enc := json.NewEncoder(w)
 	enc.SetIndent("", "  ")

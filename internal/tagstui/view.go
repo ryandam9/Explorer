@@ -50,8 +50,12 @@ func (mm *m) View() string {
 
 const aboutText = "Explore AWS resources by tag. Browse the account's tag keys, drill into a " +
 	"key's values, and press Enter to list every resource carrying that tag — or " +
-	"press f to type one or more Key=Value filters directly (comma-separated; " +
-	"repeat a key to OR its values; a bare key matches any value).\n\n" +
+	"press f to type a filter directly.\n\n" +
+	"Filter syntax: comma-separated Key=Value terms are ANDed; repeat a key to OR " +
+	"its values; a bare key matches any value. Separate groups with \"||\" to OR " +
+	"them (e.g. Team=payments || Team=billing). Scope to resource types with a " +
+	"type:ec2:instance term. Note: only *tagged* resources are queryable — there " +
+	"is no \"untagged\" filter.\n\n" +
 	"Data comes from the Resource Groups Tagging API, so only tagged resources " +
 	"on services that integrate with it are shown (IAM, for example, is not). Use " +
 	"--all-regions to sweep every region. On a resource, y copies its ARN and o " +

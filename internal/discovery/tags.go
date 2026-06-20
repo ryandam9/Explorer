@@ -119,16 +119,21 @@ func TagValues(ctx context.Context, baseCfg aws.Config, regions []string, maxCon
 	return dedupeSorted(vals), errs
 }
 
-// DiscoverWithFilters returns the taggable resources matching every tag filter
-// (AND across keys; for a key, an empty value list means "key present with any
-// value", otherwise OR across the listed values).
-func DiscoverWithFilters(ctx context.Context, baseCfg aws.Config, regions []string, maxConcurrency int, filters map[string][]string) ([]model.Resource, []model.ExploreError) {
+// discoverGroup returns the taggable resources matching one AND-group of tag
+// filters (AND across keys; for a key, an empty value list means "key present",
+// otherwise OR across the listed values), optionally scoped to resourceTypes
+// (e.g. "ec2:instance").
+func discoverGroup(ctx context.Context, baseCfg aws.Config, regions []string, maxConcurrency int, filters map[string][]string, resourceTypes []string) ([]model.Resource, []model.ExploreError) {
 	tagFilters := toTagFilters(filters)
 	return fanOutRegions(ctx, baseCfg, regions, maxConcurrency,
 		func(ctx context.Context, cfg aws.Config, region string) ([]model.Resource, error) {
 			client := rgt.NewFromConfig(cfg)
 			var out []model.Resource
-			p := rgt.NewGetResourcesPaginator(client, &rgt.GetResourcesInput{TagFilters: tagFilters})
+			in := &rgt.GetResourcesInput{TagFilters: tagFilters}
+			if len(resourceTypes) > 0 {
+				in.ResourceTypeFilters = resourceTypes
+			}
+			p := rgt.NewGetResourcesPaginator(client, in)
 			for p.HasMorePages() {
 				page, err := p.NextPage(ctx)
 				if err != nil {
@@ -142,6 +147,36 @@ func DiscoverWithFilters(ctx context.Context, baseCfg aws.Config, regions []stri
 			}
 			return out, nil
 		})
+}
+
+// DiscoverUnion returns the union (deduped by ARN) of the resources matching any
+// of the AND-groups — i.e. groups are ORed together, since the Tagging API can
+// only AND within a single GetResources call. resourceTypes scopes every group.
+func DiscoverUnion(ctx context.Context, baseCfg aws.Config, regions []string, maxConcurrency int, groups []map[string][]string, resourceTypes []string) ([]model.Resource, []model.ExploreError) {
+	if len(groups) == 0 {
+		groups = []map[string][]string{{}} // no tag filter → all (type filter may still apply)
+	}
+	var (
+		all  []model.Resource
+		errs []model.ExploreError
+		seen = map[string]bool{}
+	)
+	for _, g := range groups {
+		res, e := discoverGroup(ctx, baseCfg, regions, maxConcurrency, g, resourceTypes)
+		errs = append(errs, e...)
+		for _, r := range res {
+			key := r.ARN
+			if key == "" {
+				key = r.Service + "|" + r.Region + "|" + r.ID
+			}
+			if seen[key] {
+				continue
+			}
+			seen[key] = true
+			all = append(all, r)
+		}
+	}
+	return all, errs
 }
 
 // CountResources counts the resources matching the tag filters without
