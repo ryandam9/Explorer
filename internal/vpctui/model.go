@@ -895,12 +895,17 @@ func buildFullExport(c *VPCClient, vpc VPCInfo, getSnap func() (vpcSnapshot, err
 	}
 
 	// logFail surfaces a failed per-VPC listing instead of silently dropping it
-	// to an empty slice (which reads as "no resources"). At minimum it lands in
-	// the logs / debug pane (§6a).
+	// to an empty slice (which reads as "no resources"): it logs (debug pane) and
+	// records the resource on the export so the report flags partial data (§6a).
+	var errMu sync.Mutex
 	logFail := func(what string, err error) {
-		if err != nil {
-			slog.Warn("VPC resource listing failed", "vpc", vpc.ID, "resource", what, "error", err.Error())
+		if err == nil {
+			return
 		}
+		slog.Warn("VPC resource listing failed", "vpc", vpc.ID, "resource", what, "error", err.Error())
+		errMu.Lock()
+		data.LoadErrors = append(data.LoadErrors, what)
+		errMu.Unlock()
 	}
 
 	run(func() { v, err := c.ListFlowLogs(vpc.ID); logFail("flow logs", err); data.FlowLogs = v })
@@ -945,6 +950,7 @@ func buildFullExport(c *VPCClient, vpc VPCInfo, getSnap func() (vpcSnapshot, err
 	})
 	wg.Wait()
 
+	sort.Strings(data.LoadErrors) // deterministic order in the report
 	return data, nil
 }
 

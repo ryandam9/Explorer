@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"sort"
 	"sync"
 
@@ -266,9 +267,13 @@ func CountHBaseRows(ctx context.Context, d *emrconn.Dialer, masterDNS, qualified
 		return 0, false, fmt.Errorf("%w: scanner create returned HTTP %d", emrconn.ErrUnreachable, resp.Status)
 	}
 	scannerPath := emrconn.PathOf(resp.Location)
-	// Best-effort cleanup of the server-side scanner.
+	// Best-effort cleanup of the server-side scanner. Failure can't be acted on
+	// here, but log it rather than drop it silently (§6a) — a leaked scanner is
+	// worth a trace.
 	defer func() {
-		_, _ = d.Request(context.Background(), "DELETE", emrconn.ServiceHBase, masterDNS, scannerPath, nil, "")
+		if _, err := d.Request(context.Background(), "DELETE", emrconn.ServiceHBase, masterDNS, scannerPath, nil, ""); err != nil {
+			slog.Warn("HBase scanner cleanup failed", "scanner", scannerPath, "error", err.Error())
+		}
 	}()
 
 	// Page through until 204 (exhausted), the cap, or context cancellation.

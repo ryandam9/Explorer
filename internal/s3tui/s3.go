@@ -234,6 +234,12 @@ type ObjectDetails struct {
 	ACLGrants          string
 	Retention          string
 	LegalHold          string
+
+	// LoadError names secondary fields whose fetch genuinely failed (e.g. a
+	// denied GetObjectTagging when the object itself is readable), so the view
+	// can flag them instead of showing "none". HeadObject failure is returned as
+	// a hard error instead. Empty when everything loaded.
+	LoadError string
 }
 
 func (c *S3Client) GetObjectDetails(bucket, key string) (*ObjectDetails, error) {
@@ -257,6 +263,16 @@ func (c *S3Client) GetObjectDetails(bucket, key string) (*ObjectDetails, error) 
 
 	var wg sync.WaitGroup
 	var errMu sync.Mutex
+	var loadErrs []string
+	rec := func(what string, err error) {
+		if err == nil {
+			return
+		}
+		errMu.Lock()
+		loadErrs = append(loadErrs, what)
+		errMu.Unlock()
+		slog.Warn("S3 object detail call failed", "bucket", bucket, "key", key, "field", what, "error", err.Error())
+	}
 	wg.Add(4)
 
 	go func() {
@@ -316,9 +332,12 @@ func (c *S3Client) GetObjectDetails(bucket, key string) (*ObjectDetails, error) 
 			Key:    aws.String(key),
 		})
 		if err != nil {
-			// Don't present a failed tag read as "no tags" silently — at least
-			// log it so it's visible in the debug pane (§6a).
-			slog.Warn("GetObjectTagging failed", "bucket", bucket, "key", key, "error", err.Error())
+			// A denied/failed tag read must not read as "no tags" (§6a).
+			if hasAPIErrorCode(err, "AccessDenied") {
+				rec("tags (denied)", err)
+			} else {
+				rec("tags", err)
+			}
 			return
 		}
 		tags = make(map[string]string)
@@ -341,6 +360,9 @@ func (c *S3Client) GetObjectDetails(bucket, key string) (*ObjectDetails, error) 
 		if err != nil {
 			if hasAPIErrorCode(err, "AccessDenied") {
 				aclGrants = "Access Denied"
+			} else {
+				aclGrants = "—"
+				rec("acl", err)
 			}
 			return
 		}
@@ -435,6 +457,12 @@ func (c *S3Client) GetObjectDetails(bucket, key string) (*ObjectDetails, error) 
 		sse = "None"
 	}
 
+	var loadError string
+	if len(loadErrs) > 0 {
+		sort.Strings(loadErrs)
+		loadError = strings.Join(loadErrs, ", ")
+	}
+
 	return &ObjectDetails{
 		ContentType:        contentType,
 		SSE:                sse,
@@ -450,6 +478,7 @@ func (c *S3Client) GetObjectDetails(bucket, key string) (*ObjectDetails, error) 
 		ACLGrants:          aclGrants,
 		Retention:          retention,
 		LegalHold:          legalHold,
+		LoadError:          loadError,
 	}, nil
 }
 
