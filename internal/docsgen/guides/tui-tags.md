@@ -16,13 +16,21 @@ aws_explorer tags --region ap-southeast-2
 
 ## What it shows
 
+A **three-column layout** (Keys ▸ Values ▸ Resources), all visible at once:
+
+1. **Keys** — every tag key in the account.
+2. **Values** — the selected key's values.
+3. **Resources** — every resource carrying the selected `Key=Value`.
+
 Two ways to reach resources:
 
-1. **Drill down** — start on the list of **tag keys** in the account, press
-   `Enter` to see that key's **values**, then `Enter` on a value to list every
-   resource carrying that tag.
+1. **Drill across** — move with `↑`/`↓` in the focused column and press `Enter`
+   (or `→`) to drill into the next column to the right; `←` / `Esc` steps focus
+   back, `Tab` cycles. Selecting a key loads its values; selecting a value lists
+   the matching resources. Values and resources load **on demand** (on `Enter`),
+   never while scrolling.
 2. **Filter entry** — press `f` (or `/`) and type one or more `Key=Value`
-   filters, comma-separated, to jump straight to matching resources.
+   filters, comma-separated, to fill the Resources column directly.
 
 Each key/value row shows a **Resources** count that fills in progressively in
 the background (`…` while counting; `N+` if a region's count failed). Counts are
@@ -60,14 +68,15 @@ as "no results".
 
 | Key | Action |
 |-----|--------|
-| `↑` / `↓` · `g` / `G` | Navigate the list |
-| `Enter` | Drill in (key → values → resources) |
+| `↑` / `↓` · `g` / `G` | Move within the focused column |
+| `Enter` / `→` | Drill into the next column (keys → values → resources) |
+| `←` / `Esc` | Step focus back one column |
+| `Tab` / `Shift+Tab` | Cycle focus between columns |
 | `f` / `/` | Type a `Key=Value` filter |
-| `←` / `→` | Scroll wide resource tables |
+| `<` / `>` | Scroll the wide resources table sideways |
 | `y` | Copy the selected resource's ARN |
 | `o` | Open the selected resource in the AWS console |
-| `r` | Refresh the current view |
-| `Esc` | Back up one level |
+| `r` | Refresh the focused column |
 | `i` | About · `q` Quit |
 
 Scope is the active region by default; add `--all-regions` to sweep every

@@ -43,11 +43,12 @@ func TestResourceRows(t *testing.T) {
 	if len(rows) != 2 {
 		t.Fatalf("got %d rows", len(rows))
 	}
-	if rows[0][0] != "1" || rows[0][1] != "ec2" || rows[0][3] != "web" {
+	// Compact columns: #, Name, Type, Region, ID (#333 three-column layout).
+	if rows[0][0] != "1" || rows[0][1] != "web" || rows[0][2] != "instance" || rows[0][4] != "i-123" {
 		t.Errorf("row 0 = %v", rows[0])
 	}
-	if rows[1][3] != "—" {
-		t.Errorf("missing name should render as em dash, got %q", rows[1][3])
+	if rows[1][1] != "—" {
+		t.Errorf("missing name should render as em dash, got %q", rows[1][1])
 	}
 }
 
