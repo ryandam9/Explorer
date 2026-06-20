@@ -3,6 +3,8 @@ package s3tui
 import (
 	"strings"
 	"testing"
+
+	"github.com/ryandam9/aws_explorer/internal/table"
 )
 
 func TestPrettyJSON(t *testing.T) {
@@ -47,6 +49,32 @@ func TestOpenBucketPolicyJSON(t *testing.T) {
 	m.openBucketPolicyJSON()
 	if !strings.Contains(m.bucketJSONContent, "Access denied") {
 		t.Errorf("expected access-denied message, got %q", m.bucketJSONContent)
+	}
+
+	// A failed read (e.g. wrong region) must NOT be reported as "no policy".
+	m.selectedBucketDetails = &BucketDetails{Policy: "Error/Denied"}
+	m.openBucketPolicyJSON()
+	if strings.Contains(m.bucketJSONContent, "No bucket policy is set") {
+		t.Errorf("an errored read should not read as 'no policy': %q", m.bucketJSONContent)
+	}
+	if !strings.Contains(m.bucketJSONContent, "Could not read") {
+		t.Errorf("expected a read-failure message, got %q", m.bucketJSONContent)
+	}
+}
+
+func TestBucketRegionForDetail(t *testing.T) {
+	m := &Model{
+		bucketRegionCache: map[string]string{"cached": "ap-southeast-2"},
+		allBucketRows:     []table.Row{{"1", "fromrow", "eu-west-1", "—"}},
+	}
+	if got := m.bucketRegionForDetail("cached"); got != "ap-southeast-2" {
+		t.Errorf("cache lookup = %q, want ap-southeast-2", got)
+	}
+	if got := m.bucketRegionForDetail("fromrow"); got != "eu-west-1" {
+		t.Errorf("row lookup = %q, want eu-west-1", got)
+	}
+	if got := m.bucketRegionForDetail("unknown"); got != "" {
+		t.Errorf("unknown bucket = %q, want empty", got)
 	}
 }
 

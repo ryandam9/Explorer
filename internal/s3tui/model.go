@@ -659,13 +659,51 @@ func (m *Model) updateObjectColumns() {
 
 func (m *Model) fetchBucketDetails(bucket string) tea.Cmd {
 	m.detailsLoading = true
+	// The bucket detail can be opened (via "d") for any bucket in the global
+	// listing — including ones in a different region than the active client.
+	// Per-bucket calls (GetBucketPolicy, GetBucketCors, …) fail against the
+	// wrong region, so resolve the bucket's region and run the fetch through a
+	// region-scoped client. Falls back to the active client when the region is
+	// unknown or can't be created.
+	region := m.bucketRegionForDetail(bucket)
+	base := m.client
+	awsCfg := m.awsCfg
+	endpoint := m.endpointURL
+	curRegion := m.region
 	return func() tea.Msg {
-		details := m.client.FetchBucketDetails(bucket)
+		client := base
+		if base != nil {
+			r := region
+			if r == "" || r == regionPending {
+				// GetBucketLocation works from any region, so discover it.
+				r = base.GetBucketRegion(bucket, curRegion)
+			}
+			if r != "" && r != curRegion {
+				if rc, err := NewS3Client(base.ctx, awsCfg, r, endpoint); err == nil {
+					client = rc
+				}
+			}
+		}
+		details := client.FetchBucketDetails(bucket)
 		return bucketDetailsMsg{
 			bucket:  bucket,
 			details: details,
 		}
 	}
+}
+
+// bucketRegionForDetail returns the known region for a bucket from the region
+// cache or the loaded listing rows, or "" when it isn't known yet.
+func (m *Model) bucketRegionForDetail(bucket string) string {
+	if r, ok := m.bucketRegionCache[bucket]; ok && r != "" && r != regionPending {
+		return r
+	}
+	for _, row := range m.allBucketRows {
+		if len(row) > 2 && row[1] == bucket && row[2] != "" && row[2] != regionPending {
+			return row[2]
+		}
+	}
+	return ""
 }
 
 // ensureBucketDetails makes bucket's details current, serving them from the

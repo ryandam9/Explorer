@@ -66,9 +66,18 @@ func (m *Model) openBucketPolicyJSON() {
 	if d == nil {
 		return
 	}
-	msg := "No bucket policy is set."
-	if d.Policy == "Access Denied" {
+	// Distinguish "no policy" from "couldn't read it": only "None" means the
+	// bucket genuinely has no policy. "Set (Available)" carries the JSON; any
+	// other status is denied or an error (e.g. a region/permissions problem),
+	// which must not be reported as "no policy".
+	var msg string
+	switch d.Policy {
+	case "None":
+		msg = "No bucket policy is set."
+	case "Access Denied":
 		msg = "Access denied: not permitted to read the bucket policy (s3:GetBucketPolicy)."
+	default:
+		msg = "Could not read the bucket policy — the call failed (check the bucket's region and permissions). Press r to retry."
 	}
 	m.openBucketJSON("BUCKET POLICY: "+m.detailBucket, d.RawPolicy, msg)
 }
@@ -79,9 +88,14 @@ func (m *Model) openBucketCORSJSON() {
 	if d == nil {
 		return
 	}
-	msg := "No CORS configuration is set."
-	if d.CORS == "Access Denied" {
+	var msg string
+	switch d.CORS {
+	case "Not configured":
+		msg = "No CORS configuration is set."
+	case "Access Denied":
 		msg = "Access denied: not permitted to read the CORS configuration (s3:GetBucketCors)."
+	default:
+		msg = "Could not read the CORS configuration — the call failed (check the bucket's region and permissions). Press r to retry."
 	}
 	m.openBucketJSON("CORS CONFIGURATION: "+m.detailBucket, d.CORSJSON, msg)
 }
