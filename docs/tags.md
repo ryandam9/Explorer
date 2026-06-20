@@ -9,13 +9,16 @@ tag filter directly.
 ./bin/aws_explorer tags [--region us-east-1 | --all-regions] [--theme <name>]
 ```
 
-## Two ways to find resources
+## Three-column layout
 
-1. **Drill down** — start on the account's **tag keys**, press `Enter` for a
-   key's **values**, then `Enter` on a value to list every resource carrying
-   that tag.
+Keys ▸ Values ▸ Resources are shown side by side, all at once:
+
+1. **Drill across** — move with `↑`/`↓` in the focused column and press `Enter`
+   (or `→`) to drill into the next column; `←` / `Esc` steps back, `Tab` cycles
+   focus. Selecting a key fills the **Values** column; selecting a value fills
+   the **Resources** column. Both load on demand (on `Enter`), never on scroll.
 2. **Filter entry** — press `f` (or `/`) and type one or more `Key=Value`
-   filters, comma-separated.
+   filters, comma-separated, to fill the Resources column directly.
 
 Key and value rows show a **Resources** count, filled in progressively in the
 background (`…` while counting, `N+` when a region's count failed). Counts are
@@ -48,13 +51,14 @@ sweep every region (global resources such as CloudFront/Route 53 appear under
 
 | Key | Action |
 |-----|--------|
-| `↑`/`↓` · `g`/`G` | Navigate |
-| `Enter` | Drill in (key → values → resources) |
+| `↑`/`↓` · `g`/`G` | Move within the focused column |
+| `Enter` / `→` | Drill into the next column (keys → values → resources) |
+| `←` / `Esc` | Step focus back · `Tab` cycle columns |
 | `f` / `/` | Type a `Key=Value` filter |
-| `←`/`→` | Scroll wide resource tables |
+| `<`/`>` | Scroll the wide resources table sideways |
 | `y` | Copy the selected resource's ARN |
 | `o` | Open in the AWS console |
-| `r` | Refresh · `Esc` Back · `i` About · `q` Quit |
+| `r` | Refresh the focused column · `i` Help (scrollable cheat-sheet) · `q` Quit |
 
 ## Scripting (CLI twins)
 

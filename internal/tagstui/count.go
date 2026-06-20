@@ -24,9 +24,9 @@ type countVal struct {
 // stale pass (after navigation/refresh) is ignored.
 type countMsg struct {
 	gen      int
-	pn       pane
-	key      string // parent key (values pane)
-	item     string // the key (keys pane) or value (values pane)
+	col      focusCol // colKeys or colValues
+	key      string   // parent key (values column)
+	item     string   // the key (keys column) or value (values column)
 	n        int
 	complete bool
 }
@@ -43,23 +43,22 @@ func (mm *m) cancelCounts() {
 	mm.countGen++
 }
 
-// ensureCounts (re)starts background counting for the items in the current pane
-// that don't already have a cached count. It is best-effort: counts fill in
-// progressively and never block navigation. No-op outside the keys/values panes.
-func (mm *m) ensureCounts(cmds *[]tea.Cmd) {
+// ensureCounts (re)starts background counting for the target column's items that
+// don't already have a cached count. Best-effort: counts fill in progressively
+// and never block navigation. No-op for the resources column.
+func (mm *m) ensureCounts(target focusCol, cmds *[]tea.Cmd) {
 	mm.cancelCounts()
 
 	var items []string
-	pn := mm.pane
 	parent := mm.selectedKey
-	switch pn {
-	case paneKeys:
+	switch target {
+	case colKeys:
 		for _, k := range mm.keys {
 			if _, ok := mm.keyCounts[k]; !ok {
 				items = append(items, k)
 			}
 		}
-	case paneValues:
+	case colValues:
 		existing := mm.valueCounts[parent]
 		for _, v := range mm.values {
 			if _, ok := existing[v]; !ok {
@@ -95,17 +94,17 @@ func (mm *m) ensureCounts(cmds *[]tea.Cmd) {
 				}
 				defer func() { <-sem }()
 
-				filters := map[string][]string{}
-				if pn == paneKeys {
-					filters[it] = nil // key present, any value
+				var filters map[string][]string
+				if target == colKeys {
+					filters = map[string][]string{it: nil} // key present, any value
 				} else {
-					filters[parent] = []string{it}
+					filters = map[string][]string{parent: {it}}
 				}
 				n, complete := client.CountResources(ctx, filters)
 				if ctx.Err() != nil {
 					return
 				}
-				ch <- countMsg{gen: gen, pn: pn, key: parent, item: it, n: n, complete: complete}
+				ch <- countMsg{gen: gen, col: target, key: parent, item: it, n: n, complete: complete}
 			}()
 		}
 		wg.Wait()
@@ -128,24 +127,23 @@ func (mm *m) readCountCmd(gen int, ch <-chan countMsg) tea.Cmd {
 	}
 }
 
-// onCount records a count and refreshes the visible column, then pulls the next.
-// Stale-generation messages (after navigation/refresh) are dropped.
+// onCount records a count and refreshes the affected column (both are visible in
+// the three-column layout), then pulls the next. Stale-generation messages are
+// dropped.
 func (mm *m) onCount(msg countMsg) tea.Cmd {
 	if msg.gen != mm.countGen {
 		return nil
 	}
-	switch msg.pn {
-	case paneKeys:
+	switch msg.col {
+	case colKeys:
 		mm.keyCounts[msg.item] = countVal{n: msg.n, complete: msg.complete}
-		if mm.pane == paneKeys {
-			mm.rebuildKeyRows()
-		}
-	case paneValues:
+		mm.rebuildKeyRows()
+	case colValues:
 		if mm.valueCounts[msg.key] == nil {
 			mm.valueCounts[msg.key] = map[string]countVal{}
 		}
 		mm.valueCounts[msg.key][msg.item] = countVal{n: msg.n, complete: msg.complete}
-		if mm.pane == paneValues && mm.selectedKey == msg.key {
+		if msg.key == mm.selectedKey {
 			mm.rebuildValueRows()
 		}
 	}

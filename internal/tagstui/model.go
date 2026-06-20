@@ -10,6 +10,7 @@ import (
 	"github.com/atotto/clipboard"
 	"github.com/charmbracelet/bubbles/spinner"
 	"github.com/charmbracelet/bubbles/textinput"
+	"github.com/charmbracelet/bubbles/viewport"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 
@@ -22,12 +23,15 @@ import (
 // loadTimeout bounds each tag/resource lookup (which fans out across regions).
 const loadTimeout = 2 * time.Minute
 
-type pane int
+// focusCol identifies which of the three always-visible columns has the cursor
+// (Miller-columns layout, #333). Keys ▸ Values ▸ Resources are all on screen at
+// once; focus moves between them rather than swapping the visible pane.
+type focusCol int
 
 const (
-	paneKeys      pane = iota // browse tag keys
-	paneValues                // browse the selected key's values
-	paneResources             // resources matching the active filter
+	colKeys      focusCol = iota // browse tag keys (column 1)
+	colValues                    // browse the selected key's values (column 2)
+	colResources                 // resources matching the active filter (column 3)
 )
 
 type keysMsg struct {
@@ -57,27 +61,32 @@ type m struct {
 
 	width, height int
 
-	pane    pane
-	loading bool
-	partial []model.ExploreError // non-fatal per-region failures for the current view
+	focus focusCol
+
+	// Per-column loading state and non-fatal per-region failures, so one
+	// column refreshing never blanks the others and each column flags its own
+	// partial results (§6a).
+	loadingKeys, loadingValues, loadingResources bool
+	keysErrs, valuesErrs, resErrs                []model.ExploreError
 
 	keysTbl   table.Model
 	valuesTbl table.Model
 	resTbl    table.Model
 
-	keys         []string
-	selectedKey  string
-	values       []string
-	resources    []model.Resource
-	filterDesc   string                // human description of the active resource filter (display)
-	activeGroups []map[string][]string // the active OR-of-AND filter, for an exact refresh
-	activeTypes  []string              // active resource-type scope
+	keys          []string
+	selectedKey   string
+	values        []string
+	selectedValue string
+	resources     []model.Resource
+	filterDesc    string                // human description of the active resource filter (display)
+	activeGroups  []map[string][]string // the active OR-of-AND filter, for an exact refresh
+	activeTypes   []string              // active resource-type scope
 
 	valuesCache map[string][]string
 	resCache    map[string][]model.Resource
 
 	// Per-key / per-value resource counts, filled progressively by a background
-	// pass (best-effort; counts.go). Cached across navigation; countGen/countCh/
+	// pass (best-effort; count.go). Cached across navigation; countGen/countCh/
 	// countCancel manage the in-flight pass.
 	keyCounts   map[string]countVal
 	valueCounts map[string]map[string]countVal
@@ -91,6 +100,7 @@ type m struct {
 	spinner   spinner.Model
 	toast     string
 	showAbout bool
+	overlayVP viewport.Model // scrolls the help overlay (i)
 }
 
 // NewModel builds the tags dashboard over the client's resolved region scope.
@@ -109,10 +119,10 @@ func NewModel(ctx context.Context, client *Client, allRegions bool) tea.Model {
 		client:      client,
 		regions:     client.Regions(),
 		allRegions:  allRegions,
-		pane:        paneKeys,
-		loading:     true,
-		keysTbl:     newTable([]table.Column{{Title: "#", Width: 4}, {Title: "Tag key", Width: 36}, {Title: "Resources", Width: 10}}),
-		valuesTbl:   newTable([]table.Column{{Title: "#", Width: 4}, {Title: "Value", Width: 44}, {Title: "Resources", Width: 10}}),
+		focus:       colKeys,
+		loadingKeys: true,
+		keysTbl:     newTable([]table.Column{{Title: "#", Width: 4}, {Title: "Tag key", Width: 22}, {Title: "Res", Width: 6}}),
+		valuesTbl:   newTable([]table.Column{{Title: "#", Width: 4}, {Title: "Value", Width: 24}, {Title: "Res", Width: 6}}),
 		resTbl:      newResourceTable(),
 		valuesCache: map[string][]string{},
 		resCache:    map[string][]model.Resource{},
@@ -135,11 +145,10 @@ func newTable(cols []table.Column) table.Model {
 func newResourceTable() table.Model {
 	return newTable([]table.Column{
 		{Title: "#", Width: 4},
-		{Title: "Service", Width: 12},
+		{Title: "Name", Width: 26},
 		{Title: "Type", Width: 18},
-		{Title: "Name", Width: 28},
 		{Title: "Region", Width: 14},
-		{Title: "ID", Width: 28},
+		{Title: "ID", Width: 26},
 	})
 }
 
@@ -196,31 +205,35 @@ func (mm *m) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		mm.toast = ""
 
 	case keysMsg:
-		mm.loading = false
-		mm.partial = msg.errs
+		mm.loadingKeys = false
+		mm.keysErrs = msg.errs
 		mm.keys = msg.keys
 		mm.keyCounts = map[string]countVal{} // fresh load → recount
 		mm.keysTbl.SetRows(keyRows(msg.keys, mm.keyCounts))
 		mm.keysTbl.SetCursor(0)
-		mm.ensureCounts(&cmds)
+		mm.ensureCounts(colKeys, &cmds)
 
 	case valuesMsg:
-		mm.loading = false
-		mm.partial = msg.errs
+		mm.loadingValues = false
+		mm.valuesErrs = msg.errs
 		mm.values = msg.values
 		mm.valuesCache[msg.key] = msg.values
 		mm.valueCounts[msg.key] = map[string]countVal{} // fresh load → recount
-		mm.valuesTbl.SetRows(valueRows(msg.values, mm.valueCounts[msg.key]))
-		mm.valuesTbl.SetCursor(0)
-		mm.ensureCounts(&cmds)
+		if msg.key == mm.selectedKey {
+			mm.valuesTbl.SetRows(valueRows(msg.values, mm.valueCounts[msg.key]))
+			mm.valuesTbl.SetCursor(0)
+		}
+		mm.ensureCounts(colValues, &cmds)
 
 	case resourcesMsg:
-		mm.loading = false
-		mm.partial = msg.errs
+		mm.loadingResources = false
+		mm.resErrs = msg.errs
 		mm.resources = msg.resources
 		mm.resCache[msg.desc] = msg.resources
-		mm.resTbl.SetRows(resourceRows(msg.resources))
-		mm.resTbl.SetCursor(0)
+		if msg.desc == mm.filterDesc {
+			mm.resTbl.SetRows(resourceRows(msg.resources))
+			mm.resTbl.SetCursor(0)
+		}
 
 	case countMsg:
 		if cmd := mm.onCount(msg); cmd != nil {
@@ -240,8 +253,26 @@ func (mm *m) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 func (mm *m) handleKey(msg tea.KeyMsg) []tea.Cmd {
 	var cmds []tea.Cmd
 
+	// While the help overlay is open, keys scroll it or close it.
 	if mm.showAbout {
-		mm.showAbout = false
+		switch msg.String() {
+		case "q", "ctrl+c":
+			return []tea.Cmd{tea.Quit}
+		case "i", "?", "esc", "enter":
+			mm.showAbout = false
+		case "up", "k":
+			mm.overlayVP.LineUp(1)
+		case "down", "j":
+			mm.overlayVP.LineDown(1)
+		case "pgup":
+			mm.overlayVP.ViewUp()
+		case "pgdown", "pgdn", " ":
+			mm.overlayVP.ViewDown()
+		case "g", "home":
+			mm.overlayVP.GotoTop()
+		case "G", "end":
+			mm.overlayVP.GotoBottom()
+		}
 		return cmds
 	}
 
@@ -274,31 +305,41 @@ func (mm *m) handleKey(msg tea.KeyMsg) []tea.Cmd {
 		mm.filter.SetValue("")
 		mm.filter.Focus()
 		return cmds
+	case "i":
+		mm.showAbout = true
+		mm.overlayVP.GotoTop()
+		return cmds
 	case "r":
 		mm.refresh(&cmds)
 		return cmds
-	case "esc", "backspace", "left":
-		mm.goBack(&cmds)
+	case "tab":
+		mm.cycleFocus(1, &cmds)
 		return cmds
-	case "i":
-		mm.showAbout = true
+	case "shift+tab":
+		mm.cycleFocus(-1, &cmds)
+		return cmds
+	case "enter", "right", "l":
+		mm.descend(&cmds)
+		return cmds
+	case "left", "h", "esc", "backspace":
+		mm.ascend(&cmds)
 		return cmds
 	}
 
-	switch mm.pane {
-	case paneKeys:
-		mm.handleListKey(&mm.keysTbl, msg, func() { mm.openValues(&cmds) })
-	case paneValues:
-		mm.handleListKey(&mm.valuesTbl, msg, func() { mm.openResourcesFromValue(&cmds) })
-	case paneResources:
+	// Per-column navigation / actions on the focused column.
+	switch mm.focus {
+	case colKeys:
+		mm.moveList(&mm.keysTbl, msg)
+	case colValues:
+		mm.moveList(&mm.valuesTbl, msg)
+	case colResources:
 		mm.handleResourceKey(msg, &cmds)
 	}
 	return cmds
 }
 
-// handleListKey handles navigation common to the single-column list panes; onEnter
-// drills into the selection.
-func (mm *m) handleListKey(tbl *table.Model, msg tea.KeyMsg, onEnter func()) {
+// moveList handles vertical navigation within a focused list column.
+func (mm *m) moveList(tbl *table.Model, msg tea.KeyMsg) {
 	switch msg.String() {
 	case "up", "k":
 		tbl.MoveUp(1)
@@ -308,8 +349,6 @@ func (mm *m) handleListKey(tbl *table.Model, msg tea.KeyMsg, onEnter func()) {
 		tbl.GotoTop()
 	case "G", "end":
 		tbl.GotoBottom()
-	case "enter", "right", "l":
-		onEnter()
 	}
 }
 
@@ -348,86 +387,135 @@ func (mm *m) handleResourceKey(msg tea.KeyMsg, cmds *[]tea.Cmd) {
 	}
 }
 
-// openValues drills from the selected tag key into its values (cache-first).
-func (mm *m) openValues(cmds *[]tea.Cmd) {
+// descend drills one column to the right: keys → values → resources, loading the
+// next column on demand (never on scroll, §7) and moving focus into it.
+func (mm *m) descend(cmds *[]tea.Cmd) {
+	switch mm.focus {
+	case colKeys:
+		mm.openKey(cmds)
+	case colValues:
+		mm.openValue(cmds)
+	case colResources:
+		// already the deepest column; nothing to drill into.
+	}
+}
+
+// ascend moves focus one column to the left without reloading (the data is
+// already on screen). Returning to the keys column resumes any counts that an
+// earlier values pass interrupted.
+func (mm *m) ascend(cmds *[]tea.Cmd) {
+	switch mm.focus {
+	case colResources:
+		mm.focus = colValues
+	case colValues:
+		mm.focus = colKeys
+		mm.ensureCounts(colKeys, cmds)
+	}
+}
+
+// cycleFocus moves focus to the next/previous column (Tab / Shift+Tab),
+// resuming counts when landing on a list column.
+func (mm *m) cycleFocus(delta int, cmds *[]tea.Cmd) {
+	mm.focus = focusCol((int(mm.focus) + delta + 3) % 3)
+	switch mm.focus {
+	case colKeys:
+		mm.ensureCounts(colKeys, cmds)
+	case colValues:
+		if mm.selectedKey != "" {
+			mm.ensureCounts(colValues, cmds)
+		}
+	}
+}
+
+// openKey loads the selected key's values into column 2 (cache-first) and clears
+// the now-stale resources column.
+func (mm *m) openKey(cmds *[]tea.Cmd) {
 	i := mm.keysTbl.Cursor()
 	if i < 0 || i >= len(mm.keys) {
 		return
 	}
 	mm.selectedKey = mm.keys[i]
-	mm.pane = paneValues
+	mm.focus = colValues
+	mm.clearResources()
 	if cached, ok := mm.valuesCache[mm.selectedKey]; ok {
 		mm.values = cached
+		mm.valuesErrs = nil
+		mm.loadingValues = false
 		mm.valuesTbl.SetRows(valueRows(cached, mm.valueCounts[mm.selectedKey]))
 		mm.valuesTbl.SetCursor(0)
-		mm.partial = nil
-		mm.ensureCounts(cmds) // resume any counts not finished before
+		mm.ensureCounts(colValues, cmds) // resume any counts not finished before
 		return
 	}
-	mm.loading = true
+	mm.values = nil
+	mm.valuesTbl.SetRows(nil)
+	mm.loadingValues = true
 	*cmds = append(*cmds, mm.loadValuesCmd(mm.selectedKey), mm.spinner.Tick)
 }
 
-// openResourcesFromValue drills from the selected value into matching resources.
-func (mm *m) openResourcesFromValue(cmds *[]tea.Cmd) {
+// openValue loads resources for the selected key=value into column 3.
+func (mm *m) openValue(cmds *[]tea.Cmd) {
 	i := mm.valuesTbl.Cursor()
 	if i < 0 || i >= len(mm.values) {
 		return
 	}
-	val := mm.values[i]
-	mm.openResources(mm.selectedKey+"="+val, []map[string][]string{{mm.selectedKey: {val}}}, nil, cmds)
+	mm.selectedValue = mm.values[i]
+	mm.openResources(mm.selectedKey+"="+mm.selectedValue, []map[string][]string{{mm.selectedKey: {mm.selectedValue}}}, nil, cmds)
 }
 
-// openResources switches to the resources pane for the given OR-of-AND filter
-// (cache-first).
+// openResources fills column 3 for the given OR-of-AND filter (cache-first) and
+// moves focus to it.
 func (mm *m) openResources(desc string, groups []map[string][]string, resourceTypes []string, cmds *[]tea.Cmd) {
 	mm.filterDesc = desc
 	mm.activeGroups = groups
 	mm.activeTypes = resourceTypes
-	mm.pane = paneResources
+	mm.focus = colResources
 	if cached, ok := mm.resCache[desc]; ok {
 		mm.resources = cached
+		mm.resErrs = nil
+		mm.loadingResources = false
 		mm.resTbl.SetRows(resourceRows(cached))
 		mm.resTbl.SetCursor(0)
-		mm.partial = nil
 		return
 	}
-	mm.loading = true
+	mm.resources = nil
+	mm.resTbl.SetRows(nil)
+	mm.loadingResources = true
 	*cmds = append(*cmds, mm.loadResourcesCmd(desc, groups, resourceTypes), mm.spinner.Tick)
 }
 
-// goBack moves one pane up the drill-down (resources → values → keys), resuming
-// the destination pane's background counts.
-func (mm *m) goBack(cmds *[]tea.Cmd) {
-	switch mm.pane {
-	case paneResources:
-		// Return to values if we came from a single-key drill, else to keys.
-		if mm.selectedKey != "" && strings.HasPrefix(mm.filterDesc, mm.selectedKey+"=") {
-			mm.pane = paneValues
-		} else {
-			mm.pane = paneKeys
-		}
-		mm.partial = nil
-		mm.ensureCounts(cmds)
-	case paneValues:
-		mm.pane = paneKeys
-		mm.partial = nil
-		mm.ensureCounts(cmds)
-	}
+// clearResources resets column 3 when a new key is opened so the old value's
+// results aren't shown against the new key.
+func (mm *m) clearResources() {
+	mm.selectedValue = ""
+	mm.resources = nil
+	mm.filterDesc = ""
+	mm.activeGroups = nil
+	mm.activeTypes = nil
+	mm.resErrs = nil
+	mm.loadingResources = false
+	mm.resTbl.SetRows(nil)
 }
 
-// refresh reloads the current pane from AWS, bypassing the cache.
+// refresh reloads the focused column from AWS, bypassing the cache.
 func (mm *m) refresh(cmds *[]tea.Cmd) {
-	mm.loading = true
 	mm.cancelCounts() // stop any in-flight counts; the reload restarts them
-	switch mm.pane {
-	case paneKeys:
+	switch mm.focus {
+	case colKeys:
+		mm.loadingKeys = true
 		*cmds = append(*cmds, mm.loadKeysCmd(), mm.spinner.Tick)
-	case paneValues:
+	case colValues:
+		if mm.selectedKey == "" {
+			return
+		}
 		delete(mm.valuesCache, mm.selectedKey)
+		mm.loadingValues = true
 		*cmds = append(*cmds, mm.loadValuesCmd(mm.selectedKey), mm.spinner.Tick)
-	case paneResources:
+	case colResources:
+		if mm.filterDesc == "" {
+			return
+		}
 		delete(mm.resCache, mm.filterDesc)
+		mm.loadingResources = true
 		*cmds = append(*cmds, mm.loadResourcesCmd(mm.filterDesc, mm.activeGroups, mm.activeTypes), mm.spinner.Tick)
 	}
 }
@@ -441,10 +529,10 @@ func (mm *m) selectedResource() (model.Resource, bool) {
 }
 
 func (mm *m) PageTitle() string {
-	switch mm.pane {
-	case paneValues:
+	switch mm.focus {
+	case colValues:
 		return "AWS Tags › " + mm.selectedKey
-	case paneResources:
+	case colResources:
 		return "AWS Tags › " + mm.filterDesc
 	default:
 		return "AWS Tags › Keys"
@@ -514,7 +602,7 @@ func resourceRows(res []model.Resource) []table.Row {
 		if name == "" {
 			name = "—"
 		}
-		rows[i] = table.Row{fmt.Sprintf("%d", i+1), r.Service, r.Type, name, r.Region, r.ID}
+		rows[i] = table.Row{fmt.Sprintf("%d", i+1), name, r.Type, r.Region, r.ID}
 	}
 	return rows
 }
