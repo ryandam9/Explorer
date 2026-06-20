@@ -123,10 +123,7 @@ func TagValues(ctx context.Context, baseCfg aws.Config, regions []string, maxCon
 // (AND across keys; for a key, an empty value list means "key present with any
 // value", otherwise OR across the listed values).
 func DiscoverWithFilters(ctx context.Context, baseCfg aws.Config, regions []string, maxConcurrency int, filters map[string][]string) ([]model.Resource, []model.ExploreError) {
-	tagFilters := make([]rgttypes.TagFilter, 0, len(filters))
-	for k, vs := range filters {
-		tagFilters = append(tagFilters, rgttypes.TagFilter{Key: aws.String(k), Values: vs})
-	}
+	tagFilters := toTagFilters(filters)
 	return fanOutRegions(ctx, baseCfg, regions, maxConcurrency,
 		func(ctx context.Context, cfg aws.Config, region string) ([]model.Resource, error) {
 			client := rgt.NewFromConfig(cfg)
@@ -145,6 +142,42 @@ func DiscoverWithFilters(ctx context.Context, baseCfg aws.Config, regions []stri
 			}
 			return out, nil
 		})
+}
+
+// CountResources counts the resources matching the tag filters without
+// materializing them — used for the per-key/value counts. The count is summed
+// across regions; any per-region failure is returned so the caller can mark the
+// count as partial rather than wrong.
+func CountResources(ctx context.Context, baseCfg aws.Config, regions []string, maxConcurrency int, filters map[string][]string) (int, []model.ExploreError) {
+	tagFilters := toTagFilters(filters)
+	counts, errs := fanOutRegions(ctx, baseCfg, regions, maxConcurrency,
+		func(ctx context.Context, cfg aws.Config, _ string) ([]int, error) {
+			client := rgt.NewFromConfig(cfg)
+			n := 0
+			p := rgt.NewGetResourcesPaginator(client, &rgt.GetResourcesInput{TagFilters: tagFilters})
+			for p.HasMorePages() {
+				page, err := p.NextPage(ctx)
+				if err != nil {
+					return nil, err
+				}
+				n += len(page.ResourceTagMappingList)
+			}
+			return []int{n}, nil
+		})
+	total := 0
+	for _, c := range counts {
+		total += c
+	}
+	return total, errs
+}
+
+// toTagFilters builds the SDK TagFilter list from a key→values map.
+func toTagFilters(filters map[string][]string) []rgttypes.TagFilter {
+	out := make([]rgttypes.TagFilter, 0, len(filters))
+	for k, vs := range filters {
+		out = append(out, rgttypes.TagFilter{Key: aws.String(k), Values: vs})
+	}
+	return out
 }
 
 // dedupeSorted removes duplicates (regions can repeat keys/values) and sorts.

@@ -75,6 +75,15 @@ type m struct {
 	valuesCache map[string][]string
 	resCache    map[string][]model.Resource
 
+	// Per-key / per-value resource counts, filled progressively by a background
+	// pass (best-effort; counts.go). Cached across navigation; countGen/countCh/
+	// countCancel manage the in-flight pass.
+	keyCounts   map[string]countVal
+	valueCounts map[string]map[string]countVal
+	countGen    int
+	countCh     chan countMsg
+	countCancel context.CancelFunc
+
 	filter       textinput.Model
 	filterActive bool
 
@@ -101,11 +110,13 @@ func NewModel(ctx context.Context, client *Client, allRegions bool) tea.Model {
 		allRegions:  allRegions,
 		pane:        paneKeys,
 		loading:     true,
-		keysTbl:     newTable([]table.Column{{Title: "#", Width: 4}, {Title: "Tag key", Width: 36}}),
-		valuesTbl:   newTable([]table.Column{{Title: "#", Width: 4}, {Title: "Value", Width: 48}}),
+		keysTbl:     newTable([]table.Column{{Title: "#", Width: 4}, {Title: "Tag key", Width: 36}, {Title: "Resources", Width: 10}}),
+		valuesTbl:   newTable([]table.Column{{Title: "#", Width: 4}, {Title: "Value", Width: 44}, {Title: "Resources", Width: 10}}),
 		resTbl:      newResourceTable(),
 		valuesCache: map[string][]string{},
 		resCache:    map[string][]model.Resource{},
+		keyCounts:   map[string]countVal{},
+		valueCounts: map[string]map[string]countVal{},
 		filter:      f,
 		spinner:     s,
 	}
@@ -187,16 +198,20 @@ func (mm *m) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		mm.loading = false
 		mm.partial = msg.errs
 		mm.keys = msg.keys
-		mm.keysTbl.SetRows(numbered(msg.keys))
+		mm.keyCounts = map[string]countVal{} // fresh load → recount
+		mm.keysTbl.SetRows(keyRows(msg.keys, mm.keyCounts))
 		mm.keysTbl.SetCursor(0)
+		mm.ensureCounts(&cmds)
 
 	case valuesMsg:
 		mm.loading = false
 		mm.partial = msg.errs
 		mm.values = msg.values
 		mm.valuesCache[msg.key] = msg.values
-		mm.valuesTbl.SetRows(numbered(msg.values))
+		mm.valueCounts[msg.key] = map[string]countVal{} // fresh load → recount
+		mm.valuesTbl.SetRows(valueRows(msg.values, mm.valueCounts[msg.key]))
 		mm.valuesTbl.SetCursor(0)
+		mm.ensureCounts(&cmds)
 
 	case resourcesMsg:
 		mm.loading = false
@@ -205,6 +220,14 @@ func (mm *m) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		mm.resCache[msg.desc] = msg.resources
 		mm.resTbl.SetRows(resourceRows(msg.resources))
 		mm.resTbl.SetCursor(0)
+
+	case countMsg:
+		if cmd := mm.onCount(msg); cmd != nil {
+			cmds = append(cmds, cmd)
+		}
+
+	case countsDoneMsg:
+		// nothing to do; the pass drained.
 
 	case tea.KeyMsg:
 		cmds = append(cmds, mm.handleKey(msg)...)
@@ -254,7 +277,7 @@ func (mm *m) handleKey(msg tea.KeyMsg) []tea.Cmd {
 		mm.refresh(&cmds)
 		return cmds
 	case "esc", "backspace", "left":
-		mm.goBack()
+		mm.goBack(&cmds)
 		return cmds
 	case "i":
 		mm.showAbout = true
@@ -334,9 +357,10 @@ func (mm *m) openValues(cmds *[]tea.Cmd) {
 	mm.pane = paneValues
 	if cached, ok := mm.valuesCache[mm.selectedKey]; ok {
 		mm.values = cached
-		mm.valuesTbl.SetRows(numbered(cached))
+		mm.valuesTbl.SetRows(valueRows(cached, mm.valueCounts[mm.selectedKey]))
 		mm.valuesTbl.SetCursor(0)
 		mm.partial = nil
+		mm.ensureCounts(cmds) // resume any counts not finished before
 		return
 	}
 	mm.loading = true
@@ -369,8 +393,9 @@ func (mm *m) openResources(desc string, filters map[string][]string, cmds *[]tea
 	*cmds = append(*cmds, mm.loadResourcesCmd(desc, filters), mm.spinner.Tick)
 }
 
-// goBack moves one pane up the drill-down (resources → values → keys).
-func (mm *m) goBack() {
+// goBack moves one pane up the drill-down (resources → values → keys), resuming
+// the destination pane's background counts.
+func (mm *m) goBack(cmds *[]tea.Cmd) {
 	switch mm.pane {
 	case paneResources:
 		// Return to values if we came from a single-key drill, else to keys.
@@ -380,15 +405,18 @@ func (mm *m) goBack() {
 			mm.pane = paneKeys
 		}
 		mm.partial = nil
+		mm.ensureCounts(cmds)
 	case paneValues:
 		mm.pane = paneKeys
 		mm.partial = nil
+		mm.ensureCounts(cmds)
 	}
 }
 
 // refresh reloads the current pane from AWS, bypassing the cache.
 func (mm *m) refresh(cmds *[]tea.Cmd) {
 	mm.loading = true
+	mm.cancelCounts() // stop any in-flight counts; the reload restarts them
 	switch mm.pane {
 	case paneKeys:
 		*cmds = append(*cmds, mm.loadKeysCmd(), mm.spinner.Tick)
@@ -420,13 +448,60 @@ func (mm *m) PageTitle() string {
 	}
 }
 
-// numbered builds 1-based numbered rows for a single-column list.
-func numbered(items []string) []table.Row {
-	rows := make([]table.Row, len(items))
-	for i, s := range items {
-		rows[i] = table.Row{fmt.Sprintf("%d", i+1), s}
+// keyRows / valueRows build the list rows with a trailing resource-count cell
+// ("…" until the background count lands; "N+" when a region failed mid-count).
+func keyRows(keys []string, counts map[string]countVal) []table.Row {
+	rows := make([]table.Row, len(keys))
+	for i, k := range keys {
+		rows[i] = table.Row{fmt.Sprintf("%d", i+1), k, countCell(counts, k)}
 	}
 	return rows
+}
+
+func valueRows(values []string, counts map[string]countVal) []table.Row {
+	rows := make([]table.Row, len(values))
+	for i, v := range values {
+		rows[i] = table.Row{fmt.Sprintf("%d", i+1), v, countCell(counts, v)}
+	}
+	return rows
+}
+
+func countCell(counts map[string]countVal, item string) string {
+	cv, ok := counts[item]
+	if !ok {
+		return "…"
+	}
+	if cv.complete {
+		return fmt.Sprintf("%d", cv.n)
+	}
+	return fmt.Sprintf("%d+", cv.n) // a region failed → at least this many
+}
+
+// rebuildKeyRows / rebuildValueRows refresh the count column in place, preserving
+// the cursor so a count landing doesn't move the user's selection.
+func (mm *m) rebuildKeyRows() {
+	cur := mm.keysTbl.Cursor()
+	mm.keysTbl.SetRows(keyRows(mm.keys, mm.keyCounts))
+	mm.keysTbl.SetCursor(clampCursor(cur, len(mm.keys)))
+}
+
+func (mm *m) rebuildValueRows() {
+	cur := mm.valuesTbl.Cursor()
+	mm.valuesTbl.SetRows(valueRows(mm.values, mm.valueCounts[mm.selectedKey]))
+	mm.valuesTbl.SetCursor(clampCursor(cur, len(mm.values)))
+}
+
+func clampCursor(cur, n int) int {
+	if n <= 0 {
+		return 0
+	}
+	if cur < 0 {
+		return 0
+	}
+	if cur >= n {
+		return n - 1
+	}
+	return cur
 }
 
 func resourceRows(res []model.Resource) []table.Row {

@@ -17,6 +17,10 @@ tag filter directly.
 2. **Filter entry** — press `f` (or `/`) and type one or more `Key=Value`
    filters, comma-separated.
 
+Key and value rows show a **Resources** count, filled in progressively in the
+background (`…` while counting, `N+` when a region's count failed). Counts are
+best-effort and subject to the same coverage caveat below.
+
 Filter syntax:
 
 | You type | Meaning |

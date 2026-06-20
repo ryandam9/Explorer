@@ -50,3 +50,30 @@ func TestResourceRows(t *testing.T) {
 		t.Errorf("missing name should render as em dash, got %q", rows[1][3])
 	}
 }
+
+func TestCountCell(t *testing.T) {
+	counts := map[string]countVal{
+		"done":    {n: 5, complete: true},
+		"partial": {n: 3, complete: false},
+	}
+	cases := map[string]string{"done": "5", "partial": "3+", "missing": "…"}
+	for item, want := range cases {
+		if got := countCell(counts, item); got != want {
+			t.Errorf("countCell(%q) = %q, want %q", item, got, want)
+		}
+	}
+}
+
+func TestKeyRowsIncludeCount(t *testing.T) {
+	rows := keyRows([]string{"Env", "Team"}, map[string]countVal{"Env": {n: 9, complete: true}})
+	if len(rows) != 2 {
+		t.Fatalf("got %d rows", len(rows))
+	}
+	// #, key, count — Env resolved to 9, Team still counting (…).
+	if rows[0][1] != "Env" || rows[0][2] != "9" {
+		t.Errorf("row 0 = %v", rows[0])
+	}
+	if rows[1][2] != "…" {
+		t.Errorf("uncounted row should show …, got %q", rows[1][2])
+	}
+}

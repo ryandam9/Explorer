@@ -24,6 +24,10 @@ Two ways to reach resources:
 2. **Filter entry** — press `f` (or `/`) and type one or more `Key=Value`
    filters, comma-separated, to jump straight to matching resources.
 
+Each key/value row shows a **Resources** count that fills in progressively in
+the background (`…` while counting; `N+` if a region's count failed). Counts are
+best-effort and follow the same coverage caveat below.
+
 Filter syntax:
 
 | You type | Meaning |
