@@ -102,6 +102,7 @@ Each command and TUI has a focused guide under [`docs/`](docs/):
 | [Trail](docs/trail.md) | CloudTrail event feed and Lake queries |
 | [Find / whereused](docs/find.md) | Fuzzy resource search and blast-radius lookups |
 | [VPC explorer](docs/vpc.md) | VPC TUI and the debugging toolkit |
+| [Tags explorer](docs/tags.md) | Find resources by tag (browse keys/values or filter) |
 | [S3](docs/s3.md) · [CloudWatch Logs](docs/cloudwatch.md) | Storage and log browsers |
 | [Themes](docs/themes.md) | Color themes |
 | [Architecture](docs/architecture.md) | Internals, project layout, dependencies |

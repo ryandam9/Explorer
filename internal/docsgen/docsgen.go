@@ -50,6 +50,7 @@ var guideList = []struct {
 	{"tui-vpc.md", "guide-vpc", "VPC explorer TUI"},
 	{"tui-s3.md", "guide-s3", "S3 browser TUI"},
 	{"tui-cloudwatch.md", "guide-cloudwatch", "CloudWatch Logs TUI"},
+	{"tui-tags.md", "guide-tags", "Tags explorer TUI"},
 	{"tui-reports.md", "guide-reports", "Audit & Bill TUIs"},
 	{"shortcuts.md", "guide-shortcuts", "Keyboard shortcut cheat sheet"},
 }
