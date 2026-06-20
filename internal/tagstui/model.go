@@ -10,6 +10,7 @@ import (
 	"github.com/atotto/clipboard"
 	"github.com/charmbracelet/bubbles/spinner"
 	"github.com/charmbracelet/bubbles/textinput"
+	"github.com/charmbracelet/bubbles/viewport"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 
@@ -99,6 +100,7 @@ type m struct {
 	spinner   spinner.Model
 	toast     string
 	showAbout bool
+	overlayVP viewport.Model // scrolls the help overlay (i)
 }
 
 // NewModel builds the tags dashboard over the client's resolved region scope.
@@ -251,8 +253,26 @@ func (mm *m) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 func (mm *m) handleKey(msg tea.KeyMsg) []tea.Cmd {
 	var cmds []tea.Cmd
 
+	// While the help overlay is open, keys scroll it or close it.
 	if mm.showAbout {
-		mm.showAbout = false
+		switch msg.String() {
+		case "q", "ctrl+c":
+			return []tea.Cmd{tea.Quit}
+		case "i", "?", "esc", "enter":
+			mm.showAbout = false
+		case "up", "k":
+			mm.overlayVP.LineUp(1)
+		case "down", "j":
+			mm.overlayVP.LineDown(1)
+		case "pgup":
+			mm.overlayVP.ViewUp()
+		case "pgdown", "pgdn", " ":
+			mm.overlayVP.ViewDown()
+		case "g", "home":
+			mm.overlayVP.GotoTop()
+		case "G", "end":
+			mm.overlayVP.GotoBottom()
+		}
 		return cmds
 	}
 
@@ -287,6 +307,7 @@ func (mm *m) handleKey(msg tea.KeyMsg) []tea.Cmd {
 		return cmds
 	case "i":
 		mm.showAbout = true
+		mm.overlayVP.GotoTop()
 		return cmds
 	case "r":
 		mm.refresh(&cmds)

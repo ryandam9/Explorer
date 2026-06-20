@@ -58,7 +58,7 @@ sweep every region (global resources such as CloudFront/Route 53 appear under
 | `<`/`>` | Scroll the wide resources table sideways |
 | `y` | Copy the selected resource's ARN |
 | `o` | Open in the AWS console |
-| `r` | Refresh the focused column · `i` About · `q` Quit |
+| `r` | Refresh the focused column · `i` Help (scrollable cheat-sheet) · `q` Quit |
 
 ## Scripting (CLI twins)
 

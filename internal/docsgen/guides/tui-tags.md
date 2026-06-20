@@ -77,7 +77,8 @@ as "no results".
 | `y` | Copy the selected resource's ARN |
 | `o` | Open the selected resource in the AWS console |
 | `r` | Refresh the focused column |
-| `i` | About · `q` Quit |
+| `i` | Open the in-app help (a scrollable cheat-sheet of these keys and the filter syntax) |
+| `q` | Quit |
 
 Scope is the active region by default; add `--all-regions` to sweep every
 enabled region (global resources such as CloudFront and Route 53 appear under

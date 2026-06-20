@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/charmbracelet/bubbles/viewport"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/charmbracelet/x/ansi"
 
@@ -49,25 +50,112 @@ func (mm *m) View() string {
 	}
 	frame := mm.applyToast(ui.ClipToSize(body+sep+status, mm.width, mm.height))
 	if mm.showAbout {
-		frame = ui.OverlayCenterBlank(ui.AboutView("About — AWS Tags", aboutText, ui.AboutWidth(mm.width)), mm.width, mm.height)
+		frame = ui.OverlayCenterBlank(mm.helpOverlay(), mm.width, mm.height)
 	}
 	return frame
 }
 
-const aboutText = "Explore AWS resources by tag in a three-column layout: tag Keys ▸ the " +
-	"selected key's Values ▸ Resources carrying the selected tag. Use ↑/↓ to move " +
-	"within a column, Enter (or →) to drill into the next column, ←/Esc to step " +
-	"back, and Tab to cycle focus. Values and resources load on demand, never on " +
-	"scroll.\n\n" +
-	"Or press f to type a filter directly: comma-separated Key=Value terms are " +
-	"ANDed; repeat a key to OR its values; a bare key matches any value. Separate " +
-	"groups with \"||\" to OR them (e.g. Team=payments || Team=billing). Scope to " +
-	"resource types with a type:ec2:instance term. Note: only *tagged* resources " +
-	"are queryable — there is no \"untagged\" filter.\n\n" +
-	"Data comes from the Resource Groups Tagging API, so only tagged resources " +
-	"on services that integrate with it are shown (IAM, for example, is not). Use " +
-	"--all-regions to sweep every region. On a resource, y copies its ARN and o " +
-	"opens it in the AWS console. r refreshes the focused column."
+// helpOverlay renders the scrollable help modal (toggled with i). Scrollable so
+// the full guide is reachable on any terminal height without overrunning the
+// screen (§9).
+func (mm *m) helpOverlay() string {
+	mm.layoutHelpVP()
+	hint := lipgloss.NewStyle().Foreground(lipgloss.Color(ui.ColorMuted())).Render("↑/↓ scroll · i/Esc close")
+	body := lipgloss.JoinVertical(lipgloss.Left, mm.overlayVP.View(), "", hint)
+	return ui.HelpView("Help — AWS Tags explorer", body, mm.overlayVP.Width+4)
+}
+
+// layoutHelpVP sizes the help viewport to the terminal (preserving the scroll
+// offset) and wraps the guide to its width so nothing runs off the edge.
+func (mm *m) layoutHelpVP() {
+	w := ui.AboutWidth(mm.width) - 4 // the box pads 2 columns on each side
+	if w < 28 {
+		w = 28
+	}
+	h := mm.height - 12 // border + padding + title + hint + centering margins
+	if h < 6 {
+		h = 6
+	}
+	off := mm.overlayVP.YOffset
+	mm.overlayVP = viewport.New(w, h)
+	mm.overlayVP.SetContent(lipgloss.NewStyle().Width(w).Render(helpContent()))
+	mm.overlayVP.SetYOffset(off)
+}
+
+// helpContent builds the full, sectioned guide shown in the help overlay. Pure
+// text (themed section headings); the viewport wraps it to width.
+func helpContent() string {
+	head := func(s string) string {
+		return lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color(ui.ColorAccent())).Render(s)
+	}
+	dim := func(s string) string {
+		return lipgloss.NewStyle().Foreground(lipgloss.Color(ui.ColorMuted())).Render(s)
+	}
+	var b strings.Builder
+	w := func(lines ...string) {
+		for _, l := range lines {
+			b.WriteString(l + "\n")
+		}
+	}
+
+	w(
+		"Find AWS resources by their tags. Three columns are shown side by side:",
+		"",
+		"    Keys   ▸   Values   ▸   Resources",
+		"",
+		"Pick a tag key to load its values, then pick a value to list every",
+		"resource carrying that Key=Value tag. The focused column has a",
+		"highlighted border.",
+		"",
+		head("MOVING AROUND"),
+		"  ↑ ↓  /  k j     move within the focused column",
+		"  g / G           jump to the first / last row",
+		"  Enter  or  →    drill into the next column (loads on demand)",
+		"  ←  or  Esc      step focus back one column",
+		"  Tab / Shift+Tab cycle focus across the three columns",
+		"",
+		dim("Values and resources are fetched only when you press Enter —"),
+		dim("never while you scroll, so browsing stays fast."),
+		"",
+		head("THE \"Res\" COUNT"),
+		"Each key and value shows how many resources carry it, filled in as",
+		"background counts finish:",
+		"  …      still counting",
+		"  12     exact count",
+		"  12+    a region's count failed — there are at least this many",
+		"",
+		head("FILTER MODE   (press f or /)"),
+		"Type tag terms to jump straight to resources. Combine them:",
+		"",
+		"  Env=prod                 the exact tag",
+		"  Env=prod, Team=pay       AND — both tags must match (across keys)",
+		"  Team=pay, Team=billing   OR within a key — Team is pay or billing",
+		"  Owner                    key present with any value (bare key)",
+		"  Team=pay || Env=prod     OR across groups, joined with ||",
+		"  type:ec2:instance        limit to a resource type",
+		"",
+		dim("Rule of thumb: a comma means AND; repeating a key, or || between"),
+		dim("groups, means OR. Press Enter to run the filter (it fills the"),
+		dim("Resources column); Esc cancels. Only tagged resources are"),
+		dim("queryable — there is no \"untagged\" filter."),
+		"",
+		head("ON A RESOURCE   (Resources column)"),
+		"  y        copy its ARN to the clipboard",
+		"  o        open it in the AWS console",
+		"  < / >    scroll the wide table sideways (more columns)",
+		"",
+		head("OTHER KEYS"),
+		"  r        refresh the focused column (re-query AWS)",
+		"  i        toggle this help        q   quit",
+		"",
+		head("COVERAGE"),
+		"Data comes from the Resource Groups Tagging API, so only tagged",
+		"resources on services that support it appear (IAM, for example,",
+		"won't). Use --all-regions to sweep every region; global resources",
+		"such as CloudFront and Route 53 appear under us-east-1.",
+	)
+	return strings.TrimRight(b.String(), "\n")
+}
 
 func (mm *m) header() string {
 	crumb := "Tags ▸ Keys"
@@ -247,7 +335,7 @@ func (mm *m) hints() []ui.KeyHint {
 	if mm.focus == colResources {
 		base = append(base, ui.H("</>", "scroll"), ui.H("y", "copy ARN"), ui.H("o", "console"))
 	}
-	base = append(base, ui.H("f", "filter"), ui.H("r", "refresh"), ui.H("i", "about"), ui.H("q", "quit"))
+	base = append(base, ui.H("f", "filter"), ui.H("r", "refresh"), ui.H("i", "help"), ui.H("q", "quit"))
 	return base
 }
 
