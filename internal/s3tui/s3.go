@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log/slog"
 	"os"
 	"sort"
 	"strconv"
@@ -314,12 +315,16 @@ func (c *S3Client) GetObjectDetails(bucket, key string) (*ObjectDetails, error) 
 			Bucket: aws.String(bucket),
 			Key:    aws.String(key),
 		})
-		if err == nil {
-			tags = make(map[string]string)
-			for _, tag := range tagging.TagSet {
-				if tag.Key != nil && tag.Value != nil {
-					tags[*tag.Key] = *tag.Value
-				}
+		if err != nil {
+			// Don't present a failed tag read as "no tags" silently — at least
+			// log it so it's visible in the debug pane (§6a).
+			slog.Warn("GetObjectTagging failed", "bucket", bucket, "key", key, "error", err.Error())
+			return
+		}
+		tags = make(map[string]string)
+		for _, tag := range tagging.TagSet {
+			if tag.Key != nil && tag.Value != nil {
+				tags[*tag.Key] = *tag.Value
 			}
 		}
 	}()
@@ -473,55 +478,95 @@ func (c *S3Client) FetchBucketDetails(bucket string) *BucketDetails {
 		intelligentTier   string
 	)
 
+	// rec records a *genuine* fetch failure (the Get* helpers already fold
+	// "not configured"/denied into a nil error), so a wrong-region or throttled
+	// call is flagged as a partial load instead of being shown as a default.
+	var errMu sync.Mutex
+	var loadErrs []string
+	rec := func(what string, err error) {
+		if err == nil {
+			return
+		}
+		errMu.Lock()
+		loadErrs = append(loadErrs, what)
+		errMu.Unlock()
+		slog.Warn("S3 bucket detail call failed", "bucket", bucket, "setting", what, "error", err.Error())
+	}
+
 	var wg sync.WaitGroup
 	wg.Add(19)
 
 	go func() {
 		defer wg.Done()
-		if ver, err := c.GetBucketVersioning(bucket); err == nil {
-			versioning = ver
+		ver, err := c.GetBucketVersioning(bucket)
+		if err != nil {
+			rec("versioning", err)
+			return
 		}
+		versioning = ver
 	}()
 
 	go func() {
 		defer wg.Done()
-		if enc, err := c.GetBucketEncryption(bucket); err == nil && enc != nil && enc.ServerSideEncryptionConfiguration != nil && len(enc.ServerSideEncryptionConfiguration.Rules) > 0 {
-			algo := string(enc.ServerSideEncryptionConfiguration.Rules[0].ApplyServerSideEncryptionByDefault.SSEAlgorithm)
-			encryption = algo
+		enc, err := c.GetBucketEncryption(bucket)
+		if err != nil {
+			rec("encryption", err)
+			return
 		}
-	}()
-
-	go func() {
-		defer wg.Done()
-		if t, err := c.GetBucketTagging(bucket); err == nil {
-			tags = t
-		}
-	}()
-
-	go func() {
-		defer wg.Done()
-		if p, err := c.GetBucketPolicy(bucket); err == nil {
-			if p == "Access Denied" {
-				policy = "Access Denied"
-			} else if p != "" {
-				policy = "Set (Available)"
-				rawPolicy = p // kept for the full-screen JSON viewer
-			} else {
-				policy = "None"
+		if enc != nil && enc.ServerSideEncryptionConfiguration != nil && len(enc.ServerSideEncryptionConfiguration.Rules) > 0 {
+			if def := enc.ServerSideEncryptionConfiguration.Rules[0].ApplyServerSideEncryptionByDefault; def != nil {
+				encryption = string(def.SSEAlgorithm)
 			}
 		}
 	}()
 
 	go func() {
 		defer wg.Done()
-		if lc, err := c.GetBucketLifecycleConfiguration(bucket); err == nil && lc != nil {
+		t, err := c.GetBucketTagging(bucket)
+		if err != nil {
+			rec("tags", err)
+			return
+		}
+		tags = t
+	}()
+
+	go func() {
+		defer wg.Done()
+		p, err := c.GetBucketPolicy(bucket)
+		if err != nil {
+			rec("policy", err)
+			return
+		}
+		if p == "Access Denied" {
+			policy = "Access Denied"
+		} else if p != "" {
+			policy = "Set (Available)"
+			rawPolicy = p // kept for the full-screen JSON viewer
+		} else {
+			policy = "None"
+		}
+	}()
+
+	go func() {
+		defer wg.Done()
+		lc, err := c.GetBucketLifecycleConfiguration(bucket)
+		if err != nil {
+			rec("lifecycle", err)
+			return
+		}
+		if lc != nil {
 			lifecycleRules = len(lc.Rules)
 		}
 	}()
 
 	go func() {
 		defer wg.Done()
-		if pab, err := c.GetPublicAccessBlock(bucket); err == nil && pab != nil && pab.PublicAccessBlockConfiguration != nil {
+		pab, err := c.GetPublicAccessBlock(bucket)
+		if err != nil {
+			rec("public access block", err)
+			return
+		}
+		if pab != nil && pab.PublicAccessBlockConfiguration != nil {
 			config := pab.PublicAccessBlockConfiguration
 			publicAccessBlock = fmt.Sprintf("BlockPublicAcls:%v IgnorePublicAcls:%v BlockPublicPolicy:%v RestrictPublicBuckets:%v",
 				config.BlockPublicAcls, config.IgnorePublicAcls, config.BlockPublicPolicy, config.RestrictPublicBuckets)
@@ -599,6 +644,12 @@ func (c *S3Client) FetchBucketDetails(bucket string) *BucketDetails {
 		tags = make(map[string]string)
 	}
 
+	var loadError string
+	if len(loadErrs) > 0 {
+		sort.Strings(loadErrs)
+		loadError = strings.Join(loadErrs, ", ")
+	}
+
 	return &BucketDetails{
 		Versioning:         versioning,
 		Encryption:         encryption,
@@ -621,6 +672,7 @@ func (c *S3Client) FetchBucketDetails(bucket string) *BucketDetails {
 		IntelligentTiering: intelligentTier,
 		RawPolicy:          rawPolicy,
 		CORSJSON:           corsJSON,
+		LoadError:          loadError,
 	}
 }
 

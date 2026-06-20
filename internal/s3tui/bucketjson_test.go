@@ -4,8 +4,22 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/charmbracelet/x/ansi"
 	"github.com/ryandam9/aws_explorer/internal/table"
 )
+
+// A genuinely failed read (LoadError set) is flagged in the detail view, so the
+// defaults aren't mistaken for fact.
+func TestBucketDetailPartialLoadWarning(t *testing.T) {
+	m := &Model{
+		width: 100, height: 30, state: stateBucketDetail, detailBucket: "b",
+		selectedBucketDetails: &BucketDetails{LoadError: "policy, encryption"},
+	}
+	out := ansi.Strip(m.bucketDetailView())
+	if !strings.Contains(out, "Some settings could not be read: policy, encryption") {
+		t.Errorf("expected a partial-load warning, got:\n%s", out)
+	}
+}
 
 func TestPrettyJSON(t *testing.T) {
 	out := prettyJSON(`{"a":1,"b":[2,3]}`)
