@@ -19,6 +19,7 @@ var (
 	tagsTheme  string
 	tagsKey    string
 	tagsFilter string
+	tagsType   string
 )
 
 var tagsCmd = &cobra.Command{
@@ -150,16 +151,25 @@ var tagsResourcesCmd = &cobra.Command{
 	Use:   "resources",
 	Short: "List resources matching one or more tag filters",
 	Long: `List resources matching a tag filter, e.g. --filter "Environment=prod,Team=payments".
+
 Different keys are ANDed; repeating a key ORs its values; a bare key matches any
-value (e.g. --filter Owner).`,
-	Example: `  aws_explorer tags resources --filter Environment=prod --all-regions -o json`,
+value (e.g. --filter Owner). Separate AND-groups with "||" to OR them, e.g.
+--filter "Team=payments || Team=billing". Scope to resource types with --type
+(or a type:ec2:instance term in --filter).
+
+Note: the Resource Groups Tagging API can only match *tagged* resources, so
+there is no "untagged" / negation filter.`,
+	Example: `  aws_explorer tags resources --filter Environment=prod --all-regions -o json
+  aws_explorer tags resources --filter "Team=payments || Team=billing" -o csv
+  aws_explorer tags resources --filter Environment=prod --type ec2:instance,s3:bucket`,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		if err := output.ValidateFormat(outputFormat); err != nil {
 			return err
 		}
-		filters := tagstui.ParseFilter(tagsFilter)
-		if len(filters) == 0 {
-			return fmt.Errorf("specify a tag filter with --filter Key=Value[,Key2=Value2]")
+		groups, types := tagstui.ParseQuery(tagsFilter)
+		types = append(types, splitCSV(tagsType)...)
+		if len(groups) == 0 && len(types) == 0 {
+			return fmt.Errorf("specify a tag filter with --filter Key=Value[,Key2=Value2] (and/or --type)")
 		}
 		ctx := context.Background()
 		SilenceScanLogs()
@@ -167,10 +177,21 @@ value (e.g. --filter Owner).`,
 		if err != nil {
 			return err
 		}
-		res, errs := client.Resources(ctx, filters)
+		res, errs := client.Resources(ctx, groups, types)
 		warnTagErrors(errs)
 		return tagstui.RenderResources(os.Stdout, res, outputFormat, noHeader)
 	},
+}
+
+// splitCSV splits a comma-separated flag value into trimmed, non-empty items.
+func splitCSV(s string) []string {
+	var out []string
+	for _, p := range strings.Split(s, ",") {
+		if p = strings.TrimSpace(p); p != "" {
+			out = append(out, p)
+		}
+	}
+	return out
 }
 
 func init() {
@@ -180,8 +201,8 @@ func init() {
 
 	tagsValuesCmd.Flags().StringVar(&tagsKey, "key", "", "Tag key to list values for (required)")
 	_ = tagsValuesCmd.MarkFlagRequired("key")
-	tagsResourcesCmd.Flags().StringVar(&tagsFilter, "filter", "", "Tag filter, e.g. Key=Value,Key2=Value2")
-	_ = tagsResourcesCmd.MarkFlagRequired("filter")
+	tagsResourcesCmd.Flags().StringVar(&tagsFilter, "filter", "", `Tag filter, e.g. "Key=Value,Key2=Value2" ("||" to OR groups)`)
+	tagsResourcesCmd.Flags().StringVar(&tagsType, "type", "", "Comma-separated resource types to scope to, e.g. ec2:instance,s3:bucket")
 
 	tagsCmd.AddCommand(tagsKeysCmd, tagsValuesCmd, tagsResourcesCmd)
 	rootCmd.AddCommand(tagsCmd)

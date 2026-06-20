@@ -36,6 +36,16 @@ Filter syntax:
 | `Env=prod, Team=payments` | **both** tags (AND across keys) |
 | `Team=payments, Team=billing` | `Team` is `payments` **or** `billing` (OR within a key) |
 | `Owner` | resources that have an `Owner` tag with any value |
+| `Team=payments \|\| Env=prod` | either group (OR across keys, via `\|\|`) |
+| `Env=prod, type:ec2:instance` | scope to a resource type |
+
+The Tagging API matches only **tagged** resources, so there is no "untagged"
+filter. The CLI twin takes the same syntax plus a `--type` flag:
+
+```bash
+aws_explorer tags resources --filter "Team=payments || Team=billing" -o csv
+aws_explorer tags resources --filter Env=prod --type ec2:instance,s3:bucket -o json
+```
 
 ## Coverage (important)
 

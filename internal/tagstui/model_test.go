@@ -77,3 +77,42 @@ func TestKeyRowsIncludeCount(t *testing.T) {
 		t.Errorf("uncounted row should show …, got %q", rows[1][2])
 	}
 }
+
+func TestParseQueryOR(t *testing.T) {
+	// Two AND-groups ORed with "||".
+	groups, types := ParseQuery("Env=prod, Team=pay || Env=staging")
+	if len(groups) != 2 || len(types) != 0 {
+		t.Fatalf("groups=%v types=%v", groups, types)
+	}
+	if !reflect.DeepEqual(groups[0], map[string][]string{"Env": {"prod"}, "Team": {"pay"}}) {
+		t.Errorf("group0 = %#v", groups[0])
+	}
+	if !reflect.DeepEqual(groups[1], map[string][]string{"Env": {"staging"}}) {
+		t.Errorf("group1 = %#v", groups[1])
+	}
+}
+
+func TestParseQueryType(t *testing.T) {
+	// type: terms are pulled out as resource-type scopes (deduped), not tag filters.
+	groups, types := ParseQuery("Env=prod, type:ec2:instance || type:ec2:instance, type:s3:bucket")
+	if !reflect.DeepEqual(types, []string{"ec2:instance", "s3:bucket"}) {
+		t.Errorf("types = %#v", types)
+	}
+	// Only the Env=prod group remains (the second group had only type terms).
+	if len(groups) != 1 || !reflect.DeepEqual(groups[0], map[string][]string{"Env": {"prod"}}) {
+		t.Errorf("groups = %#v", groups)
+	}
+}
+
+func TestParseQueryEmpty(t *testing.T) {
+	if g, ty := ParseQuery("  ||  , "); len(g) != 0 || len(ty) != 0 {
+		t.Errorf("empty query → g=%v ty=%v", g, ty)
+	}
+}
+
+func TestQueryDesc(t *testing.T) {
+	got := queryDesc([]map[string][]string{{"Team": {"pay"}}, {"Env": {"prod"}}}, []string{"s3:bucket", "ec2:instance"})
+	if got != "Team=pay || Env=prod · type:ec2:instance|s3:bucket" {
+		t.Errorf("queryDesc = %q", got)
+	}
+}

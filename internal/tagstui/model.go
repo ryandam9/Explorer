@@ -69,8 +69,9 @@ type m struct {
 	selectedKey  string
 	values       []string
 	resources    []model.Resource
-	filterDesc   string              // human description of the active resource filter (display)
-	activeFilter map[string][]string // the active filter itself, for an exact refresh
+	filterDesc   string                // human description of the active resource filter (display)
+	activeGroups []map[string][]string // the active OR-of-AND filter, for an exact refresh
+	activeTypes  []string              // active resource-type scope
 
 	valuesCache map[string][]string
 	resCache    map[string][]model.Resource
@@ -99,7 +100,7 @@ func NewModel(ctx context.Context, client *Client, allRegions bool) tea.Model {
 	s.Style = lipgloss.NewStyle().Foreground(lipgloss.Color(ui.ColorAccent()))
 
 	f := textinput.New()
-	f.Placeholder = "Key=Value, Key2=Value2  (Enter to search)"
+	f.Placeholder = "Key=Value, K2=V2   ·   || to OR groups   ·   type:ec2:instance"
 	f.CharLimit = 512
 	f.Width = 48
 
@@ -164,11 +165,11 @@ func (mm *m) loadValuesCmd(key string) tea.Cmd {
 	}
 }
 
-func (mm *m) loadResourcesCmd(desc string, filters map[string][]string) tea.Cmd {
+func (mm *m) loadResourcesCmd(desc string, groups []map[string][]string, resourceTypes []string) tea.Cmd {
 	return func() tea.Msg {
 		ctx, cancel := context.WithTimeout(mm.ctx, loadTimeout)
 		defer cancel()
-		res, errs := mm.client.Resources(ctx, filters)
+		res, errs := mm.client.Resources(ctx, groups, resourceTypes)
 		return resourcesMsg{desc: desc, resources: res, errs: errs}
 	}
 }
@@ -251,8 +252,8 @@ func (mm *m) handleKey(msg tea.KeyMsg) []tea.Cmd {
 			expr := strings.TrimSpace(mm.filter.Value())
 			mm.filterActive = false
 			mm.filter.Blur()
-			if filters := parseFilterExpr(expr); len(filters) > 0 {
-				mm.openResources(filterDesc(filters), filters, &cmds)
+			if groups, types := ParseQuery(expr); len(groups) > 0 || len(types) > 0 {
+				mm.openResources(queryDesc(groups, types), groups, types, &cmds)
 			}
 		case "esc":
 			mm.filterActive = false
@@ -374,13 +375,15 @@ func (mm *m) openResourcesFromValue(cmds *[]tea.Cmd) {
 		return
 	}
 	val := mm.values[i]
-	mm.openResources(mm.selectedKey+"="+val, map[string][]string{mm.selectedKey: {val}}, cmds)
+	mm.openResources(mm.selectedKey+"="+val, []map[string][]string{{mm.selectedKey: {val}}}, nil, cmds)
 }
 
-// openResources switches to the resources pane for the given filter (cache-first).
-func (mm *m) openResources(desc string, filters map[string][]string, cmds *[]tea.Cmd) {
+// openResources switches to the resources pane for the given OR-of-AND filter
+// (cache-first).
+func (mm *m) openResources(desc string, groups []map[string][]string, resourceTypes []string, cmds *[]tea.Cmd) {
 	mm.filterDesc = desc
-	mm.activeFilter = filters
+	mm.activeGroups = groups
+	mm.activeTypes = resourceTypes
 	mm.pane = paneResources
 	if cached, ok := mm.resCache[desc]; ok {
 		mm.resources = cached
@@ -390,7 +393,7 @@ func (mm *m) openResources(desc string, filters map[string][]string, cmds *[]tea
 		return
 	}
 	mm.loading = true
-	*cmds = append(*cmds, mm.loadResourcesCmd(desc, filters), mm.spinner.Tick)
+	*cmds = append(*cmds, mm.loadResourcesCmd(desc, groups, resourceTypes), mm.spinner.Tick)
 }
 
 // goBack moves one pane up the drill-down (resources → values → keys), resuming
@@ -425,7 +428,7 @@ func (mm *m) refresh(cmds *[]tea.Cmd) {
 		*cmds = append(*cmds, mm.loadValuesCmd(mm.selectedKey), mm.spinner.Tick)
 	case paneResources:
 		delete(mm.resCache, mm.filterDesc)
-		*cmds = append(*cmds, mm.loadResourcesCmd(mm.filterDesc, mm.activeFilter), mm.spinner.Tick)
+		*cmds = append(*cmds, mm.loadResourcesCmd(mm.filterDesc, mm.activeGroups, mm.activeTypes), mm.spinner.Tick)
 	}
 }
 
@@ -561,4 +564,61 @@ func filterDesc(filters map[string][]string) string {
 		}
 	}
 	return strings.Join(parts, ", ")
+}
+
+// ParseQuery parses an OR-of-AND query into filter groups plus resource-type
+// scopes. Groups are separated by "||"; within a group, comma-separated
+// Key=Value / Key terms are ANDed (a repeated key ORs its values; a bare key
+// matches any value). A "type:SERVICE:TYPE" term in any group scopes the whole
+// query to those resource types (e.g. type:ec2:instance). Exposed for the CLI.
+func ParseQuery(expr string) (groups []map[string][]string, resourceTypes []string) {
+	seenType := map[string]bool{}
+	for _, raw := range strings.Split(expr, "||") {
+		var terms []string
+		for _, part := range strings.Split(raw, ",") {
+			p := strings.TrimSpace(part)
+			if p == "" {
+				continue
+			}
+			if t, ok := cutTypePrefix(p); ok {
+				if t != "" && !seenType[t] {
+					seenType[t] = true
+					resourceTypes = append(resourceTypes, t)
+				}
+				continue
+			}
+			terms = append(terms, p)
+		}
+		if g := parseFilterExpr(strings.Join(terms, ",")); len(g) > 0 {
+			groups = append(groups, g)
+		}
+	}
+	return groups, resourceTypes
+}
+
+// cutTypePrefix returns the resource type from a "type:SERVICE:TYPE" term.
+func cutTypePrefix(part string) (string, bool) {
+	if len(part) >= 5 && strings.EqualFold(part[:5], "type:") {
+		return strings.TrimSpace(part[5:]), true
+	}
+	return "", false
+}
+
+// queryDesc renders an OR-of-AND query (and any type scope) as a stable,
+// human-readable description used for the title and the result cache key.
+func queryDesc(groups []map[string][]string, resourceTypes []string) string {
+	parts := make([]string, 0, len(groups))
+	for _, g := range groups {
+		parts = append(parts, filterDesc(g))
+	}
+	desc := strings.Join(parts, " || ")
+	if len(resourceTypes) > 0 {
+		ts := append([]string(nil), resourceTypes...)
+		sort.Strings(ts)
+		if desc != "" {
+			desc += " · "
+		}
+		desc += "type:" + strings.Join(ts, "|")
+	}
+	return desc
 }
