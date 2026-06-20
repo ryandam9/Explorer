@@ -402,6 +402,23 @@ func (mm *m) handleKey(msg tea.KeyMsg) []tea.Cmd {
 		return cmds
 	}
 
+	// The code browser and its download confirmation are layered on top of the
+	// detail view (detailActive stays true underneath), so they must claim keys
+	// before the detail handler — otherwise the detail view swallows them.
+	if mm.codeConfirm {
+		switch msg.String() {
+		case "y", "enter":
+			mm.startCodeDownload(&cmds)
+		case "esc", "n", "q":
+			mm.codeConfirm = false
+		}
+		return cmds
+	}
+	if mm.codeActive {
+		mm.handleCodeKey(msg, &cmds)
+		return cmds
+	}
+
 	// Full-screen detail view: a grid of per-section panels. Tab/Shift+Tab (and
 	// arrows) move focus between tiles; the focused tile scrolls; Esc/Enter close.
 	// Checked before the other guards since it owns the whole screen.
@@ -436,24 +453,6 @@ func (mm *m) handleKey(msg tea.KeyMsg) []tea.Cmd {
 		case ui.KeyAbout:
 			mm.showAbout = true
 		}
-		return cmds
-	}
-
-	// Code browser confirmation modal: a deliberate y/Esc gate before the
-	// network download.
-	if mm.codeConfirm {
-		switch msg.String() {
-		case "y", "enter":
-			mm.startCodeDownload(&cmds)
-		case "esc", "n", "q":
-			mm.codeConfirm = false
-		}
-		return cmds
-	}
-
-	// Code browser: a file list, or a scrolling source viewer when a file is open.
-	if mm.codeActive {
-		mm.handleCodeKey(msg, &cmds)
 		return cmds
 	}
 
