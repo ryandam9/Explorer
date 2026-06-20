@@ -6,8 +6,58 @@ import (
 	"strings"
 	"testing"
 
+	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/x/ansi"
 )
+
+func keyMsg(s string) tea.KeyMsg {
+	switch s {
+	case "esc":
+		return tea.KeyMsg{Type: tea.KeyEsc}
+	case "enter":
+		return tea.KeyMsg{Type: tea.KeyEnter}
+	default:
+		return tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune(s)}
+	}
+}
+
+// Regression: the download-confirmation and the code browser are layered over
+// the (still-active) detail view, so their keys must not be swallowed by the
+// detail handler — a single "y" must start the download.
+func TestCodeConfirmKeyNotSwallowedByDetail(t *testing.T) {
+	mm := &m{
+		detailActive: true,
+		codeConfirm:  true,
+		detailFunc:   FunctionDetail{Name: "fn", Region: "us-east-1", CodeLocation: "https://example/pkg.zip", PackageType: "Zip"},
+	}
+	mm.handleKey(keyMsg("y"))
+	if mm.codeConfirm {
+		t.Error("a single y should dismiss the confirmation")
+	}
+	if !mm.codeActive || !mm.codeLoading {
+		t.Errorf("a single y should start the download: active=%v loading=%v", mm.codeActive, mm.codeLoading)
+	}
+}
+
+func TestCodeConfirmEscCancels(t *testing.T) {
+	mm := &m{detailActive: true, codeConfirm: true}
+	mm.handleKey(keyMsg("esc"))
+	if mm.codeConfirm || mm.codeActive {
+		t.Errorf("esc should cancel: confirm=%v active=%v", mm.codeConfirm, mm.codeActive)
+	}
+}
+
+// Esc closes the browser (back to the detail view) rather than being eaten by it.
+func TestCodeBrowserEscClosesOverDetail(t *testing.T) {
+	mm := &m{detailActive: true, codeActive: true}
+	mm.handleKey(keyMsg("esc"))
+	if mm.codeActive {
+		t.Error("esc should close the code browser")
+	}
+	if !mm.detailActive {
+		t.Error("closing the browser should leave the detail view open")
+	}
+}
 
 // makeZip builds an in-memory zip from name→content pairs for the unzip tests.
 func makeZip(t *testing.T, files map[string]string) []byte {

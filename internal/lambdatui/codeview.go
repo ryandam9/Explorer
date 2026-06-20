@@ -205,13 +205,46 @@ func (mm *m) codeViewportSize() (w, h int) {
 	return w, h
 }
 
+// renderCodeLoading draws an animated, indeterminate progress indicator while
+// the deployment package is fetched and unzipped: a spinner, a "scanner" bar
+// whose lit window sweeps back and forth, and the size being pulled. The sweep
+// phase comes from the wall clock, so it animates smoothly on every spinner tick
+// regardless of the tick rate.
+func (mm *m) renderCodeLoading() string {
+	const (
+		barW = 30
+		win  = 7
+	)
+	span := barW - win
+	// Triangle wave over [0, span] → ping-pong the lit window.
+	ph := int(time.Now().UnixMilli()/80) % (2 * span)
+	pos := ph
+	if pos > span {
+		pos = 2*span - pos
+	}
+
+	accent := lipgloss.NewStyle().Foreground(lipgloss.Color(ui.ColorAccent()))
+	muted := lipgloss.NewStyle().Foreground(lipgloss.Color(ui.ColorMuted()))
+	bar := muted.Render(strings.Repeat("░", pos)) +
+		accent.Render(strings.Repeat("█", win)) +
+		muted.Render(strings.Repeat("░", barW-pos-win))
+
+	size := mm.codeSizeNote
+	if size == "" {
+		size = "deployment package"
+	}
+	headline := fmt.Sprintf("  %s  Fetching %s", mm.spinner.View(), accent.Render(size))
+	sub := muted.Render("  downloading & unzipping the function's source…")
+	return headline + "\n\n  " + bar + "\n\n" + sub
+}
+
 // renderCode draws the code browser: a spinner/error while downloading, then the
 // file list, or the source viewer when a file is open.
 func (mm *m) renderCode() string {
 	title := detailHeading(" " + mm.codeTitle)
 	switch {
 	case mm.codeLoading:
-		return title + fmt.Sprintf("\n\n  %s Downloading & unzipping the deployment package…", mm.spinner.View())
+		return title + "\n\n" + mm.renderCodeLoading()
 	case mm.codeErr != nil:
 		return title + "\n\n  " + lipgloss.NewStyle().Foreground(lipgloss.Color(ui.ColorError())).
 			Render("Could not load code: "+mm.codeErr.Error())
