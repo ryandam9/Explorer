@@ -59,3 +59,18 @@ as "no results".
 Scope is the active region by default; add `--all-regions` to sweep every
 enabled region (global resources such as CloudFront and Route 53 appear under
 `us-east-1`).
+
+## Scripting
+
+The same data is available non-interactively for pipelines, with
+`-o table|json|ndjson|csv`:
+
+```bash
+aws_explorer tags keys --all-regions -o json
+aws_explorer tags values --key Environment -o csv
+aws_explorer tags resources --filter "Environment=prod,Team=payments" -o ndjson
+```
+
+The coverage caveat and any per-region failures are written to stderr, so stdout
+stays clean for scripts; CSV cells are sanitized against spreadsheet formula
+injection.

@@ -47,6 +47,18 @@ sweep every region (global resources such as CloudFront/Route 53 appear under
 | `o` | Open in the AWS console |
 | `r` | Refresh · `Esc` Back · `i` About · `q` Quit |
 
+## Scripting (CLI twins)
+
+Non-interactive subcommands print the same data for pipelines, with
+`-o table|json|ndjson|csv` (CSV cells are sanitized against formula injection;
+the coverage caveat and any per-region failures go to stderr, never stdout):
+
+```bash
+aws_explorer tags keys [--all-regions] -o json
+aws_explorer tags values --key Environment -o csv
+aws_explorer tags resources --filter "Environment=prod,Team=payments" -o ndjson
+```
+
 ## Required IAM
 
 `tag:GetResources`, `tag:GetTagKeys`, `tag:GetTagValues` (all free, read-only).

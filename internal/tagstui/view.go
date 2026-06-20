@@ -10,9 +10,9 @@ import (
 	"github.com/ryandam9/aws_explorer/internal/ui"
 )
 
-// coverageNote is the honest scope statement (CLAUDE.md §2): the Tagging API
+// CoverageNote is the honest scope statement (CLAUDE.md §2): the Tagging API
 // only sees tagged resources, and only services that integrate with it.
-const coverageNote = "Shows resources tagged & known to the Resource Groups Tagging API (untagged resources and unsupported services — e.g. IAM — won't appear)."
+const CoverageNote = "Shows resources tagged & known to the Resource Groups Tagging API (untagged resources and unsupported services — e.g. IAM — won't appear)."
 
 func (mm *m) View() string {
 	if mm.width == 0 {
@@ -28,7 +28,7 @@ func (mm *m) View() string {
 	if mm.filterActive {
 		b.WriteString(" " + mm.filter.View() + "\n")
 	} else {
-		b.WriteString(ui.MutedStyle().Render("  "+coverageNote) + "\n")
+		b.WriteString(ui.MutedStyle().Render("  "+CoverageNote) + "\n")
 	}
 
 	b.WriteString(mm.body())
