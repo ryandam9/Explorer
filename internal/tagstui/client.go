@@ -66,3 +66,11 @@ func (c *Client) TagValues(ctx context.Context, key string) ([]string, []model.E
 func (c *Client) Resources(ctx context.Context, filters map[string][]string) ([]model.Resource, []model.ExploreError) {
 	return discovery.DiscoverWithFilters(ctx, c.base, c.regions, maxConcurrency, filters)
 }
+
+// CountResources counts the resources matching the filters. complete is false
+// when a region failed, so the caller can render the count as partial (counts
+// are a best-effort enrichment — never a reason to fail the list).
+func (c *Client) CountResources(ctx context.Context, filters map[string][]string) (count int, complete bool) {
+	n, errs := discovery.CountResources(ctx, c.base, c.regions, maxConcurrency, filters)
+	return n, len(errs) == 0
+}
