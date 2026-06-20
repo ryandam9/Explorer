@@ -132,6 +132,17 @@ Sydney bucket labelled `us-east-1`; per-region fan-out caused the delay), #160
 **Rules.**
 - Every regional collector must set `Region: input.Region` on each resource.
   (Region is also recoverable from the ARN as a fallback.)
+- **A globally-*listed* resource is not globally-*callable*.** S3 buckets list
+  across all regions (one `ListBuckets`), but most `GetBucket*` / `Head*` calls
+  must hit the bucket's **own** region or they fail with a redirect error. Build
+  the client for the resource's region (resolve it from the listing's
+  `BucketRegion`, the region cache, or `GetBucketLocation` — which *does* work
+  cross-region) **before** the per-resource calls. *Bit us in #323*: the bucket
+  detail ran every `GetBucket*` against the active region, so a cross-region
+  bucket's policy/CORS calls errored — and the errors were swallowed (§6a), so it
+  showed "None". When you build that region client, don't swallow the
+  constructor's error either: surface it instead of silently keeping the
+  wrong-region client.
 - Prefer data the API already returns (e.g. `ListBuckets` page-size returns
   `BucketRegion` directly) over a second per-item lookup that can fall back to a
   wrong default.
@@ -190,6 +201,32 @@ that failed to describe disappeared silently.
 **Rule.** When an API returns a `Failures`/`Errors` companion array, surface it
 (best-effort, via `errors.Join` like the dynamodb/eks collectors) so dropped
 items are flagged as a *partial result*, not silently lost.
+
+### 6a. Never silently swallow an error into a default 🔴 (recurring)
+
+**The mistake.** `if v, err := call(); err == nil { use(v) }` with no `else` — on
+failure the field keeps its zero/default value and the UI presents it as *fact*.
+The user can't tell "genuinely none" from "the call failed". Same with
+`x, _ := call()` and `if err != nil { return "" / continue }` with no log/note.
+This is the **single most common bug in this repo** and is especially toxic for
+**region**-induced failures (see §3): a wrong-region `GetBucket*` returns a
+redirect error that gets swallowed and rendered as "None".
+
+*Bit us in:* #323 (bucket detail policy/CORS shown as "None" — the call had
+errored on the wrong region); the audit found the same pattern across
+`s3tui.FetchBucketDetails` (~19 goroutines), `vpctui` per-VPC listings (13×
+`_, _ =`), object/tag fetches, and more.
+
+**Rules.**
+- Distinguish **"not set" / "denied" / "failed"** as three different outcomes.
+  Model unknown as a sentinel (`"—"`, `*bool`, an error field) — never as a real
+  value (don't let a failed encryption read show `None`, a failed list show 0).
+- A swallowed error must at minimum be **`slog.Warn`'d**, and user-facing reads
+  should **surface a note** ("couldn't read X — press r to retry"), like
+  `GetBucketPolicy`/`getBucketCORS` and the `audit` error recorder do.
+- Best-effort enrichment that's *intentionally* ignored must say so **in a
+  comment** (e.g. the lambda/s3 collectors' tag fetches) — otherwise treat a
+  dropped error as a bug.
 
 ---
 
@@ -409,7 +446,11 @@ widths/truncation).
 ## Pre-flight checklist (use before every change)
 
 - [ ] Every SDK pointer deref is nil-guarded (`aws.ToX`).
-- [ ] Regional resources carry `Region`; `AccountID` set centrally.
+- [ ] Regional resources carry `Region`; `AccountID` set centrally; per-resource
+      `GetBucket*`/`Head*` calls run against the resource's **own** region (§3).
+- [ ] No error swallowed into a default: no `if err == nil { use }` without an
+      `else`, no `x, _ := awsCall()`; "not set" vs "denied" vs "failed" are
+      distinct and failures are logged/surfaced (§6a).
 - [ ] All `List*` calls paginate; caps are surfaced, not silent.
 - [ ] `Failures`/error arrays are inspected and joined.
 - [ ] Per-item sweeps are bounded-concurrent; deadline errors collapsed; APIs

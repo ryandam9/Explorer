@@ -894,27 +894,42 @@ func buildFullExport(c *VPCClient, vpc VPCInfo, getSnap func() (vpcSnapshot, err
 		vpcSubnets[s.ID] = true
 	}
 
-	run(func() { data.FlowLogs, _ = c.ListFlowLogs(vpc.ID) })
-	run(func() { data.EC2, _ = c.ListEC2Instances(vpc.ID) })
-	run(func() { data.Lambdas, _ = c.ListLambdaFunctions(vpc.ID) })
-	run(func() { data.RDS, _ = c.ListRDSInstances(vpc.ID) })
-	run(func() { data.LBs, _ = c.ListLoadBalancers(vpc.ID) })
-	run(func() { data.ECSServices, _ = c.ListECSServices(vpcSubnets) })
-	run(func() { data.EKSClusters, _ = c.ListEKSClusters(vpc.ID) })
-	run(func() { data.ElastiCache, _ = c.ListElastiCacheClusters(vpc.ID) })
-	run(func() { data.Redshift, _ = c.ListRedshiftClusters(vpc.ID) })
-	run(func() { data.EFS, _ = c.ListEFSFileSystems(vpc.ID) })
-	run(func() { data.EMR, _ = c.ListEMRClusters(vpcSubnets) })
-	run(func() { data.TransitGatewayAttachments, _ = c.ListTransitGatewayAttachments(vpc.ID) })
+	// logFail surfaces a failed per-VPC listing instead of silently dropping it
+	// to an empty slice (which reads as "no resources"). At minimum it lands in
+	// the logs / debug pane (§6a).
+	logFail := func(what string, err error) {
+		if err != nil {
+			slog.Warn("VPC resource listing failed", "vpc", vpc.ID, "resource", what, "error", err.Error())
+		}
+	}
+
+	run(func() { v, err := c.ListFlowLogs(vpc.ID); logFail("flow logs", err); data.FlowLogs = v })
+	run(func() { v, err := c.ListEC2Instances(vpc.ID); logFail("ec2", err); data.EC2 = v })
+	run(func() { v, err := c.ListLambdaFunctions(vpc.ID); logFail("lambda", err); data.Lambdas = v })
+	run(func() { v, err := c.ListRDSInstances(vpc.ID); logFail("rds", err); data.RDS = v })
+	run(func() { v, err := c.ListLoadBalancers(vpc.ID); logFail("load balancers", err); data.LBs = v })
+	run(func() { v, err := c.ListECSServices(vpcSubnets); logFail("ecs", err); data.ECSServices = v })
+	run(func() { v, err := c.ListEKSClusters(vpc.ID); logFail("eks", err); data.EKSClusters = v })
+	run(func() { v, err := c.ListElastiCacheClusters(vpc.ID); logFail("elasticache", err); data.ElastiCache = v })
+	run(func() { v, err := c.ListRedshiftClusters(vpc.ID); logFail("redshift", err); data.Redshift = v })
+	run(func() { v, err := c.ListEFSFileSystems(vpc.ID); logFail("efs", err); data.EFS = v })
+	run(func() { v, err := c.ListEMRClusters(vpcSubnets); logFail("emr", err); data.EMR = v })
+	run(func() {
+		v, err := c.ListTransitGatewayAttachments(vpc.ID)
+		logFail("transit gateway attachments", err)
+		data.TransitGatewayAttachments = v
+	})
 	// VPN resources chain: gateways → connections → customer gateways.
 	run(func() {
-		vgws, _ := c.ListVPNGateways(vpc.ID)
+		vgws, err := c.ListVPNGateways(vpc.ID)
+		logFail("vpn gateways", err)
 		data.VPNGateways = vgws
 		vgwIDs := make([]string, 0, len(vgws))
 		for _, g := range vgws {
 			vgwIDs = append(vgwIDs, g.ID)
 		}
-		conns, _ := c.ListVPNConnections(vgwIDs)
+		conns, err := c.ListVPNConnections(vgwIDs)
+		logFail("vpn connections", err)
 		data.VPNConnections = conns
 		seen := map[string]bool{}
 		var cgwIDs []string
@@ -924,7 +939,9 @@ func buildFullExport(c *VPCClient, vpc VPCInfo, getSnap func() (vpcSnapshot, err
 				cgwIDs = append(cgwIDs, cn.CustomerGatewayID)
 			}
 		}
-		data.CustomerGateways, _ = c.ListCustomerGateways(cgwIDs)
+		cgws, err := c.ListCustomerGateways(cgwIDs)
+		logFail("customer gateways", err)
+		data.CustomerGateways = cgws
 	})
 	wg.Wait()
 

@@ -83,6 +83,11 @@ type BucketDetails struct {
 	// CORS rules marshalled to JSON ("" when not configured).
 	RawPolicy string
 	CORSJSON  string
+
+	// LoadError names the settings whose fetch genuinely failed (e.g. a
+	// wrong-region or throttled call) so the detail view can flag a partial load
+	// instead of presenting the defaults as fact. Empty when everything loaded.
+	LoadError string
 }
 
 // ---------------------------------------------------------------------------
@@ -1760,9 +1765,14 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 							m.region = cached
 						}
 					}
-					// Re-initialize client for the correct bucket region
+					// Re-initialize client for the correct bucket region. If that
+					// fails, surface it rather than silently keeping the
+					// wrong-region client (whose calls would then fail/mislead).
 					newClient, err := NewS3Client(m.client.ctx, m.awsCfg, m.region, m.endpointURL)
-					if err == nil {
+					if err != nil {
+						slog.Warn("Could not create S3 client for bucket region", "region", m.region, "error", err.Error())
+						m.statusMsg = fmt.Sprintf("Could not switch to region %s: %v", m.region, err)
+					} else {
 						m.client = newClient
 					}
 					m.state = stateObjectList
@@ -2116,9 +2126,14 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 						}
 					}
 
-					// Re-initialize client for the correct bucket region
+					// Re-initialize client for the correct bucket region. If that
+					// fails, surface it rather than silently keeping the
+					// wrong-region client (whose calls would then fail/mislead).
 					newClient, err := NewS3Client(m.client.ctx, m.awsCfg, m.region, m.endpointURL)
-					if err == nil {
+					if err != nil {
+						slog.Warn("Could not create S3 client for bucket region", "region", m.region, "error", err.Error())
+						m.statusMsg = fmt.Sprintf("Could not switch to region %s: %v", m.region, err)
+					} else {
 						m.client = newClient
 					}
 
@@ -3076,6 +3091,15 @@ func (m *Model) bucketDetailView() string {
 	width := max(60, m.width-8)
 	height := max(20, m.height-10)
 
+	// Flag a partial load so the defaults below aren't mistaken for fact.
+	parts := []string{title, "", tabBar, strings.Repeat("─", min(width-6, 60)), ""}
+	if d := m.selectedBucketDetails; d != nil && d.LoadError != "" {
+		parts = append(parts,
+			ui.ErrorStyle().Render("⚠ Some settings could not be read: "+d.LoadError+" — press r to retry"),
+			"")
+	}
+	parts = append(parts, body)
+
 	return lipgloss.JoinVertical(lipgloss.Left,
 		ui.HeaderStyle().Render("S3 TUI"),
 		ui.FeatherRail(max(12, m.width-4)),
@@ -3089,14 +3113,7 @@ func (m *Model) bucketDetailView() string {
 			BorderForeground(lipgloss.Color(ui.ColorBorder())).
 			Foreground(lipgloss.Color(ui.ColorText())).
 			Padding(1, 2).
-			Render(lipgloss.JoinVertical(lipgloss.Left,
-				title,
-				"",
-				tabBar,
-				strings.Repeat("─", min(width-6, 60)),
-				"",
-				body,
-			)),
+			Render(lipgloss.JoinVertical(lipgloss.Left, parts...)),
 		"",
 		m.renderStatusBar(),
 	)
