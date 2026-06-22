@@ -67,8 +67,8 @@ Accepted targets (full ARN or bare ID):
 
 | Target | Reference types checked |
 |--------|-------------------------|
-| **IAM role** (`arn:…:role/app` or `app`) | Lambda execution roles, EC2 instance profiles, ECS task & execution roles, EKS cluster & node-group roles, IAM role trust policies, S3 bucket replication roles |
-| **KMS key** (`arn:…:key/<uuid>`) | EBS volume / RDS instance / Secrets Manager / SQS queue / Lambda environment / S3 bucket default / EFS file system encryption |
+| **IAM role** (`arn:…:role/app` or `app`) | Lambda execution roles, EC2 instance profiles, ECS task & execution roles, EKS cluster & node-group roles, IAM role trust policies, S3 bucket replication roles, Step Functions execution roles |
+| **KMS key** (`arn:…:key/<uuid>`) | EBS volume / RDS instance / Secrets Manager / SQS queue / Lambda environment / S3 bucket default / EFS file system / SNS topic / Kinesis stream encryption |
 | **ACM certificate** (`arn:…:certificate/<id>`) | ELBv2 (ALB/NLB) listeners |
 | **Security group** (`sg-…` or its ARN) | Elastic network interface attachments, EFS mount target security groups, Lambda VPC security groups, EKS cluster security groups (account-wide) |
 
@@ -91,7 +91,11 @@ Accepted targets (full ARN or bare ID):
 `eks:{ListClusters,DescribeCluster,ListNodegroups,DescribeNodegroup}`,
 `elasticloadbalancing:{DescribeLoadBalancers,DescribeListeners}`,
 `s3:{ListAllMyBuckets,GetBucketNotification,GetReplicationConfiguration,GetBucketLogging,GetEncryptionConfiguration}`,
-`elasticfilesystem:{DescribeFileSystems,DescribeMountTargets,DescribeMountTargetSecurityGroups}`.
+`elasticfilesystem:{DescribeFileSystems,DescribeMountTargets,DescribeMountTargetSecurityGroups}`,
+`sns:{ListSubscriptions,ListTopics,GetTopicAttributes}`, `sqs:GetQueueAttributes`,
+`events:{ListEventBuses,ListRules,ListTargetsByRule}`,
+`states:{ListStateMachines,DescribeStateMachine}`,
+`kinesis:{ListStreams,DescribeStreamSummary,ListStreamConsumers}`.
 Any denial skips that source with a note.
 
 # Related (bidirectional)
@@ -106,7 +110,9 @@ trust principals, **S3 event notifications → Lambda/SNS/SQS**, S3 replication 
 access-logging, **Lambda event-source mappings** (SQS/DynamoDB/Kinesis/MSK),
 Lambda layers / dead-letter / VPC / log group, EC2 subnet/AMI/key-pair/ENI/EIP,
 EBS attachments, ECS container log groups & secrets, EFS mount-target subnets,
-EKS subnets & OIDC provider); coverage grows under the
+EKS subnets & OIDC provider, **SNS subscriptions**, SQS dead-letter redrive,
+**EventBridge rule targets**, **Step Functions** definition references, Kinesis
+stream encryption & consumers); coverage grows under the
 [related-resources epic](https://github.com/ryandam9/aws_explorer/issues/336).
 
 ```bash
