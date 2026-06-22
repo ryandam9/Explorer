@@ -93,6 +93,13 @@ func Collect(ctx context.Context, baseCfg aws.Config, regions []string, maxConcu
 		edges = append(edges, r.edges...)
 		errs = append(errs, r.errs...)
 	}
+
+	// S3 is listed globally but called per-bucket-region, so it runs once here
+	// rather than in the per-region fan-out (§3).
+	s3Edges, s3Errs := collectS3(ctx, baseCfg, regions, maxConcurrency, perCallTimeout)
+	edges = append(edges, s3Edges...)
+	errs = append(errs, s3Errs...)
+
 	return edges, errs
 }
 
@@ -207,6 +214,7 @@ func collectRegion(ctx context.Context, baseCfg aws.Config, region string, profi
 	edges = append(edges, ecsEdges(ctx, cfg, region, rec)...)
 	edges = append(edges, eksEdges(ctx, cfg, region, rec)...)
 	edges = append(edges, elbv2Edges(ctx, cfg, region, rec)...)
+	edges = append(edges, efsEdges(ctx, cfg, region, rec)...)
 	return edges, rec.errs
 }
 
@@ -266,12 +274,7 @@ func ec2Edges(ctx context.Context, cfg aws.Config, region string, profiles map[s
 			rec.record("ec2", err)
 			break
 		}
-		for _, v := range page.Volumes {
-			if key := aws.ToString(v.KmsKeyId); key != "" {
-				from := Reference{Service: "ec2", Type: "volume", Region: region, ID: aws.ToString(v.VolumeId)}
-				edges = append(edges, Edge{From: withVia(from, "volume encryption key"), Target: key})
-			}
-		}
+		edges = append(edges, ebsVolumeEdges(page.Volumes, region)...)
 	}
 
 	np := awsec2.NewDescribeNetworkInterfacesPaginator(client, &awsec2.DescribeNetworkInterfacesInput{})
@@ -288,6 +291,24 @@ func ec2Edges(ctx context.Context, cfg aws.Config, region string, profiles map[s
 				if g := aws.ToString(gid.GroupId); g != "" {
 					edges = append(edges, Edge{From: withVia(from, "attached security group"), Target: g})
 				}
+			}
+		}
+	}
+	return edges
+}
+
+// ebsVolumeEdges maps EBS volumes to their encryption key and the instance each
+// is attached to. Pure over the SDK page so it is unit-testable.
+func ebsVolumeEdges(vols []ec2types.Volume, region string) []Edge {
+	var edges []Edge
+	for _, v := range vols {
+		from := Reference{Service: "ec2", Type: "volume", Region: region, ID: aws.ToString(v.VolumeId)}
+		if key := aws.ToString(v.KmsKeyId); key != "" {
+			edges = append(edges, Edge{From: withVia(from, "volume encryption key"), Target: key})
+		}
+		for _, att := range v.Attachments {
+			if inst := aws.ToString(att.InstanceId); inst != "" {
+				edges = append(edges, Edge{From: withVia(from, "attached to instance"), Target: inst})
 			}
 		}
 	}

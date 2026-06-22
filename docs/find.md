@@ -67,10 +67,10 @@ Accepted targets (full ARN or bare ID):
 
 | Target | Reference types checked |
 |--------|-------------------------|
-| **IAM role** (`arn:…:role/app` or `app`) | Lambda execution roles, EC2 instance profiles, ECS task & execution roles, EKS cluster & node-group roles, IAM role trust policies |
-| **KMS key** (`arn:…:key/<uuid>`) | EBS volume / RDS instance / Secrets Manager / SQS queue / Lambda environment encryption |
+| **IAM role** (`arn:…:role/app` or `app`) | Lambda execution roles, EC2 instance profiles, ECS task & execution roles, EKS cluster & node-group roles, IAM role trust policies, S3 bucket replication roles |
+| **KMS key** (`arn:…:key/<uuid>`) | EBS volume / RDS instance / Secrets Manager / SQS queue / Lambda environment / S3 bucket default / EFS file system encryption |
 | **ACM certificate** (`arn:…:certificate/<id>`) | ELBv2 (ALB/NLB) listeners |
-| **Security group** (`sg-…` or its ARN) | Elastic network interface attachments (account-wide) |
+| **Security group** (`sg-…` or its ARN) | Elastic network interface attachments, EFS mount target security groups (account-wide) |
 
 > **Scoped "not referenced".** The report always prints the reference types it
 > checked. Absence of evidence is therefore explicitly bounded — it means none
@@ -88,8 +88,10 @@ Accepted targets (full ARN or bare ID):
 `rds:DescribeDBInstances`, `secretsmanager:ListSecrets`,
 `sqs:{ListQueues,GetQueueAttributes}`, `ecs:{ListTaskDefinitions,DescribeTaskDefinition}`,
 `eks:{ListClusters,DescribeCluster,ListNodegroups,DescribeNodegroup}`,
-`elasticloadbalancing:{DescribeLoadBalancers,DescribeListeners}`. Any denial
-skips that source with a note.
+`elasticloadbalancing:{DescribeLoadBalancers,DescribeListeners}`,
+`s3:{ListAllMyBuckets,GetBucketNotification,GetReplicationConfiguration,GetBucketLogging,GetEncryptionConfiguration}`,
+`elasticfilesystem:{DescribeFileSystems,DescribeMountTargets,DescribeMountTargetSecurityGroups}`.
+Any denial skips that source with a note.
 
 # Related (bidirectional)
 
@@ -97,8 +99,10 @@ skips that source with a note.
 what a resource *uses* (forward — its execution role, KMS key, security groups,
 …) **and** what *uses* it (reverse — the `whereused` answer). It reuses the same
 account scan, so it sees the same relationship types `whereused` does (today:
-Lambda/EC2/ECS/EKS roles, EBS/RDS/Secrets/SQS/Lambda KMS keys, ENI security
-groups, ELBv2 listener certs, IAM trust principals); coverage grows under the
+Lambda/EC2/ECS/EKS roles, EBS/RDS/Secrets/SQS/Lambda/S3/EFS KMS keys, ENI &
+EFS-mount-target security groups, ELBv2 listener certs, IAM trust principals,
+**S3 event notifications → Lambda/SNS/SQS**, S3 replication & access-logging,
+EBS volume attachments, EFS mount-target subnets); coverage grows under the
 [related-resources epic](https://github.com/ryandam9/aws_explorer/issues/336).
 
 ```bash

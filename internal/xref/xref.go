@@ -181,6 +181,7 @@ func CheckedTypes(kind Kind) []string {
 			"ECS task and execution roles",
 			"EKS cluster and node-group roles",
 			"IAM role trust policies",
+			"S3 bucket replication roles",
 		}
 	case KindKMSKey:
 		return []string{
@@ -189,6 +190,8 @@ func CheckedTypes(kind Kind) []string {
 			"Secrets Manager secrets",
 			"SQS queue encryption",
 			"Lambda environment encryption",
+			"S3 bucket default encryption",
+			"EFS file system encryption",
 		}
 	case KindACMCert:
 		return []string{
@@ -197,6 +200,7 @@ func CheckedTypes(kind Kind) []string {
 	case KindSecurityGroup:
 		return []string{
 			"Elastic network interface attachments",
+			"EFS mount target security groups",
 		}
 	default:
 		return nil
