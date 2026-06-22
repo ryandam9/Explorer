@@ -132,7 +132,7 @@ subscriptions** / encryption); coverage grows under the
 [related-resources epic](https://github.com/ryandam9/aws_explorer/issues/336).
 
 ```bash
-./bin/aws_explorer related <arn-or-id> [--depth N] [--direction both|uses|usedby] [--all-regions] [-o table|json|ndjson|csv]
+./bin/aws_explorer related <arn-or-id> [--tui] [--depth N] [--direction both|uses|usedby] [--all-regions] [-o table|json|ndjson|csv]
 ```
 
 ```
@@ -165,5 +165,24 @@ Only relationships this tool extracts are shown; un-collected link types won't a
 > The caveat is printed on every run, and the reverse direction lists the
 > reference types checked for recognized kinds. Best-effort: a denied/failed API
 > call narrows what was checked (reported on stderr) and never aborts the run.
+
+### Interactive explorer (`--tui`)
+
+`aws_explorer related <arn-or-id> --tui` opens an interactive explorer: two
+stacked panels — **Uses (depends on) →** on top, **Used by ←** below — for the
+centered resource. Press `Enter` on any linked resource to **re-center** on it
+and walk the relationship graph hop by hop; a breadcrumb at the top shows the
+path and `Esc` steps back. Edges are collected once and navigated in memory, so
+moving around never hits AWS.
+
+| Key | Action |
+|-----|--------|
+| `↑`/`↓` · `g`/`G` | Move within the focused panel |
+| `Tab` · `←`/`→` | Switch panel (Uses / Used by) |
+| `Enter` | Re-center on the selected linked resource |
+| `Esc` / `⌫` | Step back to the previous resource |
+| `<` / `>` | Scroll a wide table sideways |
+| `y` · `o` | Copy ARN · open in the AWS console |
+| `r` · `i` · `q` | Re-scan · help · quit |
 
 **IAM permissions.** Same as `whereused` above (the two share one account scan).

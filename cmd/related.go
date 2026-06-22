@@ -7,10 +7,13 @@ import (
 	"strings"
 	"time"
 
+	tea "github.com/charmbracelet/bubbletea"
 	"github.com/spf13/cobra"
 
 	"github.com/ryandam9/aws_explorer/internal/engine"
 	"github.com/ryandam9/aws_explorer/internal/output"
+	"github.com/ryandam9/aws_explorer/internal/relatedtui"
+	"github.com/ryandam9/aws_explorer/internal/ui"
 	"github.com/ryandam9/aws_explorer/internal/xref"
 )
 
@@ -19,6 +22,7 @@ const relatedMaxDepth = 5
 var (
 	relatedDepth     int
 	relatedDirection string
+	relatedTUI       bool
 )
 
 var relatedCmd = &cobra.Command{
@@ -76,9 +80,22 @@ This generalizes 'whereused' (which answers only the "used by" direction).`,
 		SilenceScanLogs()
 
 		regions := eng.EffectiveRegions()
-		fmt.Fprintf(os.Stderr, "Scanning %d region(s) for resources related to %s…\n", len(regions), args[0])
-
 		timeout := time.Duration(AppConfig.App.TimeoutSeconds) * time.Second
+
+		if relatedTUI {
+			ui.InitFromConfig(AppConfig.UI)
+			if idx, ok := ui.LookupTheme(resolveTheme(cmd, "")); ok {
+				ui.SetActiveTheme(idx)
+			}
+			model := relatedtui.NewModel(ctx, eng.AWSConfig, regions, AppConfig.App.MaxConcurrency, timeout, allRegions || AppConfig.AWS.AllRegions, args[0])
+			p := tea.NewProgram(ui.WithWindowTitle(model), tea.WithAltScreen(), tea.WithContext(ctx))
+			if _, err := p.Run(); err != nil {
+				return fmt.Errorf("running related explorer: %w", err)
+			}
+			return nil
+		}
+
+		fmt.Fprintf(os.Stderr, "Scanning %d region(s) for resources related to %s…\n", len(regions), args[0])
 		edges, errs := xref.Collect(ctx, eng.AWSConfig, regions, AppConfig.App.MaxConcurrency, timeout)
 		output.PrintErrors(os.Stderr, errs)
 
@@ -107,5 +124,6 @@ func parseDirection(d string) (showUses, showUsedBy bool, err error) {
 func init() {
 	relatedCmd.Flags().IntVar(&relatedDepth, "depth", 1, fmt.Sprintf("how many hops to follow (1-%d)", relatedMaxDepth))
 	relatedCmd.Flags().StringVar(&relatedDirection, "direction", "both", "which links to show: both, uses, usedby")
+	relatedCmd.Flags().BoolVar(&relatedTUI, "tui", false, "open the interactive related-resources explorer")
 	rootCmd.AddCommand(relatedCmd)
 }
