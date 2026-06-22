@@ -102,6 +102,7 @@ Each command and TUI has a focused guide under [`docs/`](docs/):
 | [IAM tools](docs/iam.md) | `iam decode`, `iam can` |
 | [Trail](docs/trail.md) | CloudTrail event feed and Lake queries |
 | [Find / whereused](docs/find.md) | Fuzzy resource search and blast-radius lookups |
+| [Related resources](docs/related.md) | Bidirectional, multi-hop relationship discovery — design, coverage & limits |
 | [VPC explorer](docs/vpc.md) | VPC TUI and the debugging toolkit |
 | [Tags explorer](docs/tags.md) | Find resources by tag (browse keys/values or filter) |
 | [S3](docs/s3.md) · [CloudWatch Logs](docs/cloudwatch.md) | Storage and log browsers |
