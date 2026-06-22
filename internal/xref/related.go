@@ -276,6 +276,9 @@ func SortLinks(links []Link) {
 
 // --- ARN helpers specific to the forward direction ----------------------------
 
+// isARN reports whether s looks like an AWS ARN.
+func isARN(s string) bool { return strings.HasPrefix(s, "arn:") }
+
 // arnRegion returns the region field (index 3) of an ARN, "" if malformed.
 func arnRegion(arn string) string {
 	parts := strings.SplitN(arn, ":", 6)
