@@ -201,6 +201,8 @@ func CheckedTypes(kind Kind) []string {
 		return []string{
 			"Elastic network interface attachments",
 			"EFS mount target security groups",
+			"Lambda VPC security groups",
+			"EKS cluster security groups",
 		}
 	default:
 		return nil

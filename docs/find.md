@@ -70,7 +70,7 @@ Accepted targets (full ARN or bare ID):
 | **IAM role** (`arn:…:role/app` or `app`) | Lambda execution roles, EC2 instance profiles, ECS task & execution roles, EKS cluster & node-group roles, IAM role trust policies, S3 bucket replication roles |
 | **KMS key** (`arn:…:key/<uuid>`) | EBS volume / RDS instance / Secrets Manager / SQS queue / Lambda environment / S3 bucket default / EFS file system encryption |
 | **ACM certificate** (`arn:…:certificate/<id>`) | ELBv2 (ALB/NLB) listeners |
-| **Security group** (`sg-…` or its ARN) | Elastic network interface attachments, EFS mount target security groups (account-wide) |
+| **Security group** (`sg-…` or its ARN) | Elastic network interface attachments, EFS mount target security groups, Lambda VPC security groups, EKS cluster security groups (account-wide) |
 
 > **Scoped "not referenced".** The report always prints the reference types it
 > checked. Absence of evidence is therefore explicitly bounded — it means none
@@ -84,7 +84,8 @@ Accepted targets (full ARN or bare ID):
 | `--output` / `-o` | `table` | `table`, `json`, `ndjson`, `csv` |
 
 **IAM permissions.** Read-only: `iam:{ListRoles,ListInstanceProfiles}`,
-`lambda:ListFunctions`, `ec2:{DescribeInstances,DescribeVolumes,DescribeNetworkInterfaces}`,
+`lambda:{ListFunctions,ListEventSourceMappings}`,
+`ec2:{DescribeInstances,DescribeVolumes,DescribeNetworkInterfaces,DescribeAddresses}`,
 `rds:DescribeDBInstances`, `secretsmanager:ListSecrets`,
 `sqs:{ListQueues,GetQueueAttributes}`, `ecs:{ListTaskDefinitions,DescribeTaskDefinition}`,
 `eks:{ListClusters,DescribeCluster,ListNodegroups,DescribeNodegroup}`,
@@ -99,10 +100,13 @@ Any denial skips that source with a note.
 what a resource *uses* (forward — its execution role, KMS key, security groups,
 …) **and** what *uses* it (reverse — the `whereused` answer). It reuses the same
 account scan, so it sees the same relationship types `whereused` does (today:
-Lambda/EC2/ECS/EKS roles, EBS/RDS/Secrets/SQS/Lambda/S3/EFS KMS keys, ENI &
-EFS-mount-target security groups, ELBv2 listener certs, IAM trust principals,
-**S3 event notifications → Lambda/SNS/SQS**, S3 replication & access-logging,
-EBS volume attachments, EFS mount-target subnets); coverage grows under the
+Lambda/EC2/ECS/EKS roles, EBS/RDS/Secrets/SQS/Lambda/S3/EFS KMS keys, ENI /
+EFS-mount-target / Lambda-VPC / EKS security groups, ELBv2 listener certs, IAM
+trust principals, **S3 event notifications → Lambda/SNS/SQS**, S3 replication &
+access-logging, **Lambda event-source mappings** (SQS/DynamoDB/Kinesis/MSK),
+Lambda layers / dead-letter / VPC / log group, EC2 subnet/AMI/key-pair/ENI/EIP,
+EBS attachments, ECS container log groups & secrets, EFS mount-target subnets,
+EKS subnets & OIDC provider); coverage grows under the
 [related-resources epic](https://github.com/ryandam9/aws_explorer/issues/336).
 
 ```bash

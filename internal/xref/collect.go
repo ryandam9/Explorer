@@ -229,16 +229,10 @@ func lambdaEdges(ctx context.Context, cfg aws.Config, region string, rec *record
 			break
 		}
 		for _, fn := range page.Functions {
-			from := Reference{Service: "lambda", Type: "function", Region: region,
-				ID: aws.ToString(fn.FunctionArn), Name: aws.ToString(fn.FunctionName)}
-			if role := aws.ToString(fn.Role); role != "" {
-				edges = append(edges, Edge{From: withVia(from, "execution role"), Target: role})
-			}
-			if key := aws.ToString(fn.KMSKeyArn); key != "" {
-				edges = append(edges, Edge{From: withVia(from, "environment encryption key"), Target: key})
-			}
+			edges = append(edges, lambdaFunctionEdges(fn, region)...)
 		}
 	}
+	edges = append(edges, listEventSourceEdges(ctx, client, region, rec)...)
 	return edges
 }
 
@@ -255,17 +249,12 @@ func ec2Edges(ctx context.Context, cfg aws.Config, region string, profiles map[s
 		}
 		for _, res := range page.Reservations {
 			for _, inst := range res.Instances {
-				from := Reference{Service: "ec2", Type: "instance", Region: region,
-					ID: aws.ToString(inst.InstanceId), Name: nameTag(inst.Tags)}
-				if inst.IamInstanceProfile != nil {
-					profileArn := aws.ToString(inst.IamInstanceProfile.Arn)
-					for _, role := range profiles[profileArn] {
-						edges = append(edges, Edge{From: withVia(from, "instance profile "+shortForm(profileArn)), Target: role})
-					}
-				}
+				edges = append(edges, ec2InstanceEdges(inst, region, profiles)...)
 			}
 		}
 	}
+
+	edges = append(edges, collectEIPEdges(ctx, client, region, rec)...)
 
 	vp := awsec2.NewDescribeVolumesPaginator(client, &awsec2.DescribeVolumesInput{})
 	for vp.HasMorePages() {
@@ -414,14 +403,7 @@ func ecsEdges(ctx context.Context, cfg aws.Config, region string, rec *recorder)
 			if td == nil {
 				continue
 			}
-			from := Reference{Service: "ecs", Type: "task-definition", Region: region,
-				ID: aws.ToString(td.TaskDefinitionArn), Name: aws.ToString(td.Family)}
-			if role := aws.ToString(td.TaskRoleArn); role != "" {
-				edges = append(edges, Edge{From: withVia(from, "ECS task role"), Target: role})
-			}
-			if role := aws.ToString(td.ExecutionRoleArn); role != "" {
-				edges = append(edges, Edge{From: withVia(from, "ECS execution role"), Target: role})
-			}
+			edges = append(edges, ecsTaskDefEdges(*td, region)...)
 		}
 	}
 	return edges
@@ -444,11 +426,7 @@ func eksEdges(ctx context.Context, cfg aws.Config, region string, rec *recorder)
 				continue
 			}
 			if cl.Cluster != nil {
-				from := Reference{Service: "eks", Type: "cluster", Region: region,
-					ID: aws.ToString(cl.Cluster.Arn), Name: name}
-				if role := aws.ToString(cl.Cluster.RoleArn); role != "" {
-					edges = append(edges, Edge{From: withVia(from, "EKS cluster role"), Target: role})
-				}
+				edges = append(edges, eksClusterEdges(*cl.Cluster, region)...)
 			}
 			ngp := awseks.NewListNodegroupsPaginator(client, &awseks.ListNodegroupsInput{ClusterName: aws.String(name)})
 			for ngp.HasMorePages() {
