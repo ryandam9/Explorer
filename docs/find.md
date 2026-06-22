@@ -69,8 +69,8 @@ Accepted targets (full ARN or bare ID):
 |--------|-------------------------|
 | **IAM role** (`arn:…:role/app` or `app`) | Lambda execution roles, EC2 instance profiles, ECS task & execution roles, EKS cluster & node-group roles, IAM role trust policies, S3 bucket replication roles, Step Functions execution roles |
 | **KMS key** (`arn:…:key/<uuid>`) | EBS volume / RDS instance / Secrets Manager / SQS queue / Lambda environment / S3 bucket default / EFS file system / SNS topic / Kinesis stream encryption |
-| **ACM certificate** (`arn:…:certificate/<id>`) | ELBv2 (ALB/NLB) listeners |
-| **Security group** (`sg-…` or its ARN) | Elastic network interface attachments, EFS mount target security groups, Lambda VPC security groups, EKS cluster security groups (account-wide) |
+| **ACM certificate** (`arn:…:certificate/<id>`) | ELBv2 (ALB/NLB) listeners, CloudFront distribution viewer certificates |
+| **Security group** (`sg-…` or its ARN) | Elastic network interface attachments, EFS mount target / Lambda VPC / EKS cluster / load balancer / API Gateway VPC link / VPC endpoint security groups (account-wide) |
 
 > **Scoped "not referenced".** The report always prints the reference types it
 > checked. Absence of evidence is therefore explicitly bounded — it means none
@@ -95,7 +95,10 @@ Accepted targets (full ARN or bare ID):
 `sns:{ListSubscriptions,ListTopics,GetTopicAttributes}`, `sqs:GetQueueAttributes`,
 `events:{ListEventBuses,ListRules,ListTargetsByRule}`,
 `states:{ListStateMachines,DescribeStateMachine}`,
-`kinesis:{ListStreams,DescribeStreamSummary,ListStreamConsumers}`.
+`kinesis:{ListStreams,DescribeStreamSummary,ListStreamConsumers}`,
+`elasticloadbalancing:{DescribeTargetGroups,DescribeTargetHealth}`,
+`apigateway:GET`, `cloudfront:ListDistributions`,
+`route53:{ListHostedZones,ListResourceRecordSets}`, `ec2:DescribeVpcEndpoints`.
 Any denial skips that source with a note.
 
 # Related (bidirectional)
@@ -112,7 +115,10 @@ Lambda layers / dead-letter / VPC / log group, EC2 subnet/AMI/key-pair/ENI/EIP,
 EBS attachments, ECS container log groups & secrets, EFS mount-target subnets,
 EKS subnets & OIDC provider, **SNS subscriptions**, SQS dead-letter redrive,
 **EventBridge rule targets**, **Step Functions** definition references, Kinesis
-stream encryption & consumers); coverage grows under the
+stream encryption & consumers, ELBv2 load-balancer SGs/subnets & **target
+groups → targets** (incl. Lambda), **API Gateway** Lambda integrations /
+authorizers / VPC links, **CloudFront** origins / cert / WAF / OAC, **Route 53**
+alias targets, VPC endpoints); coverage grows under the
 [related-resources epic](https://github.com/ryandam9/aws_explorer/issues/336).
 
 ```bash

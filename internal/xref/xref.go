@@ -199,6 +199,7 @@ func CheckedTypes(kind Kind) []string {
 	case KindACMCert:
 		return []string{
 			"ELBv2 (ALB/NLB) listeners",
+			"CloudFront distribution viewer certificates",
 		}
 	case KindSecurityGroup:
 		return []string{
@@ -206,6 +207,9 @@ func CheckedTypes(kind Kind) []string {
 			"EFS mount target security groups",
 			"Lambda VPC security groups",
 			"EKS cluster security groups",
+			"Load balancer security groups",
+			"API Gateway VPC link security groups",
+			"VPC endpoint security groups",
 		}
 	default:
 		return nil
