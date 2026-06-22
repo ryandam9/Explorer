@@ -204,6 +204,7 @@ func CheckedTypes(kind Kind) []string {
 			"DynamoDB table encryption",
 			"ElastiCache encryption",
 			"Redshift cluster encryption",
+			"CloudWatch log group encryption",
 		}
 	case KindACMCert:
 		return []string{
