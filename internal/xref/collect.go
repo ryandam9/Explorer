@@ -227,6 +227,7 @@ func collectRegion(ctx context.Context, baseCfg aws.Config, region string, profi
 	edges = append(edges, dynamodbEdges(ctx, cfg, region, rec)...)
 	edges = append(edges, elastiCacheEdges(ctx, cfg, region, rec)...)
 	edges = append(edges, redshiftEdges(ctx, cfg, region, rec)...)
+	edges = append(edges, observabilityEdges(ctx, cfg, region, rec)...)
 	return edges, rec.errs
 }
 

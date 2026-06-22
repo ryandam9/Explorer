@@ -68,7 +68,7 @@ Accepted targets (full ARN or bare ID):
 | Target | Reference types checked |
 |--------|-------------------------|
 | **IAM role** (`arn:…:role/app` or `app`) | Lambda execution roles, EC2 instance profiles, ECS task & execution roles, EKS cluster & node-group roles, IAM role trust policies, S3 bucket replication roles, Step Functions execution roles, KMS key policy principals & grants |
-| **KMS key** (`arn:…:key/<uuid>`) | EBS volume / RDS instance / DynamoDB / ElastiCache / Redshift / Secrets Manager / SQS queue / Lambda environment / S3 bucket default / EFS file system / SNS topic / Kinesis stream encryption, KMS aliases |
+| **KMS key** (`arn:…:key/<uuid>`) | EBS volume / RDS instance / DynamoDB / ElastiCache / Redshift / Secrets Manager / SQS queue / Lambda environment / S3 bucket default / EFS file system / SNS topic / Kinesis stream / CloudWatch log group encryption, KMS aliases |
 | **ACM certificate** (`arn:…:certificate/<id>`) | ELBv2 (ALB/NLB) listeners, CloudFront distribution viewer certificates |
 | **Security group** (`sg-…` or its ARN) | Elastic network interface attachments, EFS mount target / Lambda VPC / EKS cluster / load balancer / API Gateway VPC link / VPC endpoint / RDS / ElastiCache / Redshift security groups (account-wide) |
 
@@ -102,7 +102,8 @@ Accepted targets (full ARN or bare ID):
 `route53:{ListHostedZones,ListResourceRecordSets}`, `ec2:DescribeVpcEndpoints`,
 `rds:{DescribeDBInstances,DescribeDBClusters}`, `dynamodb:{ListTables,DescribeTable}`,
 `elasticache:{DescribeCacheClusters,DescribeReplicationGroups}`,
-`redshift:DescribeClusters`.
+`redshift:DescribeClusters`, `cloudwatch:DescribeAlarms`,
+`logs:{DescribeLogGroups,DescribeSubscriptionFilters}`.
 Any denial skips that source with a note.
 
 # Related (bidirectional)
@@ -126,7 +127,8 @@ alias targets, VPC endpoints, **IAM role → attached/inline policies**, KMS key
 policy principals / grants / aliases, Secrets Manager rotation Lambdas,
 **RDS/Aurora** subnet/parameter/option groups & master secret & monitoring role
 & cluster↔members, DynamoDB encryption & streams, ElastiCache subnet groups/SGs,
-Redshift cluster IAM roles/SGs); coverage grows under the
+Redshift cluster IAM roles/SGs, **CloudWatch alarm actions** & **log-group
+subscriptions** / encryption); coverage grows under the
 [related-resources epic](https://github.com/ryandam9/aws_explorer/issues/336).
 
 ```bash
