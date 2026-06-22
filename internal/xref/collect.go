@@ -215,6 +215,10 @@ func collectRegion(ctx context.Context, baseCfg aws.Config, region string, profi
 	edges = append(edges, eksEdges(ctx, cfg, region, rec)...)
 	edges = append(edges, elbv2Edges(ctx, cfg, region, rec)...)
 	edges = append(edges, efsEdges(ctx, cfg, region, rec)...)
+	edges = append(edges, snsEdges(ctx, cfg, region, rec)...)
+	edges = append(edges, eventBridgeEdges(ctx, cfg, region, rec)...)
+	edges = append(edges, sfnEdges(ctx, cfg, region, rec)...)
+	edges = append(edges, kinesisEdges(ctx, cfg, region, rec)...)
 	return edges, rec.errs
 }
 
@@ -363,21 +367,26 @@ func sqsEdges(ctx context.Context, cfg aws.Config, region string, rec *recorder)
 		}
 		for _, qurl := range page.QueueUrls {
 			attrs, err := client.GetQueueAttributes(ctx, &awssqs.GetQueueAttributesInput{
-				QueueUrl:       aws.String(qurl),
-				AttributeNames: []sqstypes.QueueAttributeName{sqstypes.QueueAttributeNameKmsMasterKeyId, sqstypes.QueueAttributeNameQueueArn},
+				QueueUrl: aws.String(qurl),
+				AttributeNames: []sqstypes.QueueAttributeName{
+					sqstypes.QueueAttributeNameKmsMasterKeyId,
+					sqstypes.QueueAttributeNameQueueArn,
+					sqstypes.QueueAttributeNameRedrivePolicy,
+				},
 			})
 			if err != nil {
 				rec.record("sqs", err)
 				continue
 			}
-			key := attrs.Attributes[string(sqstypes.QueueAttributeNameKmsMasterKeyId)]
-			if key == "" {
-				continue
-			}
 			arn := attrs.Attributes[string(sqstypes.QueueAttributeNameQueueArn)]
 			from := Reference{Service: "sqs", Type: "queue", Region: region,
 				ID: orDefault(arn, qurl), Name: queueName(qurl)}
-			edges = append(edges, Edge{From: withVia(from, "queue encryption key"), Target: key})
+			if key := attrs.Attributes[string(sqstypes.QueueAttributeNameKmsMasterKeyId)]; key != "" {
+				edges = append(edges, Edge{From: withVia(from, "queue encryption key"), Target: key})
+			}
+			if dlq := sqsRedriveTarget(attrs.Attributes[string(sqstypes.QueueAttributeNameRedrivePolicy)]); dlq != "" {
+				edges = append(edges, Edge{From: withVia(from, "dead-letter queue"), Target: dlq})
+			}
 		}
 	}
 	return edges
