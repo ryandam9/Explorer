@@ -186,3 +186,7 @@ moving around never hits AWS.
 | `r` · `i` · `q` | Re-scan · help · quit |
 
 **IAM permissions.** Same as `whereused` above (the two share one account scan).
+
+For the full design — how the edge graph is built, the complete coverage
+matrix, the honesty contract, and limitations — see
+[The `related` feature](related.md).
