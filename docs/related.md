@@ -275,6 +275,15 @@ tracks the path; `Esc` steps back. `Tab` / `←` / `→` switch panels; `y` copi
 the ARN, `o` opens the console; `r` re-scans; `i` opens scrollable help; `q`
 quits. Edges are collected once, so moving around never hits AWS.
 
+### Jump in from the summary TUI
+
+You don't have to start from the command line: in the summary TUI, select a
+resource (open its detail panel — `Ctrl+P` fuzzy-find gets you there fast) and
+press **`R`** to open the related explorer centred on it. The summary TUI
+suspends, the explorer runs in the same terminal, and quitting it returns you
+exactly where you were. (Each jump re-runs the account scan, so there's a brief
+"scanning…" spinner.)
+
 ---
 
 ## 6. Limitations & non-goals

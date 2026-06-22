@@ -848,6 +848,11 @@ func (m tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, tea.Batch(cmds...)
 
 		case "R":
+			// On the detail panel, jump to the related-resources explorer for
+			// this resource (#356); on the table, reverse the active sort.
+			if m.focus == focusDetail && m.detail != nil {
+				return m, m.jumpToRelatedCmd(*m.detail)
+			}
 			if m.focus == focusTable && m.sortCol > 0 {
 				m.sortAsc = !m.sortAsc
 				m.invalidateRows()
@@ -1277,6 +1282,14 @@ func (m tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// a clean exit just lands the user back where they were.
 		if msg.err != nil {
 			m.setToast("Could not open CloudWatch logs: " + msg.err.Error())
+			cmds = append(cmds, toastCmd(4*time.Second))
+		}
+		return m, tea.Batch(cmds...)
+
+	case relatedJumpDoneMsg:
+		// Returned from the suspended related-resources explorer.
+		if msg.err != nil {
+			m.setToast("Could not open related explorer: " + msg.err.Error())
 			cmds = append(cmds, toastCmd(4*time.Second))
 		}
 		return m, tea.Batch(cmds...)
@@ -2271,6 +2284,7 @@ func (m tuiModel) helpBody() string {
 		"  L                  Open the CloudWatch Logs explorer on this resource's log group (Lambda/RDS/EKS)",
 		"  g                  Toggle CloudWatch key metric sparkline (1hr)",
 		"  x                  Toggle cross-resource relationship xrefs",
+		"  R                  Open the related-resources explorer centered on this resource",
 		"  o                  Open in AWS Console (copies URL; opens browser when local)",
 		"  k                  Copy AWS CLI reproduction command",
 		"",
@@ -2847,6 +2861,7 @@ func (m tuiModel) statusHints() []ui.KeyHint {
 			ui.H("y", "copy"),
 			ui.H("t/l/g/x", "debug info"),
 			ui.H("L", "logs explorer"),
+			ui.H("R", "related"),
 			ui.H("o/k", "copy console/cli"),
 			ui.H("Tab", "panel"),
 			ui.H("q", "quit"),
@@ -3673,6 +3688,47 @@ func (m tuiModel) jumpToLogsCmd(region, group string) tea.Cmd {
 	}
 	return tea.ExecProcess(exec.Command(self, args...), func(err error) tea.Msg {
 		return cwJumpDoneMsg{err: err}
+	})
+}
+
+// relatedJumpDoneMsg is delivered after the suspended related-resources explorer
+// exits, carrying any launch error.
+type relatedJumpDoneMsg struct{ err error }
+
+// relatedTarget picks the identifier to look the resource up by: its ARN when
+// known, else its short ID.
+func relatedTarget(res model.Resource) string {
+	if res.ARN != "" {
+		return res.ARN
+	}
+	return res.ID
+}
+
+// jumpToRelatedCmd suspends the summary TUI and runs the related-resources
+// explorer (`related <id> --tui`) as a child of this same binary, centered on
+// res. tea.ExecProcess hands over the terminal and restores it on exit;
+// credentials/scope follow from the same --profile/--config/--region flags.
+func (m tuiModel) jumpToRelatedCmd(res model.Resource) tea.Cmd {
+	target := relatedTarget(res)
+	if target == "" {
+		return func() tea.Msg { return relatedJumpDoneMsg{err: fmt.Errorf("resource has no ARN or ID to look up")} }
+	}
+	self, err := os.Executable()
+	if err != nil {
+		return func() tea.Msg { return relatedJumpDoneMsg{err: err} }
+	}
+	args := []string{"related", target, "--tui"}
+	if res.Region != "" && res.Region != "global" {
+		args = append(args, "--region", res.Region)
+	}
+	if m.cfg != nil && m.cfg.AWS.Profile != "" {
+		args = append(args, "--profile", m.cfg.AWS.Profile)
+	}
+	if cp := ui.ConfigArgPath(m.configPath); cp != "" {
+		args = append(args, "--config", cp)
+	}
+	return tea.ExecProcess(exec.Command(self, args...), func(err error) tea.Msg {
+		return relatedJumpDoneMsg{err: err}
 	})
 }
 
