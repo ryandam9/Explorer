@@ -68,9 +68,9 @@ Accepted targets (full ARN or bare ID):
 | Target | Reference types checked |
 |--------|-------------------------|
 | **IAM role** (`arn:…:role/app` or `app`) | Lambda execution roles, EC2 instance profiles, ECS task & execution roles, EKS cluster & node-group roles, IAM role trust policies, S3 bucket replication roles, Step Functions execution roles, KMS key policy principals & grants |
-| **KMS key** (`arn:…:key/<uuid>`) | EBS volume / RDS instance / Secrets Manager / SQS queue / Lambda environment / S3 bucket default / EFS file system / SNS topic / Kinesis stream encryption, KMS aliases |
+| **KMS key** (`arn:…:key/<uuid>`) | EBS volume / RDS instance / DynamoDB / ElastiCache / Redshift / Secrets Manager / SQS queue / Lambda environment / S3 bucket default / EFS file system / SNS topic / Kinesis stream encryption, KMS aliases |
 | **ACM certificate** (`arn:…:certificate/<id>`) | ELBv2 (ALB/NLB) listeners, CloudFront distribution viewer certificates |
-| **Security group** (`sg-…` or its ARN) | Elastic network interface attachments, EFS mount target / Lambda VPC / EKS cluster / load balancer / API Gateway VPC link / VPC endpoint security groups (account-wide) |
+| **Security group** (`sg-…` or its ARN) | Elastic network interface attachments, EFS mount target / Lambda VPC / EKS cluster / load balancer / API Gateway VPC link / VPC endpoint / RDS / ElastiCache / Redshift security groups (account-wide) |
 
 > **Scoped "not referenced".** The report always prints the reference types it
 > checked. Absence of evidence is therefore explicitly bounded — it means none
@@ -99,7 +99,10 @@ Accepted targets (full ARN or bare ID):
 `kinesis:{ListStreams,DescribeStreamSummary,ListStreamConsumers}`,
 `elasticloadbalancing:{DescribeTargetGroups,DescribeTargetHealth}`,
 `apigateway:GET`, `cloudfront:ListDistributions`,
-`route53:{ListHostedZones,ListResourceRecordSets}`, `ec2:DescribeVpcEndpoints`.
+`route53:{ListHostedZones,ListResourceRecordSets}`, `ec2:DescribeVpcEndpoints`,
+`rds:{DescribeDBInstances,DescribeDBClusters}`, `dynamodb:{ListTables,DescribeTable}`,
+`elasticache:{DescribeCacheClusters,DescribeReplicationGroups}`,
+`redshift:DescribeClusters`.
 Any denial skips that source with a note.
 
 # Related (bidirectional)
@@ -120,8 +123,10 @@ stream encryption & consumers, ELBv2 load-balancer SGs/subnets & **target
 groups → targets** (incl. Lambda), **API Gateway** Lambda integrations /
 authorizers / VPC links, **CloudFront** origins / cert / WAF / OAC, **Route 53**
 alias targets, VPC endpoints, **IAM role → attached/inline policies**, KMS key
-policy principals / grants / aliases, Secrets Manager rotation Lambdas); coverage
-grows under the
+policy principals / grants / aliases, Secrets Manager rotation Lambdas,
+**RDS/Aurora** subnet/parameter/option groups & master secret & monitoring role
+& cluster↔members, DynamoDB encryption & streams, ElastiCache subnet groups/SGs,
+Redshift cluster IAM roles/SGs); coverage grows under the
 [related-resources epic](https://github.com/ryandam9/aws_explorer/issues/336).
 
 ```bash

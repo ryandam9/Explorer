@@ -15,7 +15,6 @@ import (
 	awselbv2 "github.com/aws/aws-sdk-go-v2/service/elasticloadbalancingv2"
 	awsiam "github.com/aws/aws-sdk-go-v2/service/iam"
 	awslambda "github.com/aws/aws-sdk-go-v2/service/lambda"
-	awsrds "github.com/aws/aws-sdk-go-v2/service/rds"
 	awssecrets "github.com/aws/aws-sdk-go-v2/service/secretsmanager"
 	awssqs "github.com/aws/aws-sdk-go-v2/service/sqs"
 	sqstypes "github.com/aws/aws-sdk-go-v2/service/sqs/types"
@@ -225,6 +224,9 @@ func collectRegion(ctx context.Context, baseCfg aws.Config, region string, profi
 	edges = append(edges, apiGatewayEdges(ctx, cfg, region, rec)...)
 	edges = append(edges, vpcEndpointsEdges(ctx, cfg, region, rec)...)
 	edges = append(edges, kmsEdges(ctx, cfg, region, rec)...)
+	edges = append(edges, dynamodbEdges(ctx, cfg, region, rec)...)
+	edges = append(edges, elastiCacheEdges(ctx, cfg, region, rec)...)
+	edges = append(edges, redshiftEdges(ctx, cfg, region, rec)...)
 	return edges, rec.errs
 }
 
@@ -308,32 +310,6 @@ func ebsVolumeEdges(vols []ec2types.Volume, region string) []Edge {
 		for _, att := range v.Attachments {
 			if inst := aws.ToString(att.InstanceId); inst != "" {
 				edges = append(edges, Edge{From: withVia(from, "attached to instance"), Target: inst})
-			}
-		}
-	}
-	return edges
-}
-
-func rdsEdges(ctx context.Context, cfg aws.Config, region string, rec *recorder) []Edge {
-	client := awsrds.NewFromConfig(cfg)
-	var edges []Edge
-	p := awsrds.NewDescribeDBInstancesPaginator(client, &awsrds.DescribeDBInstancesInput{})
-	for p.HasMorePages() {
-		page, err := p.NextPage(ctx)
-		if err != nil {
-			rec.record("rds", err)
-			break
-		}
-		for _, db := range page.DBInstances {
-			from := Reference{Service: "rds", Type: "db-instance", Region: region,
-				ID: aws.ToString(db.DBInstanceIdentifier), Name: aws.ToString(db.DBInstanceIdentifier)}
-			if key := aws.ToString(db.KmsKeyId); key != "" {
-				edges = append(edges, Edge{From: withVia(from, "storage encryption key"), Target: key})
-			}
-			for _, sg := range db.VpcSecurityGroups {
-				if g := aws.ToString(sg.VpcSecurityGroupId); g != "" {
-					edges = append(edges, Edge{From: withVia(from, "security group"), Target: g})
-				}
 			}
 		}
 	}
