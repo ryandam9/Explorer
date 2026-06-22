@@ -67,8 +67,8 @@ Accepted targets (full ARN or bare ID):
 
 | Target | Reference types checked |
 |--------|-------------------------|
-| **IAM role** (`arn:…:role/app` or `app`) | Lambda execution roles, EC2 instance profiles, ECS task & execution roles, EKS cluster & node-group roles, IAM role trust policies, S3 bucket replication roles, Step Functions execution roles |
-| **KMS key** (`arn:…:key/<uuid>`) | EBS volume / RDS instance / Secrets Manager / SQS queue / Lambda environment / S3 bucket default / EFS file system / SNS topic / Kinesis stream encryption |
+| **IAM role** (`arn:…:role/app` or `app`) | Lambda execution roles, EC2 instance profiles, ECS task & execution roles, EKS cluster & node-group roles, IAM role trust policies, S3 bucket replication roles, Step Functions execution roles, KMS key policy principals & grants |
+| **KMS key** (`arn:…:key/<uuid>`) | EBS volume / RDS instance / Secrets Manager / SQS queue / Lambda environment / S3 bucket default / EFS file system / SNS topic / Kinesis stream encryption, KMS aliases |
 | **ACM certificate** (`arn:…:certificate/<id>`) | ELBv2 (ALB/NLB) listeners, CloudFront distribution viewer certificates |
 | **Security group** (`sg-…` or its ARN) | Elastic network interface attachments, EFS mount target / Lambda VPC / EKS cluster / load balancer / API Gateway VPC link / VPC endpoint security groups (account-wide) |
 
@@ -83,7 +83,8 @@ Accepted targets (full ARN or bare ID):
 |------|---------|-------------|
 | `--output` / `-o` | `table` | `table`, `json`, `ndjson`, `csv` |
 
-**IAM permissions.** Read-only: `iam:{ListRoles,ListInstanceProfiles}`,
+**IAM permissions.** Read-only: `iam:{ListRoles,ListInstanceProfiles,ListAttachedRolePolicies,ListRolePolicies}`,
+`kms:{ListAliases,ListKeys,GetKeyPolicy,ListGrants}`,
 `lambda:{ListFunctions,ListEventSourceMappings}`,
 `ec2:{DescribeInstances,DescribeVolumes,DescribeNetworkInterfaces,DescribeAddresses}`,
 `rds:DescribeDBInstances`, `secretsmanager:ListSecrets`,
@@ -118,7 +119,9 @@ EKS subnets & OIDC provider, **SNS subscriptions**, SQS dead-letter redrive,
 stream encryption & consumers, ELBv2 load-balancer SGs/subnets & **target
 groups → targets** (incl. Lambda), **API Gateway** Lambda integrations /
 authorizers / VPC links, **CloudFront** origins / cert / WAF / OAC, **Route 53**
-alias targets, VPC endpoints); coverage grows under the
+alias targets, VPC endpoints, **IAM role → attached/inline policies**, KMS key
+policy principals / grants / aliases, Secrets Manager rotation Lambdas); coverage
+grows under the
 [related-resources epic](https://github.com/ryandam9/aws_explorer/issues/336).
 
 ```bash

@@ -141,14 +141,12 @@ func collectIAM(ctx context.Context, baseCfg aws.Config) (map[string][]string, [
 			break
 		}
 		for _, role := range page.Roles {
-			from := Reference{
-				Service: "iam", Type: "role", Region: "global",
-				ID: aws.ToString(role.Arn), Name: aws.ToString(role.RoleName),
-				Via: "trust policy principal",
-			}
+			roleRef := Reference{Service: "iam", Type: "role", Region: "global",
+				ID: aws.ToString(role.Arn), Name: aws.ToString(role.RoleName)}
 			for _, principal := range trustPrincipals(aws.ToString(role.AssumeRolePolicyDocument)) {
-				edges = append(edges, Edge{From: from, Target: principal})
+				edges = append(edges, Edge{From: withVia(roleRef, "trust policy principal"), Target: principal})
 			}
+			edges = append(edges, rolePolicyEdges(ctx, client, roleRef, rec)...)
 		}
 	}
 	return profiles, edges, rec.errs
@@ -226,6 +224,7 @@ func collectRegion(ctx context.Context, baseCfg aws.Config, region string, profi
 	edges = append(edges, kinesisEdges(ctx, cfg, region, rec)...)
 	edges = append(edges, apiGatewayEdges(ctx, cfg, region, rec)...)
 	edges = append(edges, vpcEndpointsEdges(ctx, cfg, region, rec)...)
+	edges = append(edges, kmsEdges(ctx, cfg, region, rec)...)
 	return edges, rec.errs
 }
 
@@ -352,10 +351,13 @@ func secretsEdges(ctx context.Context, cfg aws.Config, region string, rec *recor
 			break
 		}
 		for _, s := range page.SecretList {
+			from := Reference{Service: "secretsmanager", Type: "secret", Region: region,
+				ID: aws.ToString(s.ARN), Name: aws.ToString(s.Name)}
 			if key := aws.ToString(s.KmsKeyId); key != "" {
-				from := Reference{Service: "secretsmanager", Type: "secret", Region: region,
-					ID: aws.ToString(s.ARN), Name: aws.ToString(s.Name)}
 				edges = append(edges, Edge{From: withVia(from, "secret encryption key"), Target: key})
+			}
+			if lam := aws.ToString(s.RotationLambdaARN); lam != "" {
+				edges = append(edges, Edge{From: withVia(from, "rotation Lambda"), Target: lam})
 			}
 		}
 	}

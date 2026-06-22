@@ -183,6 +183,8 @@ func CheckedTypes(kind Kind) []string {
 			"IAM role trust policies",
 			"S3 bucket replication roles",
 			"Step Functions execution roles",
+			"KMS key policy principals",
+			"KMS key grants",
 		}
 	case KindKMSKey:
 		return []string{
@@ -195,6 +197,7 @@ func CheckedTypes(kind Kind) []string {
 			"EFS file system encryption",
 			"SNS topic encryption",
 			"Kinesis stream encryption",
+			"KMS aliases",
 		}
 	case KindACMCert:
 		return []string{
