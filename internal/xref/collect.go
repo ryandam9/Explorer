@@ -100,6 +100,11 @@ func Collect(ctx context.Context, baseCfg aws.Config, regions []string, maxConcu
 	edges = append(edges, s3Edges...)
 	errs = append(errs, s3Errs...)
 
+	// CloudFront and Route 53 are global; collect them once (§3).
+	netEdges, netErrs := collectGlobalNetworking(ctx, baseCfg, perCallTimeout)
+	edges = append(edges, netEdges...)
+	errs = append(errs, netErrs...)
+
 	return edges, errs
 }
 
@@ -219,6 +224,8 @@ func collectRegion(ctx context.Context, baseCfg aws.Config, region string, profi
 	edges = append(edges, eventBridgeEdges(ctx, cfg, region, rec)...)
 	edges = append(edges, sfnEdges(ctx, cfg, region, rec)...)
 	edges = append(edges, kinesisEdges(ctx, cfg, region, rec)...)
+	edges = append(edges, apiGatewayEdges(ctx, cfg, region, rec)...)
+	edges = append(edges, vpcEndpointsEdges(ctx, cfg, region, rec)...)
 	return edges, rec.errs
 }
 
@@ -476,6 +483,7 @@ func elbv2Edges(ctx context.Context, cfg aws.Config, region string, rec *recorde
 			break
 		}
 		for _, lb := range page.LoadBalancers {
+			edges = append(edges, elbLoadBalancerEdges(lb, region)...)
 			lsp := awselbv2.NewDescribeListenersPaginator(client, &awselbv2.DescribeListenersInput{
 				LoadBalancerArn: lb.LoadBalancerArn})
 			for lsp.HasMorePages() {
@@ -496,6 +504,7 @@ func elbv2Edges(ctx context.Context, cfg aws.Config, region string, rec *recorde
 			}
 		}
 	}
+	edges = append(edges, elbTargetGroupEdges(ctx, client, region, rec)...)
 	return edges
 }
 
