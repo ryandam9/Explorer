@@ -237,8 +237,17 @@ func referenceFromIdentifier(id string) Reference {
 		}
 	}
 	r := Reference{ID: id, Name: id}
-	if strings.HasPrefix(id, "sg-") {
+	switch {
+	case strings.HasPrefix(id, "sg-"):
 		r.Service, r.Type = "ec2", "security-group"
+	case strings.HasPrefix(id, "subnet-"):
+		r.Service, r.Type = "ec2", "subnet"
+	case strings.HasPrefix(id, "ami-"):
+		r.Service, r.Type = "ec2", "image"
+	case strings.HasPrefix(id, "eipalloc-"):
+		r.Service, r.Type = "ec2", "elastic-ip"
+	case strings.HasPrefix(id, "/aws/") || strings.HasPrefix(id, "/ecs/"):
+		r.Service, r.Type = "logs", "log-group"
 	}
 	return r
 }
