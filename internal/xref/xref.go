@@ -185,6 +185,9 @@ func CheckedTypes(kind Kind) []string {
 			"Step Functions execution roles",
 			"KMS key policy principals",
 			"KMS key grants",
+			"RDS enhanced-monitoring roles",
+			"RDS cluster associated roles",
+			"Redshift cluster IAM roles",
 		}
 	case KindKMSKey:
 		return []string{
@@ -198,6 +201,9 @@ func CheckedTypes(kind Kind) []string {
 			"SNS topic encryption",
 			"Kinesis stream encryption",
 			"KMS aliases",
+			"DynamoDB table encryption",
+			"ElastiCache encryption",
+			"Redshift cluster encryption",
 		}
 	case KindACMCert:
 		return []string{
@@ -213,6 +219,9 @@ func CheckedTypes(kind Kind) []string {
 			"Load balancer security groups",
 			"API Gateway VPC link security groups",
 			"VPC endpoint security groups",
+			"RDS DB security groups",
+			"ElastiCache security groups",
+			"Redshift cluster security groups",
 		}
 	default:
 		return nil
