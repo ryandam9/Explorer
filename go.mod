@@ -52,8 +52,8 @@ require (
 	github.com/charmbracelet/x/ansi v0.11.7
 	github.com/dustin/go-humanize v1.0.1
 	github.com/lrstanley/bubblezone v1.0.0
-	github.com/mattn/go-isatty v0.0.20
-	github.com/mattn/go-runewidth v0.0.23
+	github.com/mattn/go-isatty v0.0.22
+	github.com/mattn/go-runewidth v0.0.24
 	github.com/muesli/termenv v0.16.0
 	github.com/parquet-go/parquet-go v0.30.1
 	github.com/russross/blackfriday/v2 v2.1.0
