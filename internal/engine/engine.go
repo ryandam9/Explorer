@@ -393,6 +393,31 @@ func (e *Engine) AWSConfigFor(account string) aws.Config {
 	return e.AWSConfig
 }
 
+// SweepConfig is one account's resolved credentials, exposed so out-of-engine
+// sweeps (e.g. the summary command's Resource Groups Tagging API discovery) can
+// fan across the same accounts as the typed collectors, with consistent account
+// stamping. Err is non-nil when the account's credentials could not be built.
+type SweepConfig struct {
+	Name      string
+	AWSConfig aws.Config
+	AccountID string
+	Err       error
+}
+
+// AccountSweeps resolves the per-account configs the typed-collector fan-out
+// uses. In single-account mode it returns one entry (the engine's base config);
+// in multi-account mode (config.accounts) it returns one per configured account,
+// reusing the same credential resolution. Callers run their own per-account work
+// (e.g. tag discovery) so the summary is complete and consistently labelled.
+func (e *Engine) AccountSweeps(ctx context.Context) []SweepConfig {
+	sweeps := e.buildSweeps(ctx)
+	out := make([]SweepConfig, 0, len(sweeps))
+	for _, s := range sweeps {
+		out = append(out, SweepConfig{Name: s.Name, AWSConfig: s.AWSConfig, AccountID: s.AccountID, Err: s.Err})
+	}
+	return out
+}
+
 // StreamRun emits results to the channel as they arrive, then closes it.
 func (e *Engine) StreamRun(ctx context.Context, chunks chan<- model.ResultChunk) {
 	defer close(chunks)

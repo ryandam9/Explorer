@@ -19,6 +19,12 @@ It combines two sources and merges them by ARN:
 When both sources describe the same ARN, the richer typed entry wins. Use
 `--typed-only` to skip the universal sweep.
 
+In **multi-account** mode (a `config.accounts` list), the universal sweep runs
+**per account** — the same fan-out the typed collectors use — so the inventory
+is complete across every configured account and discovered resources carry the
+same account label as typed results. A bad/denied account is flagged and skipped
+without hiding the others.
+
 > **Coverage & permissions.** The Tagging API only returns resources that
 > support tagging and are registered with the tagging service — broad, but not
 > literally 100% of every service. The sweep needs the `tag:GetResources` IAM
