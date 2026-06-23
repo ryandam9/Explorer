@@ -32,6 +32,7 @@ import (
 // be surfaced to the user alongside the result.
 
 type recorder struct {
+	mu     sync.Mutex // guards errs/seen so bounded-concurrent sweeps can record safely (§7)
 	region string
 	errs   []model.ExploreError
 	seen   map[string]bool // collapses identical errors (§7 deadline/throttle storm)
@@ -45,6 +46,8 @@ func (r *recorder) record(service string, err error) {
 	// A per-item sweep (e.g. ~55 roles all hitting the same deadline) otherwise
 	// emits one identical line per item; collapse to a single actionable error.
 	key := service + "|" + r.region + "|" + code + "|" + msg
+	r.mu.Lock()
+	defer r.mu.Unlock()
 	if r.seen == nil {
 		r.seen = map[string]bool{}
 	}
@@ -95,7 +98,7 @@ func Collect(ctx context.Context, baseCfg aws.Config, regions []string, maxConcu
 	for i, region := range regions {
 		i, region := i, region
 		g.Go(func() error {
-			edges, errs := collectRegion(ggctx, baseCfg, region, profiles, perCallTimeout)
+			edges, errs := collectRegion(ggctx, baseCfg, region, profiles, maxConcurrency, perCallTimeout)
 			results[i] = result{edges: edges, errs: errs}
 			return nil
 		})
@@ -282,7 +285,7 @@ func rawStrings(raw json.RawMessage) []string {
 
 // --- Per-region ---------------------------------------------------------------
 
-func collectRegion(ctx context.Context, baseCfg aws.Config, region string, profiles map[string][]string, timeout time.Duration) ([]Edge, []model.ExploreError) {
+func collectRegion(ctx context.Context, baseCfg aws.Config, region string, profiles map[string][]string, maxConcurrency int, timeout time.Duration) ([]Edge, []model.ExploreError) {
 	ctx, cancel := withTimeout(ctx, timeout)
 	defer cancel()
 
@@ -296,18 +299,18 @@ func collectRegion(ctx context.Context, baseCfg aws.Config, region string, profi
 	edges = append(edges, rdsEdges(ctx, cfg, region, rec)...)
 	edges = append(edges, secretsEdges(ctx, cfg, region, rec)...)
 	edges = append(edges, sqsEdges(ctx, cfg, region, rec)...)
-	edges = append(edges, ecsEdges(ctx, cfg, region, rec)...)
+	edges = append(edges, ecsEdges(ctx, cfg, region, maxConcurrency, rec)...)
 	edges = append(edges, eksEdges(ctx, cfg, region, rec)...)
 	edges = append(edges, elbv2Edges(ctx, cfg, region, rec)...)
 	edges = append(edges, efsEdges(ctx, cfg, region, rec)...)
-	edges = append(edges, snsEdges(ctx, cfg, region, rec)...)
+	edges = append(edges, snsEdges(ctx, cfg, region, maxConcurrency, rec)...)
 	edges = append(edges, eventBridgeEdges(ctx, cfg, region, rec)...)
-	edges = append(edges, sfnEdges(ctx, cfg, region, rec)...)
+	edges = append(edges, sfnEdges(ctx, cfg, region, maxConcurrency, rec)...)
 	edges = append(edges, kinesisEdges(ctx, cfg, region, rec)...)
 	edges = append(edges, apiGatewayEdges(ctx, cfg, region, rec)...)
 	edges = append(edges, vpcEndpointsEdges(ctx, cfg, region, rec)...)
-	edges = append(edges, kmsEdges(ctx, cfg, region, rec)...)
-	edges = append(edges, dynamodbEdges(ctx, cfg, region, rec)...)
+	edges = append(edges, kmsEdges(ctx, cfg, region, maxConcurrency, rec)...)
+	edges = append(edges, dynamodbEdges(ctx, cfg, region, maxConcurrency, rec)...)
 	edges = append(edges, elastiCacheEdges(ctx, cfg, region, rec)...)
 	edges = append(edges, redshiftEdges(ctx, cfg, region, rec)...)
 	edges = append(edges, observabilityEdges(ctx, cfg, region, rec)...)
@@ -461,9 +464,9 @@ func sqsEdges(ctx context.Context, cfg aws.Config, region string, rec *recorder)
 	return edges
 }
 
-func ecsEdges(ctx context.Context, cfg aws.Config, region string, rec *recorder) []Edge {
+func ecsEdges(ctx context.Context, cfg aws.Config, region string, maxConcurrency int, rec *recorder) []Edge {
 	client := awsecs.NewFromConfig(cfg)
-	var edges []Edge
+	var arns []string
 	p := awsecs.NewListTaskDefinitionsPaginator(client, &awsecs.ListTaskDefinitionsInput{})
 	for p.HasMorePages() {
 		page, err := p.NextPage(ctx)
@@ -471,20 +474,20 @@ func ecsEdges(ctx context.Context, cfg aws.Config, region string, rec *recorder)
 			rec.record("ecs", err)
 			break
 		}
-		for _, arn := range page.TaskDefinitionArns {
-			out, err := client.DescribeTaskDefinition(ctx, &awsecs.DescribeTaskDefinitionInput{TaskDefinition: aws.String(arn)})
-			if err != nil {
-				rec.record("ecs", err)
-				continue
-			}
-			td := out.TaskDefinition
-			if td == nil {
-				continue
-			}
-			edges = append(edges, ecsTaskDefEdges(*td, region)...)
-		}
+		arns = append(arns, page.TaskDefinitionArns...)
 	}
-	return edges
+	// One DescribeTaskDefinition per definition — fan out (§7).
+	return boundedEdges(ctx, arns, maxConcurrency, rec, func(ctx context.Context, arn string, rec *recorder) []Edge {
+		out, err := client.DescribeTaskDefinition(ctx, &awsecs.DescribeTaskDefinitionInput{TaskDefinition: aws.String(arn)})
+		if err != nil {
+			rec.record("ecs", err)
+			return nil
+		}
+		if out.TaskDefinition == nil {
+			return nil
+		}
+		return ecsTaskDefEdges(*out.TaskDefinition, region)
+	})
 }
 
 func eksEdges(ctx context.Context, cfg aws.Config, region string, rec *recorder) []Edge {

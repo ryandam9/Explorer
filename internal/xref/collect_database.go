@@ -162,9 +162,9 @@ func dynamoTableEdges(d *ddbtypes.TableDescription, region string) []Edge {
 	return edges
 }
 
-func dynamodbEdges(ctx context.Context, cfg aws.Config, region string, rec *recorder) []Edge {
+func dynamodbEdges(ctx context.Context, cfg aws.Config, region string, maxConcurrency int, rec *recorder) []Edge {
 	client := awsddb.NewFromConfig(cfg)
-	var edges []Edge
+	var names []string
 	p := awsddb.NewListTablesPaginator(client, &awsddb.ListTablesInput{})
 	for p.HasMorePages() {
 		page, err := p.NextPage(ctx)
@@ -172,16 +172,17 @@ func dynamodbEdges(ctx context.Context, cfg aws.Config, region string, rec *reco
 			rec.record("dynamodb", err)
 			break
 		}
-		for _, name := range page.TableNames {
-			out, err := client.DescribeTable(ctx, &awsddb.DescribeTableInput{TableName: aws.String(name)})
-			if err != nil {
-				rec.record("dynamodb", err)
-				continue
-			}
-			edges = append(edges, dynamoTableEdges(out.Table, region)...)
-		}
+		names = append(names, page.TableNames...)
 	}
-	return edges
+	// One DescribeTable per table — fan out (§7).
+	return boundedEdges(ctx, names, maxConcurrency, rec, func(ctx context.Context, name string, rec *recorder) []Edge {
+		out, err := client.DescribeTable(ctx, &awsddb.DescribeTableInput{TableName: aws.String(name)})
+		if err != nil {
+			rec.record("dynamodb", err)
+			return nil
+		}
+		return dynamoTableEdges(out.Table, region)
+	})
 }
 
 // --- ElastiCache --------------------------------------------------------------
