@@ -2,6 +2,7 @@ package tagstui
 
 import (
 	"fmt"
+	"sort"
 	"strings"
 
 	"github.com/charmbracelet/bubbles/viewport"
@@ -49,10 +50,84 @@ func (mm *m) View() string {
 		}
 	}
 	frame := mm.applyToast(ui.ClipToSize(body+sep+status, mm.width, mm.height))
+	if mm.showTags {
+		frame = ui.OverlayCenterBlank(mm.tagsOverlay(), mm.width, mm.height)
+	}
 	if mm.showAbout {
 		frame = ui.OverlayCenterBlank(mm.helpOverlay(), mm.width, mm.height)
 	}
 	return frame
+}
+
+// tagsOverlay renders the scrollable popup listing every tag on the resource the
+// cursor is on (Enter on the Resources column). Scrollable so a heavily-tagged
+// resource is fully reachable on any terminal height (§9).
+func (mm *m) tagsOverlay() string {
+	mm.layoutTagsVP()
+	hint := lipgloss.NewStyle().Foreground(lipgloss.Color(ui.ColorMuted())).Render("↑/↓ scroll · Esc close")
+	body := lipgloss.JoinVertical(lipgloss.Left, mm.tagsVP.View(), "", hint)
+	title := "Tags — " + mm.tagsResTitle()
+	return ui.HelpView(title, body, mm.tagsVP.Width+4)
+}
+
+// tagsResTitle is the short resource label shown in the popup title.
+func (mm *m) tagsResTitle() string {
+	r := mm.tagsRes
+	if r.Name != "" {
+		return r.Name
+	}
+	if r.ID != "" {
+		return r.ID
+	}
+	return r.Type
+}
+
+// layoutTagsVP sizes the tags viewport to the terminal (preserving the scroll
+// offset) and renders the tag list wrapped to its width.
+func (mm *m) layoutTagsVP() {
+	w := ui.AboutWidth(mm.width) - 4 // the box pads 2 columns on each side
+	if w < 28 {
+		w = 28
+	}
+	h := mm.height - 12 // border + padding + title + hint + centering margins
+	if h < 6 {
+		h = 6
+	}
+	off := mm.tagsVP.YOffset
+	mm.tagsVP = viewport.New(w, h)
+	mm.tagsVP.SetContent(mm.tagsListContent(w))
+	mm.tagsVP.SetYOffset(off)
+}
+
+// tagsListContent builds the popup body: an identifying sub-header plus every
+// tag as "key = value", keys sorted for a deterministic, scannable list. Long
+// values are soft-wrapped to the viewport width (§12).
+func (mm *m) tagsListContent(w int) string {
+	r := mm.tagsRes
+	dim := lipgloss.NewStyle().Foreground(lipgloss.Color(ui.ColorMuted()))
+	keyStyle := lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color(ui.ColorAccent()))
+
+	var b strings.Builder
+	meta := r.Type
+	if r.Region != "" {
+		meta += "  ·  " + r.Region
+	}
+	b.WriteString(dim.Render(ansi.Truncate(meta, w, "…")) + "\n\n")
+
+	keys := make([]string, 0, len(r.Tags))
+	for k := range r.Tags {
+		keys = append(keys, k)
+	}
+	if len(keys) == 0 {
+		b.WriteString(dim.Render("No tags on this resource."))
+		return b.String()
+	}
+	sort.Strings(keys)
+	for _, k := range keys {
+		line := keyStyle.Render(k) + dim.Render(" = ") + r.Tags[k]
+		b.WriteString(lipgloss.NewStyle().Width(w).Render(line) + "\n")
+	}
+	return strings.TrimRight(b.String(), "\n")
 }
 
 // helpOverlay renders the scrollable help modal (toggled with i). Scrollable so
@@ -333,7 +408,7 @@ func (mm *m) hints() []ui.KeyHint {
 	}
 	base := []ui.KeyHint{ui.H("↑/↓", "rows"), ui.H("Enter/→", "drill"), ui.H("←", "back"), ui.H("Tab", "column")}
 	if mm.focus == colResources {
-		base = append(base, ui.H("</>", "scroll"), ui.H("y", "copy ARN"), ui.H("o", "console"))
+		base = append(base, ui.H("Enter", "tags"), ui.H("</>", "scroll"), ui.H("y", "copy ARN"), ui.H("o", "console"))
 	}
 	base = append(base, ui.H("f", "filter"), ui.H("r", "refresh"), ui.H("i", "help"), ui.H("q", "quit"))
 	return base

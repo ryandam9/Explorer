@@ -101,6 +101,12 @@ type m struct {
 	toast     string
 	showAbout bool
 	overlayVP viewport.Model // scrolls the help overlay (i)
+
+	// Tags popup (Enter on a resource): the resource whose tags are shown and a
+	// viewport so a heavily-tagged resource stays scrollable (§9).
+	showTags bool
+	tagsRes  model.Resource
+	tagsVP   viewport.Model
 }
 
 // NewModel builds the tags dashboard over the client's resolved region scope.
@@ -286,6 +292,29 @@ func (mm *m) handleKey(msg tea.KeyMsg) []tea.Cmd {
 		return cmds
 	}
 
+	// While the tags popup is open, keys scroll it or close it.
+	if mm.showTags {
+		switch msg.String() {
+		case "q", "ctrl+c":
+			return []tea.Cmd{tea.Quit}
+		case "enter", "esc", "backspace", "left", "h":
+			mm.showTags = false
+		case "up", "k":
+			mm.tagsVP.LineUp(1)
+		case "down", "j":
+			mm.tagsVP.LineDown(1)
+		case "pgup":
+			mm.tagsVP.ViewUp()
+		case "pgdown", "pgdn", " ":
+			mm.tagsVP.ViewDown()
+		case "g", "home":
+			mm.tagsVP.GotoTop()
+		case "G", "end":
+			mm.tagsVP.GotoBottom()
+		}
+		return cmds
+	}
+
 	// Typed filter entry captures keys while active.
 	if mm.filterActive {
 		switch msg.String() {
@@ -328,7 +357,16 @@ func (mm *m) handleKey(msg tea.KeyMsg) []tea.Cmd {
 	case "shift+tab":
 		mm.cycleFocus(-1, &cmds)
 		return cmds
-	case "enter", "right", "l":
+	case "enter":
+		// On the resources column Enter pops up the resource's full tag set;
+		// elsewhere it drills into the next column.
+		if mm.focus == colResources {
+			mm.openTags()
+		} else {
+			mm.descend(&cmds)
+		}
+		return cmds
+	case "right", "l":
 		mm.descend(&cmds)
 		return cmds
 	case "left", "h", "esc", "backspace":
@@ -542,6 +580,18 @@ func (mm *m) selectedResource() (model.Resource, bool) {
 		return model.Resource{}, false
 	}
 	return mm.resources[i], true
+}
+
+// openTags pops up the full tag set of the highlighted resource. No-op when the
+// cursor isn't on a resource (e.g. an empty/loading column).
+func (mm *m) openTags() {
+	r, ok := mm.selectedResource()
+	if !ok {
+		return
+	}
+	mm.tagsRes = r
+	mm.showTags = true
+	mm.tagsVP.GotoTop()
 }
 
 func (mm *m) PageTitle() string {
