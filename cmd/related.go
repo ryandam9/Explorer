@@ -75,6 +75,13 @@ This generalizes 'whereused' (which answers only the "used by" direction).`,
 			return fmt.Errorf("--depth %d too large; maximum is %d", relatedDepth, relatedMaxDepth)
 		}
 
+		// The TUI is a one-hop, two-pane step explorer; --depth / --direction
+		// don't apply there, so reject them explicitly instead of accepting and
+		// silently ignoring them (#382).
+		if err := relatedTUIFlagError(relatedTUI, cmd.Flags().Changed("depth"), cmd.Flags().Changed("direction")); err != nil {
+			return err
+		}
+
 		applyGlobalAWSOverrides()
 		ctx := context.Background()
 
@@ -115,6 +122,24 @@ This generalizes 'whereused' (which answers only the "used by" direction).`,
 		}
 		return nil
 	},
+}
+
+// relatedTUIFlagError rejects flags the --tui explorer doesn't honor. The TUI
+// walks a single hop per Enter and always shows both directions, so an
+// explicitly-set --depth or --direction would otherwise be silently ignored
+// (#382). depthSet/directionSet come from cmd.Flags().Changed so an explicit
+// --depth 1 / --direction both (the defaults) is still accepted.
+func relatedTUIFlagError(tui, depthSet, directionSet bool) error {
+	if !tui {
+		return nil
+	}
+	if depthSet {
+		return fmt.Errorf("--depth is not used in --tui mode; the explorer walks one hop per Enter (use Enter to drill, Esc to go back)")
+	}
+	if directionSet {
+		return fmt.Errorf("--direction is not used in --tui mode; the explorer always shows both directions")
+	}
+	return nil
 }
 
 // parseDirection maps the --direction flag to which sections to show.
