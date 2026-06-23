@@ -22,15 +22,16 @@ import (
 const relatedMaxDepth = 5
 
 var (
-	relatedDepth     int
-	relatedDirection string
-	relatedTUI       bool
-	relatedShowPaths string
-	relatedCacheTTL  string
-	relatedRefresh   bool
-	relatedDebugScan bool
-	relatedFormat    string
-	relatedRisk      bool
+	relatedDepth       int
+	relatedDirection   string
+	relatedTUI         bool
+	relatedShowPaths   string
+	relatedCacheTTL    string
+	relatedRefresh     bool
+	relatedDebugScan   bool
+	relatedFormat      string
+	relatedRisk        bool
+	relatedExplainScan bool
 )
 
 var relatedCmd = &cobra.Command{
@@ -93,6 +94,12 @@ This generalizes 'whereused' (which answers only the "used by" direction).`,
 		// silently ignoring them (#382).
 		if err := relatedTUIFlagError(relatedTUI, cmd.Flags().Changed("depth"), cmd.Flags().Changed("direction")); err != nil {
 			return err
+		}
+
+		// --explain-scan describes which reference types the reverse ("used by")
+		// scan checks for this target kind, without hitting AWS (#399).
+		if relatedExplainScan {
+			return explainScan(os.Stdout, args[0], xref.Classify(args[0]))
 		}
 
 		applyGlobalAWSOverrides()
@@ -209,6 +216,25 @@ func relatedTUIFlagError(tui, depthSet, directionSet bool) error {
 	return nil
 }
 
+// explainScan prints, without scanning, the reference types the reverse
+// ("used by") query checks for the target's kind — the scoped list behind the
+// honesty contract (#399).
+func explainScan(w io.Writer, input string, t xref.Target) error {
+	fmt.Fprintf(w, "Target: %s (%s)\n", input, t.Kind)
+	types := xref.CheckedTypes(t.Kind)
+	if len(types) == 0 {
+		fmt.Fprintln(w, "This identifier isn't a first-class target kind (IAM role, KMS key, ACM")
+		fmt.Fprintln(w, "certificate, security group). It is still queryable as raw graph links, but")
+		fmt.Fprintln(w, "there is no scoped reference-type list for it.")
+		return nil
+	}
+	fmt.Fprintln(w, "To find what uses it, related checks these reference types:")
+	for _, ct := range types {
+		fmt.Fprintf(w, "  - %s\n", ct)
+	}
+	return nil
+}
+
 // relatedOutputFormat resolves the effective output format. The graph dialects
 // (#397) live behind --format (dot|mermaid) so they don't pollute the global
 // -o validation; when --format is unset, -o (table/json/ndjson/csv) is used.
@@ -273,5 +299,6 @@ func init() {
 	relatedCmd.Flags().BoolVar(&relatedDebugScan, "debug-scan", false, "print per-service scan timings to stderr")
 	relatedCmd.Flags().StringVar(&relatedFormat, "format", "", "graph export format: dot or mermaid (overrides -o)")
 	relatedCmd.Flags().BoolVar(&relatedRisk, "risk", false, "print a deletion-risk estimate from the blast radius (table output)")
+	relatedCmd.Flags().BoolVar(&relatedExplainScan, "explain-scan", false, "list the reference types checked for this target, without scanning AWS")
 	rootCmd.AddCommand(relatedCmd)
 }

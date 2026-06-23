@@ -1,6 +1,11 @@
 package cmd
 
-import "testing"
+import (
+	"strings"
+	"testing"
+
+	"github.com/ryandam9/aws_explorer/internal/xref"
+)
 
 func TestRelatedTUIFlagError(t *testing.T) {
 	cases := []struct {
@@ -22,6 +27,29 @@ func TestRelatedTUIFlagError(t *testing.T) {
 					c.tui, c.depth, c.direction, err, c.wantErr)
 			}
 		})
+	}
+}
+
+func TestExplainScan(t *testing.T) {
+	// A KMS key lists its encryption-relationship reference types.
+	var sb strings.Builder
+	kms := "arn:aws:kms:us-east-1:111:key/abc"
+	if err := explainScan(&sb, kms, xref.Classify(kms)); err != nil {
+		t.Fatalf("explainScan: %v", err)
+	}
+	out := sb.String()
+	if !strings.Contains(out, "kms-key") || !strings.Contains(out, "EBS volume encryption") {
+		t.Errorf("KMS explain missing expected content:\n%s", out)
+	}
+
+	// An unrecognized target explains it has no scoped list.
+	sb.Reset()
+	vpc := "vpc-0475013d0d9249369"
+	if err := explainScan(&sb, vpc, xref.Classify(vpc)); err != nil {
+		t.Fatalf("explainScan unknown: %v", err)
+	}
+	if !strings.Contains(sb.String(), "raw graph links") {
+		t.Errorf("unknown explain should note no scoped list:\n%s", sb.String())
 	}
 }
 
