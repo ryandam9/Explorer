@@ -48,23 +48,29 @@ func renderRelatedTable(w io.Writer, res RelatedResult, noHeader, showUses, show
 	}
 
 	if showUses {
-		if err := renderLinkSection(w, "Uses (depends on) →", res.Uses, res.Depth, partial, res.AllPaths); err != nil {
+		if err := renderLinkSection(w, "Uses (depends on) →", "uses", res.Uses, res.Depth, partial, res.AllPaths, noHeader); err != nil {
 			return err
 		}
-		fmt.Fprintln(w)
+		if !noHeader {
+			fmt.Fprintln(w)
+		}
 	}
 	if showUsedBy {
-		if err := renderLinkSection(w, "Used by ←", res.UsedBy, res.Depth, partial, res.AllPaths); err != nil {
+		if err := renderLinkSection(w, "Used by ←", "used_by", res.UsedBy, res.Depth, partial, res.AllPaths, noHeader); err != nil {
 			return err
 		}
-		if len(res.CheckedTypes) > 0 {
-			fmt.Fprintf(w, "\nReference types checked: %s.\n", strings.Join(res.CheckedTypes, ", "))
+		if !noHeader {
+			if len(res.CheckedTypes) > 0 {
+				fmt.Fprintf(w, "\nReference types checked: %s.\n", strings.Join(res.CheckedTypes, ", "))
+			}
+			fmt.Fprintln(w)
 		}
-		fmt.Fprintln(w)
 	}
-	// The honesty caveat applies to the whole report — print it once at the
-	// bottom rather than after each direction (#390).
-	fmt.Fprintf(w, "%s\n", relatedCaveat)
+	// Human annotations (the honesty caveat, §390) are part of the report, not
+	// the data — suppress them under --no-header so the output is clean rows.
+	if !noHeader {
+		fmt.Fprintf(w, "%s\n", relatedCaveat)
+	}
 	return nil
 }
 
@@ -84,13 +90,24 @@ func unknownTargetNote(t Target) string {
 		"ACM certificate, security group); only edges to/from it are shown."
 }
 
-func renderLinkSection(w io.Writer, title string, links []Link, maxDepth int, partial, showPath bool) error {
-	fmt.Fprintf(w, "%s\n", title)
+// renderLinkSection renders one direction. In human mode it prints a section
+// title, a column header, and a cosmetic SNO column. Under --no-header it emits
+// only data rows, dropping the title/header/SNO and instead prefixing each row
+// with the direction so rows stay self-describing for scripts (#391). direction
+// is the token used for that column ("uses" / "used_by").
+func renderLinkSection(w io.Writer, title, direction string, links []Link, maxDepth int, partial, showPath, noHeader bool) error {
+	if !noHeader {
+		fmt.Fprintf(w, "%s\n", title)
+	}
 	if len(links) == 0 {
-		if partial {
-			fmt.Fprintf(w, "  (none found — collection had errors; result may be incomplete)\n")
-		} else {
-			fmt.Fprintf(w, "  (none found)\n")
+		// In script mode an empty direction is simply no rows; the human note
+		// would be noise.
+		if !noHeader {
+			if partial {
+				fmt.Fprintf(w, "  (none found — collection had errors; result may be incomplete)\n")
+			} else {
+				fmt.Fprintf(w, "  (none found)\n")
+			}
 		}
 		return nil
 	}
@@ -101,19 +118,35 @@ func renderLinkSection(w io.Writer, title string, links []Link, maxDepth int, pa
 	if showPath {
 		relHeader, rel = "PATH", func(l Link) string { return dash(l.Path) }
 	}
+
 	tw := tabwriter.NewWriter(w, 0, 0, 2, ' ', 0)
-	if maxDepth > 1 {
-		fmt.Fprintf(tw, "SNO\tHOP\tSERVICE\tTYPE\tRESOURCE\tREGION\t%s\n", relHeader)
-		for i, l := range links {
-			fmt.Fprintf(tw, "%d\t%s\t%s\t%s\t%s\t%s\t%s\n",
-				i+1, depthLabel(l.Depth), l.Service, l.Type, dash(refName(l.Reference)), dash(l.Region), rel(l))
+	header := func() []string {
+		cols := []string{"SNO"}
+		if maxDepth > 1 {
+			cols = append(cols, "HOP")
 		}
-	} else {
-		fmt.Fprintf(tw, "SNO\tSERVICE\tTYPE\tRESOURCE\tREGION\t%s\n", relHeader)
-		for i, l := range links {
-			fmt.Fprintf(tw, "%d\t%s\t%s\t%s\t%s\t%s\n",
-				i+1, l.Service, l.Type, dash(refName(l.Reference)), dash(l.Region), rel(l))
+		return append(cols, "SERVICE", "TYPE", "RESOURCE", "REGION", relHeader)
+	}
+	row := func(i int, l Link) []string {
+		var cols []string
+		if noHeader {
+			// Direction replaces the cosmetic SNO so script rows self-describe
+			// without a header line (SNO is human-only per §13).
+			cols = append(cols, direction)
+		} else {
+			cols = append(cols, fmt.Sprintf("%d", i+1))
 		}
+		if maxDepth > 1 {
+			cols = append(cols, depthLabel(l.Depth))
+		}
+		return append(cols, l.Service, l.Type, dash(refName(l.Reference)), dash(l.Region), rel(l))
+	}
+
+	if !noHeader {
+		fmt.Fprintln(tw, strings.Join(header(), "\t"))
+	}
+	for i, l := range links {
+		fmt.Fprintln(tw, strings.Join(row(i, l), "\t"))
 	}
 	return tw.Flush()
 }
