@@ -14,7 +14,23 @@ import (
 // relatedCaveat is the always-printed honesty note (§8): the result only
 // reflects the relationship types collection extracts, so an empty side never
 // means "this resource is isolated".
-const relatedCaveat = "Only relationships this tool extracts are shown; un-collected link types won't appear."
+const relatedCaveat = "Only the link types listed above are checked — connections of other kinds won't appear here."
+
+// humanKind renders a Target kind in plain English for the report header.
+func humanKind(k Kind) string {
+	switch k {
+	case KindIAMRole:
+		return "IAM role"
+	case KindKMSKey:
+		return "KMS key"
+	case KindACMCert:
+		return "ACM certificate"
+	case KindSecurityGroup:
+		return "security group"
+	default:
+		return "resource"
+	}
+}
 
 // RenderRelated writes a bidirectional related-resources result in the
 // requested format. showUses / showUsedBy select which directions to print.
@@ -146,9 +162,10 @@ func mermaidEdgeLabel(s string) string {
 
 func renderRelatedTable(w io.Writer, res RelatedResult, noHeader, showUses, showUsedBy, partial bool) error {
 	if !noHeader {
-		fmt.Fprintf(w, "Related: %s (%s)\n", targetLabel(res.Target), res.Target.Kind)
+		fmt.Fprintf(w, "Related resources for %s (%s)\n", targetLabel(res.Target), humanKind(res.Target.Kind))
+		fmt.Fprintln(w, "Two lists follow: what this resource depends on, and what depends on it.")
 		if res.Depth > 1 {
-			fmt.Fprintf(w, "Depth: up to %d hop(s)\n", res.Depth)
+			fmt.Fprintf(w, "Following links up to %d hop(s) away.\n", res.Depth)
 		}
 		if note := unknownTargetNote(res.Target); note != "" {
 			fmt.Fprintf(w, "%s\n", note)
@@ -157,7 +174,7 @@ func renderRelatedTable(w io.Writer, res RelatedResult, noHeader, showUses, show
 	}
 
 	if showUses {
-		if err := renderLinkSection(w, "Uses (depends on) →", "uses", res.Uses, res.Depth, partial, res.AllPaths, noHeader); err != nil {
+		if err := renderLinkSection(w, "Depends on →  (what this resource uses)", "uses", res.Uses, res.Depth, partial, res.AllPaths, noHeader); err != nil {
 			return err
 		}
 		if !noHeader {
@@ -165,12 +182,18 @@ func renderRelatedTable(w io.Writer, res RelatedResult, noHeader, showUses, show
 		}
 	}
 	if showUsedBy {
-		if err := renderLinkSection(w, "Used by ←", "used_by", res.UsedBy, res.Depth, partial, res.AllPaths, noHeader); err != nil {
+		if err := renderLinkSection(w, "Used by ←  (what uses this resource)", "used_by", res.UsedBy, res.Depth, partial, res.AllPaths, noHeader); err != nil {
 			return err
 		}
 		if !noHeader {
 			if len(res.CheckedTypes) > 0 {
-				fmt.Fprintf(w, "\nReference types checked: %s.\n", strings.Join(res.CheckedTypes, ", "))
+				// Explain what the list is: the kinds of links searched for, so an
+				// empty "Used by" reads as "none of these", not "definitely none".
+				// One per line — a long comma list is hard to scan.
+				fmt.Fprintln(w, "\nFor \"Used by\", the tool searched for these kinds of links:")
+				for _, ct := range res.CheckedTypes {
+					fmt.Fprintf(w, "  • %s\n", ct)
+				}
 			}
 			fmt.Fprintln(w)
 		}
@@ -213,9 +236,9 @@ func renderLinkSection(w io.Writer, title, direction string, links []Link, maxDe
 		// would be noise.
 		if !noHeader {
 			if partial {
-				fmt.Fprintf(w, "  (none found — collection had errors; result may be incomplete)\n")
+				fmt.Fprintf(w, "  (nothing found — the scan hit errors, so this may be incomplete)\n")
 			} else {
-				fmt.Fprintf(w, "  (none found)\n")
+				fmt.Fprintf(w, "  (nothing found)\n")
 			}
 		}
 		return nil
@@ -223,7 +246,8 @@ func renderLinkSection(w io.Writer, title, direction string, links []Link, maxDe
 	// With --show-paths all the same resource can appear via several distinct
 	// paths; show the full path chain (and label the column PATH) so the rows
 	// are visually distinguishable rather than looking like duplicates (#388).
-	relHeader, rel := "VIA", func(l Link) string { return dash(l.Via) }
+	// "RELATIONSHIP" reads clearer than "VIA" for newcomers.
+	relHeader, rel := "RELATIONSHIP", func(l Link) string { return dash(l.Via) }
 	if showPath {
 		relHeader, rel = "PATH", func(l Link) string { return dash(l.Path) }
 	}
