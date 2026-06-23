@@ -25,6 +25,24 @@ func TestRelatedTUIFlagError(t *testing.T) {
 	}
 }
 
+func TestRelatedOutputFormat(t *testing.T) {
+	// --format unset → fall back to -o.
+	if got, err := relatedOutputFormat("json", ""); err != nil || got != "json" {
+		t.Errorf("unset --format should use -o: got %q, %v", got, err)
+	}
+	// --format graph dialects override -o.
+	for _, f := range []string{"dot", "mermaid", "DOT", "Mermaid"} {
+		got, err := relatedOutputFormat("table", f)
+		if err != nil || (got != "dot" && got != "mermaid") {
+			t.Errorf("relatedOutputFormat(table, %q) = %q, %v", f, got, err)
+		}
+	}
+	// Invalid --format is rejected.
+	if _, err := relatedOutputFormat("table", "png"); err == nil {
+		t.Errorf("invalid --format should error")
+	}
+}
+
 func TestParseDepth(t *testing.T) {
 	cases := []struct {
 		in      int

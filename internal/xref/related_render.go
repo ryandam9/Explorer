@@ -30,9 +30,118 @@ func RenderRelated(w io.Writer, res RelatedResult, format string, noHeader, show
 		return renderRelatedNDJSON(w, res, showUses, showUsedBy)
 	case "csv":
 		return renderRelatedCSV(w, res, noHeader, showUses, showUsedBy)
+	case "dot":
+		return renderRelatedGraph(w, res, showUses, showUsedBy, dotStyle)
+	case "mermaid":
+		return renderRelatedGraph(w, res, showUses, showUsedBy, mermaidStyle)
 	default:
 		return renderRelatedTable(w, res, noHeader, showUses, showUsedBy, partial)
 	}
+}
+
+// graphStyle abstracts the two graph dialects (#397) so the node/edge walk is
+// written once. Uses → are drawn target→resource; Used by ← are drawn
+// resource→target, matching the arrow direction of the relationship.
+type graphStyle struct {
+	header string
+	footer string
+	node   func(id, label string) string
+	edge   func(from, to, label string) string
+}
+
+var dotStyle = graphStyle{
+	header: "digraph related {\n  rankdir=LR;\n  node [shape=box];\n",
+	footer: "}\n",
+	node:   func(id, label string) string { return fmt.Sprintf("  %s [label=%q];\n", id, label) },
+	edge:   func(from, to, label string) string { return fmt.Sprintf("  %s -> %s [label=%q];\n", from, to, label) },
+}
+
+var mermaidStyle = graphStyle{
+	header: "graph LR\n",
+	footer: "",
+	node:   func(id, label string) string { return fmt.Sprintf("  %s[%q]\n", id, label) },
+	edge: func(from, to, label string) string {
+		return fmt.Sprintf("  %s -->|%s| %s\n", from, mermaidEdgeLabel(label), to)
+	},
+}
+
+// renderRelatedGraph emits the result as a directed graph in the given dialect:
+// a central target node, an edge out to each "uses" resource, and an edge in
+// from each "used by" resource. (Multi-hop rows are drawn against the target
+// labelled with their full path, since the intermediate nodes aren't retained
+// in the flat result.)
+func renderRelatedGraph(w io.Writer, res RelatedResult, showUses, showUsedBy bool, style graphStyle) error {
+	if _, err := io.WriteString(w, style.header); err != nil {
+		return err
+	}
+	ids := map[string]string{}
+	nodeID := func(key, label string) (string, error) {
+		if id, ok := ids[key]; ok {
+			return id, nil
+		}
+		id := fmt.Sprintf("n%d", len(ids))
+		ids[key] = id
+		_, err := io.WriteString(w, style.node(id, label))
+		return id, err
+	}
+
+	target, err := nodeID("target\x00"+res.Target.ID, targetLabel(res.Target))
+	if err != nil {
+		return err
+	}
+	edgeLabel := func(l Link) string {
+		if l.Depth > 1 && l.Path != "" {
+			return l.Path
+		}
+		return l.Via
+	}
+	emit := func(links []Link, fromTarget bool) error {
+		for _, l := range links {
+			n, err := nodeID(l.Service+"\x00"+l.ID, graphNodeLabel(l))
+			if err != nil {
+				return err
+			}
+			from, to := target, n
+			if !fromTarget {
+				from, to = n, target
+			}
+			if _, err := io.WriteString(w, style.edge(from, to, edgeLabel(l))); err != nil {
+				return err
+			}
+		}
+		return nil
+	}
+	if showUses {
+		if err := emit(res.Uses, true); err != nil {
+			return err
+		}
+	}
+	if showUsedBy {
+		if err := emit(res.UsedBy, false); err != nil {
+			return err
+		}
+	}
+	_, err = io.WriteString(w, style.footer)
+	return err
+}
+
+func graphNodeLabel(l Link) string {
+	name := refName(l.Reference)
+	if l.Service != "" {
+		return l.Service + ":" + l.Type + "\n" + name
+	}
+	return name
+}
+
+// mermaidEdgeLabel neutralizes characters that break a Mermaid `-->|...|` edge
+// label (pipes, quotes, the ▸ path separator).
+func mermaidEdgeLabel(s string) string {
+	r := strings.NewReplacer("|", "/", "\"", "'", "▸", ">", "\n", " ")
+	out := strings.TrimSpace(r.Replace(s))
+	if out == "" {
+		return " "
+	}
+	return out
 }
 
 func renderRelatedTable(w io.Writer, res RelatedResult, noHeader, showUses, showUsedBy, partial bool) error {

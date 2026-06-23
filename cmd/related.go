@@ -29,6 +29,7 @@ var (
 	relatedCacheTTL  string
 	relatedRefresh   bool
 	relatedDebugScan bool
+	relatedFormat    string
 )
 
 var relatedCmd = &cobra.Command{
@@ -74,6 +75,10 @@ This generalizes 'whereused' (which answers only the "used by" direction).`,
 			return err
 		}
 		allPaths, err := parseShowPaths(relatedShowPaths)
+		if err != nil {
+			return err
+		}
+		outFormat, err := relatedOutputFormat(outputFormat, relatedFormat)
 		if err != nil {
 			return err
 		}
@@ -158,7 +163,7 @@ This generalizes 'whereused' (which answers only the "used by" direction).`,
 		warnAmbiguousTarget(os.Stderr, args[0], edges)
 
 		result := xref.Related(args[0], xref.BuildForwardIndex(edges), xref.BuildIndex(edges), depth, allPaths).WithCollectionStatus(errs)
-		if err := xref.RenderRelated(os.Stdout, result, outputFormat, noHeader, showUses, showUsedBy, result.Partial); err != nil {
+		if err := xref.RenderRelated(os.Stdout, result, outFormat, noHeader, showUses, showUsedBy, result.Partial); err != nil {
 			return fmt.Errorf("rendering report: %w", err)
 		}
 		return nil
@@ -195,6 +200,21 @@ func relatedTUIFlagError(tui, depthSet, directionSet bool) error {
 		return fmt.Errorf("--direction is not used in --tui mode; the explorer always shows both directions")
 	}
 	return nil
+}
+
+// relatedOutputFormat resolves the effective output format. The graph dialects
+// (#397) live behind --format (dot|mermaid) so they don't pollute the global
+// -o validation; when --format is unset, -o (table/json/ndjson/csv) is used.
+func relatedOutputFormat(output, graph string) (string, error) {
+	if strings.TrimSpace(graph) == "" {
+		return output, nil
+	}
+	switch strings.ToLower(strings.TrimSpace(graph)) {
+	case "dot", "mermaid":
+		return strings.ToLower(strings.TrimSpace(graph)), nil
+	default:
+		return "", fmt.Errorf("invalid --format %q; want dot or mermaid (use -o for table/json/ndjson/csv)", graph)
+	}
 }
 
 // parseDepth normalizes and validates the --depth flag: values below 1 floor to
@@ -244,5 +264,6 @@ func init() {
 	relatedCmd.Flags().StringVar(&relatedCacheTTL, "cache-ttl", "0", "reuse a cached scan younger than this (e.g. 5m); 0 disables caching")
 	relatedCmd.Flags().BoolVar(&relatedRefresh, "refresh", false, "ignore any cached scan and re-query AWS (still writes the cache)")
 	relatedCmd.Flags().BoolVar(&relatedDebugScan, "debug-scan", false, "print per-service scan timings to stderr")
+	relatedCmd.Flags().StringVar(&relatedFormat, "format", "", "graph export format: dot or mermaid (overrides -o)")
 	rootCmd.AddCommand(relatedCmd)
 }
