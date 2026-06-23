@@ -219,7 +219,7 @@ func TestExportMarkdownPartialData(t *testing.T) {
 }
 
 func TestWriteExportRoundTrip(t *testing.T) {
-	t.Setenv("HOME", t.TempDir())
+	tempHome(t)
 	data := exportSnap()
 	at := time.Date(2026, 6, 9, 12, 0, 0, 0, time.UTC)
 	mdPath, htmlPath, svgPath, err := writeExport(data, analyzeVPC(data.Snap), at)

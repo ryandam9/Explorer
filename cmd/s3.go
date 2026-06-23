@@ -42,6 +42,8 @@ delete operations.`,
 		activeTheme := resolveTheme(cmd, s3Theme)
 
 		ui.InitFromConfig(AppConfig.UI)
+		// Show the real build version in the TUI header (same value as --version).
+		s3tui.Version = version
 		// The TUI owns the screen; keep scan logs from corrupting it.
 		SilenceScanLogs()
 

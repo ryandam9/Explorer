@@ -75,7 +75,8 @@ This is the CLI twin of the summary TUI's Ctrl+P jump palette.`,
 
 		matched := matchResources(query, summary.Dedupe(resources), findLimit)
 		if len(matched) == 0 {
-			fmt.Println("No resources match.")
+			// Name the scanned scope so "no match" is diagnosable (§3).
+			fmt.Printf("No resources match %q in %s.\n", query, regionScopeLabel(eng.EffectiveRegions()))
 			return nil
 		}
 		return renderFindResults(os.Stdout, matched, outputFormat, noHeader)

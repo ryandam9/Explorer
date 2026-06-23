@@ -5,6 +5,17 @@ import (
 	"testing"
 )
 
+// tempHome points os.UserHomeDir at a fresh temp dir on every OS: HOME covers
+// Unix, USERPROFILE is what os.UserHomeDir reads on Windows. Without the latter
+// these snapshot-store tests share the runner's real profile on Windows, so
+// baselines leak across tests/accounts and the isolation assertions fail.
+func tempHome(t *testing.T) {
+	t.Helper()
+	dir := t.TempDir()
+	t.Setenv("HOME", dir)
+	t.Setenv("USERPROFILE", dir)
+}
+
 func diffBase() vpcSnapshot {
 	return vpcSnapshot{
 		VPCID: "vpc-1",
@@ -102,7 +113,7 @@ func TestDiffCounts(t *testing.T) {
 
 func TestSaveLoadSnapshotRoundTrip(t *testing.T) {
 	// Redirect HOME so the snapshot is written to a temp dir.
-	t.Setenv("HOME", t.TempDir())
+	tempHome(t)
 
 	snap := diffBase()
 	if err := saveSnapshot(snap); err != nil {
@@ -122,7 +133,7 @@ func TestSaveLoadSnapshotRoundTrip(t *testing.T) {
 }
 
 func TestSaveLoadSnapshotAccountScoped(t *testing.T) {
-	t.Setenv("HOME", t.TempDir())
+	tempHome(t)
 
 	snap := diffBase()
 	snap.OwnerID = "111122223333"
@@ -140,7 +151,7 @@ func TestSaveLoadSnapshotAccountScoped(t *testing.T) {
 }
 
 func TestLoadSnapshotLegacyFallback(t *testing.T) {
-	t.Setenv("HOME", t.TempDir())
+	tempHome(t)
 
 	// A baseline saved before account scoping (no OwnerID → vpc-1.json) must
 	// still be found when loading with an owner.
@@ -157,7 +168,7 @@ func TestLoadSnapshotLegacyFallback(t *testing.T) {
 }
 
 func TestLoadSnapshotMissing(t *testing.T) {
-	t.Setenv("HOME", t.TempDir())
+	tempHome(t)
 	_, ok, err := loadSnapshot("vpc-absent", "")
 	if err != nil {
 		t.Errorf("missing baseline should not error, got %v", err)
