@@ -258,10 +258,26 @@ aws_explorer related arn:aws:iam::123456789012:role/app --depth 2 --all-regions
 aws_explorer related sg-0abc123 -o json | jq '.uses'
 ```
 
-Flags: `--depth 1-5`, `--direction both|uses|usedby`, `-o table|json|ndjson|csv`,
-`--no-header`, plus the global `-r/--region` and `--all-regions`. The coverage
+Flags: `--depth 1-5`, `--direction both|uses|usedby`, `--show-paths shortest|all`,
+`-o table|json|ndjson|csv`, `--no-header`, `--cache-ttl <dur>`, `--refresh`,
+`--debug-scan`, plus the global `-r/--region` and `--all-regions`. The coverage
 caveat and any per-region failures go to **stderr**, so stdout stays clean for
 pipelines.
+
+- `--show-paths all` keeps every distinct path to a resource (default keeps the
+  shortest); the table then shows the full `PATH` chain instead of `VIA`.
+- `--no-header` emits data rows only, each prefixed with its direction
+  (`uses`/`used_by`) in place of the cosmetic `SNO` column — for `awk`/`cut`.
+  For fully-structured output prefer `-o csv`/`-o ndjson`.
+- `--cache-ttl 5m` reuses a recent scan of the same scope; `--refresh` forces a
+  live rescan. `--debug-scan` prints per-service scan timings to stderr.
+- `-o json` carries `"partial": true` and an `"errors"` array when collection
+  hit failures, so automation can tell "no relationships" from "scan incomplete"
+  without parsing stderr.
+- A bare name that matches several resources (e.g. `app` → two role ARNs) prints
+  an ambiguity warning listing the candidates; pass a full ARN to disambiguate.
+- `--depth`/`--direction` are rejected in `--tui` mode (the explorer walks one
+  hop per Enter and shows both directions) rather than silently ignored.
 
 ### Interactive explorer
 
@@ -342,7 +358,76 @@ History: the feature was built incrementally under the umbrella issue **#336**
 (#337) plus per-area edge extractors (#338–#344) and the TUI (#345). It builds
 on and generalises the shipped `whereused` / `internal/xref` work (AXE-009).
 
-## 8. Related docs
+## 8. Troubleshooting & interpretation
+
+**Safe interpretation of an empty result.** An empty side never means "this
+resource is isolated". Read it as: *no relationships were found among the link
+types that were scanned successfully*. Untyped link types, unsupported services,
+denied APIs, and timed-out regions all narrow what was checked — and a denied or
+failed call is reported on stderr (and, for `-o json`, as `partial`/`errors`),
+not silently folded into "none". Before treating "Used by → (none found)" as
+"safe to delete", confirm the scan wasn't partial.
+
+Common questions:
+
+- **Why no "Used by" results?** Either the resource genuinely isn't referenced
+  by a collected link type, or the relevant collector failed (check stderr / the
+  JSON `errors`). For a security group, "Uses" is *always* empty by design — SGs
+  only appear as the target of attachments, never as a source.
+- **Why is a row missing its service/type/region?** Short-ID targets are
+  classified best-effort and inherit the source region; truly unrecognized names
+  (e.g. a DB subnet-group) are shown without a service/region rather than
+  guessed.
+- **Why did `related vpc-…` find nothing?** `related` is a resource-to-resource
+  reference graph, not a container inventory. To list what lives inside a VPC,
+  use `aws_explorer vpc`.
+- **Why does `--tui` rescan after launching from the summary TUI?** Each process
+  collects independently. Use `--cache-ttl 5m` to reuse a recent scan.
+- **Scan is slow / floods deadline errors.** Scope with `-r REGION`, raise the
+  app timeout, and use `--debug-scan` to see which service dominates. The IAM
+  role-policy sweep only runs when the query can land on a role (a role target
+  or `--depth > 1`).
+
+## 9. Performance expectations
+
+The cost is **collection**, not the in-memory graph walk. Rough guidance:
+
+| Account size | Typical scan |
+|---|---|
+| Small (one region, few resources) | seconds |
+| Medium | tens of seconds |
+| Large, multi-region (`--all-regions`) | minutes possible |
+
+Per-item sweeps (KMS, DynamoDB, SNS, Step Functions, ECS) are bounded-concurrent;
+the per-region fan-out is bounded too. Use `--debug-scan` for a per-service
+breakdown and `--cache-ttl` to avoid rescanning during repeated exploration.
+
+## 10. Recipes
+
+```bash
+# Before deleting a security group — what's attached, across all regions?
+aws_explorer related sg-0abc123 --direction usedby --all-regions
+
+# Before disabling a KMS key — everything it encrypts, two hops out
+aws_explorer related arn:aws:kms:us-east-1:123:key/abc --depth 2 --all-regions
+
+# Debug an S3 object-created pipeline
+aws_explorer related arn:aws:s3:::my-bucket --depth 2
+
+# Debug a Lambda's event sources and dependencies
+aws_explorer related arn:aws:lambda:us-east-1:123:function:checkout --depth 2
+
+# Scriptable: all of a role's consumers, one row per line
+aws_explorer related arn:aws:iam::123:role/app --direction usedby --no-header
+
+# Repeated exploration without rescanning each time
+aws_explorer related arn:aws:iam::123:role/app --cache-ttl 5m
+```
+
+> Module vs repository name: the Go module path is `github.com/ryandam9/aws_explorer`
+> (the binary is `aws_explorer`); the GitHub repository is `ryandam9/Explorer`.
+
+## 11. Related docs
 
 - [Find / whereused / related — command reference](find.md)
 - [Enhancement roadmap](enhancement-roadmap.md) (AXE-009 where-used, AXE-010
