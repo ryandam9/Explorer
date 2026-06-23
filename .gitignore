@@ -1,6 +1,9 @@
 /bin/
 man/
 
+# Coverage profile produced by the CI quality job / `go test -coverprofile`.
+coverage.out
+
 # Agent skills are fetched per-session by .claude/hooks/session-start.sh
 # (AWS Agent Toolkit), so the installed copies and lockfile are not committed.
 /.claude/skills/
