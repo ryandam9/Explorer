@@ -358,7 +358,7 @@ func collectRegion(ctx context.Context, baseCfg aws.Config, region string, profi
 		{"dynamodb", func() []Edge { return dynamodbEdges(ctx, cfg, region, maxConcurrency, rec) }},
 		{"elasticache", func() []Edge { return elastiCacheEdges(ctx, cfg, region, rec) }},
 		{"redshift", func() []Edge { return redshiftEdges(ctx, cfg, region, rec) }},
-		{"observability", func() []Edge { return observabilityEdges(ctx, cfg, region, rec) }},
+		{"observability", func() []Edge { return observabilityEdges(ctx, cfg, region, maxConcurrency, rec) }},
 	}
 
 	// Run the region's collectors concurrently (bounded). They previously ran
