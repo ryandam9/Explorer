@@ -37,6 +37,48 @@ func TestRecompute(t *testing.T) {
 	}
 }
 
+func TestFilterLinks(t *testing.T) {
+	links := []xref.Link{
+		{Reference: xref.Reference{Service: "lambda", Type: "function", Name: "checkout", Via: "execution role"}},
+		{Reference: xref.Reference{Service: "iam", Type: "role", Name: "app", Via: "trust policy principal"}},
+		{Reference: xref.Reference{Service: "ec2", Type: "subnet", ID: "subnet-0abc", Region: "us-east-1", Via: "subnet"}},
+	}
+	cases := []struct {
+		q    string
+		want int
+	}{
+		{"", 3},            // empty → all
+		{"lambda", 1},      // service
+		{"ROLE", 2},        // case-insensitive: "role" in type + in "execution role"
+		{"subnet-0abc", 1}, // ID match
+		{"us-east-1", 1},   // region match
+		{"zzz", 0},         // no match
+	}
+	for _, c := range cases {
+		if got := filterLinks(links, c.q); len(got) != c.want {
+			t.Errorf("filterLinks(%q) = %d rows, want %d", c.q, len(got), c.want)
+		}
+	}
+}
+
+func TestApplyFilter_AlignsSelection(t *testing.T) {
+	mm := newTestModel(roleARN)
+	mm.recompute() // role is used by lambda + ecs
+
+	mm.focus = paneUsedBy
+	mm.filter = "ecs"
+	mm.applyFilter()
+
+	if len(mm.viewUsedBy) != 1 {
+		t.Fatalf("filtered used-by = %d, want 1", len(mm.viewUsedBy))
+	}
+	// selected() must index the filtered view, not the raw result.
+	l, ok := mm.selected()
+	if !ok || l.Service != "ecs" {
+		t.Errorf("selected after filter = %+v (ok=%v), want the ecs row", l, ok)
+	}
+}
+
 func TestDescendAndBack(t *testing.T) {
 	mm := newTestModel(lamARN)
 	mm.recompute()

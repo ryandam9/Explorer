@@ -7,11 +7,13 @@ package relatedtui
 
 import (
 	"context"
+	"strings"
 	"time"
 
 	"github.com/atotto/clipboard"
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/charmbracelet/bubbles/spinner"
+	"github.com/charmbracelet/bubbles/textinput"
 	"github.com/charmbracelet/bubbles/viewport"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
@@ -62,6 +64,15 @@ type m struct {
 	usesTbl   table.Model
 	usedByTbl table.Model
 
+	// In-pane filter (#401): viewUses/viewUsedBy are the rows currently shown
+	// (result.Uses/UsedBy narrowed by filter); selected()/links() index these,
+	// not the raw result, so the cursor stays aligned with what's on screen.
+	filtering  bool
+	filter     string
+	search     textinput.Model
+	viewUses   []xref.Link
+	viewUsedBy []xref.Link
+
 	toast     string
 	showHelp  bool
 	overlayVP viewport.Model
@@ -73,6 +84,10 @@ func NewModel(ctx context.Context, cfg aws.Config, regions []string, maxConc int
 	s := spinner.New()
 	s.Spinner = spinner.Dot
 	s.Style = lipgloss.NewStyle().Foreground(lipgloss.Color(ui.ColorAccent()))
+
+	ti := textinput.New()
+	ti.Placeholder = "filter rows — service, type, name, region, via…"
+	ti.CharLimit = 128
 
 	return &m{
 		ctx:        ctx,
@@ -86,6 +101,7 @@ func NewModel(ctx context.Context, cfg aws.Config, regions []string, maxConc int
 		stack:      []string{input},
 		usesTbl:    newResTable(),
 		usedByTbl:  newResTable(),
+		search:     ti,
 	}
 }
 
@@ -162,10 +178,35 @@ func (mm *m) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 // resource (in memory — no AWS call).
 func (mm *m) recompute() {
 	mm.result = xref.Related(mm.current(), mm.fwd, mm.rev, 1, false)
-	mm.usesTbl.SetRows(linkRows(mm.result.Uses))
+	mm.applyFilter()
+}
+
+// applyFilter rebuilds the visible rows from the current result narrowed by the
+// active filter, resetting both cursors (#401).
+func (mm *m) applyFilter() {
+	mm.viewUses = filterLinks(mm.result.Uses, mm.filter)
+	mm.viewUsedBy = filterLinks(mm.result.UsedBy, mm.filter)
+	mm.usesTbl.SetRows(linkRows(mm.viewUses))
 	mm.usesTbl.SetCursor(0)
-	mm.usedByTbl.SetRows(linkRows(mm.result.UsedBy))
+	mm.usedByTbl.SetRows(linkRows(mm.viewUsedBy))
 	mm.usedByTbl.SetCursor(0)
+}
+
+// filterLinks keeps links whose service/type/name/region/via/path contains the
+// (case-insensitive) query. An empty query returns the input unchanged.
+func filterLinks(links []xref.Link, query string) []xref.Link {
+	q := strings.ToLower(strings.TrimSpace(query))
+	if q == "" {
+		return links
+	}
+	var out []xref.Link
+	for _, l := range links {
+		hay := strings.ToLower(strings.Join([]string{l.Service, l.Type, l.Name, l.ID, l.Region, l.Via, l.Path}, " "))
+		if strings.Contains(hay, q) {
+			out = append(out, l)
+		}
+	}
+	return out
 }
 
 func (mm *m) handleKey(msg tea.KeyMsg) []tea.Cmd {
@@ -192,6 +233,52 @@ func (mm *m) handleKey(msg tea.KeyMsg) []tea.Cmd {
 	if mm.loading {
 		if s := msg.String(); s == "q" || s == "ctrl+c" {
 			return []tea.Cmd{tea.Quit}
+		}
+		return cmds
+	}
+
+	// While the filter box is open it captures typing; Enter keeps the filter,
+	// Esc clears it. The filter applies live so the panes narrow as you type.
+	if mm.filtering {
+		switch msg.String() {
+		case "enter":
+			mm.filtering = false
+			mm.search.Blur()
+		case "esc":
+			mm.filtering = false
+			mm.search.Blur()
+			mm.filter = ""
+			mm.applyFilter()
+		default:
+			var cmd tea.Cmd
+			mm.search, cmd = mm.search.Update(msg)
+			mm.filter = mm.search.Value()
+			mm.applyFilter()
+			cmds = append(cmds, cmd)
+		}
+		return cmds
+	}
+
+	switch msg.String() {
+	case "/", "f":
+		mm.filtering = true
+		mm.search.SetValue(mm.filter)
+		mm.search.CursorEnd()
+		mm.search.Focus()
+		return cmds
+	case "p":
+		if r, ok := mm.selected(); ok {
+			path := r.Path
+			if path == "" {
+				path = r.Via
+			}
+			if path != "" {
+				_ = clipboard.WriteAll(path)
+				mm.toast = "Copied path"
+			} else {
+				mm.toast = "No relationship path for this row"
+			}
+			cmds = append(cmds, toastCmd())
 		}
 		return cmds
 	}
@@ -272,12 +359,13 @@ func (mm *m) active() *table.Model {
 	return &mm.usesTbl
 }
 
-// links returns the link slice backing the focused pane.
+// links returns the (filtered) link slice backing the focused pane — the same
+// rows shown in the table, so selected() stays aligned.
 func (mm *m) links() []xref.Link {
 	if mm.focus == paneUsedBy {
-		return mm.result.UsedBy
+		return mm.viewUsedBy
 	}
-	return mm.result.Uses
+	return mm.viewUses
 }
 
 func (mm *m) selected() (xref.Link, bool) {
