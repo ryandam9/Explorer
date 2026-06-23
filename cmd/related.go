@@ -77,12 +77,9 @@ This generalizes 'whereused' (which answers only the "used by" direction).`,
 		if err != nil {
 			return err
 		}
-		depth := relatedDepth
-		if depth < 1 {
-			depth = 1
-		}
-		if depth > relatedMaxDepth {
-			return fmt.Errorf("--depth %d too large; maximum is %d", relatedDepth, relatedMaxDepth)
+		depth, err := parseDepth(relatedDepth)
+		if err != nil {
+			return err
 		}
 
 		// The TUI is a one-hop, two-pane step explorer; --depth / --direction
@@ -198,6 +195,18 @@ func relatedTUIFlagError(tui, depthSet, directionSet bool) error {
 		return fmt.Errorf("--direction is not used in --tui mode; the explorer always shows both directions")
 	}
 	return nil
+}
+
+// parseDepth normalizes and validates the --depth flag: values below 1 floor to
+// a single hop, and anything beyond relatedMaxDepth is rejected.
+func parseDepth(d int) (int, error) {
+	if d > relatedMaxDepth {
+		return 0, fmt.Errorf("--depth %d too large; maximum is %d", d, relatedMaxDepth)
+	}
+	if d < 1 {
+		d = 1
+	}
+	return d, nil
 }
 
 // parseShowPaths maps the --show-paths flag to whether every distinct path to a

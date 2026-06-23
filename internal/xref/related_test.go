@@ -50,6 +50,41 @@ func TestRelated_ShowAllPaths(t *testing.T) {
 	}
 }
 
+func TestRenderRelated_CSVHasDirectionColumn(t *testing.T) {
+	res := relatedOver(roleARN, 1)
+	var sb strings.Builder
+	if err := RenderRelated(&sb, res, "csv", false, true, true, false); err != nil {
+		t.Fatalf("csv: %v", err)
+	}
+	out := sb.String()
+	if !strings.HasPrefix(out, "Direction,Depth,Service,Type,ID,Name,Region,Via") {
+		t.Errorf("csv header missing/incorrect:\n%s", out)
+	}
+	if !strings.Contains(out, "uses,") || !strings.Contains(out, "used_by,") {
+		t.Errorf("csv rows should carry a direction column:\n%s", out)
+	}
+
+	// --no-header drops the header row but keeps the direction-tagged data.
+	sb.Reset()
+	if err := RenderRelated(&sb, res, "csv", true, true, true, false); err != nil {
+		t.Fatalf("csv no-header: %v", err)
+	}
+	if strings.Contains(sb.String(), "Direction,Depth") {
+		t.Errorf("csv --no-header should omit the header row:\n%s", sb.String())
+	}
+}
+
+func TestRenderRelated_NDJSONEmptyProducesNoRows(t *testing.T) {
+	empty := relatedOver("arn:aws:iam::111111111111:role/lonely", 1)
+	var sb strings.Builder
+	if err := RenderRelated(&sb, empty, "ndjson", false, true, true, false); err != nil {
+		t.Fatalf("ndjson: %v", err)
+	}
+	if strings.TrimSpace(sb.String()) != "" {
+		t.Errorf("empty result should emit no NDJSON rows, got:\n%s", sb.String())
+	}
+}
+
 func TestRenderRelated_NoHeaderIsScriptable(t *testing.T) {
 	res := relatedOver(roleARN, 1) // Uses: 1 (trust principal); UsedBy: 2 (lambda, ecs)
 	var sb strings.Builder
