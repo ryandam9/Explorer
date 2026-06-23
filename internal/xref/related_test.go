@@ -7,6 +7,54 @@ import (
 	"github.com/ryandam9/aws_explorer/internal/model"
 )
 
+func TestClassifyShortID(t *testing.T) {
+	cases := []struct {
+		id           string
+		service, typ string
+		ok           bool
+	}{
+		{"sg-0abc", "ec2", "security-group", true},
+		{"subnet-0abc", "ec2", "subnet", true},
+		{"vpc-0abc", "ec2", "vpc", true},
+		{"eni-0abc", "ec2", "network-interface", true},
+		{"vol-0abc", "ec2", "volume", true},
+		{"vpce-0abc", "ec2", "vpc-endpoint", true},
+		{"i-0abc", "ec2", "instance", true},
+		{"igw-0abc", "ec2", "internet-gateway", true},
+		{"/aws/lambda/checkout", "logs", "log-group", true},
+		{"my-subnet-group", "", "", false},  // RDS subnet-group name: unclassified
+		{"web.example.com.", "", "", false}, // DNS name: unclassified
+	}
+	for _, c := range cases {
+		svc, typ, ok := classifyShortID(c.id)
+		if svc != c.service || typ != c.typ || ok != c.ok {
+			t.Errorf("classifyShortID(%q) = (%q,%q,%v), want (%q,%q,%v)", c.id, svc, typ, ok, c.service, c.typ, c.ok)
+		}
+	}
+}
+
+func TestTargetReference_InheritsRegionForShortIDs(t *testing.T) {
+	from := Reference{Service: "lambda", Type: "function", Region: "ap-southeast-4", ID: lambdaARN, Via: "VPC subnet"}
+
+	// A regional EC2 short-id target inherits the referencing resource's region.
+	got := targetReference(Edge{From: from, Target: "subnet-0abc123"})
+	if got.Region != "ap-southeast-4" || got.Service != "ec2" || got.Type != "subnet" {
+		t.Errorf("subnet target = %+v, want region ap-southeast-4 / ec2 / subnet", got)
+	}
+
+	// A bare name (e.g. a DB subnet-group) stays honestly region-less.
+	got = targetReference(Edge{From: Reference{Region: "ap-southeast-4", Via: "DB subnet group"}, Target: "prod-subnets"})
+	if got.Region != "" || got.Service != "" {
+		t.Errorf("name target should stay unclassified/region-less, got %+v", got)
+	}
+
+	// An ARN target keeps its own region, not the source's.
+	got = targetReference(Edge{From: from, Target: "arn:aws:kms:us-east-1:111:key/abc"})
+	if got.Region != "us-east-1" {
+		t.Errorf("ARN target region = %q, want us-east-1", got.Region)
+	}
+}
+
 func TestRelatedResult_WithCollectionStatus(t *testing.T) {
 	base := relatedOver(roleARN, 1)
 	if base.Partial || base.Errors != nil {

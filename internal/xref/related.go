@@ -236,6 +236,14 @@ func joinPath(parent, via string) string {
 // deriving service/type/region from its ARN and carrying the relationship.
 func targetReference(e Edge) Reference {
 	r := referenceFromIdentifier(e.Target)
+	// EC2/Logs short identifiers (sg-…, subnet-…, eni-…, vol-…, /aws/… log
+	// groups) carry no region in the string, but they always live in the same
+	// region as the resource referencing them — inherit it so the row isn't
+	// blank or ambiguous across regions (#385). Names/DNS/ARNs are left as-is
+	// (ARNs already carry a region; names stay honestly region-less).
+	if r.Region == "" && (r.Service == "ec2" || r.Service == "logs") {
+		r.Region = e.From.Region
+	}
 	r.Via = e.From.Via
 	return r
 }
@@ -253,19 +261,49 @@ func referenceFromIdentifier(id string) Reference {
 		}
 	}
 	r := Reference{ID: id, Name: id}
-	switch {
-	case strings.HasPrefix(id, "sg-"):
-		r.Service, r.Type = "ec2", "security-group"
-	case strings.HasPrefix(id, "subnet-"):
-		r.Service, r.Type = "ec2", "subnet"
-	case strings.HasPrefix(id, "ami-"):
-		r.Service, r.Type = "ec2", "image"
-	case strings.HasPrefix(id, "eipalloc-"):
-		r.Service, r.Type = "ec2", "elastic-ip"
-	case strings.HasPrefix(id, "/aws/") || strings.HasPrefix(id, "/ecs/"):
-		r.Service, r.Type = "logs", "log-group"
+	if svc, typ, ok := classifyShortID(id); ok {
+		r.Service, r.Type = svc, typ
 	}
 	return r
+}
+
+// ec2IDPrefixes maps EC2-style resource-id prefixes to their resource type, so
+// a short target id (sg-…, subnet-…, eni-…) renders with a service/type instead
+// of a blank cell (#385). All are regional and in the ec2 service.
+var ec2IDPrefixes = map[string]string{
+	"sg-":       "security-group",
+	"subnet-":   "subnet",
+	"vpc-":      "vpc",
+	"eni-":      "network-interface",
+	"vol-":      "volume",
+	"ami-":      "image",
+	"snap-":     "snapshot",
+	"eipalloc-": "elastic-ip",
+	"vpce-":     "vpc-endpoint",
+	"igw-":      "internet-gateway",
+	"nat-":      "nat-gateway",
+	"rtb-":      "route-table",
+	"acl-":      "network-acl",
+	"pcx-":      "vpc-peering-connection",
+	"tgw-":      "transit-gateway",
+	"dopt-":     "dhcp-options",
+	"i-":        "instance",
+}
+
+// classifyShortID resolves a bare (non-ARN) identifier to a service/type. It
+// recognizes EC2 resource ids and CloudWatch Logs group names; everything else
+// (subnet-group names, DNS names, bucket names) stays unclassified so the row
+// is honestly blank rather than mislabelled.
+func classifyShortID(id string) (service, typ string, ok bool) {
+	for prefix, t := range ec2IDPrefixes {
+		if strings.HasPrefix(id, prefix) {
+			return "ec2", t, true
+		}
+	}
+	if strings.HasPrefix(id, "/aws/") || strings.HasPrefix(id, "/ecs/") {
+		return "logs", "log-group", true
+	}
+	return "", "", false
 }
 
 // SortLinks orders links by depth, then like SortReferences within a depth.
