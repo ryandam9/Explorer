@@ -2,18 +2,44 @@ package s3
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"log/slog"
 	"sync"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/service/s3"
 	"github.com/aws/aws-sdk-go-v2/service/s3/types"
+	"github.com/aws/smithy-go"
 	"golang.org/x/sync/errgroup"
 
 	"github.com/ryandam9/aws_explorer/internal/awsutil"
 	"github.com/ryandam9/aws_explorer/internal/model"
 	"github.com/ryandam9/aws_explorer/internal/services"
 )
+
+// warnBucketDetail logs a failed bucket sub-resource read so a swallowed error
+// is at least traceable (CLAUDE.md §6a) — the detail key is still omitted, but
+// the failure is no longer invisible.
+func warnBucketDetail(field, bucket string, err error) {
+	slog.Warn("s3: bucket detail read failed", "field", field, "bucket", bucket, "err", err)
+}
+
+// warnBucketDetailUnlessNotFound is warnBucketDetail except it stays silent for
+// the SDK codes that genuinely mean "this configuration is unset" (so the key is
+// correctly absent rather than failed). Keeps "not set" distinct from "failed"
+// (CLAUDE.md §8).
+func warnBucketDetailUnlessNotFound(field, bucket string, err error, notFoundCodes ...string) {
+	var apiErr smithy.APIError
+	if errors.As(err, &apiErr) {
+		for _, c := range notFoundCodes {
+			if apiErr.ErrorCode() == c {
+				return
+			}
+		}
+	}
+	warnBucketDetail(field, bucket, err)
+}
 
 // bucketDetailConcurrency bounds how many buckets have their details fetched
 // at once. Each bucket already fans out ~8 API calls internally, so this
@@ -78,7 +104,7 @@ func (c *Collector) Collect(ctx context.Context, input services.CollectInput) ([
 				return nil
 			})
 		}
-		_ = g.Wait() // detail fetches swallow per-call errors; nothing to return
+		_ = g.Wait() // per-bucket detail failures are logged (warnBucketDetail), not returned
 	}
 
 	return resources, nil
@@ -129,20 +155,26 @@ func fetchBucketDetails(ctx context.Context, client *s3.Client, name string) map
 		{"locationConstraint", func() (any, bool) {
 			loc, err := client.GetBucketLocation(ctx, &s3.GetBucketLocationInput{Bucket: &name})
 			if err != nil {
+				warnBucketDetail("location", name, err)
 				return nil, false
 			}
 			return string(loc.LocationConstraint), true
 		}},
 		{"versioningStatus", func() (any, bool) {
 			v, err := client.GetBucketVersioning(ctx, &s3.GetBucketVersioningInput{Bucket: &name})
-			if err != nil || v.Status == "" {
+			if err != nil {
+				warnBucketDetail("versioning", name, err)
 				return nil, false
+			}
+			if v.Status == "" {
+				return nil, false // genuinely never enabled
 			}
 			return string(v.Status), true
 		}},
 		{"encryption", func() (any, bool) {
 			enc, err := client.GetBucketEncryption(ctx, &s3.GetBucketEncryptionInput{Bucket: &name})
 			if err != nil {
+				warnBucketDetailUnlessNotFound("encryption", name, err, "ServerSideEncryptionConfigurationNotFoundError")
 				return nil, false
 			}
 			return enc.ServerSideEncryptionConfiguration, true
@@ -150,6 +182,7 @@ func fetchBucketDetails(ctx context.Context, client *s3.Client, name string) map
 		{"tags", func() (any, bool) {
 			tags, err := client.GetBucketTagging(ctx, &s3.GetBucketTaggingInput{Bucket: &name})
 			if err != nil {
+				warnBucketDetailUnlessNotFound("tags", name, err, "NoSuchTagSet")
 				return nil, false
 			}
 			return tags.TagSet, true
@@ -157,13 +190,18 @@ func fetchBucketDetails(ctx context.Context, client *s3.Client, name string) map
 		{"acl", func() (any, bool) {
 			acl, err := client.GetBucketAcl(ctx, &s3.GetBucketAclInput{Bucket: &name})
 			if err != nil {
+				warnBucketDetail("acl", name, err)
 				return nil, false
 			}
 			return acl.Grants, true
 		}},
 		{"policy", func() (any, bool) {
 			pol, err := client.GetBucketPolicy(ctx, &s3.GetBucketPolicyInput{Bucket: &name})
-			if err != nil || pol.Policy == nil {
+			if err != nil {
+				warnBucketDetailUnlessNotFound("policy", name, err, "NoSuchBucketPolicy")
+				return nil, false
+			}
+			if pol.Policy == nil {
 				return nil, false
 			}
 			return *pol.Policy, true
@@ -171,6 +209,7 @@ func fetchBucketDetails(ctx context.Context, client *s3.Client, name string) map
 		{"lifecycle", func() (any, bool) {
 			lc, err := client.GetBucketLifecycleConfiguration(ctx, &s3.GetBucketLifecycleConfigurationInput{Bucket: &name})
 			if err != nil {
+				warnBucketDetailUnlessNotFound("lifecycle", name, err, "NoSuchLifecycleConfiguration")
 				return nil, false
 			}
 			return lc.Rules, true
@@ -178,6 +217,7 @@ func fetchBucketDetails(ctx context.Context, client *s3.Client, name string) map
 		{"publicAccessBlock", func() (any, bool) {
 			pab, err := client.GetPublicAccessBlock(ctx, &s3.GetPublicAccessBlockInput{Bucket: &name})
 			if err != nil {
+				warnBucketDetailUnlessNotFound("publicAccessBlock", name, err, "NoSuchPublicAccessBlockConfiguration")
 				return nil, false
 			}
 			return pab.PublicAccessBlockConfiguration, true

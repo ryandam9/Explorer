@@ -190,3 +190,34 @@ func TestCatalogWith_HideAppliesAfterExtras(t *testing.T) {
 		}
 	}
 }
+
+// The advisory must not slap the "may have no tags" caveat on services that are
+// queried directly — those genuinely have none when absent (#377).
+func TestCoverageNote_SplitsTypedFromTagDiscovered(t *testing.T) {
+	resources := []model.Resource{{Service: "ec2", ID: "i-1"}}
+	note := CoverageNote(Coverage(resources, typedServices, nil, nil), true)
+
+	var directLine, tagLine string
+	for _, ln := range strings.Split(note, "\n") {
+		if strings.Contains(ln, "Checked directly") {
+			directLine = ln
+		}
+		if strings.Contains(ln, "no tags") {
+			tagLine = ln
+		}
+	}
+	if directLine == "" || tagLine == "" {
+		t.Fatalf("expected both a directly-checked and a tag-caveat line:\n%s", note)
+	}
+	// EKS is typed → in the directly-checked line, never under the tag caveat.
+	if !strings.Contains(directLine, "EKS") {
+		t.Errorf("typed EKS should be in the directly-checked line:\n%s", directLine)
+	}
+	if strings.Contains(tagLine, "EKS") {
+		t.Errorf("typed EKS must not be under the 'no tags' caveat:\n%s", tagLine)
+	}
+	// Step Functions has no collector in this set → tag-discovered → tag line.
+	if !strings.Contains(tagLine, "Step Functions") {
+		t.Errorf("tag-discovered Step Functions should be under the tag caveat:\n%s", tagLine)
+	}
+}

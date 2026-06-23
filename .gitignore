@@ -1,6 +1,22 @@
 /bin/
 man/
 
+# Coverage profiles produced by the CI quality job / `go test -coverprofile`.
+coverage.out
+*.coverprofile
+
+# Release artifacts (GoReleaser).
+dist/
+
+# Local secrets / credentials / environment — never commit these. Static
+# credentials are a last-resort auth method (see SECURITY.md), so guard the
+# common local files that tend to hold them.
+.env
+.env.*
+config.local.yaml
+*.local.yaml
+*.local.yml
+
 # Agent skills are fetched per-session by .claude/hooks/session-start.sh
 # (AWS Agent Toolkit), so the installed copies and lockfile are not committed.
 /.claude/skills/

@@ -10,6 +10,7 @@ import (
 	"text/tabwriter"
 
 	"github.com/ryandam9/aws_explorer/internal/costs"
+	"github.com/ryandam9/aws_explorer/internal/csvexport"
 )
 
 // Render writes findings to w in the requested format (table, json, ndjson,
@@ -89,7 +90,7 @@ func renderCSV(w io.Writer, fs []Finding, noHeader bool) error {
 			f.Severity.String(), f.ID, f.Resource, f.Region, f.Title, f.Detail,
 			strconv.FormatFloat(f.EstMonthlyUSD, 'f', 2, 64), f.Fix,
 		}
-		if err := cw.Write(rec); err != nil {
+		if err := cw.Write(csvexport.SanitizeRow(rec)); err != nil {
 			return err
 		}
 	}

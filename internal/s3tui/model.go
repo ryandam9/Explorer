@@ -401,6 +401,11 @@ func authDisplayInfo(cfg *config.AWSConfig) string {
 // NewModel
 // ---------------------------------------------------------------------------
 
+// Version is the build version shown in the TUI header. cmd sets it from the
+// same ldflags-injected value that `aws_explorer --version` reports so the
+// header can't drift from the real binary; it defaults to "dev".
+var Version = "dev"
+
 func NewModel(ctx context.Context, awsCfg *config.AWSConfig, region, bucket, prefix, themeName string, allowDelete bool, endpointURL, configPath string, cfg *config.Config) (*Model, error) {
 	client, err := NewS3Client(ctx, awsCfg, region, endpointURL)
 	if err != nil {
@@ -960,6 +965,21 @@ func (m *Model) initPreviewViewport(content string, err error) {
 	}
 }
 
+// accessDeniedCodes are the error codes S3/STS return when the caller lacks a
+// required privilege. Kept in one place so the denied-vs-empty distinction is
+// applied consistently.
+var accessDeniedCodes = []string{"AccessDenied", "AccessDeniedException", "UnauthorizedOperation", "AuthorizationError"}
+
+// listBucketsErrorStatus turns a failed s3:ListBuckets into a user-facing status
+// line. A denial names the exact missing privilege so it can't be mistaken for
+// "zero buckets" (CLAUDE.md §6a/§8: denied ≠ empty).
+func listBucketsErrorStatus(err error) string {
+	if hasAPIErrorCode(err, accessDeniedCodes...) {
+		return "Could not list buckets: missing s3:ListAllMyBuckets permission (access denied)"
+	}
+	return "Could not list buckets: " + summarizeS3Error(err)
+}
+
 func (m *Model) loadBuckets() tea.Cmd {
 	// Reset for a clean run (handles refresh too).
 	m.loading = true
@@ -969,17 +989,18 @@ func (m *Model) loadBuckets() tea.Cmd {
 
 	// s3:ListBuckets is a global call that returns every bucket the account
 	// owns, each tagged with its region — so a single request replaces the old
-	// per-region scan. Access-denied is reported as an empty list (the IAM hint
-	// is shown by the handler) rather than a hard error.
+	// per-region scan. A denial is carried through as an error (see
+	// listBucketsErrorStatus) rather than swallowed into an empty list, so the
+	// user can tell "no buckets" from "missing s3:ListAllMyBuckets" (§6a/§8).
 	client := m.client
 	return func() tea.Msg {
 		slog.Info("Listing S3 buckets")
 		buckets, err := client.ListBuckets()
-		if err != nil && hasAPIErrorCode(err, "AccessDenied", "AccessDeniedException",
-			"UnauthorizedOperation", "AuthorizationError") {
-			return bucketsScannedMsg{}
+		if err != nil {
+			slog.Warn("ListBuckets failed", "err", err)
+		} else {
+			slog.Info("Listed S3 buckets", "count", len(buckets))
 		}
-		slog.Info("Listed S3 buckets", "count", len(buckets))
 		return bucketsScannedMsg{buckets: buckets, err: err}
 	}
 }
@@ -1973,9 +1994,9 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if m.state == stateObjectList {
 				m.showVersions = !m.showVersions
 				if m.showVersions {
-					m.statusMsg = "Versions: ON (visual indicator only)"
+					m.statusMsg = "Versions badge: ON (display only — object version listing is not yet implemented)"
 				} else {
-					m.statusMsg = "Versions: OFF"
+					m.statusMsg = "Versions badge: OFF"
 				}
 			}
 
@@ -2166,7 +2187,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case bucketsScannedMsg:
 		m.loading = false
 		if msg.err != nil {
-			m.statusMsg = "Could not list buckets: " + summarizeS3Error(msg.err)
+			m.statusMsg = listBucketsErrorStatus(msg.err)
 			break
 		}
 		m.allBucketRows = m.allBucketRows[:0]
@@ -2440,7 +2461,7 @@ func (m *Model) View() string {
 
 	var content string
 
-	headerText := "S3 TUI v1.3.0"
+	headerText := "S3 TUI " + Version
 	if info := authDisplayInfo(m.awsCfg); info != "" {
 		headerText += "   " + info
 	}
@@ -3150,27 +3171,32 @@ func (m *Model) presignedURLView() string {
 
 func (m *Model) deleteConfirmView() string {
 	width := min(70, max(40, m.width-12))
-	errLine := ""
-	if m.deleteConfirmErrMsg != "" {
-		errLine = ui.ErrorStyle().Render("  ✗ " + m.deleteConfirmErrMsg)
+	// Spell out exactly what will be removed — bucket, region and key — so a
+	// destructive action can't be misread (CLAUDE.md §14). Region matters because
+	// buckets in the listing can live in a different region than the active one.
+	regionLabel := m.region
+	if regionLabel == "" || regionLabel == regionPending {
+		regionLabel = "(unknown)"
 	}
 	rows := []string{
-		ui.BoldStyle().Render(fmt.Sprintf("DELETE OBJECT: %s", m.deleteKey)),
+		ui.BoldStyle().Render("DELETE OBJECT"),
+		"",
+		ui.MutedStyle().Render("Bucket:  ") + m.bucket,
+		ui.MutedStyle().Render("Region:  ") + regionLabel,
+		ui.MutedStyle().Render("Key:     ") + m.deleteKey,
 		"",
 		lipgloss.NewStyle().Foreground(lipgloss.Color(ui.ColorError())).Render("This action is PERMANENT and cannot be undone."),
 		"",
 		m.deleteConfirm.View(),
 	}
-	if errLine != "" {
-		rows = append(rows, errLine)
+	if m.deleteConfirmErrMsg != "" {
+		rows = append(rows, ui.ErrorStyle().Render("  ✗ "+m.deleteConfirmErrMsg))
 	}
 	rows = append(rows, "", ui.MutedStyle().Render("Type 'delete' and press Enter to confirm. Esc to cancel."))
 	content := lipgloss.JoinVertical(lipgloss.Left, rows...)
-	h := 10
-	if errLine != "" {
-		h = 12
-	}
-	return ui.ModalStyle(width, h).Render(content)
+	// Size the modal to the rendered content so added context lines can't clip
+	// the confirmation input off the bottom (CLAUDE.md §9).
+	return ui.ModalStyle(width, lipgloss.Height(content)).Render(content)
 }
 
 // s3AboutText explains what the S3 browser is for, shown in the About overlay
@@ -3234,7 +3260,7 @@ func (m *Model) helpView() string {
 			"  g                  Generate presigned URL (1 hour)",
 			"  D                  Download object (to app.downloadDir, default current dir)",
 			"  f                  Toggle flat mode (show all objects)",
-			"  v                  Toggle versions indicator",
+			"  v                  Toggle versions badge (display only; version listing not implemented)",
 			"  s                  Cycle sort column",
 			"  R                  Reverse sort direction",
 			"  L                  Load more objects (when the listing is truncated)",

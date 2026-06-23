@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"context"
+	"fmt"
 	"log/slog"
 	"os"
 
@@ -27,6 +28,9 @@ func SilenceScanLogs() {
 	if path := os.Getenv("AWS_EXPLORER_LOG"); path != "" {
 		if f, err := os.OpenFile(path, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o644); err == nil {
 			handlers = append(handlers, slog.NewJSONHandler(f, nil))
+		} else {
+			// File logging was explicitly requested — don't silently disable it.
+			fmt.Fprintf(os.Stderr, "warning: AWS_EXPLORER_LOG=%s could not be opened, file logging disabled: %v\n", path, err)
 		}
 	}
 	slog.SetDefault(slog.New(fanout(handlers)))
