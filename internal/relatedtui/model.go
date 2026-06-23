@@ -249,12 +249,12 @@ func (mm *m) handleKey(msg tea.KeyMsg) []tea.Cmd {
 		}
 	case "o":
 		if r, ok := mm.selected(); ok {
-			if url, okURL := consolelink.URL(mm.resourceOf(r)); okURL {
+			if url, kind, okURL := consoleLinkFor(mm.resourceOf(r)); okURL {
 				_ = clipboard.WriteAll(url)
 				if consolelink.CanOpenBrowser() && consolelink.Open(url) == nil {
-					mm.toast = "Opened in browser · copied console URL"
+					mm.toast = "Opened in browser · copied " + kind
 				} else {
-					mm.toast = "Copied console URL"
+					mm.toast = "Copied " + kind
 				}
 			} else {
 				mm.toast = "No console link for this resource type"
@@ -317,6 +317,23 @@ func (mm *m) resourceOf(l xref.Link) model.Resource {
 		r.ARN = l.ID
 	}
 	return r
+}
+
+// consoleLinkFor resolves the best console URL for a row. A deep link is ideal,
+// but when the resource type has no deep-link builder we still fall back to an
+// ARN search rather than telling the user there's no link at all (#387). kind
+// is the noun for the toast ("console URL" vs "console search URL"); ok is false
+// only when nothing useful (deep link or ARN search) can be built.
+func consoleLinkFor(r model.Resource) (url, kind string, ok bool) {
+	u, deep := consolelink.URL(r)
+	switch {
+	case deep:
+		return u, "console URL", true
+	case r.ARN != "":
+		return u, "console search URL", true
+	default:
+		return "", "", false
+	}
 }
 
 func isARN(s string) bool { return len(s) > 4 && s[:4] == "arn:" }
