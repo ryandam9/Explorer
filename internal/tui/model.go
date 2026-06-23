@@ -3717,19 +3717,32 @@ func (m tuiModel) jumpToRelatedCmd(res model.Resource) tea.Cmd {
 	if err != nil {
 		return func() tea.Msg { return relatedJumpDoneMsg{err: err} }
 	}
-	args := []string{"related", target, "--tui"}
-	if res.Region != "" && res.Region != "global" {
-		args = append(args, "--region", res.Region)
-	}
-	if m.cfg != nil && m.cfg.AWS.Profile != "" {
-		args = append(args, "--profile", m.cfg.AWS.Profile)
-	}
-	if cp := ui.ConfigArgPath(m.configPath); cp != "" {
-		args = append(args, "--config", cp)
-	}
+	args := relatedJumpArgs(m.cfg, m.configPath, res)
 	return tea.ExecProcess(exec.Command(self, args...), func(err error) tea.Msg {
 		return relatedJumpDoneMsg{err: err}
 	})
+}
+
+// relatedJumpArgs builds the child `related … --tui` argv, preserving the
+// summary session's scope. The all-regions case is the important one (#383):
+// without it an all-regions session silently narrows to the selected
+// resource's single region, dropping cross-region/global references. Only pin
+// --region when the session is not scanning all regions.
+func relatedJumpArgs(cfg *config.Config, configPath string, res model.Resource) []string {
+	args := []string{"related", relatedTarget(res), "--tui"}
+	switch {
+	case cfg != nil && cfg.AWS.AllRegions:
+		args = append(args, "--all-regions")
+	case res.Region != "" && res.Region != "global":
+		args = append(args, "--region", res.Region)
+	}
+	if cfg != nil && cfg.AWS.Profile != "" {
+		args = append(args, "--profile", cfg.AWS.Profile)
+	}
+	if cp := ui.ConfigArgPath(configPath); cp != "" {
+		args = append(args, "--config", cp)
+	}
+	return args
 }
 
 func (m tuiModel) fetchLogsCmd(res model.Resource, logGroupName string) tea.Cmd {
