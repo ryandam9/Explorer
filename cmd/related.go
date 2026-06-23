@@ -24,6 +24,7 @@ var (
 	relatedDepth     int
 	relatedDirection string
 	relatedTUI       bool
+	relatedShowPaths string
 )
 
 var relatedCmd = &cobra.Command{
@@ -65,6 +66,10 @@ This generalizes 'whereused' (which answers only the "used by" direction).`,
 	Args: cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		showUses, showUsedBy, err := parseDirection(relatedDirection)
+		if err != nil {
+			return err
+		}
+		allPaths, err := parseShowPaths(relatedShowPaths)
 		if err != nil {
 			return err
 		}
@@ -118,7 +123,7 @@ This generalizes 'whereused' (which answers only the "used by" direction).`,
 		output.PrintErrors(os.Stderr, errs)
 		warnAmbiguousTarget(os.Stderr, args[0], edges)
 
-		result := xref.Related(args[0], xref.BuildForwardIndex(edges), xref.BuildIndex(edges), depth).WithCollectionStatus(errs)
+		result := xref.Related(args[0], xref.BuildForwardIndex(edges), xref.BuildIndex(edges), depth, allPaths).WithCollectionStatus(errs)
 		if err := xref.RenderRelated(os.Stdout, result, outputFormat, noHeader, showUses, showUsedBy, result.Partial); err != nil {
 			return fmt.Errorf("rendering report: %w", err)
 		}
@@ -158,6 +163,19 @@ func relatedTUIFlagError(tui, depthSet, directionSet bool) error {
 	return nil
 }
 
+// parseShowPaths maps the --show-paths flag to whether every distinct path to a
+// resource is kept (true) or only the shortest (false, the default).
+func parseShowPaths(s string) (allPaths bool, err error) {
+	switch strings.ToLower(strings.TrimSpace(s)) {
+	case "", "shortest":
+		return false, nil
+	case "all":
+		return true, nil
+	default:
+		return false, fmt.Errorf("invalid --show-paths %q; want shortest or all", s)
+	}
+}
+
 // parseDirection maps the --direction flag to which sections to show.
 func parseDirection(d string) (showUses, showUsedBy bool, err error) {
 	switch strings.ToLower(strings.TrimSpace(d)) {
@@ -176,5 +194,6 @@ func init() {
 	relatedCmd.Flags().IntVar(&relatedDepth, "depth", 1, fmt.Sprintf("how many hops to follow (1-%d)", relatedMaxDepth))
 	relatedCmd.Flags().StringVar(&relatedDirection, "direction", "both", "which links to show: both, uses, usedby")
 	relatedCmd.Flags().BoolVar(&relatedTUI, "tui", false, "open the interactive related-resources explorer")
+	relatedCmd.Flags().StringVar(&relatedShowPaths, "show-paths", "shortest", "for multi-hop results: shortest (one path per resource) or all")
 	rootCmd.AddCommand(relatedCmd)
 }

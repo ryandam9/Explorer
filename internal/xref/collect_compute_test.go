@@ -77,12 +77,12 @@ func TestEventSourceEdge_ResolvesBothDirections(t *testing.T) {
 	fwd, rev := BuildForwardIndex(edges), BuildIndex(edges)
 
 	// related(queue).UsedBy → the Lambda
-	q := Related("arn:aws:sqs:us-east-1:111:orders", fwd, rev, 1)
+	q := Related("arn:aws:sqs:us-east-1:111:orders", fwd, rev, 1, false)
 	if len(q.UsedBy) != 1 || q.UsedBy[0].Service != "lambda" {
 		t.Fatalf("queue.UsedBy = %+v", q.UsedBy)
 	}
 	// related(lambda).Uses → the queue
-	l := Related("arn:aws:lambda:us-east-1:111:function:worker", fwd, rev, 1)
+	l := Related("arn:aws:lambda:us-east-1:111:function:worker", fwd, rev, 1, false)
 	if len(l.Uses) != 1 || l.Uses[0].Service != "sqs" {
 		t.Fatalf("lambda.Uses = %+v", l.Uses)
 	}

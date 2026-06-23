@@ -36,6 +36,9 @@ type RelatedResult struct {
 	Uses         []Link   `json:"uses"`  // forward: resources the target references
 	UsedBy       []Link   `json:"used_by"`
 	CheckedTypes []string `json:"checked_types"` // reverse-direction scope (recognized kinds)
+	// AllPaths is a render hint (not data): when set, the table shows the full
+	// relationship path so multiple paths to one resource are distinguishable.
+	AllPaths bool `json:"-"`
 	// Partial/Errors carry the best-effort collection status into structured
 	// output (§6a): a script reading JSON must be able to tell "no relationships"
 	// from "some collectors failed", which stderr alone doesn't convey once the
@@ -75,7 +78,10 @@ func BuildForwardIndex(edges []Edge) map[string][]Edge {
 
 // Related answers the bidirectional query for input up to maxDepth hops. fwdIdx
 // and revIdx come from BuildForwardIndex and BuildIndex over the same edges.
-func Related(input string, fwdIdx map[string][]Edge, revIdx map[string][]Reference, maxDepth int) RelatedResult {
+// When allPaths is set, a resource reachable by several distinct relationship
+// paths is emitted once per path (otherwise only the shortest path is kept) —
+// the levers behind --show-paths (#388).
+func Related(input string, fwdIdx map[string][]Edge, revIdx map[string][]Reference, maxDepth int, allPaths bool) RelatedResult {
 	if maxDepth < 1 {
 		maxDepth = 1
 	}
@@ -84,9 +90,10 @@ func Related(input string, fwdIdx map[string][]Edge, revIdx map[string][]Referen
 	return RelatedResult{
 		Target:       target,
 		Depth:        maxDepth,
-		Uses:         walkForward(ids, fwdIdx, maxDepth),
-		UsedBy:       walkReverse(ids, revIdx, maxDepth),
+		Uses:         walkForward(ids, fwdIdx, maxDepth, allPaths),
+		UsedBy:       walkReverse(ids, revIdx, maxDepth, allPaths),
 		CheckedTypes: CheckedTypes(target.Kind),
+		AllPaths:     allPaths,
 	}
 }
 
@@ -139,7 +146,7 @@ func queryIdentifiers(input string) []string {
 // what the queried resource references, hop 2 is what those reference, and so
 // on. Rows are deduplicated by resource+relationship and cycles are guarded by
 // a visited set over both identifier forms.
-func walkForward(starts []string, fwdIdx map[string][]Edge, maxDepth int) []Link {
+func walkForward(starts []string, fwdIdx map[string][]Edge, maxDepth int, allPaths bool) []Link {
 	visited := newVisited(starts)
 	rowSeen := make(map[string]bool)
 	var out []Link
@@ -151,7 +158,7 @@ func walkForward(starts []string, fwdIdx map[string][]Edge, maxDepth int) []Link
 			for _, e := range lookupEdges(fwdIdx, node.id) {
 				ref := targetReference(e)
 				path := joinPath(node.path, e.From.Via)
-				if rk := rowKey(ref); !rowSeen[rk] {
+				if rk := dedupeKey(ref, path, allPaths); !rowSeen[rk] {
 					rowSeen[rk] = true
 					out = append(out, Link{Reference: ref, Depth: depth, Path: path})
 				}
@@ -168,7 +175,7 @@ func walkForward(starts []string, fwdIdx map[string][]Edge, maxDepth int) []Link
 
 // walkReverse mirrors walkForward over the reverse index: hop 1 is what
 // references the queried resource, hop 2 is what references those, and so on.
-func walkReverse(starts []string, revIdx map[string][]Reference, maxDepth int) []Link {
+func walkReverse(starts []string, revIdx map[string][]Reference, maxDepth int, allPaths bool) []Link {
 	visited := newVisited(starts)
 	rowSeen := make(map[string]bool)
 	var out []Link
@@ -179,7 +186,7 @@ func walkReverse(starts []string, revIdx map[string][]Reference, maxDepth int) [
 		for _, node := range frontier {
 			for _, r := range lookupRefs(revIdx, node.id) {
 				path := joinPath(node.path, r.Via)
-				if rk := rowKey(r); !rowSeen[rk] {
+				if rk := dedupeKey(r, path, allPaths); !rowSeen[rk] {
 					rowSeen[rk] = true
 					out = append(out, Link{Reference: r, Depth: depth, Path: path})
 				}
@@ -192,6 +199,17 @@ func walkReverse(starts []string, revIdx map[string][]Reference, maxDepth int) [
 	}
 	SortLinks(out)
 	return out
+}
+
+// dedupeKey is the row-dedup key for a walk. By default it's the resource +
+// immediate relationship (shortest path wins); with allPaths the full path is
+// folded in so a resource reachable by several distinct paths is kept once per
+// path (#388). The cycle guard (visited) is independent, so this never loops.
+func dedupeKey(ref Reference, path string, allPaths bool) string {
+	if allPaths {
+		return rowKey(ref) + "\x00" + path
+	}
+	return rowKey(ref)
 }
 
 // --- walk helpers -------------------------------------------------------------

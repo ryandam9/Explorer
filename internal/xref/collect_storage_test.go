@@ -149,12 +149,12 @@ func TestS3BucketEdge_ResolvesBothDirections(t *testing.T) {
 	rev := BuildIndex(edges)
 
 	// related(bucket).Uses → the Lambda
-	bucket := Related("arn:aws:s3:::media", fwd, rev, 1)
+	bucket := Related("arn:aws:s3:::media", fwd, rev, 1, false)
 	if len(bucket.Uses) != 1 || bucket.Uses[0].Service != "lambda" {
 		t.Fatalf("bucket.Uses = %+v", bucket.Uses)
 	}
 	// related(lambda).UsedBy → the bucket
-	lam := Related("arn:aws:lambda:us-east-1:111:function:thumb", fwd, rev, 1)
+	lam := Related("arn:aws:lambda:us-east-1:111:function:thumb", fwd, rev, 1, false)
 	if len(lam.UsedBy) != 1 || lam.UsedBy[0].Service != "s3" {
 		t.Fatalf("lambda.UsedBy = %+v", lam.UsedBy)
 	}

@@ -161,7 +161,7 @@ func (mm *m) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 // recompute refreshes the result and table rows for the current centered
 // resource (in memory — no AWS call).
 func (mm *m) recompute() {
-	mm.result = xref.Related(mm.current(), mm.fwd, mm.rev, 1)
+	mm.result = xref.Related(mm.current(), mm.fwd, mm.rev, 1, false)
 	mm.usesTbl.SetRows(linkRows(mm.result.Uses))
 	mm.usesTbl.SetCursor(0)
 	mm.usedByTbl.SetRows(linkRows(mm.result.UsedBy))

@@ -48,13 +48,13 @@ func renderRelatedTable(w io.Writer, res RelatedResult, noHeader, showUses, show
 	}
 
 	if showUses {
-		if err := renderLinkSection(w, "Uses (depends on) →", res.Uses, res.Depth, partial); err != nil {
+		if err := renderLinkSection(w, "Uses (depends on) →", res.Uses, res.Depth, partial, res.AllPaths); err != nil {
 			return err
 		}
 		fmt.Fprintf(w, "\n%s\n\n", relatedCaveat)
 	}
 	if showUsedBy {
-		if err := renderLinkSection(w, "Used by ←", res.UsedBy, res.Depth, partial); err != nil {
+		if err := renderLinkSection(w, "Used by ←", res.UsedBy, res.Depth, partial, res.AllPaths); err != nil {
 			return err
 		}
 		if len(res.CheckedTypes) > 0 {
@@ -81,7 +81,7 @@ func unknownTargetNote(t Target) string {
 		"ACM certificate, security group); only edges to/from it are shown."
 }
 
-func renderLinkSection(w io.Writer, title string, links []Link, maxDepth int, partial bool) error {
+func renderLinkSection(w io.Writer, title string, links []Link, maxDepth int, partial, showPath bool) error {
 	fmt.Fprintf(w, "%s\n", title)
 	if len(links) == 0 {
 		if partial {
@@ -91,18 +91,25 @@ func renderLinkSection(w io.Writer, title string, links []Link, maxDepth int, pa
 		}
 		return nil
 	}
+	// With --show-paths all the same resource can appear via several distinct
+	// paths; show the full path chain (and label the column PATH) so the rows
+	// are visually distinguishable rather than looking like duplicates (#388).
+	relHeader, rel := "VIA", func(l Link) string { return dash(l.Via) }
+	if showPath {
+		relHeader, rel = "PATH", func(l Link) string { return dash(l.Path) }
+	}
 	tw := tabwriter.NewWriter(w, 0, 0, 2, ' ', 0)
 	if maxDepth > 1 {
-		fmt.Fprintf(tw, "SNO\tHOP\tSERVICE\tTYPE\tRESOURCE\tREGION\tVIA\n")
+		fmt.Fprintf(tw, "SNO\tHOP\tSERVICE\tTYPE\tRESOURCE\tREGION\t%s\n", relHeader)
 		for i, l := range links {
 			fmt.Fprintf(tw, "%d\t%s\t%s\t%s\t%s\t%s\t%s\n",
-				i+1, depthLabel(l.Depth), l.Service, l.Type, dash(refName(l.Reference)), dash(l.Region), dash(l.Via))
+				i+1, depthLabel(l.Depth), l.Service, l.Type, dash(refName(l.Reference)), dash(l.Region), rel(l))
 		}
 	} else {
-		fmt.Fprintf(tw, "SNO\tSERVICE\tTYPE\tRESOURCE\tREGION\tVIA\n")
+		fmt.Fprintf(tw, "SNO\tSERVICE\tTYPE\tRESOURCE\tREGION\t%s\n", relHeader)
 		for i, l := range links {
 			fmt.Fprintf(tw, "%d\t%s\t%s\t%s\t%s\t%s\n",
-				i+1, l.Service, l.Type, dash(refName(l.Reference)), dash(l.Region), dash(l.Via))
+				i+1, l.Service, l.Type, dash(refName(l.Reference)), dash(l.Region), rel(l))
 		}
 	}
 	return tw.Flush()
