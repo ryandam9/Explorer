@@ -194,61 +194,78 @@ func WhereUsed(target Target, index map[string][]Reference) Result {
 
 // CheckedTypes returns the human-readable reference categories that collection
 // scans for a given kind — the basis of the scoped "not referenced" answer.
-func CheckedTypes(kind Kind) []string {
-	switch kind {
-	case KindIAMRole:
-		return []string{
-			"Lambda execution roles",
-			"EC2 instance profiles",
-			"ECS task and execution roles",
-			"EKS cluster and node-group roles",
-			"IAM role trust policies",
-			"S3 bucket replication roles",
-			"Step Functions execution roles",
-			"KMS key policy principals",
-			"KMS key grants",
-			"RDS enhanced-monitoring roles",
-			"RDS cluster associated roles",
-			"Redshift cluster IAM roles",
+// checkedType is one reverse-direction reference category, tagged with the
+// collector service that provides it. The service tag lets a narrowed scan
+// (#393 --scan) drop the categories it didn't actually check, preserving the
+// honesty contract (§8): never claim a type was checked when its service was
+// skipped.
+type checkedType struct {
+	service string
+	label   string
+}
+
+var checkedTypesByKind = map[Kind][]checkedType{
+	KindIAMRole: {
+		{"lambda", "Lambda execution roles"},
+		{"ec2", "EC2 instance profiles"},
+		{"ecs", "ECS task and execution roles"},
+		{"eks", "EKS cluster and node-group roles"},
+		{"iam", "IAM role trust policies"},
+		{"s3", "S3 bucket replication roles"},
+		{"states", "Step Functions execution roles"},
+		{"kms", "KMS key policy principals"},
+		{"kms", "KMS key grants"},
+		{"rds", "RDS enhanced-monitoring roles"},
+		{"rds", "RDS cluster associated roles"},
+		{"redshift", "Redshift cluster IAM roles"},
+	},
+	KindKMSKey: {
+		{"ec2", "EBS volume encryption"},
+		{"rds", "RDS instance encryption"},
+		{"secretsmanager", "Secrets Manager secrets"},
+		{"sqs", "SQS queue encryption"},
+		{"lambda", "Lambda environment encryption"},
+		{"s3", "S3 bucket default encryption"},
+		{"efs", "EFS file system encryption"},
+		{"sns", "SNS topic encryption"},
+		{"kinesis", "Kinesis stream encryption"},
+		{"kms", "KMS aliases"},
+		{"dynamodb", "DynamoDB table encryption"},
+		{"elasticache", "ElastiCache encryption"},
+		{"redshift", "Redshift cluster encryption"},
+		{"observability", "CloudWatch log group encryption"},
+	},
+	KindACMCert: {
+		{"elbv2", "ELBv2 (ALB/NLB) listeners"},
+		{"networking", "CloudFront distribution viewer certificates"},
+	},
+	KindSecurityGroup: {
+		{"ec2", "Elastic network interface attachments"},
+		{"efs", "EFS mount target security groups"},
+		{"lambda", "Lambda VPC security groups"},
+		{"eks", "EKS cluster security groups"},
+		{"elbv2", "Load balancer security groups"},
+		{"apigateway", "API Gateway VPC link security groups"},
+		{"ec2-endpoints", "VPC endpoint security groups"},
+		{"rds", "RDS DB security groups"},
+		{"elasticache", "ElastiCache security groups"},
+		{"redshift", "Redshift cluster security groups"},
+	},
+}
+
+// CheckedTypes returns the full reverse-direction reference scope for a kind.
+func CheckedTypes(kind Kind) []string { return CheckedTypesFor(kind, nil) }
+
+// CheckedTypesFor returns the reference scope restricted to the scanned
+// services (nil = all services scanned).
+func CheckedTypesFor(kind Kind, services map[string]bool) []string {
+	var out []string
+	for _, ct := range checkedTypesByKind[kind] {
+		if services == nil || services[ct.service] {
+			out = append(out, ct.label)
 		}
-	case KindKMSKey:
-		return []string{
-			"EBS volume encryption",
-			"RDS instance encryption",
-			"Secrets Manager secrets",
-			"SQS queue encryption",
-			"Lambda environment encryption",
-			"S3 bucket default encryption",
-			"EFS file system encryption",
-			"SNS topic encryption",
-			"Kinesis stream encryption",
-			"KMS aliases",
-			"DynamoDB table encryption",
-			"ElastiCache encryption",
-			"Redshift cluster encryption",
-			"CloudWatch log group encryption",
-		}
-	case KindACMCert:
-		return []string{
-			"ELBv2 (ALB/NLB) listeners",
-			"CloudFront distribution viewer certificates",
-		}
-	case KindSecurityGroup:
-		return []string{
-			"Elastic network interface attachments",
-			"EFS mount target security groups",
-			"Lambda VPC security groups",
-			"EKS cluster security groups",
-			"Load balancer security groups",
-			"API Gateway VPC link security groups",
-			"VPC endpoint security groups",
-			"RDS DB security groups",
-			"ElastiCache security groups",
-			"Redshift cluster security groups",
-		}
-	default:
-		return nil
 	}
+	return out
 }
 
 // SortReferences orders references deterministically by service, type, region

@@ -69,7 +69,7 @@ This is the CLI generalization of the summary TUI's 'x' cross-reference.`,
 		// whereused is reverse-only at one hop: it asks "what references this",
 		// which never needs a role's own attached/inline policy edges. Skip the
 		// expensive per-role policy sweep (§7).
-		edges, errs := xref.Collect(ctx, eng.AWSConfig, regions, AppConfig.App.MaxConcurrency, timeout, false)
+		edges, errs := xref.Collect(ctx, eng.AWSConfig, regions, AppConfig.App.MaxConcurrency, timeout, false, nil)
 		output.PrintErrors(os.Stderr, errs)
 		warnAmbiguousTarget(os.Stderr, args[0], edges)
 

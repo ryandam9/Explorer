@@ -73,13 +73,21 @@ func withTimeout(ctx context.Context, d time.Duration) (context.Context, context
 // only needed when the query can land *on* a role (the target is a role, or a
 // multi-hop walk reaches one); for the common case — a non-role target at depth
 // 1 — it is pure waste, and run serially it caused the IAM deadline storm (§7).
-func Collect(ctx context.Context, baseCfg aws.Config, regions []string, maxConcurrency int, perCallTimeout time.Duration, includeRolePolicies bool) ([]Edge, []model.ExploreError) {
-	edges, errs, _ := CollectWithStats(ctx, baseCfg, regions, maxConcurrency, perCallTimeout, includeRolePolicies)
+func Collect(ctx context.Context, baseCfg aws.Config, regions []string, maxConcurrency int, perCallTimeout time.Duration, includeRolePolicies bool, services map[string]bool) ([]Edge, []model.ExploreError) {
+	edges, errs, _ := CollectWithStats(ctx, baseCfg, regions, maxConcurrency, perCallTimeout, includeRolePolicies, services)
 	return edges, errs
 }
 
+// wantService reports whether a collector should run under the active scan
+// profile. A nil set means "scan everything" (the full default, #393).
+func wantService(services map[string]bool, name string) bool {
+	return services == nil || services[name]
+}
+
 // CollectWithStats is Collect plus per-service timing for --debug-scan (#394).
-func CollectWithStats(ctx context.Context, baseCfg aws.Config, regions []string, maxConcurrency int, perCallTimeout time.Duration, includeRolePolicies bool) ([]Edge, []model.ExploreError, *ScanStats) {
+// services restricts which collectors run (nil = all) for the --scan profiles
+// (#393).
+func CollectWithStats(ctx context.Context, baseCfg aws.Config, regions []string, maxConcurrency int, perCallTimeout time.Duration, includeRolePolicies bool, services map[string]bool) ([]Edge, []model.ExploreError, *ScanStats) {
 	if maxConcurrency <= 0 {
 		maxConcurrency = 8
 	}
@@ -97,10 +105,12 @@ func CollectWithStats(ctx context.Context, baseCfg aws.Config, regions []string,
 		trustEdges []Edge
 		iamErrs    []model.ExploreError
 	)
-	stats.timed("iam", func() []Edge {
-		profiles, trustEdges, iamErrs = collectIAM(ctx, baseCfg, maxConcurrency, perCallTimeout, includeRolePolicies)
-		return nil
-	})
+	if wantService(services, "iam") {
+		stats.timed("iam", func() []Edge {
+			profiles, trustEdges, iamErrs = collectIAM(ctx, baseCfg, maxConcurrency, perCallTimeout, includeRolePolicies)
+			return nil
+		})
+	}
 
 	type result struct {
 		edges []Edge
@@ -113,7 +123,7 @@ func CollectWithStats(ctx context.Context, baseCfg aws.Config, regions []string,
 	for i, region := range regions {
 		i, region := i, region
 		g.Go(func() error {
-			edges, errs := collectRegion(ggctx, baseCfg, region, profiles, maxConcurrency, perCallTimeout, stats)
+			edges, errs := collectRegion(ggctx, baseCfg, region, profiles, maxConcurrency, perCallTimeout, stats, services)
 			results[i] = result{edges: edges, errs: errs}
 			return nil
 		})
@@ -131,20 +141,24 @@ func CollectWithStats(ctx context.Context, baseCfg aws.Config, regions []string,
 	// rather than in the per-region fan-out (§3).
 	var s3Edges []Edge
 	var s3Errs []model.ExploreError
-	stats.timed("s3", func() []Edge {
-		s3Edges, s3Errs = collectS3(ctx, baseCfg, regions, maxConcurrency, perCallTimeout)
-		return nil
-	})
+	if wantService(services, "s3") {
+		stats.timed("s3", func() []Edge {
+			s3Edges, s3Errs = collectS3(ctx, baseCfg, regions, maxConcurrency, perCallTimeout)
+			return nil
+		})
+	}
 	edges = append(edges, s3Edges...)
 	errs = append(errs, s3Errs...)
 
 	// CloudFront and Route 53 are global; collect them once (§3).
 	var netEdges []Edge
 	var netErrs []model.ExploreError
-	stats.timed("networking", func() []Edge {
-		netEdges, netErrs = collectGlobalNetworking(ctx, baseCfg, perCallTimeout)
-		return nil
-	})
+	if wantService(services, "networking") {
+		stats.timed("networking", func() []Edge {
+			netEdges, netErrs = collectGlobalNetworking(ctx, baseCfg, perCallTimeout)
+			return nil
+		})
+	}
 	edges = append(edges, netEdges...)
 	errs = append(errs, netErrs...)
 
@@ -310,7 +324,7 @@ func rawStrings(raw json.RawMessage) []string {
 
 // --- Per-region ---------------------------------------------------------------
 
-func collectRegion(ctx context.Context, baseCfg aws.Config, region string, profiles map[string][]string, maxConcurrency int, timeout time.Duration, stats *ScanStats) ([]Edge, []model.ExploreError) {
+func collectRegion(ctx context.Context, baseCfg aws.Config, region string, profiles map[string][]string, maxConcurrency int, timeout time.Duration, stats *ScanStats, services map[string]bool) ([]Edge, []model.ExploreError) {
 	ctx, cancel := withTimeout(ctx, timeout)
 	defer cancel()
 
@@ -348,6 +362,9 @@ func collectRegion(ctx context.Context, baseCfg aws.Config, region string, profi
 
 	var edges []Edge
 	for _, c := range collectors {
+		if !wantService(services, c.service) {
+			continue
+		}
 		edges = append(edges, stats.timed(c.service, c.fn)...)
 	}
 	return edges, rec.errs
