@@ -334,10 +334,11 @@ func collectRegion(ctx context.Context, baseCfg aws.Config, region string, profi
 
 	// Each collector is timed and attributed to its service so --debug-scan can
 	// show where the scan spends its time (#394).
-	collectors := []struct {
+	type regionCollector struct {
 		service string
 		fn      func() []Edge
-	}{
+	}
+	collectors := []regionCollector{
 		{"lambda", func() []Edge { return lambdaEdges(ctx, cfg, region, rec) }},
 		{"ec2", func() []Edge { return ec2Edges(ctx, cfg, region, profiles, rec) }},
 		{"rds", func() []Edge { return rdsEdges(ctx, cfg, region, rec) }},
@@ -360,13 +361,21 @@ func collectRegion(ctx context.Context, baseCfg aws.Config, region string, profi
 		{"observability", func() []Edge { return observabilityEdges(ctx, cfg, region, rec) }},
 	}
 
-	var edges []Edge
+	// Run the region's collectors concurrently (bounded). They previously ran
+	// sequentially under one shared region deadline, so a slow early service
+	// starved the ones after it and they all reported "context deadline
+	// exceeded" — even for a single-region scan. With the fan-out each service
+	// gets the full window in parallel, so one slow API no longer dooms the
+	// rest (§7). The shared recorder and ScanStats are concurrency-safe.
+	var active []regionCollector
 	for _, c := range collectors {
-		if !wantService(services, c.service) {
-			continue
+		if wantService(services, c.service) {
+			active = append(active, c)
 		}
-		edges = append(edges, stats.timed(c.service, c.fn)...)
 	}
+	edges := boundedEdges(ctx, active, maxConcurrency, rec, func(_ context.Context, c regionCollector, _ *recorder) []Edge {
+		return stats.timed(c.service, c.fn)
+	})
 	return edges, rec.errs
 }
 
