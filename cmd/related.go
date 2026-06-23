@@ -116,8 +116,8 @@ This generalizes 'whereused' (which answers only the "used by" direction).`,
 		edges, errs := xref.Collect(ctx, eng.AWSConfig, regions, AppConfig.App.MaxConcurrency, timeout, includeRolePolicies)
 		output.PrintErrors(os.Stderr, errs)
 
-		result := xref.Related(args[0], xref.BuildForwardIndex(edges), xref.BuildIndex(edges), depth)
-		if err := xref.RenderRelated(os.Stdout, result, outputFormat, noHeader, showUses, showUsedBy, len(errs) > 0); err != nil {
+		result := xref.Related(args[0], xref.BuildForwardIndex(edges), xref.BuildIndex(edges), depth).WithCollectionStatus(errs)
+		if err := xref.RenderRelated(os.Stdout, result, outputFormat, noHeader, showUses, showUsedBy, result.Partial); err != nil {
 			return fmt.Errorf("rendering report: %w", err)
 		}
 		return nil

@@ -3,7 +3,52 @@ package xref
 import (
 	"strings"
 	"testing"
+
+	"github.com/ryandam9/aws_explorer/internal/model"
 )
+
+func TestRelatedResult_WithCollectionStatus(t *testing.T) {
+	base := relatedOver(roleARN, 1)
+	if base.Partial || base.Errors != nil {
+		t.Fatalf("fresh result should not be partial: %+v", base)
+	}
+	withErrs := base.WithCollectionStatus([]model.ExploreError{
+		{Service: "iam", Region: "global", Code: "Throttling", Message: "rate exceeded"},
+	})
+	if !withErrs.Partial || len(withErrs.Errors) != 1 {
+		t.Errorf("expected partial with 1 error, got %+v", withErrs)
+	}
+	// No errors → not partial.
+	if got := base.WithCollectionStatus(nil); got.Partial {
+		t.Errorf("nil errors must not mark partial: %+v", got)
+	}
+}
+
+func TestRenderRelated_JSONCarriesPartialStatus(t *testing.T) {
+	res := relatedOver(roleARN, 1).WithCollectionStatus([]model.ExploreError{
+		{Service: "iam", Region: "global", Code: "Throttling", Message: "rate exceeded"},
+	})
+	var sb strings.Builder
+	if err := RenderRelated(&sb, res, "json", false, true, true, res.Partial); err != nil {
+		t.Fatalf("json: %v", err)
+	}
+	out := sb.String()
+	for _, want := range []string{`"partial": true`, `"errors"`, "rate exceeded"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("json missing %q:\n%s", want, out)
+		}
+	}
+
+	// A clean result must report partial:false and omit the errors array.
+	sb.Reset()
+	clean := relatedOver(roleARN, 1).WithCollectionStatus(nil)
+	if err := RenderRelated(&sb, clean, "json", false, true, true, clean.Partial); err != nil {
+		t.Fatalf("json clean: %v", err)
+	}
+	if !strings.Contains(sb.String(), `"partial": false`) || strings.Contains(sb.String(), `"errors"`) {
+		t.Errorf("clean json should be partial:false with no errors array:\n%s", sb.String())
+	}
+}
 
 const (
 	lambdaARN = "arn:aws:lambda:us-east-1:111111111111:function:checkout"

@@ -4,6 +4,8 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+
+	"github.com/ryandam9/aws_explorer/internal/model"
 )
 
 // This file generalizes the where-used engine (xref.go) into a bidirectional,
@@ -34,6 +36,20 @@ type RelatedResult struct {
 	Uses         []Link   `json:"uses"`  // forward: resources the target references
 	UsedBy       []Link   `json:"used_by"`
 	CheckedTypes []string `json:"checked_types"` // reverse-direction scope (recognized kinds)
+	// Partial/Errors carry the best-effort collection status into structured
+	// output (§6a): a script reading JSON must be able to tell "no relationships"
+	// from "some collectors failed", which stderr alone doesn't convey once the
+	// exit code is 0. The caller fills these from Collect's error return.
+	Partial bool                 `json:"partial"`
+	Errors  []model.ExploreError `json:"errors,omitempty"`
+}
+
+// WithCollectionStatus records the best-effort collection errors on the result
+// so structured renderers can flag a possibly-incomplete answer.
+func (r RelatedResult) WithCollectionStatus(errs []model.ExploreError) RelatedResult {
+	r.Partial = len(errs) > 0
+	r.Errors = errs
+	return r
 }
 
 // BuildForwardIndex maps a resource identifier to the edges originating from it,
