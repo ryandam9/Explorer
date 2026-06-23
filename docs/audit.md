@@ -1,8 +1,9 @@
 # Audit Usage
 
-`audit` scans the configured regions for findings in four categories —
-**cost/waste**, **security**, **IAM hygiene**, and **messaging plumbing**
-(all run by default; `--only cost,security,iam,messaging` narrows) — and
+`audit` scans the configured regions for findings in eight categories —
+**cost/waste**, **security**, **IAM hygiene**, **messaging plumbing**,
+**CloudTrail**, **Glue**, **EMR**, and **Lambda** (all run by default;
+`--only cost,security,iam,messaging,cloudtrail,glue,emr,lambda` narrows) — and
 prints them as a ranked table, with an estimated monthly cost per cost
 finding and a total at the bottom. Like everything else in the tool, the audit
 is **deterministic, read-only and best-effort**: a denied API call skips the
@@ -242,7 +243,7 @@ by them.
 
 | Flag | Default | Description |
 |------|---------|-------------|
-| `--only` | all | Restrict to finding categories (currently: `cost`); more categories are planned |
+| `--only` | all | Restrict to finding categories (`cost`, `security`, `iam`, `messaging`, `cloudtrail`, `glue`, `emr`, `lambda`) |
 | `--tui` | `false` | Explore the findings interactively instead of printing |
 | `--fail-on` | — | Exit with code 2 if findings at or above this severity exist: `critical`, `warning`, `info` |
 | `--ignore` | — | Suppress findings by check ID (e.g. `--ignore COST-EBS-002,COST-SNAP-001`); unknown IDs are rejected |
