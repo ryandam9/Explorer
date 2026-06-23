@@ -122,7 +122,7 @@ func (mm *m) collectCmd() tea.Cmd {
 		// whose policy edges should be visible — so include the per-role policy
 		// sweep. It is collected once at startup and the fan-out is now
 		// bounded-concurrent (§7), so this no longer storms.
-		edges, errs := xref.Collect(mm.ctx, mm.cfg, mm.regions, mm.maxConc, mm.timeout, true)
+		edges, errs := xref.Collect(mm.ctx, mm.cfg, mm.regions, mm.maxConc, mm.timeout, true, nil)
 		return edgesMsg{edges: edges, errs: errs}
 	}
 }

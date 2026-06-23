@@ -32,6 +32,7 @@ var (
 	relatedFormat      string
 	relatedRisk        bool
 	relatedExplainScan bool
+	relatedScan        string
 )
 
 var relatedCmd = &cobra.Command{
@@ -81,6 +82,10 @@ This generalizes 'whereused' (which answers only the "used by" direction).`,
 			return err
 		}
 		outFormat, err := relatedOutputFormat(outputFormat, relatedFormat)
+		if err != nil {
+			return err
+		}
+		scanServices, err := xref.ParseScan(relatedScan)
 		if err != nil {
 			return err
 		}
@@ -141,7 +146,7 @@ This generalizes 'whereused' (which answers only the "used by" direction).`,
 		// Short-lived cache (#393): reuse a recent scan of this scope when
 		// --cache-ttl is set, unless --refresh forces a live scan. Role-policy
 		// edges change the graph shape, so they're part of the cache key.
-		cacheKey := xref.CacheKey(version, eng.AccountID, AppConfig.AWS.Profile, append(regions, fmt.Sprintf("rp=%t", includeRolePolicies)))
+		cacheKey := xref.CacheKey(version, eng.AccountID, AppConfig.AWS.Profile, append(regions, fmt.Sprintf("rp=%t", includeRolePolicies), "scan="+relatedScan))
 		cachePath, _ := xref.CachePath(cacheKey)
 
 		var edges []xref.Edge
@@ -156,7 +161,7 @@ This generalizes 'whereused' (which answers only the "used by" direction).`,
 		if !cached {
 			fmt.Fprintf(os.Stderr, "Scanning %d region(s) for resources related to %s…\n", len(regions), args[0])
 			var stats *xref.ScanStats
-			edges, errs, stats = xref.CollectWithStats(ctx, eng.AWSConfig, regions, AppConfig.App.MaxConcurrency, timeout, includeRolePolicies)
+			edges, errs, stats = xref.CollectWithStats(ctx, eng.AWSConfig, regions, AppConfig.App.MaxConcurrency, timeout, includeRolePolicies, scanServices)
 			if relatedDebugScan {
 				fmt.Fprintln(os.Stderr, "Scan timings (per service, slowest first):")
 				for _, line := range stats.Lines() {
@@ -171,6 +176,12 @@ This generalizes 'whereused' (which answers only the "used by" direction).`,
 		warnAmbiguousTarget(os.Stderr, args[0], edges)
 
 		result := xref.Related(args[0], xref.BuildForwardIndex(edges), xref.BuildIndex(edges), depth, allPaths).WithCollectionStatus(errs)
+		if scanServices != nil {
+			// Honesty (§8): a narrowed scan must narrow what it claims to have
+			// checked, and say so.
+			result.CheckedTypes = xref.CheckedTypesFor(result.Target.Kind, scanServices)
+			fmt.Fprintf(os.Stderr, "Scan limited to --scan %s; coverage is narrower than a full scan.\n", relatedScan)
+		}
 		if err := xref.RenderRelated(os.Stdout, result, outFormat, noHeader, showUses, showUsedBy, result.Partial); err != nil {
 			return fmt.Errorf("rendering report: %w", err)
 		}
@@ -300,5 +311,6 @@ func init() {
 	relatedCmd.Flags().StringVar(&relatedFormat, "format", "", "graph export format: dot or mermaid (overrides -o)")
 	relatedCmd.Flags().BoolVar(&relatedRisk, "risk", false, "print a deletion-risk estimate from the blast radius (table output)")
 	relatedCmd.Flags().BoolVar(&relatedExplainScan, "explain-scan", false, "list the reference types checked for this target, without scanning AWS")
+	relatedCmd.Flags().StringVar(&relatedScan, "scan", "full", "scan scope: full|fast|security|eventing|network, or an explicit comma list of services")
 	rootCmd.AddCommand(relatedCmd)
 }
