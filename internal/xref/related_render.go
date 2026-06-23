@@ -51,7 +51,7 @@ func renderRelatedTable(w io.Writer, res RelatedResult, noHeader, showUses, show
 		if err := renderLinkSection(w, "Uses (depends on) →", res.Uses, res.Depth, partial, res.AllPaths); err != nil {
 			return err
 		}
-		fmt.Fprintf(w, "\n%s\n\n", relatedCaveat)
+		fmt.Fprintln(w)
 	}
 	if showUsedBy {
 		if err := renderLinkSection(w, "Used by ←", res.UsedBy, res.Depth, partial, res.AllPaths); err != nil {
@@ -60,8 +60,11 @@ func renderRelatedTable(w io.Writer, res RelatedResult, noHeader, showUses, show
 		if len(res.CheckedTypes) > 0 {
 			fmt.Fprintf(w, "\nReference types checked: %s.\n", strings.Join(res.CheckedTypes, ", "))
 		}
-		fmt.Fprintf(w, "\n%s\n", relatedCaveat)
+		fmt.Fprintln(w)
 	}
+	// The honesty caveat applies to the whole report — print it once at the
+	// bottom rather than after each direction (#390).
+	fmt.Fprintf(w, "%s\n", relatedCaveat)
 	return nil
 }
 
