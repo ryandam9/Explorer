@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"net/url"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
@@ -33,6 +34,7 @@ import (
 type recorder struct {
 	region string
 	errs   []model.ExploreError
+	seen   map[string]bool // collapses identical errors (§7 deadline/throttle storm)
 }
 
 func (r *recorder) record(service string, err error) {
@@ -40,6 +42,16 @@ func (r *recorder) record(service string, err error) {
 		return
 	}
 	code, msg := awserr.Classify(err, service, "")
+	// A per-item sweep (e.g. ~55 roles all hitting the same deadline) otherwise
+	// emits one identical line per item; collapse to a single actionable error.
+	key := service + "|" + r.region + "|" + code + "|" + msg
+	if r.seen == nil {
+		r.seen = map[string]bool{}
+	}
+	if r.seen[key] {
+		return
+	}
+	r.seen[key] = true
 	r.errs = append(r.errs, model.ExploreError{Service: service, Region: r.region, Code: code, Message: msg})
 }
 
@@ -53,7 +65,12 @@ func withTimeout(ctx context.Context, d time.Duration) (context.Context, context
 // Collect gathers reference edges across the given regions (plus the global
 // IAM roles and instance profiles) and returns them with any collection
 // errors. The result feeds BuildIndex.
-func Collect(ctx context.Context, baseCfg aws.Config, regions []string, maxConcurrency int, perCallTimeout time.Duration) ([]Edge, []model.ExploreError) {
+// includeRolePolicies controls the expensive part of the global IAM sweep: the
+// per-role attached/inline policy lookup (two paginated calls per role). It is
+// only needed when the query can land *on* a role (the target is a role, or a
+// multi-hop walk reaches one); for the common case — a non-role target at depth
+// 1 — it is pure waste, and run serially it caused the IAM deadline storm (§7).
+func Collect(ctx context.Context, baseCfg aws.Config, regions []string, maxConcurrency int, perCallTimeout time.Duration, includeRolePolicies bool) ([]Edge, []model.ExploreError) {
 	if maxConcurrency <= 0 {
 		maxConcurrency = 8
 	}
@@ -63,10 +80,9 @@ func Collect(ctx context.Context, baseCfg aws.Config, regions []string, maxConcu
 
 	// IAM is global; resolve instance-profile → role mappings and trust-policy
 	// edges once, up front, so per-region EC2 collection can attribute instance
-	// profiles to their roles.
-	gctx, gcancel := withTimeout(ctx, perCallTimeout)
-	profiles, trustEdges, iamErrs := collectIAM(gctx, baseCfg)
-	gcancel()
+	// profiles to their roles. collectIAM manages its own per-call timeouts and
+	// bounds the per-role policy fan-out concurrency.
+	profiles, trustEdges, iamErrs := collectIAM(ctx, baseCfg, maxConcurrency, perCallTimeout, includeRolePolicies)
 
 	type result struct {
 		edges []Edge
@@ -109,46 +125,113 @@ func Collect(ctx context.Context, baseCfg aws.Config, regions []string, maxConcu
 
 // --- Global IAM ---------------------------------------------------------------
 
-// collectIAM returns instance-profile → role ARNs and the trust-policy edges
-// (roles whose AssumeRole policy names another principal).
-func collectIAM(ctx context.Context, baseCfg aws.Config) (map[string][]string, []Edge, []model.ExploreError) {
+// collectIAM returns instance-profile → role ARNs and the role edges: always
+// the trust-policy edges (cheap — the trust document is already on each role),
+// and, when includePolicies is set, each role's attached/inline policy edges.
+// The policy lookup is the expensive part (two paginated calls per role), so it
+// is fanned out with bounded concurrency and a per-role timeout rather than run
+// serially under one deadline (the #154-style storm, §7).
+func collectIAM(ctx context.Context, baseCfg aws.Config, maxConcurrency int, perCallTimeout time.Duration, includePolicies bool) (map[string][]string, []Edge, []model.ExploreError) {
+	if maxConcurrency <= 0 {
+		maxConcurrency = 8
+	}
 	rec := &recorder{region: "global"}
 	client := awsiam.NewFromConfig(baseCfg)
 	profiles := map[string][]string{}
 
-	pp := awsiam.NewListInstanceProfilesPaginator(client, &awsiam.ListInstanceProfilesInput{})
-	for pp.HasMorePages() {
-		page, err := pp.NextPage(ctx)
-		if err != nil {
-			rec.record("iam", err)
-			break
-		}
-		for _, p := range page.InstanceProfiles {
-			arn := aws.ToString(p.Arn)
-			for _, role := range p.Roles {
-				profiles[arn] = append(profiles[arn], aws.ToString(role.Arn))
+	func() {
+		lctx, cancel := withTimeout(ctx, perCallTimeout)
+		defer cancel()
+		pp := awsiam.NewListInstanceProfilesPaginator(client, &awsiam.ListInstanceProfilesInput{})
+		for pp.HasMorePages() {
+			page, err := pp.NextPage(lctx)
+			if err != nil {
+				rec.record("iam", err)
+				break
+			}
+			for _, p := range page.InstanceProfiles {
+				arn := aws.ToString(p.Arn)
+				for _, role := range p.Roles {
+					profiles[arn] = append(profiles[arn], aws.ToString(role.Arn))
+				}
 			}
 		}
-	}
+	}()
 
 	var edges []Edge
-	rp := awsiam.NewListRolesPaginator(client, &awsiam.ListRolesInput{})
-	for rp.HasMorePages() {
-		page, err := rp.NextPage(ctx)
-		if err != nil {
-			rec.record("iam", err)
-			break
-		}
-		for _, role := range page.Roles {
-			roleRef := Reference{Service: "iam", Type: "role", Region: "global",
-				ID: aws.ToString(role.Arn), Name: aws.ToString(role.RoleName)}
-			for _, principal := range trustPrincipals(aws.ToString(role.AssumeRolePolicyDocument)) {
-				edges = append(edges, Edge{From: withVia(roleRef, "trust policy principal"), Target: principal})
+	var roleRefs []Reference
+	func() {
+		lctx, cancel := withTimeout(ctx, perCallTimeout)
+		defer cancel()
+		rp := awsiam.NewListRolesPaginator(client, &awsiam.ListRolesInput{})
+		for rp.HasMorePages() {
+			page, err := rp.NextPage(lctx)
+			if err != nil {
+				rec.record("iam", err)
+				break
 			}
-			edges = append(edges, rolePolicyEdges(ctx, client, roleRef, rec)...)
+			for _, role := range page.Roles {
+				roleRef := Reference{Service: "iam", Type: "role", Region: "global",
+					ID: aws.ToString(role.Arn), Name: aws.ToString(role.RoleName)}
+				for _, principal := range trustPrincipals(aws.ToString(role.AssumeRolePolicyDocument)) {
+					edges = append(edges, Edge{From: withVia(roleRef, "trust policy principal"), Target: principal})
+				}
+				roleRefs = append(roleRefs, roleRef)
+			}
 		}
+	}()
+
+	if !includePolicies || len(roleRefs) == 0 {
+		return profiles, edges, rec.errs
 	}
+
+	// Per-role attached/inline policy edges, bounded-concurrent with the
+	// write-by-index pattern so results are race-free and a slow/denied role
+	// degrades only itself (§7).
+	edgesByIdx := make([][]Edge, len(roleRefs))
+	var mu sync.Mutex
+	g, gctx := errgroup.WithContext(ctx)
+	g.SetLimit(maxConcurrency)
+	for i, rr := range roleRefs {
+		i, rr := i, rr
+		g.Go(func() error {
+			rctx, cancel := withTimeout(gctx, perCallTimeout)
+			defer cancel()
+			local := &recorder{region: "global"}
+			edgesByIdx[i] = rolePolicyEdges(rctx, client, rr, local)
+			mu.Lock()
+			for _, e := range local.errs {
+				rec.errs = append(rec.errs, e)
+			}
+			mu.Unlock()
+			return nil
+		})
+	}
+	_ = g.Wait()
+	for i := range roleRefs {
+		edges = append(edges, edgesByIdx[i]...)
+	}
+	// Collapse duplicate per-role errors (e.g. every role timing out identically)
+	// into one line apiece, matching the recorder's own dedup.
+	rec.errs = dedupeErrors(rec.errs)
 	return profiles, edges, rec.errs
+}
+
+// dedupeErrors collapses identical (service, region, code, message) entries —
+// the per-role workers each use a private recorder, so identical deadline/
+// throttle errors would otherwise reappear once per role.
+func dedupeErrors(errs []model.ExploreError) []model.ExploreError {
+	seen := make(map[string]bool, len(errs))
+	out := errs[:0]
+	for _, e := range errs {
+		key := e.Service + "|" + e.Region + "|" + e.Code + "|" + e.Message
+		if seen[key] {
+			continue
+		}
+		seen[key] = true
+		out = append(out, e)
+	}
+	return out
 }
 
 // trustPrincipals extracts the AWS principal ARNs from a URL-encoded IAM trust

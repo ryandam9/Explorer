@@ -15,6 +15,7 @@
 package xref
 
 import (
+	"regexp"
 	"sort"
 	"strings"
 )
@@ -77,6 +78,14 @@ func Classify(input string) Target {
 	case strings.HasPrefix(in, "sg-"):
 		t.Kind = KindSecurityGroup
 		t.ID = in
+	case looksLikeResourceID(in):
+		// An EC2-style resource id (vpc-…, subnet-…, i-…, eni-…, vol-…, etc.)
+		// that isn't one of the supported kinds. It is still queryable as a raw
+		// identifier (queryIdentifiers uses the input directly), but must NOT be
+		// mislabelled as an IAM role — doing so printed the wrong "(iam-role)"
+		// scope for e.g. a VPC id and confused users about what was checked.
+		t.Kind = KindUnknown
+		t.ID = in
 	default:
 		// A bare name is ambiguous; treat it as an IAM role name (the most
 		// common bare-name where-used query) so callers still get a scoped
@@ -122,6 +131,19 @@ func classifyARN(t *Target, arn string) {
 		}
 	}
 	t.Kind = KindUnknown
+}
+
+// resourceIDPattern matches an EC2-style resource id: a lowercase service
+// prefix, a dash, then a hex token (the 8- or 17-char form). Role names like
+// "my-app-role" don't match (the trailing token isn't hex), so a genuine bare
+// role-name query still classifies as KindIAMRole.
+var resourceIDPattern = regexp.MustCompile(`^[a-z][a-z0-9]*-[0-9a-f]{8,}$`)
+
+// looksLikeResourceID reports whether s is an EC2-style resource id (vpc-…,
+// subnet-…, i-…, eni-…, vol-…, rtb-…, igw-…, vpce-…, ami-…, etc.). sg- ids are
+// handled before this in Classify, so they never reach here.
+func looksLikeResourceID(s string) bool {
+	return resourceIDPattern.MatchString(s)
 }
 
 // BuildIndex maps every referenced identifier to the resources that reference

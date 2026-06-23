@@ -18,7 +18,11 @@ const relatedCaveat = "Only relationships this tool extracts are shown; un-colle
 
 // RenderRelated writes a bidirectional related-resources result in the
 // requested format. showUses / showUsedBy select which directions to print.
-func RenderRelated(w io.Writer, res RelatedResult, format string, noHeader, showUses, showUsedBy bool) error {
+// partial is set when collection reported errors, so an empty side is flagged
+// as possibly-incomplete rather than presented as a definitive "none" (§6a).
+// Machine formats are intentionally unaffected by partial (scripting stability,
+// §13) — it only changes the human table's empty-section wording and header.
+func RenderRelated(w io.Writer, res RelatedResult, format string, noHeader, showUses, showUsedBy, partial bool) error {
 	switch strings.ToLower(format) {
 	case "json":
 		return renderRelatedJSON(w, res, showUses, showUsedBy)
@@ -27,27 +31,30 @@ func RenderRelated(w io.Writer, res RelatedResult, format string, noHeader, show
 	case "csv":
 		return renderRelatedCSV(w, res, noHeader, showUses, showUsedBy)
 	default:
-		return renderRelatedTable(w, res, noHeader, showUses, showUsedBy)
+		return renderRelatedTable(w, res, noHeader, showUses, showUsedBy, partial)
 	}
 }
 
-func renderRelatedTable(w io.Writer, res RelatedResult, noHeader, showUses, showUsedBy bool) error {
+func renderRelatedTable(w io.Writer, res RelatedResult, noHeader, showUses, showUsedBy, partial bool) error {
 	if !noHeader {
 		fmt.Fprintf(w, "Related: %s (%s)\n", targetLabel(res.Target), res.Target.Kind)
 		if res.Depth > 1 {
 			fmt.Fprintf(w, "Depth: up to %d hop(s)\n", res.Depth)
 		}
+		if note := unknownTargetNote(res.Target); note != "" {
+			fmt.Fprintf(w, "%s\n", note)
+		}
 		fmt.Fprintln(w)
 	}
 
 	if showUses {
-		if err := renderLinkSection(w, "Uses (depends on) →", res.Uses, res.Depth); err != nil {
+		if err := renderLinkSection(w, "Uses (depends on) →", res.Uses, res.Depth, partial); err != nil {
 			return err
 		}
 		fmt.Fprintf(w, "\n%s\n\n", relatedCaveat)
 	}
 	if showUsedBy {
-		if err := renderLinkSection(w, "Used by ←", res.UsedBy, res.Depth); err != nil {
+		if err := renderLinkSection(w, "Used by ←", res.UsedBy, res.Depth, partial); err != nil {
 			return err
 		}
 		if len(res.CheckedTypes) > 0 {
@@ -58,10 +65,30 @@ func renderRelatedTable(w io.Writer, res RelatedResult, noHeader, showUses, show
 	return nil
 }
 
-func renderLinkSection(w io.Writer, title string, links []Link, maxDepth int) error {
+// unknownTargetNote returns a one-line hint when the queried identifier isn't
+// one of the supported kinds, so an empty result reads as "not a supported
+// target" rather than a real "isolated" answer. VPC-style ids get a pointer to
+// the command that actually lists their contents.
+func unknownTargetNote(t Target) string {
+	if t.Kind != KindUnknown {
+		return ""
+	}
+	if strings.HasPrefix(t.Input, "vpc-") {
+		return "Note: 'related' walks resource-to-resource references, not VPC membership. " +
+			"To list resources inside a VPC, use 'aws_explorer vpc'."
+	}
+	return "Note: this identifier isn't a supported target kind (IAM role, KMS key, " +
+		"ACM certificate, security group); only edges to/from it are shown."
+}
+
+func renderLinkSection(w io.Writer, title string, links []Link, maxDepth int, partial bool) error {
 	fmt.Fprintf(w, "%s\n", title)
 	if len(links) == 0 {
-		fmt.Fprintf(w, "  (none found)\n")
+		if partial {
+			fmt.Fprintf(w, "  (none found — collection had errors; result may be incomplete)\n")
+		} else {
+			fmt.Fprintf(w, "  (none found)\n")
+		}
 		return nil
 	}
 	tw := tabwriter.NewWriter(w, 0, 0, 2, ' ', 0)

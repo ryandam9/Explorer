@@ -101,6 +101,12 @@ type m struct {
 	toast     string
 	showAbout bool
 	overlayVP viewport.Model // scrolls the help overlay (i)
+
+	// Tags popup (Enter on a resource): the resource whose tags are shown and a
+	// viewport so a heavily-tagged resource stays scrollable (§9).
+	showTags bool
+	tagsRes  model.Resource
+	tagsVP   viewport.Model
 }
 
 // NewModel builds the tags dashboard over the client's resolved region scope.
@@ -143,13 +149,23 @@ func newTable(cols []table.Column) table.Model {
 }
 
 func newResourceTable() table.Model {
-	return newTable([]table.Column{
-		{Title: "#", Width: 4},
-		{Title: "Name", Width: 26},
-		{Title: "Type", Width: 18},
-		{Title: "Region", Width: 14},
-		{Title: "ID", Width: 26},
-	})
+	return newTable(resourceColumns(true))
+}
+
+// resourceColumns builds the resources-table columns. The Name column is dropped
+// when the column is filtered by a single Name=<value> (the header already shows
+// it as "Resources · Name=<value>", so every row would just repeat it) — this
+// reclaims the width for the ID column.
+func resourceColumns(showName bool) []table.Column {
+	cols := []table.Column{{Title: "#", Width: 4}}
+	if showName {
+		cols = append(cols, table.Column{Title: "Name", Width: 26})
+	}
+	return append(cols,
+		table.Column{Title: "Type", Width: 18},
+		table.Column{Title: "Region", Width: 14},
+		table.Column{Title: "ID", Width: 26},
+	)
 }
 
 func (mm *m) Init() tea.Cmd {
@@ -231,7 +247,7 @@ func (mm *m) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		mm.resources = msg.resources
 		mm.resCache[msg.desc] = msg.resources
 		if msg.desc == mm.filterDesc {
-			mm.resTbl.SetRows(resourceRows(msg.resources))
+			mm.setResourceRows(msg.resources)
 			mm.resTbl.SetCursor(0)
 		}
 
@@ -272,6 +288,29 @@ func (mm *m) handleKey(msg tea.KeyMsg) []tea.Cmd {
 			mm.overlayVP.GotoTop()
 		case "G", "end":
 			mm.overlayVP.GotoBottom()
+		}
+		return cmds
+	}
+
+	// While the tags popup is open, keys scroll it or close it.
+	if mm.showTags {
+		switch msg.String() {
+		case "q", "ctrl+c":
+			return []tea.Cmd{tea.Quit}
+		case "enter", "esc", "backspace", "left", "h":
+			mm.showTags = false
+		case "up", "k":
+			mm.tagsVP.LineUp(1)
+		case "down", "j":
+			mm.tagsVP.LineDown(1)
+		case "pgup":
+			mm.tagsVP.ViewUp()
+		case "pgdown", "pgdn", " ":
+			mm.tagsVP.ViewDown()
+		case "g", "home":
+			mm.tagsVP.GotoTop()
+		case "G", "end":
+			mm.tagsVP.GotoBottom()
 		}
 		return cmds
 	}
@@ -318,7 +357,16 @@ func (mm *m) handleKey(msg tea.KeyMsg) []tea.Cmd {
 	case "shift+tab":
 		mm.cycleFocus(-1, &cmds)
 		return cmds
-	case "enter", "right", "l":
+	case "enter":
+		// On the resources column Enter pops up the resource's full tag set;
+		// elsewhere it drills into the next column.
+		if mm.focus == colResources {
+			mm.openTags()
+		} else {
+			mm.descend(&cmds)
+		}
+		return cmds
+	case "right", "l":
 		mm.descend(&cmds)
 		return cmds
 	case "left", "h", "esc", "backspace":
@@ -479,7 +527,7 @@ func (mm *m) openResources(desc string, groups []map[string][]string, resourceTy
 		mm.resources = cached
 		mm.resErrs = nil
 		mm.loadingResources = false
-		mm.resTbl.SetRows(resourceRows(cached))
+		mm.setResourceRows(cached)
 		mm.resTbl.SetCursor(0)
 		return
 	}
@@ -532,6 +580,18 @@ func (mm *m) selectedResource() (model.Resource, bool) {
 		return model.Resource{}, false
 	}
 	return mm.resources[i], true
+}
+
+// openTags pops up the full tag set of the highlighted resource. No-op when the
+// cursor isn't on a resource (e.g. an empty/loading column).
+func (mm *m) openTags() {
+	r, ok := mm.selectedResource()
+	if !ok {
+		return
+	}
+	mm.tagsRes = r
+	mm.showTags = true
+	mm.tagsVP.GotoTop()
 }
 
 func (mm *m) PageTitle() string {
@@ -601,16 +661,44 @@ func clampCursor(cur, n int) int {
 	return cur
 }
 
-func resourceRows(res []model.Resource) []table.Row {
+func resourceRows(res []model.Resource, showName bool) []table.Row {
 	rows := make([]table.Row, len(res))
 	for i, r := range res {
-		name := r.Name
-		if name == "" {
-			name = "—"
+		cells := []string{fmt.Sprintf("%d", i+1)}
+		if showName {
+			name := r.Name
+			if name == "" {
+				name = "—"
+			}
+			cells = append(cells, name)
 		}
-		rows[i] = table.Row{fmt.Sprintf("%d", i+1), name, r.Type, r.Region, r.ID}
+		cells = append(cells, r.Type, r.Region, r.ID)
+		rows[i] = table.Row(cells)
 	}
 	return rows
+}
+
+// filteredByName reports whether the resources column is filtered by exactly one
+// Name=<value> tag, in which case every row's Name equals that value and the
+// column is redundant with the header (CLAUDE.md §16 — save space, no dup info).
+func (mm *m) filteredByName() bool {
+	if len(mm.activeGroups) != 1 || len(mm.activeTypes) != 0 {
+		return false
+	}
+	g := mm.activeGroups[0]
+	if len(g) != 1 {
+		return false
+	}
+	vals, ok := g["Name"]
+	return ok && len(vals) == 1
+}
+
+// setResourceRows refreshes the resources table, dropping the Name column when
+// the view is filtered by a single Name value (see filteredByName).
+func (mm *m) setResourceRows(res []model.Resource) {
+	showName := !mm.filteredByName()
+	mm.resTbl.SetColumns(resourceColumns(showName))
+	mm.resTbl.SetRows(resourceRows(res, showName))
 }
 
 // parseFilterExpr turns "Key=Value, Key2=Value2, Key3" into a tag-filter map:

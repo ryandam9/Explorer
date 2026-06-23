@@ -118,7 +118,11 @@ func (mm *m) Init() tea.Cmd {
 
 func (mm *m) collectCmd() tea.Cmd {
 	return func() tea.Msg {
-		edges, errs := xref.Collect(mm.ctx, mm.cfg, mm.regions, mm.maxConc, mm.timeout)
+		// The explorer lets you drill onto any resource — including IAM roles,
+		// whose policy edges should be visible — so include the per-role policy
+		// sweep. It is collected once at startup and the fan-out is now
+		// bounded-concurrent (§7), so this no longer storms.
+		edges, errs := xref.Collect(mm.ctx, mm.cfg, mm.regions, mm.maxConc, mm.timeout, true)
 		return edgesMsg{edges: edges, errs: errs}
 	}
 }

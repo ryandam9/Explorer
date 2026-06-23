@@ -39,6 +39,11 @@ walks them from the resource you name. Pass a full ARN or a bare ID (an IAM
 role name, an sg-… id, etc.). With --depth it follows links several hops out
 (e.g. a Lambda → its role → that role's trust principals).
 
+This is a resource-to-resource reference graph, not a container inventory:
+querying a VPC/subnet/route-table id won't list what lives inside it (use
+'aws_explorer vpc' for that). Identifiers it doesn't recognize as a supported
+kind are still queried as raw links, flagged with a note.
+
 Both directions are read-only and best-effort: a denied or failed API call
 narrows what was checked (reported on stderr) and never aborts the run. The
 report only reflects the relationship types this tool extracts, so an empty
@@ -96,11 +101,16 @@ This generalizes 'whereused' (which answers only the "used by" direction).`,
 		}
 
 		fmt.Fprintf(os.Stderr, "Scanning %d region(s) for resources related to %s…\n", len(regions), args[0])
-		edges, errs := xref.Collect(ctx, eng.AWSConfig, regions, AppConfig.App.MaxConcurrency, timeout)
+		// The per-role IAM policy sweep is only needed when the query can land on
+		// a role: the target itself is a role, or a multi-hop walk could reach
+		// one. Skipping it for the common non-role, depth-1 case avoids the
+		// expensive (and previously deadline-storming) sweep (§7).
+		includeRolePolicies := depth > 1 || xref.Classify(args[0]).Kind == xref.KindIAMRole
+		edges, errs := xref.Collect(ctx, eng.AWSConfig, regions, AppConfig.App.MaxConcurrency, timeout, includeRolePolicies)
 		output.PrintErrors(os.Stderr, errs)
 
 		result := xref.Related(args[0], xref.BuildForwardIndex(edges), xref.BuildIndex(edges), depth)
-		if err := xref.RenderRelated(os.Stdout, result, outputFormat, noHeader, showUses, showUsedBy); err != nil {
+		if err := xref.RenderRelated(os.Stdout, result, outputFormat, noHeader, showUses, showUsedBy, len(errs) > 0); err != nil {
 			return fmt.Errorf("rendering report: %w", err)
 		}
 		return nil

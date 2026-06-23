@@ -36,19 +36,50 @@ func TestFilterDesc(t *testing.T) {
 }
 
 func TestResourceRows(t *testing.T) {
-	rows := resourceRows([]model.Resource{
+	res := []model.Resource{
 		{Service: "ec2", Type: "instance", Name: "web", Region: "us-east-1", ID: "i-123"},
 		{Service: "s3", Type: "bucket", Region: "us-east-1", ID: "my-bucket"}, // no Name → "—"
-	})
+	}
+	// Compact columns: #, Name, Type, Region, ID (#333 three-column layout).
+	rows := resourceRows(res, true)
 	if len(rows) != 2 {
 		t.Fatalf("got %d rows", len(rows))
 	}
-	// Compact columns: #, Name, Type, Region, ID (#333 three-column layout).
 	if rows[0][0] != "1" || rows[0][1] != "web" || rows[0][2] != "instance" || rows[0][4] != "i-123" {
 		t.Errorf("row 0 = %v", rows[0])
 	}
 	if rows[1][1] != "—" {
 		t.Errorf("missing name should render as em dash, got %q", rows[1][1])
+	}
+
+	// When filtered by a single Name=<value>, the Name column is dropped (it
+	// just repeats the header), so columns collapse to #, Type, Region, ID.
+	rows = resourceRows(res, false)
+	if rows[0][0] != "1" || rows[0][1] != "instance" || rows[0][2] != "us-east-1" || rows[0][3] != "i-123" {
+		t.Errorf("name-less row 0 = %v", rows[0])
+	}
+}
+
+func TestFilteredByName(t *testing.T) {
+	cases := []struct {
+		name   string
+		groups []map[string][]string
+		types  []string
+		want   bool
+	}{
+		{"single Name value", []map[string][]string{{"Name": {"web"}}}, nil, true},
+		{"Name with OR values", []map[string][]string{{"Name": {"web", "db"}}}, nil, false},
+		{"other key", []map[string][]string{{"Env": {"prod"}}}, nil, false},
+		{"Name plus another key", []map[string][]string{{"Name": {"web"}, "Env": {"prod"}}}, nil, false},
+		{"two groups", []map[string][]string{{"Name": {"web"}}, {"Name": {"db"}}}, nil, false},
+		{"Name with type filter", []map[string][]string{{"Name": {"web"}}}, []string{"ec2:instance"}, false},
+		{"no filter", nil, nil, false},
+	}
+	for _, c := range cases {
+		mm := &m{activeGroups: c.groups, activeTypes: c.types}
+		if got := mm.filteredByName(); got != c.want {
+			t.Errorf("%s: filteredByName = %v, want %v", c.name, got, c.want)
+		}
 	}
 }
 
