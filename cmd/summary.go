@@ -128,7 +128,8 @@ unchanged account diffs clean.`,
 
 		rows := summary.BuildRows(resources)
 		if len(rows) == 0 {
-			fmt.Println("No resources found.")
+			// Name the scanned scope so "none" is diagnosable (§3).
+			fmt.Printf("No resources found in %s.\n", regionScopeLabel(eng.EffectiveRegions()))
 		} else if err := summary.Render(os.Stdout, rows, outputFormat, noHeader); err != nil {
 			return fmt.Errorf("rendering summary: %w", err)
 		}

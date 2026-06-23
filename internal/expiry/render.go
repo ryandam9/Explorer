@@ -8,6 +8,8 @@ import (
 	"strconv"
 	"strings"
 	"text/tabwriter"
+
+	"github.com/ryandam9/aws_explorer/internal/csvexport"
 )
 
 // Render writes the items to w in the requested format (table, json, ndjson,
@@ -69,7 +71,7 @@ func renderCSV(w io.Writer, items []Item, noHeader bool) error {
 			strconv.Itoa(it.Days), it.Date.Format("2006-01-02"),
 			it.Kind, it.Resource, it.Region, it.Detail,
 		}
-		if err := cw.Write(rec); err != nil {
+		if err := cw.Write(csvexport.SanitizeRow(rec)); err != nil {
 			return err
 		}
 	}

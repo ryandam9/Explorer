@@ -70,7 +70,9 @@ func TestRenderCSV(t *testing.T) {
 	if len(recs) != 3 {
 		t.Fatalf("csv records = %d, want 3", len(recs))
 	}
-	if recs[1][0] != "-3" || recs[1][1] != "2026-06-09" {
+	// The Days cell is negative ("-3"), which a spreadsheet would treat as a
+	// formula — it's neutralized with a leading apostrophe (§13).
+	if recs[1][0] != "'-3" || recs[1][1] != "2026-06-09" {
 		t.Errorf("csv row = %v", recs[1])
 	}
 }

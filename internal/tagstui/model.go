@@ -367,9 +367,13 @@ func (mm *m) handleResourceKey(msg tea.KeyMsg, cmds *[]tea.Cmd) {
 	case ">", ".":
 		mm.resTbl.ScrollRight()
 	case "y":
-		if r, ok := mm.selectedResource(); ok && r.ARN != "" {
-			_ = clipboard.WriteAll(r.ARN)
-			mm.setToast("Copied ARN")
+		if r, ok := mm.selectedResource(); ok {
+			if r.ARN != "" {
+				_ = clipboard.WriteAll(r.ARN)
+				mm.setToast("Copied ARN")
+			} else {
+				mm.setToast("No ARN to copy for this resource")
+			}
 			*cmds = append(*cmds, toastCmd())
 		}
 	case "o":
@@ -381,8 +385,10 @@ func (mm *m) handleResourceKey(msg tea.KeyMsg, cmds *[]tea.Cmd) {
 				} else {
 					mm.setToast("Copied console URL")
 				}
-				*cmds = append(*cmds, toastCmd())
+			} else {
+				mm.setToast("No console link for this resource type")
 			}
+			*cmds = append(*cmds, toastCmd())
 		}
 	}
 }
