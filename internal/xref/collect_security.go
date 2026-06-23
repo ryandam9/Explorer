@@ -111,7 +111,7 @@ func kmsAliasEdges(aliases []kmstypes.AliasListEntry, region string) []Edge {
 	return edges
 }
 
-func kmsEdges(ctx context.Context, cfg aws.Config, region string, rec *recorder) []Edge {
+func kmsEdges(ctx context.Context, cfg aws.Config, region string, maxConcurrency int, rec *recorder) []Edge {
 	client := awskms.NewFromConfig(cfg)
 	var edges []Edge
 
@@ -125,6 +125,7 @@ func kmsEdges(ctx context.Context, cfg aws.Config, region string, rec *recorder)
 		edges = append(edges, kmsAliasEdges(page.Aliases, region)...)
 	}
 
+	var keyRefs []Reference
 	kp := awskms.NewListKeysPaginator(client, &awskms.ListKeysInput{})
 	for kp.HasMorePages() {
 		page, err := kp.NextPage(ctx)
@@ -133,24 +134,30 @@ func kmsEdges(ctx context.Context, cfg aws.Config, region string, rec *recorder)
 			break
 		}
 		for _, k := range page.Keys {
-			keyID := aws.ToString(k.KeyId)
-			keyRef := Reference{Service: "kms", Type: "key", Region: region,
-				ID: aws.ToString(k.KeyArn), Name: keyID}
-			if pol, err := client.GetKeyPolicy(ctx, &awskms.GetKeyPolicyInput{KeyId: &keyID, PolicyName: aws.String("default")}); err != nil {
-				rec.record("kms", err)
-			} else {
-				edges = append(edges, kmsKeyPolicyEdges(keyRef, trustPrincipals(aws.ToString(pol.Policy)))...)
-			}
-			gp := awskms.NewListGrantsPaginator(client, &awskms.ListGrantsInput{KeyId: &keyID})
-			for gp.HasMorePages() {
-				gPage, err := gp.NextPage(ctx)
-				if err != nil {
-					rec.record("kms", err)
-					break
-				}
-				edges = append(edges, kmsGrantEdges(keyRef, gPage.Grants)...)
-			}
+			keyRefs = append(keyRefs, Reference{Service: "kms", Type: "key", Region: region,
+				ID: aws.ToString(k.KeyArn), Name: aws.ToString(k.KeyId)})
 		}
 	}
-	return edges
+
+	// GetKeyPolicy + ListGrants per key — fan out across keys (§7).
+	keyEdges := boundedEdges(ctx, keyRefs, maxConcurrency, rec, func(ctx context.Context, keyRef Reference, rec *recorder) []Edge {
+		keyID := keyRef.Name
+		var out []Edge
+		if pol, err := client.GetKeyPolicy(ctx, &awskms.GetKeyPolicyInput{KeyId: &keyID, PolicyName: aws.String("default")}); err != nil {
+			rec.record("kms", err)
+		} else {
+			out = append(out, kmsKeyPolicyEdges(keyRef, trustPrincipals(aws.ToString(pol.Policy)))...)
+		}
+		gp := awskms.NewListGrantsPaginator(client, &awskms.ListGrantsInput{KeyId: &keyID})
+		for gp.HasMorePages() {
+			gPage, err := gp.NextPage(ctx)
+			if err != nil {
+				rec.record("kms", err)
+				break
+			}
+			out = append(out, kmsGrantEdges(keyRef, gPage.Grants)...)
+		}
+		return out
+	})
+	return append(edges, keyEdges...)
 }

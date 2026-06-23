@@ -11,6 +11,7 @@ import (
 	ebtypes "github.com/aws/aws-sdk-go-v2/service/eventbridge/types"
 	awskinesis "github.com/aws/aws-sdk-go-v2/service/kinesis"
 	awssfn "github.com/aws/aws-sdk-go-v2/service/sfn"
+	sfntypes "github.com/aws/aws-sdk-go-v2/service/sfn/types"
 	awssns "github.com/aws/aws-sdk-go-v2/service/sns"
 	snstypes "github.com/aws/aws-sdk-go-v2/service/sns/types"
 )
@@ -43,7 +44,7 @@ func snsSubscriptionEdges(subs []snstypes.Subscription, region string) []Edge {
 	return edges
 }
 
-func snsEdges(ctx context.Context, cfg aws.Config, region string, rec *recorder) []Edge {
+func snsEdges(ctx context.Context, cfg aws.Config, region string, maxConcurrency int, rec *recorder) []Edge {
 	client := awssns.NewFromConfig(cfg)
 	var edges []Edge
 
@@ -60,6 +61,7 @@ func snsEdges(ctx context.Context, cfg aws.Config, region string, rec *recorder)
 	}
 
 	// Topic encryption keys need a per-topic attribute read.
+	var topics []string
 	tp := awssns.NewListTopicsPaginator(client, &awssns.ListTopicsInput{})
 	for tp.HasMorePages() {
 		page, err := tp.NextPage(ctx)
@@ -68,22 +70,25 @@ func snsEdges(ctx context.Context, cfg aws.Config, region string, rec *recorder)
 			break
 		}
 		for _, t := range page.Topics {
-			arn := aws.ToString(t.TopicArn)
-			if arn == "" {
-				continue
-			}
-			attrs, err := client.GetTopicAttributes(ctx, &awssns.GetTopicAttributesInput{TopicArn: t.TopicArn})
-			if err != nil {
-				rec.record("sns", err)
-				continue
-			}
-			if key := attrs.Attributes["KmsMasterKeyId"]; key != "" {
-				from := Reference{Service: "sns", Type: "topic", Region: region, ID: arn, Name: lastSegment(shortForm(arn))}
-				edges = append(edges, Edge{From: withVia(from, "topic encryption key"), Target: key})
+			if arn := aws.ToString(t.TopicArn); arn != "" {
+				topics = append(topics, arn)
 			}
 		}
 	}
-	return edges
+	// One GetTopicAttributes per topic — fan out (§7).
+	topicEdges := boundedEdges(ctx, topics, maxConcurrency, rec, func(ctx context.Context, arn string, rec *recorder) []Edge {
+		attrs, err := client.GetTopicAttributes(ctx, &awssns.GetTopicAttributesInput{TopicArn: aws.String(arn)})
+		if err != nil {
+			rec.record("sns", err)
+			return nil
+		}
+		if key := attrs.Attributes["KmsMasterKeyId"]; key != "" {
+			from := Reference{Service: "sns", Type: "topic", Region: region, ID: arn, Name: lastSegment(shortForm(arn))}
+			return []Edge{{From: withVia(from, "topic encryption key"), Target: key}}
+		}
+		return nil
+	})
+	return append(edges, topicEdges...)
 }
 
 // --- SQS dead-letter ----------------------------------------------------------
@@ -206,9 +211,9 @@ func sfnDefinitionARNs(definition, selfARN string) []string {
 	return out
 }
 
-func sfnEdges(ctx context.Context, cfg aws.Config, region string, rec *recorder) []Edge {
+func sfnEdges(ctx context.Context, cfg aws.Config, region string, maxConcurrency int, rec *recorder) []Edge {
 	client := awssfn.NewFromConfig(cfg)
-	var edges []Edge
+	var machines []sfntypes.StateMachineListItem
 	p := awssfn.NewListStateMachinesPaginator(client, &awssfn.ListStateMachinesInput{})
 	for p.HasMorePages() {
 		page, err := p.NextPage(ctx)
@@ -216,24 +221,27 @@ func sfnEdges(ctx context.Context, cfg aws.Config, region string, rec *recorder)
 			rec.record("states", err)
 			break
 		}
-		for _, sm := range page.StateMachines {
-			arn := aws.ToString(sm.StateMachineArn)
-			out, err := client.DescribeStateMachine(ctx, &awssfn.DescribeStateMachineInput{StateMachineArn: sm.StateMachineArn})
-			if err != nil {
-				rec.record("states", err)
-				continue
-			}
-			from := Reference{Service: "states", Type: "state-machine", Region: region,
-				ID: arn, Name: aws.ToString(sm.Name)}
-			if role := aws.ToString(out.RoleArn); role != "" {
-				edges = append(edges, Edge{From: withVia(from, "Step Functions execution role"), Target: role})
-			}
-			for _, ref := range sfnDefinitionARNs(aws.ToString(out.Definition), arn) {
-				edges = append(edges, Edge{From: withVia(from, "state machine definition"), Target: ref})
-			}
-		}
+		machines = append(machines, page.StateMachines...)
 	}
-	return edges
+	// One DescribeStateMachine per machine — fan out (§7).
+	return boundedEdges(ctx, machines, maxConcurrency, rec, func(ctx context.Context, sm sfntypes.StateMachineListItem, rec *recorder) []Edge {
+		arn := aws.ToString(sm.StateMachineArn)
+		out, err := client.DescribeStateMachine(ctx, &awssfn.DescribeStateMachineInput{StateMachineArn: sm.StateMachineArn})
+		if err != nil {
+			rec.record("states", err)
+			return nil
+		}
+		from := Reference{Service: "states", Type: "state-machine", Region: region,
+			ID: arn, Name: aws.ToString(sm.Name)}
+		var edges []Edge
+		if role := aws.ToString(out.RoleArn); role != "" {
+			edges = append(edges, Edge{From: withVia(from, "Step Functions execution role"), Target: role})
+		}
+		for _, ref := range sfnDefinitionARNs(aws.ToString(out.Definition), arn) {
+			edges = append(edges, Edge{From: withVia(from, "state machine definition"), Target: ref})
+		}
+		return edges
+	})
 }
 
 // --- Kinesis ------------------------------------------------------------------
