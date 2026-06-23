@@ -66,7 +66,10 @@ This is the CLI generalization of the summary TUI's 'x' cross-reference.`,
 		fmt.Fprintf(os.Stderr, "Scanning %d region(s) for references to %s…\n", len(regions), args[0])
 
 		timeout := time.Duration(AppConfig.App.TimeoutSeconds) * time.Second
-		edges, errs := xref.Collect(ctx, eng.AWSConfig, regions, AppConfig.App.MaxConcurrency, timeout)
+		// whereused is reverse-only at one hop: it asks "what references this",
+		// which never needs a role's own attached/inline policy edges. Skip the
+		// expensive per-role policy sweep (§7).
+		edges, errs := xref.Collect(ctx, eng.AWSConfig, regions, AppConfig.App.MaxConcurrency, timeout, false)
 		output.PrintErrors(os.Stderr, errs)
 
 		result := xref.WhereUsed(target, xref.BuildIndex(edges))

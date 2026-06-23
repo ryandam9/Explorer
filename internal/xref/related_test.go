@@ -136,7 +136,7 @@ func TestArnHelpers(t *testing.T) {
 func TestRenderRelated_Table(t *testing.T) {
 	res := relatedOver(roleARN, 1)
 	var sb strings.Builder
-	if err := RenderRelated(&sb, res, "table", false, true, true); err != nil {
+	if err := RenderRelated(&sb, res, "table", false, true, true, false); err != nil {
 		t.Fatalf("table: %v", err)
 	}
 	out := sb.String()
@@ -148,7 +148,7 @@ func TestRenderRelated_Table(t *testing.T) {
 
 	// Direction filter: only the forward section.
 	sb.Reset()
-	if err := RenderRelated(&sb, res, "table", false, true, false); err != nil {
+	if err := RenderRelated(&sb, res, "table", false, true, false, false); err != nil {
 		t.Fatalf("table uses-only: %v", err)
 	}
 	if strings.Contains(sb.String(), "Used by ←") {
@@ -156,11 +156,42 @@ func TestRenderRelated_Table(t *testing.T) {
 	}
 }
 
+func TestRenderRelated_PartialFlagsEmptySection(t *testing.T) {
+	empty := RelatedResult{Target: Classify("arn:aws:iam::1:role/lonely"), Depth: 1}
+
+	var sb strings.Builder
+	if err := RenderRelated(&sb, empty, "table", false, true, true, true); err != nil {
+		t.Fatalf("table: %v", err)
+	}
+	if !strings.Contains(sb.String(), "result may be incomplete") {
+		t.Errorf("partial empty section should flag incompleteness:\n%s", sb.String())
+	}
+
+	sb.Reset()
+	if err := RenderRelated(&sb, empty, "table", false, true, true, false); err != nil {
+		t.Fatalf("table: %v", err)
+	}
+	if strings.Contains(sb.String(), "result may be incomplete") {
+		t.Errorf("non-partial empty section must not claim incompleteness:\n%s", sb.String())
+	}
+}
+
+func TestRenderRelated_UnknownTargetNote(t *testing.T) {
+	res := RelatedResult{Target: Classify("vpc-0475013d0d9249369"), Depth: 1}
+	var sb strings.Builder
+	if err := RenderRelated(&sb, res, "table", false, true, true, false); err != nil {
+		t.Fatalf("table: %v", err)
+	}
+	if !strings.Contains(sb.String(), "aws_explorer vpc") {
+		t.Errorf("vpc- target should point at the vpc command:\n%s", sb.String())
+	}
+}
+
 func TestRenderRelated_JSONAndNDJSON(t *testing.T) {
 	res := relatedOver(roleARN, 1)
 
 	var sb strings.Builder
-	if err := RenderRelated(&sb, res, "json", false, true, true); err != nil {
+	if err := RenderRelated(&sb, res, "json", false, true, true, false); err != nil {
 		t.Fatalf("json: %v", err)
 	}
 	for _, want := range []string{`"uses"`, `"used_by"`, `"checked_types"`, srcRole} {
@@ -170,7 +201,7 @@ func TestRenderRelated_JSONAndNDJSON(t *testing.T) {
 	}
 
 	sb.Reset()
-	if err := RenderRelated(&sb, res, "ndjson", false, true, true); err != nil {
+	if err := RenderRelated(&sb, res, "ndjson", false, true, true, false); err != nil {
 		t.Fatalf("ndjson: %v", err)
 	}
 	if !strings.Contains(sb.String(), `"direction":"uses"`) || !strings.Contains(sb.String(), `"direction":"used_by"`) {

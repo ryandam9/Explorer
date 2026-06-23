@@ -19,6 +19,13 @@ func TestClassify(t *testing.T) {
 		{"sg-0abc123", KindSecurityGroup, "sg-0abc123"},
 		{"my-role-name", KindIAMRole, "my-role-name"},
 		{"arn:aws:s3:::some-bucket", KindUnknown, ""},
+		// EC2-style resource ids must not be mislabelled as IAM role names.
+		{"vpc-0475013d0d9249369", KindUnknown, "vpc-0475013d0d9249369"},
+		{"subnet-0abc12345678", KindUnknown, "subnet-0abc12345678"},
+		{"i-0abc12345678", KindUnknown, "i-0abc12345678"},
+		{"eni-0abc12345678", KindUnknown, "eni-0abc12345678"},
+		// Hyphenated role names whose tail isn't a hex token stay IAM roles.
+		{"app-2", KindIAMRole, "app-2"},
 		{"", KindUnknown, ""},
 	}
 	for _, c := range cases {
