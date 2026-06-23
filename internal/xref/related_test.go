@@ -50,6 +50,26 @@ func TestRelated_ShowAllPaths(t *testing.T) {
 	}
 }
 
+func TestRenderRelated_CaveatPrintedOnce(t *testing.T) {
+	res := relatedOver(roleARN, 1)
+	var sb strings.Builder
+	if err := RenderRelated(&sb, res, "table", false, true, true, false); err != nil {
+		t.Fatalf("table: %v", err)
+	}
+	if got := strings.Count(sb.String(), relatedCaveat); got != 1 {
+		t.Errorf("caveat should print exactly once when both directions shown, got %d:\n%s", got, sb.String())
+	}
+
+	// Single-direction output still prints it exactly once.
+	sb.Reset()
+	if err := RenderRelated(&sb, res, "table", false, true, false, false); err != nil {
+		t.Fatalf("table uses-only: %v", err)
+	}
+	if got := strings.Count(sb.String(), relatedCaveat); got != 1 {
+		t.Errorf("uses-only: caveat count = %d, want 1", got)
+	}
+}
+
 func TestAmbiguousCandidates(t *testing.T) {
 	roleA := "arn:aws:iam::111111111111:role/team-a/app"
 	roleB := "arn:aws:iam::111111111111:role/team-b/app"
