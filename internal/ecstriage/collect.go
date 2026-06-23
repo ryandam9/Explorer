@@ -2,6 +2,8 @@ package ecstriage
 
 import (
 	"context"
+	"errors"
+	"fmt"
 	"time"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
@@ -92,11 +94,12 @@ func collectRegion(ctx context.Context, baseCfg aws.Config, region, clusterFilte
 	var errs []model.ExploreError
 	for _, cluster := range clusters {
 		ct, err := collectCluster(ctx, client, region, cluster)
+		// Keep whatever was collected even on a partial error: a DescribeTasks
+		// Failures entry drops one task, not the whole cluster (CLAUDE.md §6).
+		tasks = append(tasks, ct...)
 		if err != nil {
 			errs = append(errs, exploreError(region, "ecs", err))
-			continue
 		}
-		tasks = append(tasks, ct...)
 	}
 	return Classify(tasks), errs
 }
@@ -120,6 +123,7 @@ func collectCluster(ctx context.Context, client *awsecs.Client, region, cluster 
 
 	clusterName := shortClusterName(cluster)
 	var tasks []Task
+	var describeErrs []error
 	for start := 0; start < len(arns); start += describeBatchSize {
 		end := start + describeBatchSize
 		if end > len(arns) {
@@ -130,13 +134,18 @@ func collectCluster(ctx context.Context, client *awsecs.Client, region, cluster 
 			Tasks:   arns[start:end],
 		})
 		if err != nil {
-			return nil, err
+			return tasks, err
 		}
 		for _, t := range out.Tasks {
 			tasks = append(tasks, mapTask(region, clusterName, t))
 		}
+		// Tasks that fail to describe come back in Failures, not Tasks — surface
+		// them as a partial error so they aren't silently dropped (CLAUDE.md §6).
+		for _, f := range out.Failures {
+			describeErrs = append(describeErrs, fmt.Errorf("describe task %s: %s", aws.ToString(f.Arn), aws.ToString(f.Reason)))
+		}
 	}
-	return tasks, nil
+	return tasks, errors.Join(describeErrs...)
 }
 
 func mapTask(region, clusterName string, t types.Task) Task {

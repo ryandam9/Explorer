@@ -103,39 +103,69 @@ func apiGatewayEdges(ctx context.Context, cfg aws.Config, region string, rec *re
 // authorizers, and VPC links to their subnets/security groups.
 func apiGatewayV2Edges(ctx context.Context, client *awsapigwv2.Client, region string, rec *recorder) []Edge {
 	var edges []Edge
-	apis, err := client.GetApis(ctx, &awsapigwv2.GetApisInput{})
-	if err != nil {
-		rec.record("apigateway", err)
-	} else {
+	// apigatewayv2 has no SDK paginators, so each list is followed manually on
+	// NextToken — otherwise APIs / integrations / authorizers past page 1 (and
+	// their Lambda edges) are silently dropped (CLAUDE.md §5).
+	var apiTok *string
+	for {
+		apis, err := client.GetApis(ctx, &awsapigwv2.GetApisInput{NextToken: apiTok})
+		if err != nil {
+			rec.record("apigateway", err)
+			break
+		}
 		for _, api := range apis.Items {
 			id := aws.ToString(api.ApiId)
 			from := Reference{Service: "apigateway", Type: "http-api", Region: region, ID: id, Name: aws.ToString(api.Name)}
 
-			if ints, err := client.GetIntegrations(ctx, &awsapigwv2.GetIntegrationsInput{ApiId: api.ApiId}); err != nil {
-				rec.record("apigateway", err)
-			} else {
+			var intTok *string
+			for {
+				ints, err := client.GetIntegrations(ctx, &awsapigwv2.GetIntegrationsInput{ApiId: api.ApiId, NextToken: intTok})
+				if err != nil {
+					rec.record("apigateway", err)
+					break
+				}
 				for _, in := range ints.Items {
 					if arn := extractLambdaARN(aws.ToString(in.IntegrationUri)); arn != "" {
 						edges = append(edges, Edge{From: withVia(from, "Lambda integration"), Target: arn})
 					}
 				}
+				if ints.NextToken == nil {
+					break
+				}
+				intTok = ints.NextToken
 			}
-			if auths, err := client.GetAuthorizers(ctx, &awsapigwv2.GetAuthorizersInput{ApiId: api.ApiId}); err != nil {
-				rec.record("apigateway", err)
-			} else {
+
+			var authTok *string
+			for {
+				auths, err := client.GetAuthorizers(ctx, &awsapigwv2.GetAuthorizersInput{ApiId: api.ApiId, NextToken: authTok})
+				if err != nil {
+					rec.record("apigateway", err)
+					break
+				}
 				for _, a := range auths.Items {
 					if arn := extractLambdaARN(aws.ToString(a.AuthorizerUri)); arn != "" {
 						edges = append(edges, Edge{From: withVia(from, "Lambda authorizer"), Target: arn})
 					}
 				}
+				if auths.NextToken == nil {
+					break
+				}
+				authTok = auths.NextToken
 			}
 		}
+		if apis.NextToken == nil {
+			break
+		}
+		apiTok = apis.NextToken
 	}
 
-	links, err := client.GetVpcLinks(ctx, &awsapigwv2.GetVpcLinksInput{})
-	if err != nil {
-		rec.record("apigateway", err)
-	} else {
+	var linkTok *string
+	for {
+		links, err := client.GetVpcLinks(ctx, &awsapigwv2.GetVpcLinksInput{NextToken: linkTok})
+		if err != nil {
+			rec.record("apigateway", err)
+			break
+		}
 		for _, vl := range links.Items {
 			from := Reference{Service: "apigateway", Type: "vpc-link", Region: region,
 				ID: aws.ToString(vl.VpcLinkId), Name: aws.ToString(vl.Name)}
@@ -146,6 +176,10 @@ func apiGatewayV2Edges(ctx context.Context, client *awsapigwv2.Client, region st
 				edges = append(edges, Edge{From: withVia(from, "VPC link security group"), Target: g})
 			}
 		}
+		if links.NextToken == nil {
+			break
+		}
+		linkTok = links.NextToken
 	}
 	return edges
 }
@@ -155,24 +189,41 @@ func apiGatewayV2Edges(ctx context.Context, client *awsapigwv2.Client, region st
 // walk; see #341 follow-up.)
 func apiGatewayV1Edges(ctx context.Context, client *awsapigw.Client, region string, rec *recorder) []Edge {
 	var edges []Edge
-	apis, err := client.GetRestApis(ctx, &awsapigw.GetRestApisInput{})
-	if err != nil {
-		rec.record("apigateway", err)
-		return edges
-	}
-	for _, api := range apis.Items {
-		from := Reference{Service: "apigateway", Type: "rest-api", Region: region,
-			ID: aws.ToString(api.Id), Name: aws.ToString(api.Name)}
-		auths, err := client.GetAuthorizers(ctx, &awsapigw.GetAuthorizersInput{RestApiId: api.Id})
+	// GetRestApis pages via Position with a default page size of 25 — without the
+	// loop, every REST API past the 25th (and all its authorizer edges) is lost
+	// (CLAUDE.md §5).
+	var pos *string
+	for {
+		apis, err := client.GetRestApis(ctx, &awsapigw.GetRestApisInput{Position: pos})
 		if err != nil {
 			rec.record("apigateway", err)
-			continue
+			return edges
 		}
-		for _, a := range auths.Items {
-			if arn := extractLambdaARN(aws.ToString(a.AuthorizerUri)); arn != "" {
-				edges = append(edges, Edge{From: withVia(from, "Lambda authorizer"), Target: arn})
+		for _, api := range apis.Items {
+			from := Reference{Service: "apigateway", Type: "rest-api", Region: region,
+				ID: aws.ToString(api.Id), Name: aws.ToString(api.Name)}
+			var apos *string
+			for {
+				auths, err := client.GetAuthorizers(ctx, &awsapigw.GetAuthorizersInput{RestApiId: api.Id, Position: apos})
+				if err != nil {
+					rec.record("apigateway", err)
+					break
+				}
+				for _, a := range auths.Items {
+					if arn := extractLambdaARN(aws.ToString(a.AuthorizerUri)); arn != "" {
+						edges = append(edges, Edge{From: withVia(from, "Lambda authorizer"), Target: arn})
+					}
+				}
+				if auths.Position == nil {
+					break
+				}
+				apos = auths.Position
 			}
 		}
+		if apis.Position == nil {
+			break
+		}
+		pos = apis.Position
 	}
 	return edges
 }

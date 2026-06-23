@@ -155,3 +155,30 @@ func TestMapAlarm_DetailLevel(t *testing.T) {
 		t.Errorf("Details[actionsEnabled] = %v, want true", res.Details["actionsEnabled"])
 	}
 }
+
+func TestMapCompositeAlarm(t *testing.T) {
+	c := NewCollector()
+	arn := "arn:aws:cloudwatch:us-east-1:123456789012:alarm:site-health"
+	alarm := types.CompositeAlarm{
+		AlarmArn:   aws.String(arn),
+		AlarmName:  aws.String("site-health"),
+		StateValue: types.StateValueOk,
+		AlarmRule:  aws.String("ALARM(high-cpu) OR ALARM(high-mem)"),
+	}
+
+	res := c.mapCompositeAlarm("us-east-1", alarm, services.DetailLevelSummary)
+
+	if res.Type != "composite-alarm" {
+		t.Errorf("Type = %q, want composite-alarm", res.Type)
+	}
+	if res.Name != "site-health" || res.ARN != arn || res.Region != "us-east-1" {
+		t.Errorf("unexpected identity fields: %+v", res)
+	}
+	if res.State != string(types.StateValueOk) {
+		t.Errorf("State = %q, want OK", res.State)
+	}
+	// A composite alarm has no metric/threshold — its rule must be carried instead.
+	if !strings.Contains(res.Summary["alarmRule"], "ALARM(high-cpu)") {
+		t.Errorf("alarmRule not carried: %q", res.Summary["alarmRule"])
+	}
+}
