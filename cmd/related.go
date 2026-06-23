@@ -30,6 +30,7 @@ var (
 	relatedRefresh   bool
 	relatedDebugScan bool
 	relatedFormat    string
+	relatedRisk      bool
 )
 
 var relatedCmd = &cobra.Command{
@@ -166,6 +167,12 @@ This generalizes 'whereused' (which answers only the "used by" direction).`,
 		if err := xref.RenderRelated(os.Stdout, result, outFormat, noHeader, showUses, showUsedBy, result.Partial); err != nil {
 			return fmt.Errorf("rendering report: %w", err)
 		}
+		// Deletion-risk estimate (#398): a human-only summary of the blast radius
+		// (the "used by" side). Kept off machine formats so scripts are stable.
+		if relatedRisk && showUsedBy && outFormat == "table" {
+			a := xref.AssessRisk(result)
+			fmt.Fprintf(os.Stdout, "\nDeletion risk: %s — %s.\n", a.Level, a.Reason)
+		}
 		return nil
 	},
 }
@@ -265,5 +272,6 @@ func init() {
 	relatedCmd.Flags().BoolVar(&relatedRefresh, "refresh", false, "ignore any cached scan and re-query AWS (still writes the cache)")
 	relatedCmd.Flags().BoolVar(&relatedDebugScan, "debug-scan", false, "print per-service scan timings to stderr")
 	relatedCmd.Flags().StringVar(&relatedFormat, "format", "", "graph export format: dot or mermaid (overrides -o)")
+	relatedCmd.Flags().BoolVar(&relatedRisk, "risk", false, "print a deletion-risk estimate from the blast radius (table output)")
 	rootCmd.AddCommand(relatedCmd)
 }
