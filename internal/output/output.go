@@ -308,6 +308,15 @@ func regionList(regions []string) string {
 	return fmt.Sprintf("%s, +%d more", strings.Join(regions[:3], ", "), len(regions)-3)
 }
 
+// levelTag renders a fixed-width, colored severity label (ERROR / WARNING) for
+// the error-summary headings, so each block is scannable by severity and lines
+// up with the leveled status lines the CLI prints elsewhere. Width 7 fits the
+// longest label ("WARNING"). Color degrades to plain text off a terminal.
+func levelTag(label, color string) string {
+	return stderrRenderer.NewStyle().Bold(true).Foreground(lipgloss.Color(color)).
+		Render(fmt.Sprintf("%-7s", label))
+}
+
 // PrintErrors summarizes collection errors on w, separating access-denied
 // errors from everything else and merging duplicates across regions.
 // Styling degrades to plain text when stderr is not a terminal.
@@ -331,7 +340,7 @@ func PrintErrors(w io.Writer, errs []model.ExploreError) {
 
 	if len(authErrs) > 0 {
 		fmt.Fprintln(w)
-		fmt.Fprintln(w, headingErr.Render("✗ Insufficient privileges")+
+		fmt.Fprintln(w, levelTag("ERROR", "1")+" "+headingErr.Render("Insufficient privileges")+
 			dim.Render(" — some services could not be scanned:"))
 		for _, g := range groupErrors(authErrs) {
 			suffix := ""
@@ -345,7 +354,7 @@ func PrintErrors(w io.Writer, errs []model.ExploreError) {
 
 	if len(otherErrs) > 0 {
 		fmt.Fprintln(w)
-		fmt.Fprintln(w, headingWarn.Render("⚠ Collection errors")+
+		fmt.Fprintln(w, levelTag("WARNING", "3")+" "+headingWarn.Render("Collection errors")+
 			dim.Render(" — results may be incomplete:"))
 		for _, g := range groupErrors(otherErrs) {
 			suffix := ""

@@ -6,8 +6,10 @@ import (
 	"os"
 	"time"
 
+	"github.com/mattn/go-isatty"
 	"github.com/spf13/cobra"
 
+	"github.com/ryandam9/aws_explorer/internal/clilog"
 	"github.com/ryandam9/aws_explorer/internal/engine"
 	"github.com/ryandam9/aws_explorer/internal/output"
 	"github.com/ryandam9/aws_explorer/internal/xref"
@@ -62,21 +64,27 @@ This is the CLI generalization of the summary TUI's 'x' cross-reference.`,
 		}
 		SilenceScanLogs()
 
+		// Status/diagnostic lines go to stderr, tinted by level (and with the
+		// user's input highlighted) when stderr is a terminal.
+		color := clilog.ColorEnabled(isatty.IsTerminal(os.Stderr.Fd()))
+
 		regions := eng.EffectiveRegions()
-		fmt.Fprintf(os.Stderr, "Scanning %d region(s) for references to %s…\n", len(regions), args[0])
+		clilog.Statusf(os.Stderr, color, "INFO", "Scanning %d region(s) for references to %s…", len(regions), clilog.Highlight(args[0], color))
 
 		timeout := time.Duration(AppConfig.App.TimeoutSeconds) * time.Second
 		// whereused is reverse-only at one hop: it asks "what references this",
 		// which never needs a role's own attached/inline policy edges. Skip the
 		// expensive per-role policy sweep (§7).
 		edges, errs := xref.Collect(ctx, eng.AWSConfig, regions, AppConfig.App.MaxConcurrency, timeout, false, nil)
-		output.PrintErrors(os.Stderr, errs)
-		warnAmbiguousTarget(os.Stderr, args[0], edges)
 
+		// Results first, then the diagnostics (ambiguity warning, collection-error
+		// summary), so the report isn't buried under the error block.
 		result := xref.WhereUsed(target, xref.BuildIndex(edges))
 		if err := xref.Render(os.Stdout, result, outputFormat, noHeader); err != nil {
 			return fmt.Errorf("rendering report: %w", err)
 		}
+		warnAmbiguousTarget(os.Stderr, args[0], edges, color)
+		output.PrintErrors(os.Stderr, errs)
 		return nil
 	},
 }

@@ -15,6 +15,7 @@
 package clilog
 
 import (
+	"fmt"
 	"io"
 	"os"
 	"strings"
@@ -30,6 +31,7 @@ const (
 	yellow = "\x1b[33m"
 	green  = "\x1b[32m"
 	gray   = "\x1b[90m"
+	cyan   = "\x1b[36m"
 )
 
 // ColorEnabled reports whether colored log output should be used, given whether
@@ -106,4 +108,60 @@ func colorizeLine(line string) string {
 // the line in the terminal's default foreground so it stays easy to read.
 func colorToken(line string, idx int, token, color string) string {
 	return line[:idx] + bold + color + token + reset + line[idx+len(token):]
+}
+
+// levelWidth pads every level label to a common width so a column of mixed
+// INFO / WARNING / ERROR tags stays aligned. "WARNING" is the longest label
+// we emit, so the column is sized to it.
+const levelWidth = 7
+
+// levelColor maps a severity label to its ANSI colour, matching the scheme
+// colorize() uses for slog records (ERROR red, WARN yellow, INFO green, DEBUG
+// gray). An unrecognised label gets no colour.
+func levelColor(label string) string {
+	switch {
+	case strings.HasPrefix(label, "ERROR"):
+		return red
+	case strings.HasPrefix(label, "WARN"):
+		return yellow
+	case strings.HasPrefix(label, "INFO"):
+		return green
+	case strings.HasPrefix(label, "DEBUG"):
+		return gray
+	default:
+		return ""
+	}
+}
+
+// LevelTag returns a fixed-width, coloured severity label (e.g. "INFO   ",
+// "WARNING", "ERROR  ") for ad-hoc CLI status lines that are not slog records
+// but should sit visually alongside the structured logs this package colours.
+// When color is false the tag is padded but left plain. Unknown levels are
+// padded and uncoloured.
+func LevelTag(level string, color bool) string {
+	label := strings.ToUpper(strings.TrimSpace(level))
+	padded := fmt.Sprintf("%-*s", levelWidth, label)
+	c := levelColor(label)
+	if !color || c == "" {
+		return padded
+	}
+	return bold + c + padded + reset
+}
+
+// Highlight emphasises a user-supplied value (an ARN, a resource id) so it
+// stands out when echoed back in a status line. It renders bold cyan on a
+// terminal and returns the string unchanged when color is false or empty.
+func Highlight(s string, color bool) string {
+	if !color || s == "" {
+		return s
+	}
+	return bold + cyan + s + reset
+}
+
+// Statusf prints a leveled status line to w: a coloured level tag followed by
+// the formatted message. It mirrors the look of the colorized slog records so
+// one-off CLI prints don't look out of place next to them. Pass color from
+// ColorEnabled.
+func Statusf(w io.Writer, color bool, level, format string, args ...any) {
+	fmt.Fprintf(w, "%s %s\n", LevelTag(level, color), fmt.Sprintf(format, args...))
 }

@@ -262,7 +262,11 @@ Flags: `--depth 1-5`, `--direction both|uses|usedby`, `--show-paths shortest|all
 `-o table|json|ndjson|csv`, `--no-header`, `--cache-ttl <dur>`, `--refresh`,
 `--debug-scan`, plus the global `-r/--region` and `--all-regions`. The coverage
 caveat and any per-region failures go to **stderr**, so stdout stays clean for
-pipelines.
+pipelines. The report is printed **first**; the collection-error summary follows
+**after** it (so results aren't buried under the errors). Status and error lines
+on a terminal carry a colored `INFO`/`WARNING`/`ERROR` level tag — matching the
+CLI's own leveled logs — and the resource you queried is highlighted where it's
+echoed back (disabled by [`NO_COLOR`](https://no-color.org/) or when piped).
 
 - `--show-paths all` keeps every distinct path to a resource (default keeps the
   shortest); the table then shows the full `PATH` chain instead of `VIA`.
