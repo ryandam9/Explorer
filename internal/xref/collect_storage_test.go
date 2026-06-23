@@ -231,7 +231,7 @@ func TestEFSEdges(t *testing.T) {
 		sgs: &awsefs.DescribeMountTargetSecurityGroupsOutput{SecurityGroups: []string{"sg-0aa"}},
 	}
 	rec := &recorder{region: "us-east-1"}
-	edges := efsEdgesAPI(context.Background(), fake, "us-east-1", rec)
+	edges := efsEdgesAPI(context.Background(), fake, "us-east-1", 4, rec)
 	if len(rec.errs) != 0 {
 		t.Fatalf("unexpected errors: %+v", rec.errs)
 	}
