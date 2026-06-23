@@ -148,6 +148,7 @@ func queryIdentifiers(input string) []string {
 // a visited set over both identifier forms.
 func walkForward(starts []string, fwdIdx map[string][]Edge, maxDepth int, allPaths bool) []Link {
 	visited := newVisited(starts)
+	startSet := identifierSet(starts)
 	rowSeen := make(map[string]bool)
 	var out []Link
 
@@ -156,6 +157,13 @@ func walkForward(starts []string, fwdIdx map[string][]Edge, maxDepth int, allPat
 		var next []frontierNode
 		for _, node := range frontier {
 			for _, e := range lookupEdges(fwdIdx, node.id) {
+				// A back-edge to the queried resource itself (a cycle, e.g.
+				// role/a → role/b → role/a) shouldn't list the start node as one
+				// of its own related rows (#389). It's already visited, so it
+				// never expands either.
+				if isStart(startSet, e.Target) {
+					continue
+				}
 				ref := targetReference(e)
 				path := joinPath(node.path, e.From.Via)
 				if rk := dedupeKey(ref, path, allPaths); !rowSeen[rk] {
@@ -173,10 +181,28 @@ func walkForward(starts []string, fwdIdx map[string][]Edge, maxDepth int, allPat
 	return out
 }
 
+// identifierSet expands ids (and their short forms) into a lookup set.
+func identifierSet(ids []string) map[string]bool {
+	set := make(map[string]bool)
+	for _, id := range ids {
+		for _, k := range dedupe(id, shortForm(id)) {
+			set[k] = true
+		}
+	}
+	return set
+}
+
+// isStart reports whether id (in either identifier form) is one of the query's
+// start identifiers — used to drop self/back-edge rows.
+func isStart(startSet map[string]bool, id string) bool {
+	return startSet[id] || startSet[shortForm(id)]
+}
+
 // walkReverse mirrors walkForward over the reverse index: hop 1 is what
 // references the queried resource, hop 2 is what references those, and so on.
 func walkReverse(starts []string, revIdx map[string][]Reference, maxDepth int, allPaths bool) []Link {
 	visited := newVisited(starts)
+	startSet := identifierSet(starts)
 	rowSeen := make(map[string]bool)
 	var out []Link
 
@@ -185,6 +211,10 @@ func walkReverse(starts []string, revIdx map[string][]Reference, maxDepth int, a
 		var next []frontierNode
 		for _, node := range frontier {
 			for _, r := range lookupRefs(revIdx, node.id) {
+				// Drop a back-edge to the queried resource itself (#389).
+				if isStart(startSet, r.ID) {
+					continue
+				}
 				path := joinPath(node.path, r.Via)
 				if rk := dedupeKey(r, path, allPaths); !rowSeen[rk] {
 					rowSeen[rk] = true

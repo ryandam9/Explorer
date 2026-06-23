@@ -263,9 +263,18 @@ func TestRelated_CycleGuard(t *testing.T) {
 		{From: Reference{Service: "iam", Type: "role", ID: b, Name: "b", Via: "trust policy principal"}, Target: a},
 	}
 	res := Related(a, BuildForwardIndex(edges), BuildIndex(edges), 5, false)
-	// Must terminate; b at depth 1, a at depth 2 — and no further (a already visited).
-	if len(res.Uses) != 2 {
-		t.Fatalf("uses: want 2 (b, then a), got %d: %+v", len(res.Uses), res.Uses)
+	// Must terminate and must NOT list the queried resource (a) back to itself
+	// via the cycle (#389): only b is related to a here.
+	if len(res.Uses) != 1 {
+		t.Fatalf("uses: want 1 (b only; a is the start), got %d: %+v", len(res.Uses), res.Uses)
+	}
+	if res.Uses[0].ID != b {
+		t.Errorf("uses[0] = %q, want %q", res.Uses[0].ID, b)
+	}
+	for _, l := range res.Uses {
+		if l.ID == a {
+			t.Errorf("start node a must not appear as its own related row: %+v", l)
+		}
 	}
 }
 
