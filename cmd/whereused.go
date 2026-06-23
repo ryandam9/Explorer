@@ -71,6 +71,7 @@ This is the CLI generalization of the summary TUI's 'x' cross-reference.`,
 		// expensive per-role policy sweep (§7).
 		edges, errs := xref.Collect(ctx, eng.AWSConfig, regions, AppConfig.App.MaxConcurrency, timeout, false)
 		output.PrintErrors(os.Stderr, errs)
+		warnAmbiguousTarget(os.Stderr, args[0], edges)
 
 		result := xref.WhereUsed(target, xref.BuildIndex(edges))
 		if err := xref.Render(os.Stdout, result, outputFormat, noHeader); err != nil {

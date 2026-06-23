@@ -90,6 +90,43 @@ func Related(input string, fwdIdx map[string][]Edge, revIdx map[string][]Referen
 	}
 }
 
+// AmbiguousCandidates returns the distinct fully-qualified identifiers (ARNs)
+// in the edge set that share the query's short form, when the query is a bare
+// name/short form rather than a full ARN. Short-form matching is convenient but
+// can merge unrelated resources — e.g. "app" matching role/team-a/app and
+// role/team-b/app, or a name reused across regions (#386). When this returns
+// more than one, the caller should warn and suggest passing a full ARN.
+// Returns nil when the query is already a full ARN or matches at most one.
+func AmbiguousCandidates(input string, edges []Edge) []string {
+	in := strings.TrimSpace(input)
+	if in == "" || strings.HasPrefix(in, "arn:") {
+		return nil
+	}
+	short := shortForm(in)
+	set := map[string]bool{}
+	consider := func(id string) {
+		// Only count fully-qualified identifiers (ARNs) whose short form equals
+		// the query's — those are the genuinely distinct resources a bare name
+		// could conflate.
+		if strings.HasPrefix(id, "arn:") && shortForm(id) == short {
+			set[id] = true
+		}
+	}
+	for _, e := range edges {
+		consider(e.From.ID)
+		consider(e.Target)
+	}
+	if len(set) <= 1 {
+		return nil
+	}
+	out := make([]string, 0, len(set))
+	for id := range set {
+		out = append(out, id)
+	}
+	sort.Strings(out)
+	return out
+}
+
 // queryIdentifiers returns the strings a stored edge might match for input —
 // the input itself and its short form — so any resource (not just the four
 // where-used kinds) is queryable.

@@ -7,6 +7,37 @@ import (
 	"github.com/ryandam9/aws_explorer/internal/model"
 )
 
+func TestAmbiguousCandidates(t *testing.T) {
+	roleA := "arn:aws:iam::111111111111:role/team-a/app"
+	roleB := "arn:aws:iam::111111111111:role/team-b/app"
+	edges := []Edge{
+		{From: Reference{Service: "lambda", ID: lambdaARN, Via: "execution role"}, Target: roleA},
+		{From: Reference{Service: "ecs", ID: tdARN, Via: "ECS task role"}, Target: roleB},
+		{From: Reference{Service: "iam", ID: roleA, Via: "trust policy principal"}, Target: srcRole},
+	}
+
+	// Bare name "app" collides across two distinct role ARNs.
+	got := AmbiguousCandidates("app", edges)
+	if len(got) != 2 || got[0] != roleA || got[1] != roleB {
+		t.Errorf("AmbiguousCandidates(app) = %v, want [%s %s]", got, roleA, roleB)
+	}
+
+	// A full ARN is never ambiguous.
+	if got := AmbiguousCandidates(roleA, edges); got != nil {
+		t.Errorf("full ARN should not be ambiguous, got %v", got)
+	}
+
+	// A name matching only one resource is unambiguous.
+	if got := AmbiguousCandidates("source", edges); got != nil {
+		t.Errorf("unique name should not be ambiguous, got %v", got)
+	}
+
+	// Empty input is a no-op.
+	if got := AmbiguousCandidates("", edges); got != nil {
+		t.Errorf("empty input should return nil, got %v", got)
+	}
+}
+
 func TestClassifyShortID(t *testing.T) {
 	cases := []struct {
 		id           string

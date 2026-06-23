@@ -3,6 +3,7 @@ package cmd
 import (
 	"context"
 	"fmt"
+	"io"
 	"os"
 	"strings"
 	"time"
@@ -115,6 +116,7 @@ This generalizes 'whereused' (which answers only the "used by" direction).`,
 		includeRolePolicies := depth > 1 || xref.Classify(args[0]).Kind == xref.KindIAMRole
 		edges, errs := xref.Collect(ctx, eng.AWSConfig, regions, AppConfig.App.MaxConcurrency, timeout, includeRolePolicies)
 		output.PrintErrors(os.Stderr, errs)
+		warnAmbiguousTarget(os.Stderr, args[0], edges)
 
 		result := xref.Related(args[0], xref.BuildForwardIndex(edges), xref.BuildIndex(edges), depth).WithCollectionStatus(errs)
 		if err := xref.RenderRelated(os.Stdout, result, outputFormat, noHeader, showUses, showUsedBy, result.Partial); err != nil {
@@ -122,6 +124,20 @@ This generalizes 'whereused' (which answers only the "used by" direction).`,
 		}
 		return nil
 	},
+}
+
+// warnAmbiguousTarget prints a stderr warning when a bare-name query matches
+// more than one fully-qualified resource by short form, so a merged graph isn't
+// mistaken for one resource's (#386).
+func warnAmbiguousTarget(w io.Writer, input string, edges []xref.Edge) {
+	cands := xref.AmbiguousCandidates(input, edges)
+	if len(cands) <= 1 {
+		return
+	}
+	fmt.Fprintf(w, "warning: %q matches %d resources by name; results are merged. Pass a full ARN to disambiguate:\n", input, len(cands))
+	for _, c := range cands {
+		fmt.Fprintf(w, "  - %s\n", c)
+	}
 }
 
 // relatedTUIFlagError rejects flags the --tui explorer doesn't honor. The TUI
