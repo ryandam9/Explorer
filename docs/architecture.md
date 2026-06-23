@@ -5,7 +5,7 @@ CLI (cobra)     ┐
                 ├── Engine ──┬── Collector Registry ──┬── EC2        ┐
 TUI (bubbletea) ┘            │                        ├── S3         │
                             │                        ├── RDS        │
-                            ├── Auth (5 methods)      ├── IAM        │ 15 service
+                            ├── Auth (5 methods)      ├── IAM        │ 29 service
                             ├── Config (viper + YAML) ├── DynamoDB   ├ collectors
                             ├── Filtering (reg/tag)   ├── Lambda     │ (EMR, ECS,
                             └── Output (table / JSON) ├── ELBv2      │  EKS, SQS,
@@ -50,7 +50,7 @@ aws_explorer/
 │   ├── engine/          # Orchestration: concurrent collection + streaming
 │   ├── model/           # Data models: Resource, Result, Filter, ExploreError
 │   ├── output/          # Table/JSON formatting + streaming writer
-│   ├── services/        # Collector interface, registry, 15 service implementations
+│   ├── services/        # Collector interface, registry, 29 service implementations
 │   │   ├── ec2/
 │   │   ├── s3/
 │   │   ├── rds/
@@ -98,7 +98,7 @@ aws_explorer/
 
 | Package | Purpose |
 |---------|---------|
-| [aws-sdk-go-v2](https://github.com/aws/aws-sdk-go-v2) | AWS SDK (15 service modules + STS/SSO) |
+| [aws-sdk-go-v2](https://github.com/aws/aws-sdk-go-v2) | AWS SDK for Go v2 (per-service modules + STS/SSO) |
 | [cobra](https://github.com/spf13/cobra) | CLI framework |
 | [viper](https://github.com/spf13/viper) | Configuration loading |
 | [bubbletea](https://github.com/charmbracelet/bubbletea) | TUI framework |

@@ -37,8 +37,9 @@ var (
 var auditCmd = &cobra.Command{
 	Use:   "audit",
 	Short: "Scan the account for cost waste and security risks (findings linter)",
-	Long: `Audit scans the configured regions and reports findings in two categories
-(both run by default; --only narrows):
+	Long: `Audit scans the configured regions and reports findings across several
+categories — cost, security, IAM hygiene, messaging, CloudTrail, Glue, EMR and
+Lambda (all run by default; --only narrows):
 
 cost — unattached EBS volumes, gp2 volumes that could be gp3, unassociated
 Elastic IPs, idle NAT gateways, load balancers with no healthy targets or no
