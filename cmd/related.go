@@ -12,6 +12,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/ryandam9/aws_explorer/internal/engine"
+	"github.com/ryandam9/aws_explorer/internal/model"
 	"github.com/ryandam9/aws_explorer/internal/output"
 	"github.com/ryandam9/aws_explorer/internal/relatedtui"
 	"github.com/ryandam9/aws_explorer/internal/ui"
@@ -25,6 +26,8 @@ var (
 	relatedDirection string
 	relatedTUI       bool
 	relatedShowPaths string
+	relatedCacheTTL  string
+	relatedRefresh   bool
 )
 
 var relatedCmd = &cobra.Command{
@@ -113,13 +116,39 @@ This generalizes 'whereused' (which answers only the "used by" direction).`,
 			return nil
 		}
 
-		fmt.Fprintf(os.Stderr, "Scanning %d region(s) for resources related to %s…\n", len(regions), args[0])
+		cacheTTL, err := time.ParseDuration(relatedCacheTTL)
+		if err != nil {
+			return fmt.Errorf("invalid --cache-ttl %q: %w", relatedCacheTTL, err)
+		}
+
 		// The per-role IAM policy sweep is only needed when the query can land on
 		// a role: the target itself is a role, or a multi-hop walk could reach
 		// one. Skipping it for the common non-role, depth-1 case avoids the
 		// expensive (and previously deadline-storming) sweep (§7).
 		includeRolePolicies := depth > 1 || xref.Classify(args[0]).Kind == xref.KindIAMRole
-		edges, errs := xref.Collect(ctx, eng.AWSConfig, regions, AppConfig.App.MaxConcurrency, timeout, includeRolePolicies)
+
+		// Short-lived cache (#393): reuse a recent scan of this scope when
+		// --cache-ttl is set, unless --refresh forces a live scan. Role-policy
+		// edges change the graph shape, so they're part of the cache key.
+		cacheKey := xref.CacheKey(version, eng.AccountID, AppConfig.AWS.Profile, append(regions, fmt.Sprintf("rp=%t", includeRolePolicies)))
+		cachePath, _ := xref.CachePath(cacheKey)
+
+		var edges []xref.Edge
+		var errs []model.ExploreError
+		cached := false
+		if !relatedRefresh {
+			if e, ok := xref.LoadCache(cachePath, version, cacheTTL, time.Now()); ok {
+				edges, errs, cached = e.Edges, e.Errors, true
+				fmt.Fprintf(os.Stderr, "Using cached scan from %s ago (--refresh to rescan)\n", time.Since(e.CreatedAt).Round(time.Second))
+			}
+		}
+		if !cached {
+			fmt.Fprintf(os.Stderr, "Scanning %d region(s) for resources related to %s…\n", len(regions), args[0])
+			edges, errs = xref.Collect(ctx, eng.AWSConfig, regions, AppConfig.App.MaxConcurrency, timeout, includeRolePolicies)
+			if cacheTTL > 0 {
+				_ = xref.SaveCache(cachePath, xref.CacheEntry{Version: version, CreatedAt: time.Now(), Edges: edges, Errors: errs})
+			}
+		}
 		output.PrintErrors(os.Stderr, errs)
 		warnAmbiguousTarget(os.Stderr, args[0], edges)
 
@@ -195,5 +224,7 @@ func init() {
 	relatedCmd.Flags().StringVar(&relatedDirection, "direction", "both", "which links to show: both, uses, usedby")
 	relatedCmd.Flags().BoolVar(&relatedTUI, "tui", false, "open the interactive related-resources explorer")
 	relatedCmd.Flags().StringVar(&relatedShowPaths, "show-paths", "shortest", "for multi-hop results: shortest (one path per resource) or all")
+	relatedCmd.Flags().StringVar(&relatedCacheTTL, "cache-ttl", "0", "reuse a cached scan younger than this (e.g. 5m); 0 disables caching")
+	relatedCmd.Flags().BoolVar(&relatedRefresh, "refresh", false, "ignore any cached scan and re-query AWS (still writes the cache)")
 	rootCmd.AddCommand(relatedCmd)
 }
