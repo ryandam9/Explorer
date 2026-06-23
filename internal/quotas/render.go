@@ -8,6 +8,8 @@ import (
 	"strconv"
 	"strings"
 	"text/tabwriter"
+
+	"github.com/ryandam9/aws_explorer/internal/csvexport"
 )
 
 // Render writes the rows to w in the requested format (table, json, ndjson,
@@ -42,6 +44,11 @@ func usageCell(r Row) string {
 	limit := trimFloat(r.Limit)
 	if r.Unit != "" {
 		limit += " " + r.Unit
+	}
+	if r.FromDefault {
+		// The applied quota couldn't be read; this is AWS's generic default, so
+		// a near-limit reading may be wrong. Flag it (§8) — already in JSON/CSV.
+		limit += " (default)"
 	}
 	if r.Used == nil {
 		return "— / " + limit
@@ -108,7 +115,7 @@ func renderCSV(w io.Writer, rows []Row, noHeader bool) error {
 			r.Name, r.Service, r.Region, used, trimFloat(r.Limit), r.Unit, pct,
 			string(r.Status), strconv.FormatBool(r.FromDefault),
 		}
-		if err := cw.Write(rec); err != nil {
+		if err := cw.Write(csvexport.SanitizeRow(rec)); err != nil {
 			return err
 		}
 	}

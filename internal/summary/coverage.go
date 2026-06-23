@@ -174,11 +174,12 @@ func NotShown(cov []ServiceCoverage) []ServiceCoverage {
 	return out
 }
 
-// CoverageNote renders a plain-language advisory for the summary table: if an
-// expected resource is absent, it may simply have no tags, followed by the
-// common services that produced nothing. tagSweep reports whether the
-// all-services tag search ran (it is skipped by --typed-only). Returns "" when
-// every catalog service is present and there is nothing to advise.
+// CoverageNote renders a plain-language advisory for the summary table,
+// listing common services that produced nothing — split by how they're found:
+// directly-queried services (absent ⇒ none exist) versus tag-discovered ones
+// (absent could just mean untagged). tagSweep reports whether the all-services
+// tag search ran (it is skipped by --typed-only). Returns "" when every catalog
+// service is present and there is nothing to advise.
 //
 // The wording deliberately avoids internal terms like "typed collector" — the
 // reader is a user trying to understand why something is missing, not how the
@@ -192,16 +193,30 @@ func CoverageNote(cov []ServiceCoverage, tagSweep bool) string {
 	warn := lipgloss.NewStyle().Foreground(lipgloss.Color(ui.ColorWarning())).Bold(true)
 	muted := ui.MutedStyle()
 
-	var b strings.Builder
-	b.WriteString(warn.Render("⚠ If a resource you expected isn't listed, it may have no tags, or there simply aren't any.") + "\n")
-	if !tagSweep {
-		b.WriteString(muted.Render("Run without --typed-only to also search for resources by their tags.") + "\n")
+	// Split missing services by how they're discovered: a service queried
+	// directly that shows nothing genuinely has none, whereas a tag-discovered
+	// service might just be untagged. Applying the "may have no tags" caveat to
+	// directly-queried services misinforms (#377).
+	var direct, tagged []string
+	for _, c := range missing {
+		if c.Typed {
+			direct = append(direct, c.Label)
+		} else {
+			tagged = append(tagged, c.Label)
+		}
 	}
 
-	names := make([]string, len(missing))
-	for i, c := range missing {
-		names[i] = c.Label
+	var b strings.Builder
+	if len(direct) > 0 {
+		b.WriteString(muted.Render("Checked directly, none found: "+strings.Join(direct, ", ")) + "\n")
 	}
-	b.WriteString(muted.Render("Common services with nothing shown: " + strings.Join(names, ", ")))
-	return b.String()
+	if len(tagged) > 0 {
+		if tagSweep {
+			b.WriteString(warn.Render("⚠ Found only by tags, so any with no tags won't appear: "+strings.Join(tagged, ", ")) + "\n")
+		} else {
+			b.WriteString(warn.Render("⚠ Not searched (tag lookup skipped): "+strings.Join(tagged, ", ")) + "\n")
+			b.WriteString(muted.Render("Run without --typed-only to search for these by tag.") + "\n")
+		}
+	}
+	return strings.TrimRight(b.String(), "\n")
 }

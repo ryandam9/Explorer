@@ -98,7 +98,11 @@ func (mm *m) defBody() string {
 	row("Glue version", d.GlueVersion)
 	row("Execution class", d.ExecutionClass)
 	row("Worker", d.Worker)
-	row("Timeout", fmt.Sprintf("%d min", d.TimeoutMinutes))
+	timeout := "—"
+	if d.TimeoutMinutes > 0 {
+		timeout = fmt.Sprintf("%d min", d.TimeoutMinutes)
+	}
+	row("Timeout", timeout)
 	row("Max retries", fmt.Sprintf("%d", d.MaxRetries))
 	row("Job bookmark", map[bool]string{true: "enabled", false: "disabled"}[d.BookmarkEnabled])
 	row("Script", d.Script)
