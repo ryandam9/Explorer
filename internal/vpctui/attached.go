@@ -2,6 +2,7 @@ package vpctui
 
 import (
 	"fmt"
+	"log/slog"
 	"strings"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
@@ -504,19 +505,33 @@ func (c *VPCClient) ListEFSFileSystems(vpcID string) ([]EFSFileSystemInfo, error
 			return nil, err
 		}
 		for _, fs := range out.FileSystems {
-			mts, err := c.efs.DescribeMountTargets(ctx, &efs.DescribeMountTargetsInput{
-				FileSystemId: fs.FileSystemId,
-			})
-			if err != nil {
-				continue
-			}
+			// A filesystem can have mount targets across many pages; reading only
+			// the first page can undercount in-VPC targets or drop the filesystem
+			// entirely (CLAUDE.md §5). Don't swallow the error silently either (§6a).
 			var subnetIDs []string
-			for _, mt := range mts.MountTargets {
-				if aws.ToString(mt.VpcId) == vpcID {
-					subnetIDs = append(subnetIDs, aws.ToString(mt.SubnetId))
+			var mtMarker *string
+			mtFailed := false
+			for {
+				mts, err := c.efs.DescribeMountTargets(ctx, &efs.DescribeMountTargetsInput{
+					FileSystemId: fs.FileSystemId,
+					Marker:       mtMarker,
+				})
+				if err != nil {
+					slog.Warn("efs: describe mount targets failed", "filesystem", aws.ToString(fs.FileSystemId), "err", err)
+					mtFailed = true
+					break
 				}
+				for _, mt := range mts.MountTargets {
+					if aws.ToString(mt.VpcId) == vpcID {
+						subnetIDs = append(subnetIDs, aws.ToString(mt.SubnetId))
+					}
+				}
+				if mts.NextMarker == nil {
+					break
+				}
+				mtMarker = mts.NextMarker
 			}
-			if len(subnetIDs) == 0 {
+			if mtFailed || len(subnetIDs) == 0 {
 				continue
 			}
 			name := aws.ToString(fs.Name)
