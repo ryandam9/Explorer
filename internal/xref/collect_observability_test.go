@@ -35,7 +35,7 @@ func TestMetricAlarmEdge_ResolvesBothDirections(t *testing.T) {
 	}
 	edges := metricAlarmEdges(a, "us-east-1")
 	fwd, rev := BuildForwardIndex(edges), BuildIndex(edges)
-	topic := Related("arn:aws:sns:us-east-1:111:ops", fwd, rev, 1)
+	topic := Related("arn:aws:sns:us-east-1:111:ops", fwd, rev, 1, false)
 	if len(topic.UsedBy) != 1 || topic.UsedBy[0].Service != "cloudwatch" {
 		t.Fatalf("topic.UsedBy = %+v", topic.UsedBy)
 	}
@@ -73,7 +73,7 @@ func TestLogGroup_UnifiesWithLambdaEdge(t *testing.T) {
 		ID: "arn:aws:lambda:us-east-1:111:function:checkout", Name: "checkout", Via: "CloudWatch log group (by convention)"}, Target: lgName})
 
 	fwd, rev := BuildForwardIndex(edges), BuildIndex(edges)
-	res := Related(lgName, fwd, rev, 1)
+	res := Related(lgName, fwd, rev, 1, false)
 	if len(res.UsedBy) != 1 || res.UsedBy[0].Service != "lambda" {
 		t.Errorf("log group UsedBy should include the Lambda: %+v", res.UsedBy)
 	}

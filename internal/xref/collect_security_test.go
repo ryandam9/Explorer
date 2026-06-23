@@ -89,7 +89,7 @@ func TestDepth2_LambdaRolePolicies(t *testing.T) {
 	})...)
 
 	fwd, rev := BuildForwardIndex(edges), BuildIndex(edges)
-	res := Related(lambdaARN, fwd, rev, 2)
+	res := Related(lambdaARN, fwd, rev, 2, false)
 
 	var role, policy *Link
 	for i := range res.Uses {

@@ -51,7 +51,7 @@ func TestTargetGroupTargetEdges_BothDirections(t *testing.T) {
 	}
 	fwd, rev := BuildForwardIndex(edges), BuildIndex(edges)
 	// related(lambda).UsedBy → the target group
-	lam := Related("arn:aws:lambda:us-east-1:111:function:handler", fwd, rev, 1)
+	lam := Related("arn:aws:lambda:us-east-1:111:function:handler", fwd, rev, 1, false)
 	if len(lam.UsedBy) != 1 || lam.UsedBy[0].Type != "target-group" {
 		t.Fatalf("lambda.UsedBy = %+v", lam.UsedBy)
 	}

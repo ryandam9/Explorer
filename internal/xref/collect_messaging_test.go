@@ -36,11 +36,11 @@ func TestSNSSubscription_ResolvesBothDirections(t *testing.T) {
 	}, "us-east-1")
 	fwd, rev := BuildForwardIndex(edges), BuildIndex(edges)
 
-	topic := Related("arn:aws:sns:us-east-1:111:orders", fwd, rev, 1)
+	topic := Related("arn:aws:sns:us-east-1:111:orders", fwd, rev, 1, false)
 	if len(topic.Uses) != 1 || topic.Uses[0].Service != "sqs" {
 		t.Fatalf("topic.Uses = %+v", topic.Uses)
 	}
-	queue := Related("arn:aws:sqs:us-east-1:111:orders-q", fwd, rev, 1)
+	queue := Related("arn:aws:sqs:us-east-1:111:orders-q", fwd, rev, 1, false)
 	if len(queue.UsedBy) != 1 || queue.UsedBy[0].Service != "sns" {
 		t.Fatalf("queue.UsedBy = %+v", queue.UsedBy)
 	}

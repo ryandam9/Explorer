@@ -25,6 +25,29 @@ func TestRelatedTUIFlagError(t *testing.T) {
 	}
 }
 
+func TestParseShowPaths(t *testing.T) {
+	cases := []struct {
+		in      string
+		wantAll bool
+		wantErr bool
+	}{
+		{"", false, false},
+		{"shortest", false, false},
+		{"all", true, false},
+		{"ALL", true, false},
+		{"bogus", false, true},
+	}
+	for _, c := range cases {
+		all, err := parseShowPaths(c.in)
+		if (err != nil) != c.wantErr {
+			t.Errorf("parseShowPaths(%q) err=%v, wantErr=%v", c.in, err, c.wantErr)
+		}
+		if err == nil && all != c.wantAll {
+			t.Errorf("parseShowPaths(%q) = %v, want %v", c.in, all, c.wantAll)
+		}
+	}
+}
+
 func TestParseDirection(t *testing.T) {
 	cases := []struct {
 		in                   string

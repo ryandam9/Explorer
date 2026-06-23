@@ -7,6 +7,49 @@ import (
 	"github.com/ryandam9/aws_explorer/internal/model"
 )
 
+func TestRelated_ShowAllPaths(t *testing.T) {
+	// Diamond: A reaches D via two distinct two-hop paths (A→B→D and A→C→D).
+	a := "arn:aws:iam::1:role/a"
+	b := "arn:aws:iam::1:role/b"
+	c := "arn:aws:iam::1:role/c"
+	d := "arn:aws:iam::1:role/d"
+	// Both routes reach D via the *same* final relationship ("p"); only the
+	// upstream path differs. Shortest mode collapses them (resource + immediate
+	// relationship match); --show-paths all keeps both (full path differs).
+	edges := []Edge{
+		{From: Reference{Service: "iam", Type: "role", ID: a, Via: "x"}, Target: b},
+		{From: Reference{Service: "iam", Type: "role", ID: a, Via: "y"}, Target: c},
+		{From: Reference{Service: "iam", Type: "role", ID: b, Via: "p"}, Target: d},
+		{From: Reference{Service: "iam", Type: "role", ID: c, Via: "p"}, Target: d},
+	}
+	fwd, rev := BuildForwardIndex(edges), BuildIndex(edges)
+	countD := func(links []Link) int {
+		n := 0
+		for _, l := range links {
+			if l.ID == d {
+				n++
+			}
+		}
+		return n
+	}
+
+	shortest := Related(a, fwd, rev, 2, false)
+	if got := countD(shortest.Uses); got != 1 {
+		t.Errorf("shortest: D should appear once, got %d: %+v", got, shortest.Uses)
+	}
+	if shortest.AllPaths {
+		t.Errorf("shortest result should not set AllPaths")
+	}
+
+	all := Related(a, fwd, rev, 2, true)
+	if got := countD(all.Uses); got != 2 {
+		t.Errorf("all-paths: D should appear twice, got %d: %+v", got, all.Uses)
+	}
+	if !all.AllPaths {
+		t.Errorf("all-paths result should set AllPaths")
+	}
+}
+
 func TestAmbiguousCandidates(t *testing.T) {
 	roleA := "arn:aws:iam::111111111111:role/team-a/app"
 	roleB := "arn:aws:iam::111111111111:role/team-b/app"
@@ -146,7 +189,7 @@ func sampleEdges() []Edge {
 
 func relatedOver(input string, depth int) RelatedResult {
 	edges := sampleEdges()
-	return Related(input, BuildForwardIndex(edges), BuildIndex(edges), depth)
+	return Related(input, BuildForwardIndex(edges), BuildIndex(edges), depth, false)
 }
 
 func TestRelated_BothDirections(t *testing.T) {
@@ -219,7 +262,7 @@ func TestRelated_CycleGuard(t *testing.T) {
 		{From: Reference{Service: "iam", Type: "role", ID: a, Name: "a", Via: "trust policy principal"}, Target: b},
 		{From: Reference{Service: "iam", Type: "role", ID: b, Name: "b", Via: "trust policy principal"}, Target: a},
 	}
-	res := Related(a, BuildForwardIndex(edges), BuildIndex(edges), 5)
+	res := Related(a, BuildForwardIndex(edges), BuildIndex(edges), 5, false)
 	// Must terminate; b at depth 1, a at depth 2 — and no further (a already visited).
 	if len(res.Uses) != 2 {
 		t.Fatalf("uses: want 2 (b, then a), got %d: %+v", len(res.Uses), res.Uses)
