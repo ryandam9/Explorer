@@ -203,13 +203,13 @@ type efsAPI interface {
 }
 
 // efsEdges builds the EFS client for the region and delegates to efsEdgesAPI.
-func efsEdges(ctx context.Context, cfg aws.Config, region string, rec *recorder) []Edge {
-	return efsEdgesAPI(ctx, awsefs.NewFromConfig(cfg), region, rec)
+func efsEdges(ctx context.Context, cfg aws.Config, region string, maxConcurrency int, rec *recorder) []Edge {
+	return efsEdgesAPI(ctx, awsefs.NewFromConfig(cfg), region, maxConcurrency, rec)
 }
 
 // efsEdgesAPI emits file-system → KMS key and mount-target → subnet / security
 // group edges across all file systems in the region.
-func efsEdgesAPI(ctx context.Context, api efsAPI, region string, rec *recorder) []Edge {
+func efsEdgesAPI(ctx context.Context, api efsAPI, region string, maxConcurrency int, rec *recorder) []Edge {
 	var edges []Edge
 	var marker *string
 	for {
@@ -227,7 +227,7 @@ func efsEdgesAPI(ctx context.Context, api efsAPI, region string, rec *recorder) 
 			if k := aws.ToString(fs.KmsKeyId); k != "" {
 				edges = append(edges, Edge{From: withVia(from, "EFS encryption key"), Target: k})
 			}
-			edges = append(edges, efsMountTargetEdges(ctx, api, from, aws.ToString(fs.FileSystemId), rec)...)
+			edges = append(edges, efsMountTargetEdges(ctx, api, from, aws.ToString(fs.FileSystemId), maxConcurrency, rec)...)
 		}
 		if out.NextMarker == nil {
 			break
@@ -237,8 +237,9 @@ func efsEdgesAPI(ctx context.Context, api efsAPI, region string, rec *recorder) 
 	return edges
 }
 
-func efsMountTargetEdges(ctx context.Context, api efsAPI, from Reference, fsID string, rec *recorder) []Edge {
-	var edges []Edge
+func efsMountTargetEdges(ctx context.Context, api efsAPI, from Reference, fsID string, maxConcurrency int, rec *recorder) []Edge {
+	type mountTarget struct{ subnetID, id string }
+	var mts []mountTarget
 	var marker *string
 	for {
 		out, err := api.DescribeMountTargets(ctx, &awsefs.DescribeMountTargetsInput{FileSystemId: &fsID, Marker: marker})
@@ -247,23 +248,30 @@ func efsMountTargetEdges(ctx context.Context, api efsAPI, from Reference, fsID s
 			break
 		}
 		for _, mt := range out.MountTargets {
-			if sub := aws.ToString(mt.SubnetId); sub != "" {
-				edges = append(edges, Edge{From: withVia(from, "EFS mount target subnet"), Target: sub})
-			}
-			mtID := aws.ToString(mt.MountTargetId)
-			sgOut, err := api.DescribeMountTargetSecurityGroups(ctx, &awsefs.DescribeMountTargetSecurityGroupsInput{MountTargetId: &mtID})
-			if err != nil {
-				rec.record("efs", err)
-				continue
-			}
-			for _, sg := range sgOut.SecurityGroups {
-				edges = append(edges, Edge{From: withVia(from, "EFS mount target security group"), Target: sg})
-			}
+			mts = append(mts, mountTarget{subnetID: aws.ToString(mt.SubnetId), id: aws.ToString(mt.MountTargetId)})
 		}
 		if out.NextMarker == nil {
 			break
 		}
 		marker = out.NextMarker
 	}
-	return edges
+	// One DescribeMountTargetSecurityGroups per mount target — fan out (§7).
+	return boundedEdges(ctx, mts, maxConcurrency, rec, func(ctx context.Context, mt mountTarget, rec *recorder) []Edge {
+		var edges []Edge
+		if mt.subnetID != "" {
+			edges = append(edges, Edge{From: withVia(from, "EFS mount target subnet"), Target: mt.subnetID})
+		}
+		if mt.id == "" {
+			return edges
+		}
+		sgOut, err := api.DescribeMountTargetSecurityGroups(ctx, &awsefs.DescribeMountTargetSecurityGroupsInput{MountTargetId: &mt.id})
+		if err != nil {
+			rec.record("efs", err)
+			return edges
+		}
+		for _, sg := range sgOut.SecurityGroups {
+			edges = append(edges, Edge{From: withVia(from, "EFS mount target security group"), Target: sg})
+		}
+		return edges
+	})
 }

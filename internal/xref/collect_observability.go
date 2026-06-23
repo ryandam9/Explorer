@@ -83,9 +83,9 @@ func subscriptionFilterEdges(from Reference, filters []cwltypes.SubscriptionFilt
 	return edges
 }
 
-func cwLogsEdges(ctx context.Context, cfg aws.Config, region string, rec *recorder) []Edge {
+func cwLogsEdges(ctx context.Context, cfg aws.Config, region string, maxConcurrency int, rec *recorder) []Edge {
 	client := awscwl.NewFromConfig(cfg)
-	var edges []Edge
+	var groups []cwltypes.LogGroup
 	p := awscwl.NewDescribeLogGroupsPaginator(client, &awscwl.DescribeLogGroupsInput{})
 	for p.HasMorePages() {
 		page, err := p.NextPage(ctx)
@@ -93,25 +93,28 @@ func cwLogsEdges(ctx context.Context, cfg aws.Config, region string, rec *record
 			rec.record("logs", err)
 			break
 		}
-		for _, lg := range page.LogGroups {
-			ref := logGroupRef(lg, region)
-			if key := aws.ToString(lg.KmsKeyId); key != "" {
-				edges = append(edges, Edge{From: withVia(ref, "log group encryption key"), Target: key})
-			}
-			out, err := client.DescribeSubscriptionFilters(ctx, &awscwl.DescribeSubscriptionFiltersInput{LogGroupName: lg.LogGroupName})
-			if err != nil {
-				rec.record("logs", err)
-				continue
-			}
-			edges = append(edges, subscriptionFilterEdges(ref, out.SubscriptionFilters)...)
-		}
+		groups = append(groups, page.LogGroups...)
 	}
-	return edges
+	// One DescribeSubscriptionFilters per log group — accounts can have hundreds,
+	// so fan out instead of calling them serially under the region deadline (§7).
+	return boundedEdges(ctx, groups, maxConcurrency, rec, func(ctx context.Context, lg cwltypes.LogGroup, rec *recorder) []Edge {
+		ref := logGroupRef(lg, region)
+		var edges []Edge
+		if key := aws.ToString(lg.KmsKeyId); key != "" {
+			edges = append(edges, Edge{From: withVia(ref, "log group encryption key"), Target: key})
+		}
+		out, err := client.DescribeSubscriptionFilters(ctx, &awscwl.DescribeSubscriptionFiltersInput{LogGroupName: lg.LogGroupName})
+		if err != nil {
+			rec.record("logs", err)
+			return edges
+		}
+		return append(edges, subscriptionFilterEdges(ref, out.SubscriptionFilters)...)
+	})
 }
 
-func observabilityEdges(ctx context.Context, cfg aws.Config, region string, rec *recorder) []Edge {
+func observabilityEdges(ctx context.Context, cfg aws.Config, region string, maxConcurrency int, rec *recorder) []Edge {
 	var edges []Edge
 	edges = append(edges, cloudWatchAlarmEdges(ctx, cfg, region, rec)...)
-	edges = append(edges, cwLogsEdges(ctx, cfg, region, rec)...)
+	edges = append(edges, cwLogsEdges(ctx, cfg, region, maxConcurrency, rec)...)
 	return edges
 }

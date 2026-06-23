@@ -346,8 +346,8 @@ func collectRegion(ctx context.Context, baseCfg aws.Config, region string, profi
 		{"sqs", func() []Edge { return sqsEdges(ctx, cfg, region, rec) }},
 		{"ecs", func() []Edge { return ecsEdges(ctx, cfg, region, maxConcurrency, rec) }},
 		{"eks", func() []Edge { return eksEdges(ctx, cfg, region, rec) }},
-		{"elbv2", func() []Edge { return elbv2Edges(ctx, cfg, region, rec) }},
-		{"efs", func() []Edge { return efsEdges(ctx, cfg, region, rec) }},
+		{"elbv2", func() []Edge { return elbv2Edges(ctx, cfg, region, maxConcurrency, rec) }},
+		{"efs", func() []Edge { return efsEdges(ctx, cfg, region, maxConcurrency, rec) }},
 		{"sns", func() []Edge { return snsEdges(ctx, cfg, region, maxConcurrency, rec) }},
 		{"events", func() []Edge { return eventBridgeEdges(ctx, cfg, region, rec) }},
 		{"states", func() []Edge { return sfnEdges(ctx, cfg, region, maxConcurrency, rec) }},
@@ -358,7 +358,7 @@ func collectRegion(ctx context.Context, baseCfg aws.Config, region string, profi
 		{"dynamodb", func() []Edge { return dynamodbEdges(ctx, cfg, region, maxConcurrency, rec) }},
 		{"elasticache", func() []Edge { return elastiCacheEdges(ctx, cfg, region, rec) }},
 		{"redshift", func() []Edge { return redshiftEdges(ctx, cfg, region, rec) }},
-		{"observability", func() []Edge { return observabilityEdges(ctx, cfg, region, rec) }},
+		{"observability", func() []Edge { return observabilityEdges(ctx, cfg, region, maxConcurrency, rec) }},
 	}
 
 	// Run the region's collectors concurrently (bounded). They previously ran
@@ -599,7 +599,7 @@ func eksEdges(ctx context.Context, cfg aws.Config, region string, rec *recorder)
 	return edges
 }
 
-func elbv2Edges(ctx context.Context, cfg aws.Config, region string, rec *recorder) []Edge {
+func elbv2Edges(ctx context.Context, cfg aws.Config, region string, maxConcurrency int, rec *recorder) []Edge {
 	client := awselbv2.NewFromConfig(cfg)
 	var edges []Edge
 	lbp := awselbv2.NewDescribeLoadBalancersPaginator(client, &awselbv2.DescribeLoadBalancersInput{})
@@ -631,7 +631,7 @@ func elbv2Edges(ctx context.Context, cfg aws.Config, region string, rec *recorde
 			}
 		}
 	}
-	edges = append(edges, elbTargetGroupEdges(ctx, client, region, rec)...)
+	edges = append(edges, elbTargetGroupEdges(ctx, client, region, maxConcurrency, rec)...)
 	return edges
 }
 

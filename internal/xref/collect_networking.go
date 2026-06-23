@@ -58,8 +58,8 @@ func targetGroupTargetEdges(tgRef Reference, targets []elbv2types.TargetHealthDe
 
 // elbTargetGroupEdges pages target groups, links each to its load balancer(s)
 // and registered targets.
-func elbTargetGroupEdges(ctx context.Context, client *awselbv2.Client, region string, rec *recorder) []Edge {
-	var edges []Edge
+func elbTargetGroupEdges(ctx context.Context, client *awselbv2.Client, region string, maxConcurrency int, rec *recorder) []Edge {
+	var tgs []elbv2types.TargetGroup
 	p := awselbv2.NewDescribeTargetGroupsPaginator(client, &awselbv2.DescribeTargetGroupsInput{})
 	for p.HasMorePages() {
 		page, err := p.NextPage(ctx)
@@ -67,21 +67,23 @@ func elbTargetGroupEdges(ctx context.Context, client *awselbv2.Client, region st
 			rec.record("elbv2", err)
 			break
 		}
-		for _, tg := range page.TargetGroups {
-			tgRef := Reference{Service: "elbv2", Type: "target-group", Region: region,
-				ID: aws.ToString(tg.TargetGroupArn), Name: aws.ToString(tg.TargetGroupName)}
-			for _, lbArn := range tg.LoadBalancerArns {
-				edges = append(edges, Edge{From: withVia(tgRef, "attached to load balancer"), Target: lbArn})
-			}
-			health, err := client.DescribeTargetHealth(ctx, &awselbv2.DescribeTargetHealthInput{TargetGroupArn: tg.TargetGroupArn})
-			if err != nil {
-				rec.record("elbv2", err)
-				continue
-			}
-			edges = append(edges, targetGroupTargetEdges(tgRef, health.TargetHealthDescriptions)...)
-		}
+		tgs = append(tgs, page.TargetGroups...)
 	}
-	return edges
+	// One DescribeTargetHealth per target group — fan out (§7).
+	return boundedEdges(ctx, tgs, maxConcurrency, rec, func(ctx context.Context, tg elbv2types.TargetGroup, rec *recorder) []Edge {
+		tgRef := Reference{Service: "elbv2", Type: "target-group", Region: region,
+			ID: aws.ToString(tg.TargetGroupArn), Name: aws.ToString(tg.TargetGroupName)}
+		var edges []Edge
+		for _, lbArn := range tg.LoadBalancerArns {
+			edges = append(edges, Edge{From: withVia(tgRef, "attached to load balancer"), Target: lbArn})
+		}
+		health, err := client.DescribeTargetHealth(ctx, &awselbv2.DescribeTargetHealthInput{TargetGroupArn: tg.TargetGroupArn})
+		if err != nil {
+			rec.record("elbv2", err)
+			return edges
+		}
+		return append(edges, targetGroupTargetEdges(tgRef, health.TargetHealthDescriptions)...)
+	})
 }
 
 // --- API Gateway --------------------------------------------------------------
