@@ -32,6 +32,26 @@ func humanKind(k Kind) string {
 	}
 }
 
+// targetKindLabel is the parenthetical label in the report header. The four
+// classified kinds get their plain name; any other ARN is named from the ARN
+// itself (e.g. "lambda function") rather than the vague "resource" — a Lambda
+// or S3 ARN queries perfectly well, it just has no scoped reverse-footer kind.
+func targetKindLabel(t Target) string {
+	if t.Kind != KindUnknown {
+		return humanKind(t.Kind)
+	}
+	if t.ARN != "" {
+		svc, typ := arnService(t.ARN), arnResourceType(t.ARN)
+		switch {
+		case svc != "" && typ != "":
+			return svc + " " + typ
+		case svc != "":
+			return svc + " resource"
+		}
+	}
+	return "resource"
+}
+
 // RenderRelated writes a bidirectional related-resources result in the
 // requested format. showUses / showUsedBy select which directions to print.
 // partial is set when collection reported errors, so an empty side is flagged
@@ -162,7 +182,7 @@ func mermaidEdgeLabel(s string) string {
 
 func renderRelatedTable(w io.Writer, res RelatedResult, noHeader, showUses, showUsedBy, partial bool) error {
 	if !noHeader {
-		fmt.Fprintf(w, "Related resources for %s (%s)\n", targetLabel(res.Target), humanKind(res.Target.Kind))
+		fmt.Fprintf(w, "Related resources for %s (%s)\n", targetLabel(res.Target), targetKindLabel(res.Target))
 		fmt.Fprintln(w, "Two lists follow: what this resource depends on, and what depends on it.")
 		if res.Depth > 1 {
 			fmt.Fprintf(w, "Following links up to %d hop(s) away.\n", res.Depth)
@@ -217,6 +237,12 @@ func unknownTargetNote(t Target) string {
 	if strings.HasPrefix(t.Input, "vpc-") {
 		return "Note: 'related' walks resource-to-resource references, not VPC membership. " +
 			"To list resources inside a VPC, use 'aws_explorer vpc'."
+	}
+	if t.ARN != "" {
+		// A real ARN (Lambda, S3, RDS, …) queries fine; it just isn't one of the
+		// four kinds that get a scoped "Used by" footer. No warning needed — the
+		// bottom caveat already states the honesty contract.
+		return ""
 	}
 	return "Note: this identifier isn't a supported target kind (IAM role, KMS key, " +
 		"ACM certificate, security group); only edges to/from it are shown."
