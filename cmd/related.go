@@ -231,6 +231,9 @@ This generalizes 'whereused' (which answers only the "used by" direction).`,
 			}
 		}
 		output.PrintErrors(os.Stderr, errs)
+		if hint := timeoutHint(errs, arnRegionField(args[0]), len(regions)); hint != "" {
+			fmt.Fprint(os.Stderr, hint)
+		}
 		warnAmbiguousTarget(os.Stderr, args[0], edges)
 
 		result := xref.Related(args[0], xref.BuildForwardIndex(edges), xref.BuildIndex(edges), depth, allPaths).WithCollectionStatus(errs)
@@ -251,6 +254,51 @@ This generalizes 'whereused' (which answers only the "used by" direction).`,
 		}
 		return nil
 	},
+}
+
+// arnRegionField extracts the region from an ARN (the 4th colon-field), or ""
+// for a non-ARN / global resource — used to make the -r suggestion concrete.
+func arnRegionField(s string) string {
+	if !strings.HasPrefix(s, "arn:") {
+		return ""
+	}
+	parts := strings.SplitN(s, ":", 6)
+	if len(parts) >= 4 {
+		return parts[3]
+	}
+	return ""
+}
+
+// timeoutHint returns scan-narrowing guidance when collection hit deadline/
+// cancellation errors, so a timed-out (and thus incomplete) result tells the
+// user how to get a complete, faster answer. region is the target's own region
+// (for a concrete -r suggestion); regionCount lets us skip the -r tip when the
+// scan was already a single region. Returns "" when nothing timed out.
+func timeoutHint(errs []model.ExploreError, region string, regionCount int) string {
+	timedOut := false
+	for _, e := range errs {
+		m := strings.ToLower(e.Message)
+		if strings.Contains(m, "deadline exceeded") || strings.Contains(m, "canceled") || strings.Contains(m, "cancelled") {
+			timedOut = true
+			break
+		}
+	}
+	if !timedOut {
+		return ""
+	}
+
+	var b strings.Builder
+	b.WriteString("\nSome regions/services timed out, so the result above may be incomplete. To get a complete, faster answer, narrow the scan:\n")
+	if regionCount != 1 {
+		r := region
+		if r == "" {
+			r = "<region>"
+		}
+		fmt.Fprintf(&b, "  • -r %-12s scan only the resource's region (usually all you need for \"Depends on\")\n", r)
+	}
+	b.WriteString("  • --scan eventing  focus the \"Used by\" search (or pass an explicit service list)\n")
+	b.WriteString("  • --debug-scan     show which regions/services are slow\n")
+	return b.String()
 }
 
 // warnAmbiguousTarget prints a stderr warning when a bare-name query matches

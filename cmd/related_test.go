@@ -4,6 +4,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/ryandam9/aws_explorer/internal/model"
 	"github.com/ryandam9/aws_explorer/internal/xref"
 )
 
@@ -27,6 +28,46 @@ func TestRelatedTUIFlagError(t *testing.T) {
 					c.tui, c.depth, c.direction, err, c.wantErr)
 			}
 		})
+	}
+}
+
+func TestArnRegionField(t *testing.T) {
+	cases := map[string]string{
+		"arn:aws:lambda:us-east-2:111:function:f": "us-east-2",
+		"arn:aws:iam::111:role/app":               "", // global → empty region field
+		"sg-0abc123":                              "", // not an ARN
+		"my-role":                                 "",
+	}
+	for in, want := range cases {
+		if got := arnRegionField(in); got != want {
+			t.Errorf("arnRegionField(%q) = %q, want %q", in, got, want)
+		}
+	}
+}
+
+func TestTimeoutHint(t *testing.T) {
+	deadline := []model.ExploreError{{Service: "logs", Region: "sa-east-1", Code: "CollectionError", Message: "operation error CloudWatch Logs: DescribeLogGroups, context deadline exceeded"}}
+	denied := []model.ExploreError{{Service: "s3", Region: "us-east-1", Code: "AccessDenied", Message: "not authorized"}}
+
+	// Timeout present, multi-region → full hint incl. the -r suggestion.
+	h := timeoutHint(deadline, "us-east-2", 18)
+	for _, want := range []string{"timed out", "-r us-east-2", "--scan eventing", "--debug-scan"} {
+		if !strings.Contains(h, want) {
+			t.Errorf("hint missing %q:\n%s", want, h)
+		}
+	}
+
+	// Single-region scan → no -r suggestion (already scoped).
+	if h := timeoutHint(deadline, "us-east-2", 1); strings.Contains(h, "-r ") {
+		t.Errorf("single-region hint should omit -r:\n%s", h)
+	}
+
+	// No timeout errors → no hint.
+	if h := timeoutHint(denied, "us-east-1", 18); h != "" {
+		t.Errorf("non-timeout errors should produce no hint, got:\n%s", h)
+	}
+	if h := timeoutHint(nil, "", 18); h != "" {
+		t.Errorf("no errors should produce no hint, got:\n%s", h)
 	}
 }
 
