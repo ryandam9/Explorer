@@ -125,7 +125,10 @@ This generalizes 'whereused' (which answers only the "used by" direction).`,
   aws_explorer related arn:aws:kms:…:key/abcd --depth 2 --all-regions
   # Debug an S3 → Lambda event pipeline, or a Lambda's event sources:
   aws_explorer related arn:aws:s3:::uploads --depth 2
-  aws_explorer related arn:aws:lambda:…:function:worker --depth 2`,
+  aws_explorer related arn:aws:lambda:…:function:worker --depth 2
+
+  # See docs/related.md ("Examples by resource type") for a full table of
+  # every resource type, an example invocation, and the links it reveals.`,
 	Args: cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		showUses, showUsedBy, err := parseDirection(relatedDirection)
