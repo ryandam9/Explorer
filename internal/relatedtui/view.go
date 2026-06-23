@@ -49,7 +49,16 @@ func (mm *m) View() string {
 		b.WriteString(badge + "\n")
 	}
 	b.WriteString(mm.header() + "\n")
-	b.WriteString(ui.MutedStyle().Render("  "+caveat) + "\n")
+	// One chrome line: the filter box while filtering, the active filter when
+	// set, else the coverage caveat (keeps panel height math stable, §9).
+	switch {
+	case mm.filtering:
+		b.WriteString(" " + mm.search.View() + "\n")
+	case mm.filter != "":
+		b.WriteString(ui.MutedStyle().Render("  filter: "+mm.filter+"   (/ edit · Esc clear)") + "\n")
+	default:
+		b.WriteString(ui.MutedStyle().Render("  "+caveat) + "\n")
+	}
 
 	if mm.loading {
 		b.WriteString(fmt.Sprintf("\n  %s Scanning the account for relationships…", mm.spinner.View()))
@@ -123,12 +132,29 @@ func (mm *m) panels() string {
 		innerW = 10
 	}
 
-	uses := mm.panel(paneUses, fmt.Sprintf("Uses (depends on) →  ·  %d", len(mm.result.Uses)),
-		&mm.usesTbl, len(mm.result.Uses), "Nothing this resource references was found.", innerW, tableH)
-	usedBy := mm.panel(paneUsedBy, fmt.Sprintf("Used by ←  ·  %d", len(mm.result.UsedBy)),
-		&mm.usedByTbl, len(mm.result.UsedBy), mm.usedByEmpty(), innerW, tableH)
+	uses := mm.panel(paneUses, fmt.Sprintf("Uses (depends on) →  ·  %s", mm.paneCount(mm.viewUses, mm.result.Uses)),
+		&mm.usesTbl, len(mm.viewUses), mm.emptyMsg("Nothing this resource references was found."), innerW, tableH)
+	usedBy := mm.panel(paneUsedBy, fmt.Sprintf("Used by ←  ·  %s", mm.paneCount(mm.viewUsedBy, mm.result.UsedBy)),
+		&mm.usedByTbl, len(mm.viewUsedBy), mm.emptyMsg(mm.usedByEmpty()), innerW, tableH)
 
 	return lipgloss.JoinVertical(lipgloss.Left, uses, usedBy)
+}
+
+// paneCount shows "shown/total" when a filter is hiding rows, else just the
+// count.
+func (mm *m) paneCount(view, all []xref.Link) string {
+	if mm.filter != "" && len(view) != len(all) {
+		return fmt.Sprintf("%d of %d", len(view), len(all))
+	}
+	return fmt.Sprintf("%d", len(all))
+}
+
+// emptyMsg adapts the empty-state text when a filter is active.
+func (mm *m) emptyMsg(base string) string {
+	if mm.filter != "" {
+		return "No rows match filter " + mm.filter + "."
+	}
+	return base
 }
 
 func (mm *m) panel(pane focusPane, title string, tbl *table.Model, items int, empty string, innerW, tableH int) string {
@@ -194,8 +220,12 @@ func (mm *m) hints() []ui.KeyHint {
 	if mm.loading {
 		return []ui.KeyHint{ui.H("q", "quit")}
 	}
+	if mm.filtering {
+		return []ui.KeyHint{ui.H("type", "filter"), ui.H("Enter", "apply"), ui.H("Esc", "clear")}
+	}
 	return []ui.KeyHint{
 		ui.H("↑/↓", "rows"), ui.H("Tab/←/→", "pane"), ui.H("Enter", "open link"),
+		ui.H("/", "filter"), ui.H("p", "copy path"),
 		ui.H("Esc", "back"), ui.H("y", "copy ARN"), ui.H("o", "console"),
 		ui.H("r", "refresh"), ui.H("i", "help"), ui.H("q", "quit"),
 	}
@@ -265,8 +295,13 @@ func helpContent() string {
 		"",
 		dimNote(),
 		"",
+		head("FILTER"),
+		"  /  or  f      filter rows by service / type / name / region / via",
+		"                (live; Enter keeps it, Esc clears it)",
+		"",
 		head("ON A ROW"),
 		"  y             copy the resource's ARN",
+		"  p             copy the relationship path",
 		"  o             open it in the AWS console",
 		"",
 		head("OTHER"),
