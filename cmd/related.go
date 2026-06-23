@@ -9,8 +9,10 @@ import (
 	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/mattn/go-isatty"
 	"github.com/spf13/cobra"
 
+	"github.com/ryandam9/aws_explorer/internal/clilog"
 	"github.com/ryandam9/aws_explorer/internal/engine"
 	"github.com/ryandam9/aws_explorer/internal/model"
 	"github.com/ryandam9/aws_explorer/internal/output"
@@ -177,6 +179,11 @@ This generalizes 'whereused' (which answers only the "used by" direction).`,
 		regions := eng.EffectiveRegions()
 		timeout := time.Duration(AppConfig.App.TimeoutSeconds) * time.Second
 
+		// Status/diagnostic lines go to stderr, tinted by level (and with the
+		// user's input highlighted) when stderr is a terminal — matching the
+		// leveled slog stream. Piped/NO_COLOR output stays plain.
+		color := clilog.ColorEnabled(isatty.IsTerminal(os.Stderr.Fd()))
+
 		if relatedTUI {
 			ui.InitFromConfig(AppConfig.UI)
 			if idx, ok := ui.LookupTheme(resolveTheme(cmd, "")); ok {
@@ -213,11 +220,11 @@ This generalizes 'whereused' (which answers only the "used by" direction).`,
 		if !relatedRefresh {
 			if e, ok := xref.LoadCache(cachePath, version, cacheTTL, time.Now()); ok {
 				edges, errs, cached = e.Edges, e.Errors, true
-				fmt.Fprintf(os.Stderr, "Using cached scan from %s ago (--refresh to rescan)\n", time.Since(e.CreatedAt).Round(time.Second))
+				clilog.Statusf(os.Stderr, color, "INFO", "Using cached scan from %s ago (--refresh to rescan)", time.Since(e.CreatedAt).Round(time.Second))
 			}
 		}
 		if !cached {
-			fmt.Fprintf(os.Stderr, "Scanning %d region(s) for resources related to %s…\n", len(regions), args[0])
+			clilog.Statusf(os.Stderr, color, "INFO", "Scanning %d region(s) for resources related to %s…", len(regions), clilog.Highlight(args[0], color))
 			var stats *xref.ScanStats
 			edges, errs, stats = xref.CollectWithStats(ctx, eng.AWSConfig, regions, AppConfig.App.MaxConcurrency, timeout, includeRolePolicies, scanServices)
 			if relatedDebugScan {
@@ -230,19 +237,17 @@ This generalizes 'whereused' (which answers only the "used by" direction).`,
 				_ = xref.SaveCache(cachePath, xref.CacheEntry{Version: version, CreatedAt: time.Now(), Edges: edges, Errors: errs})
 			}
 		}
-		output.PrintErrors(os.Stderr, errs)
-		if hint := timeoutHint(errs, arnRegionField(args[0]), len(regions)); hint != "" {
-			fmt.Fprint(os.Stderr, hint)
-		}
-		warnAmbiguousTarget(os.Stderr, args[0], edges)
-
 		result := xref.Related(args[0], xref.BuildForwardIndex(edges), xref.BuildIndex(edges), depth, allPaths).WithCollectionStatus(errs)
 		if scanServices != nil {
 			// Honesty (§8): a narrowed scan must narrow what it claims to have
-			// checked, and say so.
+			// checked.
 			result.CheckedTypes = xref.CheckedTypesFor(result.Target.Kind, scanServices)
-			fmt.Fprintf(os.Stderr, "Scan limited to --scan %s; coverage is narrower than a full scan.\n", relatedScan)
 		}
+
+		// Show the results first; the diagnostics (scan-scope notice, ambiguity
+		// warning, collection-error summary, slow-scan hint) follow at the end so
+		// they don't bury the report. This matches the streaming commands, which
+		// also summarize errors after the rows.
 		if err := xref.RenderRelated(os.Stdout, result, outFormat, noHeader, showUses, showUsedBy, result.Partial); err != nil {
 			return fmt.Errorf("rendering report: %w", err)
 		}
@@ -251,6 +256,15 @@ This generalizes 'whereused' (which answers only the "used by" direction).`,
 		if relatedRisk && showUsedBy && outFormat == "table" {
 			a := xref.AssessRisk(result)
 			fmt.Fprintf(os.Stdout, "\nDeletion risk: %s — %s.\n", a.Level, a.Reason)
+		}
+
+		if scanServices != nil {
+			clilog.Statusf(os.Stderr, color, "WARNING", "Scan limited to --scan %s; coverage is narrower than a full scan.", relatedScan)
+		}
+		warnAmbiguousTarget(os.Stderr, args[0], edges, color)
+		output.PrintErrors(os.Stderr, errs)
+		if hint := timeoutHint(errs, arnRegionField(args[0]), len(regions)); hint != "" {
+			fmt.Fprint(os.Stderr, hint)
 		}
 		return nil
 	},
@@ -304,12 +318,13 @@ func timeoutHint(errs []model.ExploreError, region string, regionCount int) stri
 // warnAmbiguousTarget prints a stderr warning when a bare-name query matches
 // more than one fully-qualified resource by short form, so a merged graph isn't
 // mistaken for one resource's (#386).
-func warnAmbiguousTarget(w io.Writer, input string, edges []xref.Edge) {
+func warnAmbiguousTarget(w io.Writer, input string, edges []xref.Edge, color bool) {
 	cands := xref.AmbiguousCandidates(input, edges)
 	if len(cands) <= 1 {
 		return
 	}
-	fmt.Fprintf(w, "warning: %q matches %d resources by name; results are merged. Pass a full ARN to disambiguate:\n", input, len(cands))
+	clilog.Statusf(w, color, "WARNING", "%s matches %d resources by name; results are merged. Pass a full ARN to disambiguate:",
+		clilog.Highlight(input, color), len(cands))
 	for _, c := range cands {
 		fmt.Fprintf(w, "  - %s\n", c)
 	}
