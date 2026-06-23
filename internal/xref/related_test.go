@@ -50,6 +50,40 @@ func TestRelated_ShowAllPaths(t *testing.T) {
 	}
 }
 
+func TestRenderRelated_GraphExport(t *testing.T) {
+	res := relatedOver(roleARN, 1) // Uses: 1 (source role); UsedBy: 2 (lambda, ecs)
+
+	var dot strings.Builder
+	if err := RenderRelated(&dot, res, "dot", false, true, true, false); err != nil {
+		t.Fatalf("dot: %v", err)
+	}
+	d := dot.String()
+	if !strings.HasPrefix(d, "digraph related {") || !strings.Contains(d, "->") || !strings.HasSuffix(strings.TrimSpace(d), "}") {
+		t.Errorf("dot output malformed:\n%s", d)
+	}
+	if !strings.Contains(d, "execution role") {
+		t.Errorf("dot should label edges with the relationship:\n%s", d)
+	}
+
+	var mmd strings.Builder
+	if err := RenderRelated(&mmd, res, "mermaid", false, true, true, false); err != nil {
+		t.Fatalf("mermaid: %v", err)
+	}
+	m := mmd.String()
+	if !strings.HasPrefix(m, "graph LR") || !strings.Contains(m, "-->") {
+		t.Errorf("mermaid output malformed:\n%s", m)
+	}
+}
+
+func TestMermaidEdgeLabel(t *testing.T) {
+	if got := mermaidEdgeLabel("a ▸ b|c\"d"); strings.ContainsAny(got, "|\"▸") {
+		t.Errorf("mermaid edge label not sanitized: %q", got)
+	}
+	if got := mermaidEdgeLabel(""); got != " " {
+		t.Errorf("empty label should become a space, got %q", got)
+	}
+}
+
 func TestRenderRelated_CSVHasDirectionColumn(t *testing.T) {
 	res := relatedOver(roleARN, 1)
 	var sb strings.Builder
