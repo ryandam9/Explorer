@@ -25,6 +25,29 @@ func TestRelatedTUIFlagError(t *testing.T) {
 	}
 }
 
+func TestParseDepth(t *testing.T) {
+	cases := []struct {
+		in      int
+		want    int
+		wantErr bool
+	}{
+		{0, 1, false},  // floored to one hop
+		{-3, 1, false}, // floored
+		{1, 1, false},
+		{relatedMaxDepth, relatedMaxDepth, false},
+		{relatedMaxDepth + 1, 0, true}, // too deep
+	}
+	for _, c := range cases {
+		got, err := parseDepth(c.in)
+		if (err != nil) != c.wantErr {
+			t.Errorf("parseDepth(%d) err=%v, wantErr=%v", c.in, err, c.wantErr)
+		}
+		if err == nil && got != c.want {
+			t.Errorf("parseDepth(%d) = %d, want %d", c.in, got, c.want)
+		}
+	}
+}
+
 func TestParseShowPaths(t *testing.T) {
 	cases := []struct {
 		in      string
