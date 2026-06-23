@@ -40,9 +40,9 @@ var relatedCmd = &cobra.Command{
 	Short: "Related resources — what a resource uses and what uses it",
 	Long: `Related shows everything linked to a resource, in both directions:
 
-  Uses (depends on) →   what the resource references (a Lambda's execution role,
-                        a volume's KMS key, an instance's security groups …)
-  Used by ←             what references the resource (the where-used answer)
+  Depends on →   what the resource uses (a Lambda's execution role, a volume's
+                 KMS key, an instance's security groups …)
+  Used by ←      what uses the resource (the where-used answer)
 
 It scans the account for the linking fields the inventory does not keep and
 walks them from the resource you name. Pass a full ARN or a bare ID (an IAM
@@ -60,17 +60,72 @@ report only reflects the relationship types this tool extracts, so an empty
 side means "none of the collected link types" — not "this resource is isolated".
 
 This generalizes 'whereused' (which answers only the "used by" direction).`,
-	Example: `  # Everything linked to a Lambda function (both directions)
+	Example: `  You can pass a full ARN, a bare resource id (sg-…, i-…, vol-…, eni-…,
+  subnet-…, vpce-…, fs-…), a CloudWatch log-group name (/aws/lambda/…), or a
+  bare name for IAM roles / S3 buckets / RDS / DynamoDB / SNS / SQS / etc.
+
+  # ── By resource type ───────────────────────────────────────────────
+  # Lambda function — its role, KMS key, subnets/SGs, log group, event sources
   aws_explorer related arn:aws:lambda:us-east-1:123456789012:function:checkout
 
-  # Only what this security group is attached to
-  aws_explorer related sg-0abc123 --direction usedby -r eu-west-1
+  # EC2 instance — instance-profile role, subnet, AMI, key pair, ENIs
+  aws_explorer related i-0abc123def456 -r us-east-1
 
-  # Follow links two hops out, across all regions
-  aws_explorer related arn:aws:iam::123456789012:role/app --depth 2 --all-regions
+  # Security group — everything it's attached to (ENIs, LBs, RDS, …)
+  aws_explorer related sg-0abc123 --direction usedby
 
-  # Machine-readable
-  aws_explorer related sg-0abc123 -o json | jq '.uses'`,
+  # IAM role — what assumes it, and (with --uses) its policies/trust principals
+  aws_explorer related arn:aws:iam::123456789012:role/app
+  aws_explorer related app                       # bare role name also works
+
+  # KMS key — every resource encrypted with it (a classic "safe to disable?")
+  aws_explorer related arn:aws:kms:us-east-1:123456789012:key/abcd-1234 -r us-east-1
+
+  # S3 bucket — event-notification targets, replication role, log bucket, SSE key
+  aws_explorer related my-bucket
+  aws_explorer related arn:aws:s3:::my-bucket
+
+  # More: RDS/Aurora, DynamoDB, ELBv2, EFS, subnet, log group, SNS/SQS, …
+  aws_explorer related orders-db -r us-east-1            # RDS instance
+  aws_explorer related Orders -r us-east-1               # DynamoDB table
+  aws_explorer related subnet-0abc123 --direction usedby -r us-east-1
+  aws_explorer related fs-0abc123 -r us-east-1           # EFS file system
+  aws_explorer related /aws/lambda/checkout -r us-east-1 # CloudWatch log group
+
+  # ── Direction & depth ──────────────────────────────────────────────
+  aws_explorer related sg-0abc123 --direction usedby     # only "used by"
+  aws_explorer related my-fn --direction uses            # only "depends on"
+  aws_explorer related arn:aws:iam::…:role/app --depth 2 # follow 2 hops out
+  aws_explorer related arn:aws:iam::…:role/app --depth 3 --show-paths all
+
+  # ── Scope & speed ──────────────────────────────────────────────────
+  aws_explorer related sg-0abc123 --all-regions          # sweep every region
+  aws_explorer related sg-0abc123 -r eu-west-1           # one region
+  aws_explorer related arn:aws:kms:…:key/abcd --scan security   # focused scan
+  aws_explorer related my-fn --scan lambda,kms,ec2       # explicit services
+  aws_explorer related my-fn --cache-ttl 5m              # reuse a recent scan
+  aws_explorer related my-fn --refresh                   # force a fresh scan
+  aws_explorer related my-fn --debug-scan                # per-service timings
+
+  # ── Output formats ─────────────────────────────────────────────────
+  aws_explorer related sg-0abc123 -o json | jq '.used_by'
+  aws_explorer related sg-0abc123 -o csv --no-header > links.csv
+  aws_explorer related my-fn -o ndjson
+  aws_explorer related my-fn --depth 2 --format mermaid > graph.md
+  aws_explorer related my-fn --depth 2 --format dot | dot -Tpng -o graph.png
+
+  # ── Decision helpers ───────────────────────────────────────────────
+  aws_explorer related sg-0abc123 --direction usedby --risk   # blast-radius rating
+  aws_explorer related arn:aws:kms:…:key/abcd --explain-scan   # what it would check
+  aws_explorer related arn:aws:kms:…:key/abcd --tui            # interactive explorer
+
+  # ── Common tasks ───────────────────────────────────────────────────
+  # Before deleting a security group / KMS key / IAM role, across all regions:
+  aws_explorer related sg-0abc123 --direction usedby --all-regions --risk
+  aws_explorer related arn:aws:kms:…:key/abcd --depth 2 --all-regions
+  # Debug an S3 → Lambda event pipeline, or a Lambda's event sources:
+  aws_explorer related arn:aws:s3:::uploads --depth 2
+  aws_explorer related arn:aws:lambda:…:function:worker --depth 2`,
 	Args: cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		showUses, showUsedBy, err := parseDirection(relatedDirection)
