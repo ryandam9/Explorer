@@ -74,18 +74,33 @@ func withTimeout(ctx context.Context, d time.Duration) (context.Context, context
 // multi-hop walk reaches one); for the common case — a non-role target at depth
 // 1 — it is pure waste, and run serially it caused the IAM deadline storm (§7).
 func Collect(ctx context.Context, baseCfg aws.Config, regions []string, maxConcurrency int, perCallTimeout time.Duration, includeRolePolicies bool) ([]Edge, []model.ExploreError) {
+	edges, errs, _ := CollectWithStats(ctx, baseCfg, regions, maxConcurrency, perCallTimeout, includeRolePolicies)
+	return edges, errs
+}
+
+// CollectWithStats is Collect plus per-service timing for --debug-scan (#394).
+func CollectWithStats(ctx context.Context, baseCfg aws.Config, regions []string, maxConcurrency int, perCallTimeout time.Duration, includeRolePolicies bool) ([]Edge, []model.ExploreError, *ScanStats) {
 	if maxConcurrency <= 0 {
 		maxConcurrency = 8
 	}
 	if len(regions) == 0 {
 		regions = []string{"us-east-1"}
 	}
+	stats := &ScanStats{}
 
 	// IAM is global; resolve instance-profile → role mappings and trust-policy
 	// edges once, up front, so per-region EC2 collection can attribute instance
 	// profiles to their roles. collectIAM manages its own per-call timeouts and
 	// bounds the per-role policy fan-out concurrency.
-	profiles, trustEdges, iamErrs := collectIAM(ctx, baseCfg, maxConcurrency, perCallTimeout, includeRolePolicies)
+	var (
+		profiles   map[string][]string
+		trustEdges []Edge
+		iamErrs    []model.ExploreError
+	)
+	stats.timed("iam", func() []Edge {
+		profiles, trustEdges, iamErrs = collectIAM(ctx, baseCfg, maxConcurrency, perCallTimeout, includeRolePolicies)
+		return nil
+	})
 
 	type result struct {
 		edges []Edge
@@ -98,7 +113,7 @@ func Collect(ctx context.Context, baseCfg aws.Config, regions []string, maxConcu
 	for i, region := range regions {
 		i, region := i, region
 		g.Go(func() error {
-			edges, errs := collectRegion(ggctx, baseCfg, region, profiles, maxConcurrency, perCallTimeout)
+			edges, errs := collectRegion(ggctx, baseCfg, region, profiles, maxConcurrency, perCallTimeout, stats)
 			results[i] = result{edges: edges, errs: errs}
 			return nil
 		})
@@ -114,16 +129,26 @@ func Collect(ctx context.Context, baseCfg aws.Config, regions []string, maxConcu
 
 	// S3 is listed globally but called per-bucket-region, so it runs once here
 	// rather than in the per-region fan-out (§3).
-	s3Edges, s3Errs := collectS3(ctx, baseCfg, regions, maxConcurrency, perCallTimeout)
+	var s3Edges []Edge
+	var s3Errs []model.ExploreError
+	stats.timed("s3", func() []Edge {
+		s3Edges, s3Errs = collectS3(ctx, baseCfg, regions, maxConcurrency, perCallTimeout)
+		return nil
+	})
 	edges = append(edges, s3Edges...)
 	errs = append(errs, s3Errs...)
 
 	// CloudFront and Route 53 are global; collect them once (§3).
-	netEdges, netErrs := collectGlobalNetworking(ctx, baseCfg, perCallTimeout)
+	var netEdges []Edge
+	var netErrs []model.ExploreError
+	stats.timed("networking", func() []Edge {
+		netEdges, netErrs = collectGlobalNetworking(ctx, baseCfg, perCallTimeout)
+		return nil
+	})
 	edges = append(edges, netEdges...)
 	errs = append(errs, netErrs...)
 
-	return edges, errs
+	return edges, errs, stats
 }
 
 // --- Global IAM ---------------------------------------------------------------
@@ -285,7 +310,7 @@ func rawStrings(raw json.RawMessage) []string {
 
 // --- Per-region ---------------------------------------------------------------
 
-func collectRegion(ctx context.Context, baseCfg aws.Config, region string, profiles map[string][]string, maxConcurrency int, timeout time.Duration) ([]Edge, []model.ExploreError) {
+func collectRegion(ctx context.Context, baseCfg aws.Config, region string, profiles map[string][]string, maxConcurrency int, timeout time.Duration, stats *ScanStats) ([]Edge, []model.ExploreError) {
 	ctx, cancel := withTimeout(ctx, timeout)
 	defer cancel()
 
@@ -293,27 +318,38 @@ func collectRegion(ctx context.Context, baseCfg aws.Config, region string, profi
 	cfg.Region = region
 	rec := &recorder{region: region}
 
+	// Each collector is timed and attributed to its service so --debug-scan can
+	// show where the scan spends its time (#394).
+	collectors := []struct {
+		service string
+		fn      func() []Edge
+	}{
+		{"lambda", func() []Edge { return lambdaEdges(ctx, cfg, region, rec) }},
+		{"ec2", func() []Edge { return ec2Edges(ctx, cfg, region, profiles, rec) }},
+		{"rds", func() []Edge { return rdsEdges(ctx, cfg, region, rec) }},
+		{"secretsmanager", func() []Edge { return secretsEdges(ctx, cfg, region, rec) }},
+		{"sqs", func() []Edge { return sqsEdges(ctx, cfg, region, rec) }},
+		{"ecs", func() []Edge { return ecsEdges(ctx, cfg, region, maxConcurrency, rec) }},
+		{"eks", func() []Edge { return eksEdges(ctx, cfg, region, rec) }},
+		{"elbv2", func() []Edge { return elbv2Edges(ctx, cfg, region, rec) }},
+		{"efs", func() []Edge { return efsEdges(ctx, cfg, region, rec) }},
+		{"sns", func() []Edge { return snsEdges(ctx, cfg, region, maxConcurrency, rec) }},
+		{"events", func() []Edge { return eventBridgeEdges(ctx, cfg, region, rec) }},
+		{"states", func() []Edge { return sfnEdges(ctx, cfg, region, maxConcurrency, rec) }},
+		{"kinesis", func() []Edge { return kinesisEdges(ctx, cfg, region, rec) }},
+		{"apigateway", func() []Edge { return apiGatewayEdges(ctx, cfg, region, rec) }},
+		{"ec2-endpoints", func() []Edge { return vpcEndpointsEdges(ctx, cfg, region, rec) }},
+		{"kms", func() []Edge { return kmsEdges(ctx, cfg, region, maxConcurrency, rec) }},
+		{"dynamodb", func() []Edge { return dynamodbEdges(ctx, cfg, region, maxConcurrency, rec) }},
+		{"elasticache", func() []Edge { return elastiCacheEdges(ctx, cfg, region, rec) }},
+		{"redshift", func() []Edge { return redshiftEdges(ctx, cfg, region, rec) }},
+		{"observability", func() []Edge { return observabilityEdges(ctx, cfg, region, rec) }},
+	}
+
 	var edges []Edge
-	edges = append(edges, lambdaEdges(ctx, cfg, region, rec)...)
-	edges = append(edges, ec2Edges(ctx, cfg, region, profiles, rec)...)
-	edges = append(edges, rdsEdges(ctx, cfg, region, rec)...)
-	edges = append(edges, secretsEdges(ctx, cfg, region, rec)...)
-	edges = append(edges, sqsEdges(ctx, cfg, region, rec)...)
-	edges = append(edges, ecsEdges(ctx, cfg, region, maxConcurrency, rec)...)
-	edges = append(edges, eksEdges(ctx, cfg, region, rec)...)
-	edges = append(edges, elbv2Edges(ctx, cfg, region, rec)...)
-	edges = append(edges, efsEdges(ctx, cfg, region, rec)...)
-	edges = append(edges, snsEdges(ctx, cfg, region, maxConcurrency, rec)...)
-	edges = append(edges, eventBridgeEdges(ctx, cfg, region, rec)...)
-	edges = append(edges, sfnEdges(ctx, cfg, region, maxConcurrency, rec)...)
-	edges = append(edges, kinesisEdges(ctx, cfg, region, rec)...)
-	edges = append(edges, apiGatewayEdges(ctx, cfg, region, rec)...)
-	edges = append(edges, vpcEndpointsEdges(ctx, cfg, region, rec)...)
-	edges = append(edges, kmsEdges(ctx, cfg, region, maxConcurrency, rec)...)
-	edges = append(edges, dynamodbEdges(ctx, cfg, region, maxConcurrency, rec)...)
-	edges = append(edges, elastiCacheEdges(ctx, cfg, region, rec)...)
-	edges = append(edges, redshiftEdges(ctx, cfg, region, rec)...)
-	edges = append(edges, observabilityEdges(ctx, cfg, region, rec)...)
+	for _, c := range collectors {
+		edges = append(edges, stats.timed(c.service, c.fn)...)
+	}
 	return edges, rec.errs
 }
 

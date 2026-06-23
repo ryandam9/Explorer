@@ -28,6 +28,7 @@ var (
 	relatedShowPaths string
 	relatedCacheTTL  string
 	relatedRefresh   bool
+	relatedDebugScan bool
 )
 
 var relatedCmd = &cobra.Command{
@@ -144,7 +145,14 @@ This generalizes 'whereused' (which answers only the "used by" direction).`,
 		}
 		if !cached {
 			fmt.Fprintf(os.Stderr, "Scanning %d region(s) for resources related to %s…\n", len(regions), args[0])
-			edges, errs = xref.Collect(ctx, eng.AWSConfig, regions, AppConfig.App.MaxConcurrency, timeout, includeRolePolicies)
+			var stats *xref.ScanStats
+			edges, errs, stats = xref.CollectWithStats(ctx, eng.AWSConfig, regions, AppConfig.App.MaxConcurrency, timeout, includeRolePolicies)
+			if relatedDebugScan {
+				fmt.Fprintln(os.Stderr, "Scan timings (per service, slowest first):")
+				for _, line := range stats.Lines() {
+					fmt.Fprintf(os.Stderr, "  %s\n", line)
+				}
+			}
 			if cacheTTL > 0 {
 				_ = xref.SaveCache(cachePath, xref.CacheEntry{Version: version, CreatedAt: time.Now(), Edges: edges, Errors: errs})
 			}
@@ -226,5 +234,6 @@ func init() {
 	relatedCmd.Flags().StringVar(&relatedShowPaths, "show-paths", "shortest", "for multi-hop results: shortest (one path per resource) or all")
 	relatedCmd.Flags().StringVar(&relatedCacheTTL, "cache-ttl", "0", "reuse a cached scan younger than this (e.g. 5m); 0 disables caching")
 	relatedCmd.Flags().BoolVar(&relatedRefresh, "refresh", false, "ignore any cached scan and re-query AWS (still writes the cache)")
+	relatedCmd.Flags().BoolVar(&relatedDebugScan, "debug-scan", false, "print per-service scan timings to stderr")
 	rootCmd.AddCommand(relatedCmd)
 }
