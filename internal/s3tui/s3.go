@@ -97,6 +97,21 @@ func hasAPIErrorCode(err error, codes ...string) bool {
 	return false
 }
 
+// bucketConfigSentinel maps a failed GetBucket* read to a display value that
+// keeps "genuinely not configured" distinct from "denied" and "failed", instead
+// of asserting a negative fact from a wrong-region/denied/throttled error
+// (CLAUDE.md §6a/§8). notFoundCode is the SDK error code that genuinely means
+// "no such configuration" for this call ("" when the call has none).
+func bucketConfigSentinel(err error, notFoundCode, notFoundLabel string) string {
+	if notFoundCode != "" && hasAPIErrorCode(err, notFoundCode) {
+		return notFoundLabel
+	}
+	if hasAPIErrorCode(err, "AccessDenied") {
+		return "Access Denied"
+	}
+	return "—"
+}
+
 // isEmptyObjectRangeErr reports whether err is S3's reply to a ranged GET of a
 // zero-byte object. A "bytes=0-N" range can't be satisfied when the object has
 // no bytes, so S3 returns 416 InvalidRange. That's not a failure — the object
@@ -794,10 +809,7 @@ func (c *S3Client) getBucketWebsite(bucket string) string {
 
 	out, err := c.client.GetBucketWebsite(ctx, &s3.GetBucketWebsiteInput{Bucket: aws.String(bucket)})
 	if err != nil {
-		if hasAPIErrorCode(err, "NoSuchWebsiteConfiguration") {
-			return "Not configured"
-		}
-		return "Not configured"
+		return bucketConfigSentinel(err, "NoSuchWebsiteConfiguration", "Not configured")
 	}
 	if out.IndexDocument != nil && out.IndexDocument.Suffix != nil {
 		return fmt.Sprintf("index: %s", *out.IndexDocument.Suffix)
@@ -870,10 +882,12 @@ func (c *S3Client) getBucketAcceleration(bucket string) string {
 
 	out, err := c.client.GetBucketAccelerateConfiguration(ctx, &s3.GetBucketAccelerateConfigurationInput{Bucket: aws.String(bucket)})
 	if err != nil {
-		if hasAPIErrorCode(err, "AccessDenied", "MethodNotAllowed") {
+		// MethodNotAllowed genuinely means acceleration isn't supported here;
+		// AccessDenied is a permissions failure, not a capability fact.
+		if hasAPIErrorCode(err, "MethodNotAllowed") {
 			return "Not supported"
 		}
-		return "—"
+		return bucketConfigSentinel(err, "", "")
 	}
 	if out.Status == "" {
 		return "Not enabled"
@@ -938,10 +952,7 @@ func (c *S3Client) getBucketReplication(bucket string) string {
 
 	out, err := c.client.GetBucketReplication(ctx, &s3.GetBucketReplicationInput{Bucket: aws.String(bucket)})
 	if err != nil {
-		if hasAPIErrorCode(err, "ReplicationConfigurationNotFoundError") {
-			return "Not configured"
-		}
-		return "Not configured"
+		return bucketConfigSentinel(err, "ReplicationConfigurationNotFoundError", "Not configured")
 	}
 	if out.ReplicationConfiguration == nil {
 		return "Not configured"
@@ -962,7 +973,9 @@ func (c *S3Client) getIntelligentTiering(bucket string) string {
 
 	out, err := c.client.ListBucketIntelligentTieringConfigurations(ctx, &s3.ListBucketIntelligentTieringConfigurationsInput{Bucket: aws.String(bucket)})
 	if err != nil {
-		return "None"
+		// No genuine "not found" code here — an empty list (below) is the real
+		// "None"; an error must not be rendered as None.
+		return bucketConfigSentinel(err, "", "")
 	}
 	count := len(out.IntelligentTieringConfigurationList)
 	if count == 0 {

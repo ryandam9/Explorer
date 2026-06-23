@@ -164,7 +164,7 @@ This is the CLI twin of the summary TUI's 't' CloudTrail timeline.`,
 
 		fmt.Fprintln(os.Stderr, ui.InfoStyle().Render(
 			fmt.Sprintf("Looking up CloudTrail events for %s across %s (last 90 days max)…",
-				scope, trailRegionScope(regions))))
+				scope, regionScopeLabel(regions))))
 
 		events, truncated, err := trail.LookupFilteredRegions(ctx, awscfg, regions, filter, opts)
 		if err != nil {
@@ -182,7 +182,7 @@ This is the CLI twin of the summary TUI's 't' CloudTrail timeline.`,
 		table := strings.EqualFold(outputFormat, "table")
 		if len(events) == 0 {
 			if table {
-				printNoTrailEvents(scope, trailRegionScope(regions), truncated)
+				printNoTrailEvents(scope, regionScopeLabel(regions), truncated)
 			}
 			return nil
 		}
@@ -214,8 +214,8 @@ func trailBootstrapRegion() string {
 	return "us-east-1"
 }
 
-// trailRegionScope describes the region set for status messages.
-func trailRegionScope(regions []string) string {
+// regionScopeLabel describes the region set for status messages.
+func regionScopeLabel(regions []string) string {
 	if len(regions) == 1 {
 		return regions[0]
 	}

@@ -2,6 +2,7 @@ package acctsnap
 
 import (
 	"bytes"
+	"path/filepath"
 	"reflect"
 	"strings"
 	"testing"
@@ -144,15 +145,27 @@ func TestScopeKey(t *testing.T) {
 	}
 }
 
+// tempHome points os.UserHomeDir at a fresh temp dir on every OS: HOME covers
+// Unix, USERPROFILE is what os.UserHomeDir reads on Windows. Without the latter
+// these tests would write into the runner's real profile on Windows.
+func tempHome(t *testing.T) {
+	t.Helper()
+	dir := t.TempDir()
+	t.Setenv("HOME", dir)
+	t.Setenv("USERPROFILE", dir)
+}
+
 func TestSaveLoadRoundTrip(t *testing.T) {
-	t.Setenv("HOME", t.TempDir())
+	tempHome(t)
 
 	snap := New(baseResources(), "123456789012", []string{"us-east-1"})
 	path, err := Save(snap)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(path, "account-snapshots/123456789012/us-east-1.json") {
+	// filepath.ToSlash normalizes the OS separator so the assertion holds on
+	// Windows (backslashes) as well as Unix.
+	if !strings.Contains(filepath.ToSlash(path), "account-snapshots/123456789012/us-east-1.json") {
 		t.Errorf("path = %q", path)
 	}
 
@@ -174,7 +187,7 @@ func TestSaveLoadRoundTrip(t *testing.T) {
 }
 
 func TestLoad_NoBaseline(t *testing.T) {
-	t.Setenv("HOME", t.TempDir())
+	tempHome(t)
 	if _, ok, err := Load("999", []string{"us-east-1"}); ok || err != nil {
 		t.Errorf("ok=%v err=%v, want false,nil", ok, err)
 	}

@@ -234,9 +234,13 @@ func (mm *m) handleKey(msg tea.KeyMsg) []tea.Cmd {
 		mm.active().ScrollRight()
 	case "y":
 		if r, ok := mm.selected(); ok && r.ID != "" {
-			arn := r.ID
-			_ = clipboard.WriteAll(arn)
-			mm.toast = "Copied ARN"
+			_ = clipboard.WriteAll(r.ID)
+			// r.ID isn't always an ARN — don't claim it is.
+			if isARN(r.ID) {
+				mm.toast = "Copied ARN"
+			} else {
+				mm.toast = "Copied ID"
+			}
 			cmds = append(cmds, toastCmd())
 		}
 	case "o":
@@ -248,8 +252,10 @@ func (mm *m) handleKey(msg tea.KeyMsg) []tea.Cmd {
 				} else {
 					mm.toast = "Copied console URL"
 				}
-				cmds = append(cmds, toastCmd())
+			} else {
+				mm.toast = "No console link for this resource type"
 			}
+			cmds = append(cmds, toastCmd())
 		}
 	}
 	return cmds
