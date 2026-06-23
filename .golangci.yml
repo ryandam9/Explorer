@@ -1,0 +1,14 @@
+# golangci-lint v2 configuration. Tuned for signal over noise on this codebase.
+#
+# errcheck is disabled deliberately: the tool follows a documented best-effort
+# pattern (CLAUDE.md §6a) where some AWS errors are intentionally ignored with a
+# comment, which errcheck would flag en masse. The standard set's other linters
+# (govet, ineffassign, staticcheck, unused) stay on, plus misspell.
+version: "2"
+
+linters:
+  default: standard
+  disable:
+    - errcheck
+  enable:
+    - misspell
