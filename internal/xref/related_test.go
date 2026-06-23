@@ -437,7 +437,7 @@ func TestRenderRelated_Table(t *testing.T) {
 		t.Fatalf("table: %v", err)
 	}
 	out := sb.String()
-	for _, want := range []string{"Uses (depends on) →", "Used by ←", "execution role", relatedCaveat, "Reference types checked"} {
+	for _, want := range []string{"Depends on →", "Used by ←", "execution role", relatedCaveat, "searched for these kinds of links"} {
 		if !strings.Contains(out, want) {
 			t.Errorf("table missing %q:\n%s", want, out)
 		}
@@ -460,7 +460,7 @@ func TestRenderRelated_PartialFlagsEmptySection(t *testing.T) {
 	if err := RenderRelated(&sb, empty, "table", false, true, true, true); err != nil {
 		t.Fatalf("table: %v", err)
 	}
-	if !strings.Contains(sb.String(), "result may be incomplete") {
+	if !strings.Contains(sb.String(), "may be incomplete") {
 		t.Errorf("partial empty section should flag incompleteness:\n%s", sb.String())
 	}
 
@@ -468,8 +468,26 @@ func TestRenderRelated_PartialFlagsEmptySection(t *testing.T) {
 	if err := RenderRelated(&sb, empty, "table", false, true, true, false); err != nil {
 		t.Fatalf("table: %v", err)
 	}
-	if strings.Contains(sb.String(), "result may be incomplete") {
+	if strings.Contains(sb.String(), "may be incomplete") {
 		t.Errorf("non-partial empty section must not claim incompleteness:\n%s", sb.String())
+	}
+}
+
+func TestRenderRelated_CheckedTypesAreBulleted(t *testing.T) {
+	// roleARN's "Used by" prints the checked-type list; it must be one bullet
+	// per line, not a single comma-joined run (#newcomer-readability).
+	res := relatedOver(roleARN, 1)
+	var sb strings.Builder
+	if err := RenderRelated(&sb, res, "table", false, false, true, false); err != nil {
+		t.Fatalf("table: %v", err)
+	}
+	out := sb.String()
+	if !strings.Contains(out, "\n  • ") {
+		t.Errorf("checked types should render as bullets:\n%s", out)
+	}
+	// At least a couple of distinct bullet lines (not one comma-joined line).
+	if strings.Count(out, "  • ") < 2 {
+		t.Errorf("expected multiple bulleted checked types:\n%s", out)
 	}
 }
 
