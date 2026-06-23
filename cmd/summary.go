@@ -83,7 +83,7 @@ unchanged account diffs clean.`,
 			var seed []model.Resource
 			if !summaryTypedOnly {
 				fmt.Fprintln(os.Stderr, "Discovering resources across all services…")
-				seed, _ = discovery.Discover(ctx, eng.AWSConfig, eng.EffectiveRegions(), AppConfig.App.MaxConcurrency)
+				seed, _ = discoverAllAccounts(ctx, eng, eng.EffectiveRegions(), AppConfig.App.MaxConcurrency)
 			}
 			m := tui.NewModelWithSeed(ctx, eng, configFilePath(), AppConfig, seed,
 				tui.WithCoverageAdvisory(!summaryTypedOnly))
@@ -107,10 +107,12 @@ unchanged account diffs clean.`,
 		errs := result.Errors
 
 		// Universal sweep across all services via the Resource Groups Tagging
-		// API, merged with the rich typed collectors above (deduped by ARN).
+		// API, merged with the rich typed collectors above (deduped by ARN). Run
+		// it per configured account — the same fan-out the typed collectors use —
+		// so multi-account summaries are complete and consistently labelled (#359).
 		if !summaryTypedOnly {
-			discovered, dErrs := discovery.Discover(
-				ctx, eng.AWSConfig, eng.EffectiveRegions(), AppConfig.App.MaxConcurrency)
+			discovered, dErrs := discoverAllAccounts(
+				ctx, eng, eng.EffectiveRegions(), AppConfig.App.MaxConcurrency)
 			resources = append(resources, discovered...)
 			errs = append(errs, dErrs...)
 		}
@@ -144,6 +146,51 @@ unchanged account diffs clean.`,
 		}
 		return nil
 	},
+}
+
+// discoverAllAccounts runs the Resource Groups Tagging API sweep once per
+// configured account (the same fan-out the typed collectors use), stamping each
+// account's identifier consistently so multi-account summaries are complete and
+// dedupe/labels line up with typed results (#359). In single-account mode this
+// is one pass, behaving as before.
+func discoverAllAccounts(ctx context.Context, eng *engine.Engine, regions []string, maxConcurrency int) ([]model.Resource, []model.ExploreError) {
+	multiAcct := AppConfig != nil && len(AppConfig.Accounts) > 0
+	var resources []model.Resource
+	var errs []model.ExploreError
+	for _, sw := range eng.AccountSweeps(ctx) {
+		if sw.Err != nil {
+			// A bad account narrows coverage with a visible note; it never hides
+			// the other accounts (§3/§6a).
+			errs = append(errs, model.ExploreError{
+				Service: "account:" + sw.Name, Code: "AccountConfig",
+				Message: fmt.Sprintf("account %q skipped: %v", sw.Name, sw.Err),
+			})
+			continue
+		}
+		discovered, dErrs := discovery.Discover(ctx, sw.AWSConfig, regions, maxConcurrency)
+		// Match the typed-collector stamping: account *name* in multi-account
+		// mode, resolved account *ID* in single-account mode (engine.go).
+		acct := sw.AccountID
+		if multiAcct {
+			acct = sw.Name
+		}
+		stampAccount(discovered, acct)
+		resources = append(resources, discovered...)
+		errs = append(errs, dErrs...)
+	}
+	return resources, errs
+}
+
+// stampAccount sets AccountID on every resource (when acct is non-empty), so
+// tag-discovered resources carry the same account identifier the typed
+// collectors stamp.
+func stampAccount(resources []model.Resource, acct string) {
+	if acct == "" {
+		return
+	}
+	for i := range resources {
+		resources[i].AccountID = acct
+	}
 }
 
 // isTableFormat reports whether fmt is the human table view — i.e. not one of
