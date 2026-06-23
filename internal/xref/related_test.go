@@ -50,6 +50,38 @@ func TestRelated_ShowAllPaths(t *testing.T) {
 	}
 }
 
+func TestRenderRelated_NoHeaderIsScriptable(t *testing.T) {
+	res := relatedOver(roleARN, 1) // Uses: 1 (trust principal); UsedBy: 2 (lambda, ecs)
+	var sb strings.Builder
+	if err := RenderRelated(&sb, res, "table", true /*noHeader*/, true, true, false); err != nil {
+		t.Fatalf("table: %v", err)
+	}
+	out := sb.String()
+
+	// No human chrome: section titles, column header, caveat, checked-types.
+	for _, banned := range []string{"Uses (depends on)", "Used by", "SERVICE", "Reference types checked", relatedCaveat} {
+		if strings.Contains(out, banned) {
+			t.Errorf("--no-header output must not contain %q:\n%s", banned, out)
+		}
+	}
+	// Rows are direction-tagged and self-describing.
+	if !strings.Contains(out, "uses\t") && !strings.Contains(out, "uses ") {
+		t.Errorf("expected uses-tagged rows:\n%s", out)
+	}
+	if !strings.Contains(out, "used_by") {
+		t.Errorf("expected used_by-tagged rows:\n%s", out)
+	}
+	// Every non-empty line starts with a direction token (no stray headers).
+	for _, line := range strings.Split(strings.TrimSpace(out), "\n") {
+		if line == "" {
+			continue
+		}
+		if !strings.HasPrefix(line, "uses") && !strings.HasPrefix(line, "used_by") {
+			t.Errorf("unexpected non-data line in --no-header output: %q", line)
+		}
+	}
+}
+
 func TestRenderRelated_CaveatPrintedOnce(t *testing.T) {
 	res := relatedOver(roleARN, 1)
 	var sb strings.Builder
