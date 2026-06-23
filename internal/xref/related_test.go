@@ -502,6 +502,42 @@ func TestRenderRelated_UnknownTargetNote(t *testing.T) {
 	}
 }
 
+func TestTargetKindLabel(t *testing.T) {
+	cases := []struct {
+		in   string
+		want string
+	}{
+		{"arn:aws:iam::111122223333:role/app", "IAM role"},
+		{"arn:aws:kms:us-east-1:111122223333:key/abc", "KMS key"},
+		{"sg-0abc123", "security group"},
+		{"arn:aws:lambda:us-east-2:111122223333:function:add_attendee", "lambda function"},
+		{"arn:aws:s3:::my-bucket", "s3 resource"}, // S3 ARN has no type segment
+		{"vpc-0475013d0d9249369", "resource"},     // unrecognized bare id
+	}
+	for _, c := range cases {
+		if got := targetKindLabel(Classify(c.in)); got != c.want {
+			t.Errorf("targetKindLabel(%q) = %q, want %q", c.in, got, c.want)
+		}
+	}
+}
+
+func TestUnknownTargetNote_NoWarningForRealARN(t *testing.T) {
+	// A Lambda ARN queries fine; it must NOT carry the "not a supported target
+	// kind" warning (that's only for unrecognized bare ids).
+	res := RelatedResult{Target: Classify("arn:aws:lambda:us-east-2:111122223333:function:add_attendee"), Depth: 1}
+	var sb strings.Builder
+	if err := RenderRelated(&sb, res, "table", false, true, true, false); err != nil {
+		t.Fatalf("table: %v", err)
+	}
+	out := sb.String()
+	if strings.Contains(out, "isn't a supported target kind") {
+		t.Errorf("real ARN should not get the unsupported-kind warning:\n%s", out)
+	}
+	if !strings.Contains(out, "(lambda function)") {
+		t.Errorf("header should name the resource as 'lambda function':\n%s", out)
+	}
+}
+
 func TestRenderRelated_JSONAndNDJSON(t *testing.T) {
 	res := relatedOver(roleARN, 1)
 
