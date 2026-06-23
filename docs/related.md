@@ -300,6 +300,64 @@ suspends, the explorer runs in the same terminal, and quitting it returns you
 exactly where you were. (Each jump re-runs the account scan, so there's a brief
 "scanning…" spinner.)
 
+### Examples by resource type
+
+Pass a full ARN, a bare resource id, or (for the named services) a bare name.
+For regional resources add `-r <region>` (or `--all-regions`).
+
+#### Query the resource itself — what it depends on (`--direction uses`, the default includes this)
+
+| Resource type | Example invocation | Reveals (the links it follows) |
+|---|---|---|
+| Lambda function | `related arn:aws:lambda:us-east-1:111122223333:function:checkout -r us-east-1` | execution role, env KMS key, VPC subnets, VPC SGs, layers, dead-letter target, log group, event source |
+| EC2 instance | `related i-0abc123def -r us-east-1` | instance-profile role, subnet, AMI, key pair, attached ENIs, Elastic IP |
+| EC2 network interface | `related eni-0abc123 -r us-east-1` | attached security groups, Elastic IP |
+| EBS volume | `related vol-0abc123 -r us-east-1` | encryption key, attached-to instance |
+| ECS task definition | `related arn:aws:ecs:us-east-1:111122223333:task-definition/web:7 -r us-east-1` | task role, execution role, container log groups, container secrets |
+| EKS cluster | `related arn:aws:eks:us-east-1:111122223333:cluster/prod -r us-east-1` (or `related prod`) | cluster role, cluster SG, extra SGs, subnets, OIDC provider |
+| EKS node group | `related arn:aws:eks:us-east-1:111122223333:nodegroup/prod/ng-1/abc -r us-east-1` | node-group role |
+| RDS DB instance | `related orders -r us-east-1` (or its ARN) | storage KMS key, DB SGs, subnet group, subnets, parameter/option groups, master-user secret, monitoring role, parent cluster |
+| RDS/Aurora cluster | `related orders-cluster -r us-east-1` | KMS key, DB SGs, subnet group, master-user secret, associated roles, member instances |
+| DynamoDB table | `related Orders -r us-east-1` (or ARN) | encryption key, stream |
+| ElastiCache cache cluster | `related my-redis-001 -r us-east-1` | security groups, cache subnet group |
+| ElastiCache replication group | `related my-redis -r us-east-1` | encryption key, member cache clusters |
+| Redshift cluster | `related my-warehouse -r us-east-1` | IAM roles, encryption key, security groups, subnet group |
+| ELBv2 load balancer | `related arn:aws:elasticloadbalancing:us-east-1:111122223333:loadbalancer/app/web/abc -r us-east-1` | load balancer security groups, subnets |
+| ELBv2 target group | `related arn:aws:elasticloadbalancing:us-east-1:111122223333:targetgroup/web/abc -r us-east-1` | attached load balancers, registered targets (instances/IPs/Lambda) |
+| ELBv2 listener | `related arn:aws:elasticloadbalancing:us-east-1:111122223333:listener/app/web/abc/def -r us-east-1` | listener certificate |
+| API Gateway (HTTP/REST) | `related a1b2c3d4 -r us-east-1` (the API id) | Lambda integrations, Lambda authorizers |
+| API Gateway VPC link | `related <vpc-link-id> -r us-east-1` | subnets, security groups |
+| VPC endpoint | `related vpce-0abc123 -r us-east-1` | endpoint service, subnets, security groups |
+| CloudFront distribution | `related arn:aws:cloudfront::111122223333:distribution/E123ABC` (global) | origins (by DNS), origin access control, viewer ACM cert, WAF web ACL |
+| Route 53 alias record | `related www.example.com.` | alias target (by DNS name) |
+| SNS topic | `related orders -r us-east-1` (or ARN) | subscriptions (SQS/Lambda/HTTP/email…), topic encryption key |
+| SQS queue | `related orders -r us-east-1` (or ARN) | queue encryption key, dead-letter queue |
+| EventBridge rule | `related my-rule -r us-east-1` (or ARN) | targets, target dead-letter queues, event bus |
+| Step Functions state machine | `related my-sm -r us-east-1` (or ARN) | execution role, ARNs referenced in its definition |
+| Kinesis stream | `related events -r us-east-1` (or ARN) | encryption key, registered consumers |
+| S3 bucket | `related my-bucket` (or `arn:aws:s3:::my-bucket`) | event notifications → Lambda/SNS/SQS, replication role + destination, access-log target bucket, default SSE-KMS key |
+| EFS file system | `related fs-0abc123 -r us-east-1` (or ARN) | encryption key, mount-target subnets, mount-target security groups |
+| IAM role | `related app` (or `arn:aws:iam::111122223333:role/app`) | trust-policy principals, attached managed policies, inline policies |
+| KMS key | `related arn:aws:kms:us-east-1:111122223333:key/<id> -r us-east-1` | key-policy principals, grant grantees |
+| KMS alias | `related alias/my-key -r us-east-1` | target key |
+| CloudWatch alarm | `related HighCPU -r us-east-1` (or ARN) | alarm/OK/insufficient-data actions |
+| CloudWatch Logs log group | `related /aws/lambda/checkout -r us-east-1` | encryption key, subscription-filter destinations |
+| Secrets Manager secret | `related db-creds -r us-east-1` (or ARN) | encryption key, rotation Lambda |
+
+#### Query a shared dependency — what uses it (`--direction usedby`)
+
+The four classified kinds also print a scoped "checked these link types" footer.
+
+| Query | Example | Reveals |
+|---|---|---|
+| IAM role | `related arn:aws:iam::111122223333:role/app --direction usedby` | Lambda/EC2/ECS/EKS/Redshift/RDS/Step Functions that assume it, plus trust principals |
+| KMS key | `related arn:aws:kms:us-east-1:111122223333:key/<id> --direction usedby -r us-east-1` | every resource encrypted with it (EBS, RDS, S3, Secrets, SQS, SNS, DynamoDB, EFS, Kinesis, Logs, …) |
+| ACM certificate | `related arn:aws:acm:us-east-1:111122223333:certificate/<id> --direction usedby -r us-east-1` | ELBv2 listeners, CloudFront distributions |
+| Security group | `related sg-0abc123 --direction usedby -r us-east-1` | ENIs, Lambda VPC config, EKS, load balancers, RDS, ElastiCache, Redshift, VPC endpoints, EFS mount targets |
+| Subnet / AMI / log group / … | `related subnet-0abc123 --direction usedby -r us-east-1` | anything placed in / referencing it (no scoped footer — not a classified kind) |
+
+> **Note on coverage.** A security group has *no* "depends on" edges (it only ever appears as the target of an attachment), so for SGs the meaningful direction is `--direction usedby`. Querying a VPC/route-table/NACL id finds nothing — `related` is a resource-to-resource reference graph, not a VPC inventory (use `aws_explorer vpc`).
+
 ---
 
 ## 6. Limitations & non-goals
