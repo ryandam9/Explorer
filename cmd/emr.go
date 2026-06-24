@@ -30,7 +30,13 @@ vCPU and EBS storage), running EC2 instances, services and VPC networking.
 
 Scope: --region pins a single region; --all-regions (or aws.allRegions in the
 config) sweeps every enabled region and adds a Region column; otherwise the
-config's aws.regions list is used.`,
+config's aws.regions list is used.
+
+Clusters, steps, instances, apps and describe use the AWS API and need no extra
+setup. The live YARN / HBase / Oozie views read daemons that run on the cluster
+itself and have no AWS API, so they need opt-in on-cluster access (an SSH tunnel
+or SOCKS proxy into the VPC) — run 'aws_explorer emr hbase --help' for a full,
+worked explanation.`,
 	Example: `  # Browse EMR in the configured regions
   aws_explorer emr
 
@@ -248,17 +254,85 @@ read-only EC2 describe calls in addition to the EMR API.`,
 	},
 }
 
+// emrOnClusterHelp returns the shared "why this needs setup, and how" section
+// appended to every live (YARN/HBase/Oozie) command's help. These daemons have
+// no AWS API — they answer only on the cluster's primary node, inside the VPC —
+// so the text explains, for someone new to SSH tunnelling, the three ways to
+// bridge in. service is the daemon's display name; port is its default REST port.
+func emrOnClusterHelp(service string, port int) string {
+	return fmt.Sprintf(`Why this needs extra setup:
+  %[1]s has no AWS API. It answers on a REST server that runs ON the cluster's
+  primary node, which sits inside the cluster's private VPC — so your laptop
+  cannot reach it directly. You bridge into the VPC over SSH, then point the tool
+  at that bridge. This is opt-in and OFF by default; turn it on in config.yaml
+  under emr.onCluster by choosing ONE mode:
+
+  • socks  — you run an SSH "dynamic tunnel", which opens a local SOCKS5 proxy
+             (a little local port that forwards traffic into the VPC); the tool
+             sends its requests through it. This is the pattern AWS documents for
+             the EMR web UIs. In a separate terminal, leave this running:
+
+                 ssh -i <key.pem> -N -D 8157 hadoop@<primary-dns>
+
+             ( -D 8157 opens the SOCKS proxy on 127.0.0.1:8157; -N keeps it
+               open with no remote shell; <primary-dns> is the cluster's
+               primary-node public DNS. ) Then in config.yaml:
+
+                 emr:
+                   onCluster:
+                     mode: socks
+                     socksProxy: 127.0.0.1:8157
+
+  • tunnel — the tool opens its OWN SSH connection to the primary node and dials
+             the daemon through it, so there is no separate ssh command to run.
+             In config.yaml:
+
+                 emr:
+                   onCluster:
+                     mode: tunnel
+                     ssh:
+                       user: hadoop
+                       keyFile: ~/.ssh/emr.pem   # unencrypted private key
+
+  • direct — only when the tool itself already runs inside the VPC (a bastion
+             host, an in-VPC CloudShell, or a peered network); plain HTTP, no SSH.
+
+  Also required: the cluster must be running, and its security group must allow
+  the %[1]s REST port (%[2]d) from where your SSH session lands. Every request is
+  a read-only HTTP GET with a timeout; if the daemon can't be reached you get a
+  "how to connect" helper, never a crash.`, service, port)
+}
+
+// emrTunnelExamplePreamble is the shared "open a tunnel, point config at it"
+// setup shown before each live command's own invocation lines, so the examples
+// are self-contained for someone setting this up for the first time.
+const emrTunnelExamplePreamble = `  # 1. Find the cluster's primary-node DNS:
+  aws_explorer emr describe j-1A2B3C4D5 -r us-east-1     # see "Primary node DNS"
+
+  # 2. In a SEPARATE terminal, open an SSH dynamic tunnel (a SOCKS proxy) to it
+  #    and leave it running:
+  ssh -i ~/.ssh/emr.pem -N -D 8157 hadoop@<primary-dns>
+
+  # 3. Point config.yaml at the proxy (one time):
+  #      emr:
+  #        onCluster:
+  #          mode: socks
+  #          socksProxy: 127.0.0.1:8157
+`
+
 var emrYarnCmd = &cobra.Command{
 	Use:   "yarn <cluster-id>",
 	Short: "List a cluster's live YARN applications (requires on-cluster access)",
-	Long: `List the live YARN applications running on an EMR cluster, read from the
-ResourceManager REST API on the cluster's primary node.
+	Long: `List the live YARN applications running on an EMR cluster — id, name, type,
+state, progress and allocated resources — read from the ResourceManager REST API
+on the cluster's primary node.
 
-This needs on-cluster access (emr.onCluster in config) because YARN has no AWS
-API — it runs on the cluster's primary node, reachable only from inside the VPC
-(directly, or through a SOCKS proxy such as an 'ssh -D' dynamic tunnel).`,
-	Args:    cobra.ExactArgs(1),
-	Example: "  aws_explorer emr yarn j-1A2B3C4D5 -r us-east-1 -o json",
+` + emrOnClusterHelp("YARN", emrconn.DefaultYARNPort),
+	Args: cobra.ExactArgs(1),
+	Example: emrTunnelExamplePreamble + `
+  # 4. List the live YARN applications:
+  aws_explorer emr yarn j-1A2B3C4D5 -r us-east-1
+  aws_explorer emr yarn j-1A2B3C4D5 -r us-east-1 -o json`,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		if err := output.ValidateFormat(outputFormat); err != nil {
 			return err
@@ -296,15 +370,27 @@ API — it runs on the cluster's primary node, reachable only from inside the VP
 var emrHBaseCmd = &cobra.Command{
 	Use:   "hbase <cluster-id>",
 	Short: "List a cluster's HBase tables (requires on-cluster access)",
-	Long: `List the HBase tables on an EMR cluster — namespace, derived state, region
-counts and column families — read from the HBase REST server on the cluster's
-primary node.
+	Long: `List the HBase tables on an EMR cluster — namespace, derived state (ENABLED /
+DISABLED / PARTIAL, inferred from how many of a table's regions are assigned),
+region counts, online regions and column families — read from the HBase REST
+server on the cluster's primary node.
 
-This needs on-cluster access (emr.onCluster in config) because HBase has no AWS
-API — it runs on the cluster's primary node, reachable only from inside the VPC
-(directly, or through a SOCKS proxy such as an 'ssh -D' dynamic tunnel).`,
-	Args:    cobra.ExactArgs(1),
-	Example: "  aws_explorer emr hbase j-1A2B3C4D5 -r us-east-1 -o json",
+With --count <ns:table> it instead runs an exact, read-only full-table row scan
+(bounded at 5M rows and confirmation-gated) and prints just the row count.
+
+` + emrOnClusterHelp("HBase", emrconn.DefaultHBasePort),
+	Args: cobra.ExactArgs(1),
+	Example: emrTunnelExamplePreamble + `
+  # 4. List the HBase tables:
+  aws_explorer emr hbase j-1A2B3C4D5 -r us-east-1
+  aws_explorer emr hbase j-1A2B3C4D5 -r us-east-1 -o json
+
+  # Count rows in one table — exact full scan, prompts before it runs:
+  aws_explorer emr hbase j-1A2B3C4D5 --count default:events -r us-east-1
+
+  # Already inside the VPC (bastion / in-VPC CloudShell)? Skip the tunnel and set
+  # mode: direct in config.yaml, then just:
+  aws_explorer emr hbase j-1A2B3C4D5 -r us-east-1`,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		if err := output.ValidateFormat(outputFormat); err != nil {
 			return err
@@ -362,11 +448,11 @@ var emrOozieCmd = &cobra.Command{
 	Long: `List the Oozie workflow jobs (or, with --coordinators, the coordinator jobs)
 on an EMR cluster, read from the Oozie REST API on the cluster's primary node.
 
-This needs on-cluster access (emr.onCluster in config) because Oozie has no AWS
-API — it runs on the cluster's primary node, reachable only from inside the VPC
-(directly, or through a SOCKS proxy such as an 'ssh -D' dynamic tunnel).`,
+` + emrOnClusterHelp("Oozie", emrconn.DefaultOoziePort),
 	Args: cobra.ExactArgs(1),
-	Example: `  aws_explorer emr oozie j-1A2B3C4D5 -r us-east-1
+	Example: emrTunnelExamplePreamble + `
+  # 4. List Oozie workflows (or coordinators with --coordinators):
+  aws_explorer emr oozie j-1A2B3C4D5 -r us-east-1
   aws_explorer emr oozie j-1A2B3C4D5 --coordinators -o json`,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		if err := output.ValidateFormat(outputFormat); err != nil {
