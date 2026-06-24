@@ -85,6 +85,13 @@ nothing is clipped. The panels are:
   DynamoDB metadata table, flagged obsolete when on) and S3 encryption. Pure read
   of the describe response — no extra API calls. The same derivation backs the
   `EMR-EMRFS-001` audit check.
+- **Config browser** (`c` on a cluster, or the `emr config <id>` CLI twin) — the
+  cluster's configuration classifications presented as the on-disk files they
+  become (`core-site.xml`, `hdfs-site.xml`, `yarn-site.xml`, `spark-defaults.conf`,
+  `hive-site.xml`, `emrfs-site.xml`, …), one row per property. Reads the
+  classifications `DescribeCluster` already returns — no on-cluster access. The
+  CLI takes `--classification hdfs-site` to scope to one file and the usual
+  `-o table|json|ndjson|csv`.
 - **Services** — the installed applications and their versions.
 - **Compute, memory & storage** — each instance group (or fleet): node role,
   instance type and market, running/requested counts, per-instance **memory**
@@ -222,6 +229,7 @@ aws_explorer emr steps <id>     [-r us-east-1] [--limit 50] [--status FAILED] [-
 aws_explorer emr instances <id> [-r us-east-1] [--limit N] [-o …]
 aws_explorer emr apps <id>      [-r us-east-1] [-o …]
 aws_explorer emr describe <id>  [-r us-east-1] [-o table|json|ndjson]   # full describe (config, OS, compute, storage, networking)
+aws_explorer emr config <id>    [-r us-east-1] [--classification hdfs-site] [-o …]   # config files (core-site, hdfs-site, spark-defaults, …)
 aws_explorer emr yarn <id>      [-r us-east-1] [-o …]   # live YARN apps (on-cluster)
 aws_explorer emr hbase <id>     [-r us-east-1] [-o …]   # HBase tables (on-cluster)
 aws_explorer emr oozie <id>     [-r us-east-1] [--coordinators] [-o …]   # Oozie jobs (on-cluster)
