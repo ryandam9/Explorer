@@ -273,6 +273,14 @@ echoed back (disabled by [`NO_COLOR`](https://no-color.org/) or when piped).
 - `--no-header` emits data rows only, each prefixed with its direction
   (`uses`/`used_by`) in place of the cosmetic `SNO` column — for `awk`/`cut`.
   For fully-structured output prefer `-o csv`/`-o ndjson`.
+- `--scan` narrows which collectors run: a profile (`fast|security|eventing|
+  network`), an explicit service list (`--scan lambda,kms,ec2`), or
+  `exclude:<services>` to scan everything *but* those. CloudWatch is split into
+  `cloudwatch` (alarm actions) and `logs` (the per-log-group subscription-filter
+  sweep), so `--scan exclude:logs` drops the throttle-prone Logs sweep while
+  keeping everything else. The umbrella alias `observability` still means both
+  (`--scan observability` / `exclude:observability`). A narrowed scan also
+  narrows the "reference types checked" footer, so the honesty contract holds.
 - `--cache-ttl 5m` reuses a recent scan of the same scope; `--refresh` forces a
   live rescan. `--debug-scan` prints per-service scan timings to stderr.
 - `-o json` carries `"partial": true` and an `"errors"` array when collection

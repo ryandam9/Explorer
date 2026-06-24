@@ -233,7 +233,7 @@ var checkedTypesByKind = map[Kind][]checkedType{
 		{"dynamodb", "DynamoDB table encryption"},
 		{"elasticache", "ElastiCache encryption"},
 		{"redshift", "Redshift cluster encryption"},
-		{"observability", "CloudWatch log group encryption"},
+		{"logs", "CloudWatch log group encryption"},
 	},
 	KindACMCert: {
 		{"elbv2", "ELBv2 (ALB/NLB) listeners"},
