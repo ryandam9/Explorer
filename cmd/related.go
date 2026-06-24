@@ -105,6 +105,7 @@ This generalizes 'whereused' (which answers only the "used by" direction).`,
   aws_explorer related sg-0abc123 -r eu-west-1           # one region
   aws_explorer related arn:aws:kms:…:key/abcd --scan security   # focused scan
   aws_explorer related my-fn --scan lambda,kms,ec2       # explicit services
+  aws_explorer related my-fn --scan exclude:logs         # all but the CW Logs sweep
   aws_explorer related my-fn --cache-ttl 5m              # reuse a recent scan
   aws_explorer related my-fn --refresh                   # force a fresh scan
   aws_explorer related my-fn --debug-scan                # per-service timings
@@ -432,6 +433,6 @@ func init() {
 	relatedCmd.Flags().StringVar(&relatedFormat, "format", "", "graph export format: dot or mermaid (overrides -o)")
 	relatedCmd.Flags().BoolVar(&relatedRisk, "risk", false, "print a deletion-risk estimate from the blast radius (table output)")
 	relatedCmd.Flags().BoolVar(&relatedExplainScan, "explain-scan", false, "list the reference types checked for this target, without scanning AWS")
-	relatedCmd.Flags().StringVar(&relatedScan, "scan", "full", "scan scope: full|fast|security|eventing|network, or an explicit comma list of services")
+	relatedCmd.Flags().StringVar(&relatedScan, "scan", "full", "scan scope: full|fast|security|eventing|network, an explicit comma list of services, or exclude:<services> to scan all but those (e.g. exclude:logs)")
 	rootCmd.AddCommand(relatedCmd)
 }

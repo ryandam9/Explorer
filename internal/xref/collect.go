@@ -358,7 +358,10 @@ func collectRegion(ctx context.Context, baseCfg aws.Config, region string, profi
 		{"dynamodb", func() []Edge { return dynamodbEdges(ctx, cfg, region, maxConcurrency, rec) }},
 		{"elasticache", func() []Edge { return elastiCacheEdges(ctx, cfg, region, rec) }},
 		{"redshift", func() []Edge { return redshiftEdges(ctx, cfg, region, rec) }},
-		{"observability", func() []Edge { return observabilityEdges(ctx, cfg, region, maxConcurrency, rec) }},
+		// CloudWatch is split so the throttle-prone Logs sweep can be excluded on
+		// its own (--scan exclude:logs) without dropping alarm-action edges.
+		{"cloudwatch", func() []Edge { return cloudWatchAlarmEdges(ctx, cfg, region, rec) }},
+		{"logs", func() []Edge { return cwLogsEdges(ctx, cfg, region, maxConcurrency, rec) }},
 	}
 
 	// Run the region's collectors concurrently (bounded). They previously ran

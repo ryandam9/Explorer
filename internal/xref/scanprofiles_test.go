@@ -26,6 +26,57 @@ func TestParseScan(t *testing.T) {
 	}
 }
 
+func TestParseScan_Exclude(t *testing.T) {
+	// exclude:logs runs everything except the CloudWatch Logs sweep, but keeps
+	// CloudWatch alarms and the rest.
+	got, err := ParseScan("exclude:logs")
+	if err != nil {
+		t.Fatalf("exclude:logs errored: %v", err)
+	}
+	if got["logs"] {
+		t.Errorf("exclude:logs should drop logs, got %v", got)
+	}
+	if !got["cloudwatch"] || !got["iam"] || !got["lambda"] {
+		t.Errorf("exclude:logs should keep every other service, got %v", got)
+	}
+	if len(got) != len(validServices)-1 {
+		t.Errorf("exclude:logs should keep all but one service: got %d, want %d", len(got), len(validServices)-1)
+	}
+
+	// exclude:observability expands the alias and drops both cloudwatch + logs.
+	got, err = ParseScan("exclude:observability")
+	if err != nil {
+		t.Fatalf("exclude:observability errored: %v", err)
+	}
+	if got["logs"] || got["cloudwatch"] {
+		t.Errorf("exclude:observability should drop both cloudwatch and logs, got %v", got)
+	}
+
+	// An exclude naming an unknown service errors rather than silently scanning all.
+	if _, err := ParseScan("exclude:bogus"); err == nil {
+		t.Errorf("exclude with unknown service should error")
+	}
+	// Empty exclude list errors.
+	if _, err := ParseScan("exclude:"); err == nil {
+		t.Errorf("empty exclude list should error")
+	}
+}
+
+func TestParseScan_ObservabilityAlias(t *testing.T) {
+	got, err := ParseScan("observability")
+	if err != nil {
+		t.Fatalf("observability alias errored: %v", err)
+	}
+	if !got["cloudwatch"] || !got["logs"] || len(got) != 2 {
+		t.Errorf("observability alias should expand to {cloudwatch, logs}, got %v", got)
+	}
+	// Alias mixed into an explicit list.
+	got, err = ParseScan("iam,observability")
+	if err != nil || !got["iam"] || !got["cloudwatch"] || !got["logs"] {
+		t.Errorf("iam,observability = %v, %v", got, err)
+	}
+}
+
 func TestCheckedTypesFor_NarrowsWithScan(t *testing.T) {
 	full := CheckedTypes(KindKMSKey)
 	if len(full) == 0 {

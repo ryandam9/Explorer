@@ -111,10 +111,3 @@ func cwLogsEdges(ctx context.Context, cfg aws.Config, region string, maxConcurre
 		return append(edges, subscriptionFilterEdges(ref, out.SubscriptionFilters)...)
 	})
 }
-
-func observabilityEdges(ctx context.Context, cfg aws.Config, region string, maxConcurrency int, rec *recorder) []Edge {
-	var edges []Edge
-	edges = append(edges, cloudWatchAlarmEdges(ctx, cfg, region, rec)...)
-	edges = append(edges, cwLogsEdges(ctx, cfg, region, maxConcurrency, rec)...)
-	return edges
-}
