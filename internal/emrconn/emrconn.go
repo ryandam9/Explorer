@@ -53,10 +53,11 @@ const (
 
 // Default daemon ports on Amazon EMR.
 const (
-	DefaultYARNPort  = 8088
-	DefaultHBasePort = 8080  // HBase REST server
-	DefaultOoziePort = 11000 // Oozie REST/web
-	DefaultTimeout   = 5 * time.Second
+	DefaultYARNPort     = 8088
+	DefaultHBasePort    = 8080  // HBase REST server
+	DefaultOoziePort    = 11000 // Oozie REST/web
+	DefaultNameNodePort = 9870  // HDFS NameNode HTTP (Hadoop 3; Hadoop 2 was 50070)
+	DefaultTimeout      = 5 * time.Second
 )
 
 // ErrUnreachable wraps any failure to reach a daemon (mode off, dial refused,
@@ -71,9 +72,10 @@ var ErrDisabled = fmt.Errorf("%w: on-cluster access is off", ErrUnreachable)
 type Service string
 
 const (
-	ServiceYARN  Service = "yarn"
-	ServiceHBase Service = "hbase"
-	ServiceOozie Service = "oozie"
+	ServiceYARN     Service = "yarn"
+	ServiceHBase    Service = "hbase"
+	ServiceOozie    Service = "oozie"
+	ServiceNameNode Service = "namenode" // HDFS NameNode HTTP (JMX + /conf)
 )
 
 // Dialer reaches a cluster's on-cluster daemons per the resolved configuration.
@@ -215,6 +217,8 @@ func (d *Dialer) Port(svc Service) int {
 		return orDefault(d.ports.HBase, DefaultHBasePort)
 	case ServiceOozie:
 		return orDefault(d.ports.Oozie, DefaultOoziePort)
+	case ServiceNameNode:
+		return orDefault(d.ports.NameNode, DefaultNameNodePort)
 	default:
 		return 0
 	}

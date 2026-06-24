@@ -197,11 +197,19 @@ EMR connect-check — j-1A2B3C4D5 [us-east-1]
 Summary: 2 OK · 1 failed · 1 skipped — fix the first ✗ above and re-run.
 ```
 
-Scope it with `--service hbase,oozie` (default `all` = `hbase,yarn,oozie,hive`).
+Scope it with `--service hbase,oozie` (default `all` = `hdfs,hbase,yarn,oozie,hive`).
 It exits non-zero when any check fails, so it works as a pre-flight gate in
 scripts. **Hive** is a TCP **port-reachability** check only — HiveServer2 speaks
 Thrift, not HTTP, so the port can be confirmed open but not protocol-checked
-(use `beeline` for a full check); YARN/HBase/Oozie get true REST health checks.
+(use `beeline` for a full check); HDFS/YARN/HBase/Oozie get true REST health checks.
+
+The **HDFS browser** (`n` on a cluster, or the `emr hdfs <id>` CLI twin) reads the
+**NameNode**'s JMX (port 9870) and shows the filesystem's health: capacity
+**used / free / total** and percent used, **live vs dead DataNodes**, file and
+block totals, **missing / under-replicated / corrupt** blocks, **safe-mode**
+state and the NameNode version — plus a per-DataNode table (state, used,
+capacity, used %, blocks, last contact). Like the other live browsers it needs
+`emr.onCluster` configured and degrades to the connect helper when off.
 
 The **HBase browser** lists namespaces → tables with a derived **state**
 (`ENABLED` / `DISABLED` / `PARTIAL`, inferred from how many of a table's regions
@@ -230,6 +238,7 @@ aws_explorer emr instances <id> [-r us-east-1] [--limit N] [-o …]
 aws_explorer emr apps <id>      [-r us-east-1] [-o …]
 aws_explorer emr describe <id>  [-r us-east-1] [-o table|json|ndjson]   # full describe (config, OS, compute, storage, networking)
 aws_explorer emr config <id>    [-r us-east-1] [--classification hdfs-site] [-o …]   # config files (core-site, hdfs-site, spark-defaults, …)
+aws_explorer emr hdfs <id>      [-r us-east-1] [-o …]   # HDFS / NameNode status (on-cluster)
 aws_explorer emr yarn <id>      [-r us-east-1] [-o …]   # live YARN apps (on-cluster)
 aws_explorer emr hbase <id>     [-r us-east-1] [-o …]   # HBase tables (on-cluster)
 aws_explorer emr oozie <id>     [-r us-east-1] [--coordinators] [-o …]   # Oozie jobs (on-cluster)

@@ -81,6 +81,16 @@ type m struct {
 	stepsErr     error
 	stepsTbl     table.Model
 
+	// HDFS / NameNode browser sub-view (n on a cluster): cluster-wide HDFS
+	// health (capacity, live/dead DataNodes, blocks, safemode) plus a per-DataNode
+	// table. Reads the NameNode JMX over the on-cluster dialer (nil when off).
+	hdfsActive  bool
+	hdfsCluster Cluster
+	hdfsLoading bool
+	hdfsErr     error
+	hdfsStatus  HDFSStatus
+	hdfsTbl     table.Model
+
 	// Config browser sub-view (c on a cluster): the cluster's configuration
 	// classifications flattened to one row per property (classification, key,
 	// value), shown as the on-disk files they become. Loaded async (one
@@ -191,6 +201,13 @@ type configMsg struct {
 	err     error
 }
 
+// hdfsMsg delivers a cluster's HDFS/NameNode status for the HDFS browser.
+type hdfsMsg struct {
+	cluster Cluster
+	status  HDFSStatus
+	err     error
+}
+
 // descMsg delivers a cluster's full description (or the error that aborted it)
 // for the detail overlay.
 type descMsg struct {
@@ -282,6 +299,7 @@ func NewModel(ctx context.Context, awsCfg *config.AWSConfig, regions []string, a
 		tbl:         tbl,
 		stepsTbl:    newSubTable(stepColumns()),
 		configTbl:   newSubTable(configColumns()),
+		hdfsTbl:     newSubTable(hdfsColumns()),
 		yarnTbl:     newSubTable(yarnColumns()),
 		hbaseTbl:    newSubTable(hbaseColumns()),
 		oozieTbl:    newSubTable(oozieWFColumns()),
@@ -401,6 +419,16 @@ func (mm *m) loadConfigCmd(cl Cluster) tea.Cmd {
 		defer cancel()
 		cfgs, err := mm.client.Configurations(ctx, cl.Region, cl.ID)
 		return configMsg{cluster: cl, rows: FlattenConfigRows(cfgs), err: err}
+	}
+}
+
+func (mm *m) loadHDFSCmd(cl Cluster) tea.Cmd {
+	return func() tea.Msg {
+		slog.Info("Loading EMR HDFS status", "cluster", cl.ID, "region", cl.Region)
+		ctx, cancel := context.WithTimeout(mm.ctx, drillTimeout)
+		defer cancel()
+		status, err := FetchHDFS(ctx, mm.dialer, cl.MasterDNS)
+		return hdfsMsg{cluster: cl, status: status, err: err}
 	}
 }
 
@@ -550,6 +578,12 @@ func (mm *m) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		mm.configErr = msg.err
 		mm.configRows = msg.rows
 		mm.setRows(&mm.configTbl, len(msg.rows), func(i int) table.Row { return configTableRow(msg.rows[i]) })
+
+	case hdfsMsg:
+		mm.hdfsLoading = false
+		mm.hdfsErr = msg.err
+		mm.hdfsStatus = msg.status
+		mm.setRows(&mm.hdfsTbl, len(msg.status.DataNodes), func(i int) table.Row { return hdfsRow(msg.status.DataNodes[i]) })
 
 	case descMsg:
 		// Ignore a stale describe if the view was closed or moved to another
@@ -727,6 +761,39 @@ func (mm *m) handleKey(msg tea.KeyMsg) []tea.Cmd {
 			mm.filter, cmd = mm.filter.Update(msg)
 			cmds = append(cmds, cmd)
 			mm.rebuild()
+		}
+		return cmds
+	}
+
+	// HDFS / NameNode browser sub-view.
+	if mm.hdfsActive {
+		switch msg.String() {
+		case "q", "ctrl+c":
+			return []tea.Cmd{tea.Quit}
+		case "esc", "backspace", "left", "h":
+			mm.hdfsActive = false
+		case "up", "k":
+			mm.hdfsTbl.MoveUp(1)
+		case "down", "j":
+			mm.hdfsTbl.MoveDown(1)
+		case "pgup":
+			mm.hdfsTbl.MoveUp(10)
+		case "pgdown", "pgdn", " ":
+			mm.hdfsTbl.MoveDown(10)
+		case "g", "home":
+			mm.hdfsTbl.GotoTop()
+		case "G", "end":
+			mm.hdfsTbl.GotoBottom()
+		case "<", ",":
+			mm.hdfsTbl.ScrollLeft()
+		case ">", ".":
+			mm.hdfsTbl.ScrollRight()
+		case "r":
+			mm.hdfsLoading = true
+			mm.hdfsErr = nil
+			cmds = append(cmds, mm.loadHDFSCmd(mm.hdfsCluster), mm.spinner.Tick)
+		case ui.KeyAbout:
+			mm.showAbout = true
 		}
 		return cmds
 	}
@@ -1015,6 +1082,15 @@ func (mm *m) handleKey(msg tea.KeyMsg) []tea.Cmd {
 				mm.appUILoading = false
 			}
 		}
+	case "n":
+		if cl, ok := mm.selectedCluster(); ok {
+			mm.hdfsActive = true
+			mm.hdfsCluster = cl
+			mm.hdfsLoading = true
+			mm.hdfsStatus = HDFSStatus{}
+			mm.hdfsErr = nil
+			cmds = append(cmds, mm.loadHDFSCmd(cl), mm.spinner.Tick)
+		}
 	case "y":
 		if cl, ok := mm.selectedCluster(); ok {
 			mm.yarnActive = true
@@ -1174,6 +1250,9 @@ func (mm *m) PageTitle() string {
 	base := "Amazon EMR"
 	if mm.detailActive {
 		return base + " › " + mm.detailCluster.Name + " › describe"
+	}
+	if mm.hdfsActive {
+		return base + " › " + mm.hdfsCluster.Name + " › HDFS"
 	}
 	if mm.configActive {
 		return base + " › " + mm.configCluster.Name + " › config"

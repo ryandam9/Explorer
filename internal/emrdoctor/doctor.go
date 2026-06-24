@@ -94,6 +94,7 @@ type target struct {
 }
 
 var targets = map[string]target{
+	"hdfs":  {"HDFS NameNode", emrconn.ServiceNameNode, emrconn.DefaultNameNodePort, "/jmx", false},
 	"hbase": {"HBase", emrconn.ServiceHBase, emrconn.DefaultHBasePort, "/version/cluster", false},
 	"yarn":  {"YARN", emrconn.ServiceYARN, emrconn.DefaultYARNPort, "/ws/v1/cluster/info", false},
 	"oozie": {"Oozie", emrconn.ServiceOozie, emrconn.DefaultOoziePort, "/oozie/v1/admin/status", false},
@@ -101,7 +102,7 @@ var targets = map[string]target{
 }
 
 // serviceOrder is the canonical display order.
-var serviceOrder = []string{"hbase", "yarn", "oozie", "hive"}
+var serviceOrder = []string{"hdfs", "hbase", "yarn", "oozie", "hive"}
 
 // AllServices returns the selectable service keys in display order.
 func AllServices() []string { return append([]string(nil), serviceOrder...) }
@@ -120,7 +121,7 @@ func ParseServices(s string) ([]string, error) {
 			continue
 		}
 		if _, ok := targets[part]; !ok {
-			return nil, fmt.Errorf("unknown service %q (valid: hbase, yarn, oozie, hive, or all)", part)
+			return nil, fmt.Errorf("unknown service %q (valid: hdfs, hbase, yarn, oozie, hive, or all)", part)
 		}
 		want[part] = true
 	}

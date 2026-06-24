@@ -72,9 +72,10 @@ type OnClusterSSH struct {
 
 // OnClusterPorts holds the per-daemon ports (0 = use the EMR default).
 type OnClusterPorts struct {
-	YARN  int `mapstructure:"yarn"`
-	HBase int `mapstructure:"hbase"`
-	Oozie int `mapstructure:"oozie"`
+	YARN     int `mapstructure:"yarn"`
+	HBase    int `mapstructure:"hbase"`
+	Oozie    int `mapstructure:"oozie"`
+	NameNode int `mapstructure:"namenode"` // HDFS NameNode HTTP (default 9870)
 }
 
 // SummaryConfig configures the `summary` command.
