@@ -151,6 +151,45 @@ When access is off or the daemon can't be reached, the browser shows a "how to
 connect" helper (including the exact tunnel command) instead of an error — every
 on-cluster request is a read-only `GET` with a timeout.
 
+#### Debugging a connection — `emr connect-check`
+
+When a live view won't load, `emr connect-check <cluster-id>` verifies the
+connection **one layer at a time** and tells you exactly what to fix, instead of
+a single opaque "unreachable". It walks the same path a real connection uses:
+
+1. **config** — is `emr.onCluster` configured and does the dialer build?
+2. **cluster** — does `DescribeCluster` work, is the cluster running, is the
+   primary-node DNS resolved?
+3. **bridge** — the link into the VPC: is the SOCKS proxy listening (`socks`),
+   can the tool SSH to the primary node (`tunnel`, distinguishing an auth failure
+   from a blocked port 22), or is it in-VPC (`direct`)?
+4. **service** — for each daemon: is its port reachable through the bridge, and
+   does it answer its health endpoint?
+
+A failure short-circuits the layers that depend on it (shown as `SKIP`), so the
+report never implies it verified something it couldn't reach. Each line carries a
+concrete next step:
+
+```text
+EMR connect-check — j-1A2B3C4D5 [us-east-1]
+
+  ✓ OK   on-cluster config          mode=socks · proxy 127.0.0.1:8157
+  ✓ OK   cluster                    RUNNING — primary ec2-…compute.amazonaws.com
+  ✗ FAIL bridge (socks)             SOCKS proxy 127.0.0.1:8157 not reachable
+      → No SSH dynamic tunnel is running. In a separate terminal run:
+      → ssh -i <key.pem> -N -D 8157 hadoop@ec2-…  — and confirm
+      → emr.onCluster.socksProxy matches that -D port.
+  · SKIP HBase                      skipped — bridge not available
+
+Summary: 2 OK · 1 failed · 1 skipped — fix the first ✗ above and re-run.
+```
+
+Scope it with `--service hbase,oozie` (default `all` = `hbase,yarn,oozie,hive`).
+It exits non-zero when any check fails, so it works as a pre-flight gate in
+scripts. **Hive** is a TCP **port-reachability** check only — HiveServer2 speaks
+Thrift, not HTTP, so the port can be confirmed open but not protocol-checked
+(use `beeline` for a full check); YARN/HBase/Oozie get true REST health checks.
+
 The **HBase browser** lists namespaces → tables with a derived **state**
 (`ENABLED` / `DISABLED` / `PARTIAL`, inferred from how many of a table's regions
 are assigned), the **region count**, **online regions**, and **column

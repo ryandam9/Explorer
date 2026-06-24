@@ -417,6 +417,23 @@ func (c *Client) MasterDNS(ctx context.Context, region, clusterID string) (strin
 	return aws.ToString(out.Cluster.MasterPublicDnsName), nil
 }
 
+// ClusterConn returns a cluster's primary-node DNS and state in one
+// DescribeCluster call, for connect-check. Status is nil-guarded (§1): a cluster
+// without a populated Status yields an empty state rather than panicking.
+func (c *Client) ClusterConn(ctx context.Context, region, clusterID string) (dns, state string, err error) {
+	out, err := c.clientFor(region).DescribeCluster(ctx, &emr.DescribeClusterInput{ClusterId: aws.String(clusterID)})
+	if err != nil {
+		return "", "", err
+	}
+	if out.Cluster == nil {
+		return "", "", fmt.Errorf("cluster %q not found", clusterID)
+	}
+	if out.Cluster.Status != nil {
+		state = string(out.Cluster.Status.State)
+	}
+	return aws.ToString(out.Cluster.MasterPublicDnsName), state, nil
+}
+
 // Apps fetches a cluster's installed applications and versions (one
 // DescribeCluster call).
 func (c *Client) Apps(ctx context.Context, region, clusterID string) ([]AppInfo, error) {
