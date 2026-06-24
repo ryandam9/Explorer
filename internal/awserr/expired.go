@@ -78,6 +78,10 @@ func Classify(err error, service, profile string) (code, msg string) {
 		return "ExpiredCredentials", hint
 	case IsAuthError(err):
 		return "AccessDenied", FriendlyMessage(err, service)
+	case IsThrottle(err):
+		// Canonical, RequestID-free line so a storm of identical throttles
+		// collapses to one (§7).
+		return "Throttling", throttleMessage(service)
 	default:
 		return "CollectionError", err.Error()
 	}

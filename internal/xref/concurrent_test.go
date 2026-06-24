@@ -40,6 +40,27 @@ func TestBoundedEdges_RecorderIsConcurrencySafe(t *testing.T) {
 	}
 }
 
+// TestBoundedEdges_CollapsesThrottleStorm reproduces the CloudWatch Logs case:
+// a large per-item sweep self-throttles, and each call fails with a "Rate
+// exceeded" error carrying a distinct RequestID. Classify canonicalizes them,
+// so the recorder must collapse the whole storm to a single line (§7).
+func TestBoundedEdges_CollapsesThrottleStorm(t *testing.T) {
+	items := make([]int, 50)
+	rec := &recorder{region: "ap-southeast-2"}
+	boundedEdges(context.Background(), items, 16, rec, func(_ context.Context, n int, rec *recorder) []Edge {
+		rec.record("logs", fmt.Errorf("operation error CloudWatch Logs: DescribeSubscriptionFilters, "+
+			"exceeded maximum number of attempts, 3, https response error StatusCode: 400, "+
+			"RequestID: req-%d, api error ThrottlingException: Rate exceeded", n))
+		return nil
+	})
+	if len(rec.errs) != 1 {
+		t.Fatalf("throttle storm should collapse to 1 error, got %d", len(rec.errs))
+	}
+	if rec.errs[0].Code != "Throttling" {
+		t.Errorf("expected code Throttling, got %q", rec.errs[0].Code)
+	}
+}
+
 func TestBoundedEdges_Empty(t *testing.T) {
 	rec := &recorder{}
 	if got := boundedEdges(context.Background(), nil, 8, rec, func(context.Context, int, *recorder) []Edge {
