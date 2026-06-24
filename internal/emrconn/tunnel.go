@@ -79,6 +79,13 @@ func (t *tunnelDialer) dialContext(ctx context.Context, network, addr string) (n
 	return conn, nil
 }
 
+// connect establishes (and authenticates) the SSH connection to host without
+// dialing any daemon, so connect-check can verify the SSH bridge on its own.
+func (t *tunnelDialer) connect(ctx context.Context, host string) error {
+	_, err := t.clientFor(ctx, host)
+	return err
+}
+
 // clientFor returns a cached SSH client for host, dialing a new one if needed.
 func (t *tunnelDialer) clientFor(ctx context.Context, host string) (*ssh.Client, error) {
 	t.mu.Lock()

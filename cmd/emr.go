@@ -7,10 +7,13 @@ import (
 	"strings"
 
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/mattn/go-isatty"
 	"github.com/spf13/cobra"
 
+	"github.com/ryandam9/aws_explorer/internal/clilog"
 	"github.com/ryandam9/aws_explorer/internal/config"
 	"github.com/ryandam9/aws_explorer/internal/emrconn"
+	"github.com/ryandam9/aws_explorer/internal/emrdoctor"
 	"github.com/ryandam9/aws_explorer/internal/emrtui"
 	"github.com/ryandam9/aws_explorer/internal/output"
 	"github.com/ryandam9/aws_explorer/internal/ui"
@@ -36,7 +39,8 @@ Clusters, steps, instances, apps and describe use the AWS API and need no extra
 setup. The live YARN / HBase / Oozie views read daemons that run on the cluster
 itself and have no AWS API, so they need opt-in on-cluster access (an SSH tunnel
 or SOCKS proxy into the VPC) — run 'aws_explorer emr hbase --help' for a full,
-worked explanation.`,
+worked explanation, and 'aws_explorer emr connect-check <id>' to diagnose a
+connection step by step when something doesn't work.`,
 	Example: `  # Browse EMR in the configured regions
   aws_explorer emr
 
@@ -491,6 +495,93 @@ on an EMR cluster, read from the Oozie REST API on the cluster's primary node.
 	},
 }
 
+var emrConnCheckService string
+
+var emrConnCheckCmd = &cobra.Command{
+	Use:   "connect-check <cluster-id>",
+	Short: "Diagnose on-cluster access step by step (YARN/HBase/Oozie/Hive)",
+	Long: `Verify, one layer at a time, why a live YARN / HBase / Oozie / Hive connection
+does or doesn't work — and tell you exactly what to fix. It walks the same path a
+real connection uses and prints a pass/fail line with a concrete next step for
+each layer:
+
+  1. config   — is emr.onCluster configured, and does the dialer build?
+  2. cluster  — does DescribeCluster work, is the cluster running, is the
+                primary-node DNS resolved?
+  3. bridge   — the link into the VPC: is the SOCKS proxy listening (socks), can
+                the tool SSH to the primary node (tunnel), or is it in-VPC
+                (direct)? Authentication vs network failures are distinguished.
+  4. service  — for each daemon: is its port reachable through the bridge, and
+                does it answer its health endpoint?
+
+A failure short-circuits the layers that depend on it (shown as "skipped"), so
+the report never implies it verified something it couldn't reach. Every probe is
+read-only and bounded by emr.onCluster.timeoutSeconds.
+
+Note on Hive: HiveServer2 speaks Thrift (port 10000), not HTTP, so it gets a
+TCP port-reachability check only — the port can be confirmed open, but not that
+the service is healthy (use beeline for a full check). YARN, HBase and Oozie
+expose REST daemons and get a true protocol-level health check.
+
+Configure on-cluster access first — run 'aws_explorer emr hbase --help' for a
+full, worked setup of the socks / tunnel / direct modes.`,
+	Args: cobra.ExactArgs(1),
+	Example: `  # Check every service on a cluster:
+  aws_explorer emr connect-check j-1A2B3C4D5 -r us-east-1
+
+  # Just HBase (or a comma list):
+  aws_explorer emr connect-check j-1A2B3C4D5 --service hbase
+  aws_explorer emr connect-check j-1A2B3C4D5 --service hbase,oozie`,
+	RunE: func(cmd *cobra.Command, args []string) error {
+		services, err := emrdoctor.ParseServices(emrConnCheckService)
+		if err != nil {
+			return err
+		}
+		ctx := context.Background()
+		SilenceScanLogs()
+
+		var onCluster config.OnClusterConfig
+		if AppConfig != nil {
+			onCluster = AppConfig.EMR.OnCluster
+		}
+
+		client, err := newEMRClient(ctx)
+		if err != nil {
+			return err
+		}
+		region := emrRegionForCommand(client)
+
+		// One DescribeCluster up front; a failure is fed into the report (the
+		// cluster check reports it) rather than aborting — the config layer is
+		// still worth verifying.
+		dns, state, derr := client.ClusterConn(ctx, region, args[0])
+		report := emrdoctor.Run(ctx, onCluster, emrdoctor.ClusterInfo{
+			State: state, PrimaryDNS: dns, DescribeErr: derr,
+		}, services)
+
+		fmt.Printf("EMR connect-check — %s [%s]\n\n", args[0], region)
+		color := clilog.ColorEnabled(isatty.IsTerminal(os.Stdout.Fd()))
+		emrdoctor.Render(os.Stdout, report, color)
+		if report.Failed() {
+			// Non-zero exit so scripts/CI can gate on a clean connection, but
+			// suppress Cobra's usage dump — the report already explains the failure.
+			cmd.SilenceUsage = true
+			cmd.SilenceErrors = true
+			return fmt.Errorf("connect-check found %s", failSummary(report))
+		}
+		return nil
+	},
+}
+
+// failSummary is the terse reason attached to connect-check's non-zero exit.
+func failSummary(r *emrdoctor.Report) string {
+	_, fail, _, _ := r.Counts()
+	if fail == 1 {
+		return "1 failed check"
+	}
+	return fmt.Sprintf("%d failed checks", fail)
+}
+
 func init() {
 	emrCmd.Flags().StringVar(&emrTheme, "theme", defaultThemeName, "Color theme ("+strings.Join(ui.ThemeNames(), ", ")+")")
 	registerAlwaysTUIFlag(emrCmd)
@@ -508,6 +599,8 @@ func init() {
 
 	emrOozieCmd.Flags().BoolVar(&emrOozieCoordinators, "coordinators", false, "list coordinator jobs instead of workflows")
 
-	emrCmd.AddCommand(emrClustersCmd, emrStepsCmd, emrInstancesCmd, emrAppsCmd, emrDescribeCmd, emrYarnCmd, emrHBaseCmd, emrOozieCmd)
+	emrConnCheckCmd.Flags().StringVar(&emrConnCheckService, "service", "all", "which services to check: all, or a comma list of hbase,yarn,oozie,hive")
+
+	emrCmd.AddCommand(emrClustersCmd, emrStepsCmd, emrInstancesCmd, emrAppsCmd, emrDescribeCmd, emrYarnCmd, emrHBaseCmd, emrOozieCmd, emrConnCheckCmd)
 	rootCmd.AddCommand(emrCmd)
 }

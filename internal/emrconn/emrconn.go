@@ -19,6 +19,7 @@ import (
 	"net"
 	"net/http"
 	"net/url"
+	"strconv"
 	"time"
 
 	"golang.org/x/net/proxy"
@@ -77,11 +78,16 @@ const (
 
 // Dialer reaches a cluster's on-cluster daemons per the resolved configuration.
 type Dialer struct {
-	mode    Mode
-	ports   config.OnClusterPorts
-	timeout time.Duration
-	client  *http.Client
-	tunnel  *tunnelDialer // non-nil only in tunnel mode
+	mode       Mode
+	socksProxy string // host:port of the SOCKS5 proxy (socks mode only)
+	ports      config.OnClusterPorts
+	timeout    time.Duration
+	client     *http.Client
+	tunnel     *tunnelDialer // non-nil only in tunnel mode
+	// dial reaches host:port through whatever bridge the mode configures (direct
+	// net dial, the SOCKS proxy, or the SSH tunnel). It backs both the HTTP
+	// transport and the raw Dial probe used by connect-check.
+	dial func(ctx context.Context, network, addr string) (net.Conn, error)
 }
 
 // New builds a Dialer from the on-cluster config. It returns (nil, ErrDisabled)
@@ -99,9 +105,12 @@ func New(cfg config.OnClusterConfig) (*Dialer, error) {
 
 	transport := &http.Transport{}
 	var tun *tunnelDialer
+	var dial func(ctx context.Context, network, addr string) (net.Conn, error)
+	socksProxy := ""
 	switch mode {
 	case ModeDirect:
-		// Default transport dials directly; nothing to configure.
+		// Plain dial straight to the primary node (the tool is inside the VPC).
+		dial = (&net.Dialer{Timeout: timeout}).DialContext
 	case ModeSocks:
 		if cfg.SocksProxy == "" {
 			return nil, fmt.Errorf("socks mode requires emr.onCluster.socksProxy (e.g. 127.0.0.1:8157)")
@@ -114,24 +123,28 @@ func New(cfg config.OnClusterConfig) (*Dialer, error) {
 		if !ok {
 			return nil, fmt.Errorf("socks dialer does not support contexts")
 		}
-		transport.DialContext = cd.DialContext
+		dial = cd.DialContext
+		socksProxy = cfg.SocksProxy
 	case ModeTunnel:
 		t, err := newTunnelDialer(cfg.SSH, timeout)
 		if err != nil {
 			return nil, err
 		}
 		tun = t
-		transport.DialContext = t.dialContext
+		dial = t.dialContext
 	default:
 		return nil, fmt.Errorf("unknown on-cluster mode %q (want off|direct|socks|tunnel)", cfg.Mode)
 	}
+	transport.DialContext = dial
 
 	return &Dialer{
-		mode:    mode,
-		ports:   cfg.Ports,
-		timeout: timeout,
-		client:  &http.Client{Transport: transport, Timeout: timeout},
-		tunnel:  tun,
+		mode:       mode,
+		socksProxy: socksProxy,
+		ports:      cfg.Ports,
+		timeout:    timeout,
+		client:     &http.Client{Transport: transport, Timeout: timeout},
+		tunnel:     tun,
+		dial:       dial,
 	}, nil
 }
 
@@ -145,6 +158,53 @@ func (d *Dialer) Close() {
 
 // Mode returns the dialer's resolved mode.
 func (d *Dialer) Mode() Mode { return d.mode }
+
+// SocksProxy returns the configured SOCKS proxy address (socks mode only, else "").
+func (d *Dialer) SocksProxy() string { return d.socksProxy }
+
+// Dial opens a raw TCP connection to host:port through the configured bridge
+// (direct / SOCKS / SSH tunnel), bounded by the dialer timeout. It is the
+// transport-level probe behind connect-check — it proves a daemon port is
+// reachable without speaking the daemon's protocol (used for Hive, whose
+// HiveServer2 is Thrift, not HTTP). The caller closes the returned conn.
+func (d *Dialer) Dial(ctx context.Context, host string, port int) (net.Conn, error) {
+	ctx, cancel := context.WithTimeout(ctx, d.timeout)
+	defer cancel()
+	conn, err := d.dial(ctx, "tcp", net.JoinHostPort(host, strconv.Itoa(port)))
+	if err != nil {
+		return nil, fmt.Errorf("%w: %v", ErrUnreachable, err)
+	}
+	return conn, nil
+}
+
+// Bridge verifies the connection bridge itself — the layer between this machine
+// and the cluster — independent of any daemon. In socks mode it checks the SOCKS
+// proxy is listening; in tunnel mode it opens (and authenticates) the SSH
+// connection to host; in direct mode there is no bridge, so it is a no-op.
+// Transport failures wrap ErrUnreachable so connect-check can render a hint.
+func (d *Dialer) Bridge(ctx context.Context, host string) error {
+	switch d.mode {
+	case ModeDirect:
+		return nil
+	case ModeSocks:
+		c, err := (&net.Dialer{Timeout: d.timeout}).DialContext(ctx, "tcp", d.socksProxy)
+		if err != nil {
+			return fmt.Errorf("%w: SOCKS proxy %s: %v", ErrUnreachable, d.socksProxy, err)
+		}
+		_ = c.Close()
+		return nil
+	case ModeTunnel:
+		if d.tunnel == nil {
+			return fmt.Errorf("%w: tunnel not initialized", ErrUnreachable)
+		}
+		if err := d.tunnel.connect(ctx, host); err != nil {
+			return fmt.Errorf("%w: %v", ErrUnreachable, err)
+		}
+		return nil
+	default:
+		return nil
+	}
+}
 
 // Port returns the configured (or default) port for a service.
 func (d *Dialer) Port(svc Service) int {
