@@ -187,6 +187,19 @@ func (c *Client) Describe(ctx context.Context, region, clusterID string) (Cluste
 	return d, nil
 }
 
+// Configurations returns a cluster's configuration classifications in one
+// DescribeCluster call, for the config browser and the `emr config` CLI twin.
+func (c *Client) Configurations(ctx context.Context, region, clusterID string) ([]ConfigClassification, error) {
+	out, err := c.clientFor(region).DescribeCluster(ctx, &emr.DescribeClusterInput{ClusterId: aws.String(clusterID)})
+	if err != nil {
+		return nil, err
+	}
+	if out.Cluster == nil {
+		return nil, fmt.Errorf("cluster %q not found", clusterID)
+	}
+	return configClassifications(out.Cluster.Configurations), nil
+}
+
 // clusterFromDescribe builds the dashboard's Cluster from a DescribeCluster
 // result (the summary path is clusterFromSummary; this is its detail twin so the
 // describe view can be opened on a cluster that was never listed via the table).

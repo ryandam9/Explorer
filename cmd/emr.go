@@ -495,6 +495,46 @@ on an EMR cluster, read from the Oozie REST API on the cluster's primary node.
 	},
 }
 
+var emrConfigClassification string
+
+var emrConfigCmd = &cobra.Command{
+	Use:   "config <cluster-id>",
+	Short: "Browse an EMR cluster's configuration files (core-site, hdfs-site, spark-defaults, …)",
+	Long: `Show the cluster's setup as the on-disk configuration files it becomes —
+core-site.xml, hdfs-site.xml, yarn-site.xml, spark-defaults.conf, hive-site.xml,
+emrfs-site.xml and so on — with every property key/value.
+
+This reads the configuration classifications EMR returns from DescribeCluster
+(the declared setup); it needs no on-cluster access. Use --classification to
+scope to one file. For the interactive browser, press 'c' on a cluster in
+'aws_explorer emr'.`,
+	Args: cobra.ExactArgs(1),
+	Example: `  aws_explorer emr config j-1A2B3C4D5 -r us-east-1
+  aws_explorer emr config j-1A2B3C4D5 --classification hdfs-site
+  aws_explorer emr config j-1A2B3C4D5 -o json | jq '.[] | select(.classification=="core-site")'`,
+	RunE: func(cmd *cobra.Command, args []string) error {
+		if err := output.ValidateFormat(outputFormat); err != nil {
+			return err
+		}
+		ctx := context.Background()
+		SilenceScanLogs()
+		client, err := newEMRClient(ctx)
+		if err != nil {
+			return err
+		}
+		region := emrRegionForCommand(client)
+		cfgs, err := client.Configurations(ctx, region, args[0])
+		if err != nil {
+			return fmt.Errorf("failed to get configuration for cluster %q in %s: %w", args[0], region, err)
+		}
+		rows := emrtui.FlattenConfigRows(cfgs)
+		if emrConfigClassification != "" {
+			rows = emrtui.FilterConfigRows(rows, emrConfigClassification)
+		}
+		return emrtui.RenderConfig(os.Stdout, rows, outputFormat, noHeader)
+	},
+}
+
 var emrConnCheckService string
 
 var emrConnCheckCmd = &cobra.Command{
@@ -601,6 +641,8 @@ func init() {
 
 	emrConnCheckCmd.Flags().StringVar(&emrConnCheckService, "service", "all", "which services to check: all, or a comma list of hbase,yarn,oozie,hive")
 
-	emrCmd.AddCommand(emrClustersCmd, emrStepsCmd, emrInstancesCmd, emrAppsCmd, emrDescribeCmd, emrYarnCmd, emrHBaseCmd, emrOozieCmd, emrConnCheckCmd)
+	emrConfigCmd.Flags().StringVar(&emrConfigClassification, "classification", "", "show only this classification/file (e.g. hdfs-site, core-site)")
+
+	emrCmd.AddCommand(emrClustersCmd, emrStepsCmd, emrInstancesCmd, emrAppsCmd, emrDescribeCmd, emrYarnCmd, emrHBaseCmd, emrOozieCmd, emrConnCheckCmd, emrConfigCmd)
 	rootCmd.AddCommand(emrCmd)
 }

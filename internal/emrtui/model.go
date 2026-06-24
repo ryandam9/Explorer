@@ -81,6 +81,17 @@ type m struct {
 	stepsErr     error
 	stepsTbl     table.Model
 
+	// Config browser sub-view (c on a cluster): the cluster's configuration
+	// classifications flattened to one row per property (classification, key,
+	// value), shown as the on-disk files they become. Loaded async (one
+	// DescribeCluster) like the other drill-downs.
+	configActive  bool
+	configCluster Cluster
+	configLoading bool
+	configErr     error
+	configRows    []ConfigRow
+	configTbl     table.Model
+
 	// Cluster describe view (d on a cluster): a full-screen, btop-style grid of
 	// per-section panels (overview, config/OS, compute/memory/storage,
 	// networking, instances, services). It is loaded asynchronously because it
@@ -170,6 +181,13 @@ type enrichMsg struct {
 type stepsMsg struct {
 	cluster Cluster
 	steps   []Step
+	err     error
+}
+
+// configMsg delivers a cluster's flattened configuration for the config browser.
+type configMsg struct {
+	cluster Cluster
+	rows    []ConfigRow
 	err     error
 }
 
@@ -263,6 +281,7 @@ func NewModel(ctx context.Context, awsCfg *config.AWSConfig, regions []string, a
 		spinner:     s,
 		tbl:         tbl,
 		stepsTbl:    newSubTable(stepColumns()),
+		configTbl:   newSubTable(configColumns()),
 		yarnTbl:     newSubTable(yarnColumns()),
 		hbaseTbl:    newSubTable(hbaseColumns()),
 		oozieTbl:    newSubTable(oozieWFColumns()),
@@ -372,6 +391,16 @@ func (mm *m) loadStepsCmd(cl Cluster) tea.Cmd {
 		defer cancel()
 		steps, err := mm.client.Steps(ctx, cl.Region, cl.ID, stepWindow)
 		return stepsMsg{cluster: cl, steps: steps, err: err}
+	}
+}
+
+func (mm *m) loadConfigCmd(cl Cluster) tea.Cmd {
+	return func() tea.Msg {
+		slog.Info("Loading EMR configuration", "cluster", cl.ID, "region", cl.Region)
+		ctx, cancel := context.WithTimeout(mm.ctx, drillTimeout)
+		defer cancel()
+		cfgs, err := mm.client.Configurations(ctx, cl.Region, cl.ID)
+		return configMsg{cluster: cl, rows: FlattenConfigRows(cfgs), err: err}
 	}
 }
 
@@ -515,6 +544,12 @@ func (mm *m) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		mm.stepsErr = msg.err
 		mm.steps = msg.steps
 		mm.setRows(&mm.stepsTbl, len(msg.steps), func(i int) table.Row { return stepRow(msg.steps[i]) })
+
+	case configMsg:
+		mm.configLoading = false
+		mm.configErr = msg.err
+		mm.configRows = msg.rows
+		mm.setRows(&mm.configTbl, len(msg.rows), func(i int) table.Row { return configTableRow(msg.rows[i]) })
 
 	case descMsg:
 		// Ignore a stale describe if the view was closed or moved to another
@@ -692,6 +727,41 @@ func (mm *m) handleKey(msg tea.KeyMsg) []tea.Cmd {
 			mm.filter, cmd = mm.filter.Update(msg)
 			cmds = append(cmds, cmd)
 			mm.rebuild()
+		}
+		return cmds
+	}
+
+	// Config browser sub-view.
+	if mm.configActive {
+		switch msg.String() {
+		case "q", "ctrl+c":
+			return []tea.Cmd{tea.Quit}
+		case "esc", "backspace", "left", "h":
+			mm.configActive = false
+		case "up", "k":
+			mm.configTbl.MoveUp(1)
+		case "down", "j":
+			mm.configTbl.MoveDown(1)
+		case "pgup":
+			mm.configTbl.MoveUp(10)
+		case "pgdown", "pgdn", " ":
+			mm.configTbl.MoveDown(10)
+		case "g", "home":
+			mm.configTbl.GotoTop()
+		case "G", "end":
+			mm.configTbl.GotoBottom()
+		case "<", ",":
+			mm.configTbl.ScrollLeft()
+		case ">", ".":
+			mm.configTbl.ScrollRight()
+		case "y":
+			if r, ok := mm.selectedConfigRow(); ok {
+				_ = clipboard.WriteAll(r.Value)
+				mm.setToast("Copied value")
+				cmds = append(cmds, toastCmd(3*time.Second))
+			}
+		case ui.KeyAbout:
+			mm.showAbout = true
 		}
 		return cmds
 	}
@@ -920,6 +990,15 @@ func (mm *m) handleKey(msg tea.KeyMsg) []tea.Cmd {
 		if cl, ok := mm.selectedCluster(); ok {
 			mm.openDetail(cl, &cmds)
 		}
+	case "c":
+		if cl, ok := mm.selectedCluster(); ok {
+			mm.configActive = true
+			mm.configCluster = cl
+			mm.configLoading = true
+			mm.configRows = nil
+			mm.configErr = nil
+			cmds = append(cmds, mm.loadConfigCmd(cl), mm.spinner.Tick)
+		}
 	case "L":
 		if cl, ok := mm.selectedCluster(); ok {
 			mm.jumpToClusterLogs(cl, &cmds)
@@ -1095,6 +1174,9 @@ func (mm *m) PageTitle() string {
 	base := "Amazon EMR"
 	if mm.detailActive {
 		return base + " › " + mm.detailCluster.Name + " › describe"
+	}
+	if mm.configActive {
+		return base + " › " + mm.configCluster.Name + " › config"
 	}
 	if mm.stepsActive {
 		return base + " › " + mm.stepsCluster.Name + " › steps"

@@ -24,6 +24,8 @@ func (mm *m) View() string {
 
 	if mm.detailActive {
 		sb.WriteString(mm.renderDescribe())
+	} else if mm.configActive {
+		sb.WriteString(mm.renderConfig())
 	} else if mm.stepsActive {
 		sb.WriteString(mm.renderSteps())
 	} else if mm.yarnActive {
@@ -78,7 +80,8 @@ const emrAboutText = "This is the Amazon EMR dashboard. Each row is a cluster, c
 	"describe the cluster in full — configuration and OS, compute layout (instance " +
 	"groups with per-instance memory, vCPU and EBS storage), running EC2 instances, " +
 	"installed services and VPC networking (subnet, security-group rules, routes, " +
-	"network ACL) — and f for the " +
+	"network ACL). Press c to browse the cluster's configuration files (core-site, " +
+	"hdfs-site, yarn-site, spark-defaults, …) as their on-disk files, and f for the " +
 	"findings panel — deterministic posture/cost checks (idle/long-running clusters, " +
 	"no log destination or security configuration, terminated-with-errors) over the " +
 	"loaded clusters.\n\n" +
@@ -201,6 +204,22 @@ func (mm *m) renderSubTable(tbl *table.Model, head, foot string) string {
 		out += "\n" + foot
 	}
 	return out
+}
+
+func (mm *m) renderConfig() string {
+	head := heading(fmt.Sprintf(" Config — %s [%s]", mm.configCluster.Name, mm.configCluster.Region))
+	head += "\n" + muted("  classifications shown as their on-disk files · ←/h back · y copies value")
+	switch {
+	case mm.configLoading:
+		return head + fmt.Sprintf("\n\n  %s Loading configuration…", mm.spinner.View())
+	case mm.configErr != nil:
+		return head + "\n\n  " + errLine("Could not load configuration: "+mm.configErr.Error())
+	case len(mm.configRows) == 0:
+		return head + "\n\n  No configuration classifications — EMR defaults are in effect for this cluster."
+	default:
+		foot := muted(fmt.Sprintf("  %d properties across %d files", len(mm.configRows), configCountFiles(mm.configRows)))
+		return mm.renderSubTable(&mm.configTbl, head, foot)
+	}
 }
 
 func (mm *m) renderSteps() string {
@@ -411,6 +430,9 @@ func (mm *m) statusLeft() string {
 		}
 		return left
 	}
+	if mm.configActive {
+		return fmt.Sprintf("Cluster: %s  ·  Config properties: %d", mm.configCluster.Name, len(mm.configRows))
+	}
 	if mm.stepsActive {
 		return fmt.Sprintf("Cluster: %s  ·  Steps: %d", mm.stepsCluster.Name, len(mm.steps))
 	}
@@ -447,6 +469,16 @@ func (mm *m) helpHints() []ui.KeyHint {
 		return []ui.KeyHint{
 			ui.H("Tab", "panel"),
 			ui.H("↑/↓", "scroll"),
+			ui.H("Esc", "back"),
+			ui.H("i", "about"),
+			ui.H("q", "quit"),
+		}
+	}
+	if mm.configActive {
+		return []ui.KeyHint{
+			ui.H("↑/↓", "properties"),
+			ui.H("</>", "columns"),
+			ui.H("y", "copy value"),
 			ui.H("Esc", "back"),
 			ui.H("i", "about"),
 			ui.H("q", "quit"),
@@ -502,6 +534,7 @@ func (mm *m) helpHints() []ui.KeyHint {
 		ui.H("↑/↓", "rows"),
 		ui.H("Enter", "steps"),
 		ui.H("d", "describe"),
+		ui.H("c", "config"),
 		ui.H("f", "findings"),
 		ui.H("L", "logs"),
 		ui.H("u", "app UIs"),
