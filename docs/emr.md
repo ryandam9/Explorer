@@ -79,6 +79,12 @@ nothing is clipped. The panels are:
   auto-terminate, termination protection, scale-down behaviour, EBS root-volume
   size, log URI, security configuration, service role, instance profile and EC2
   key.
+- **S3 connector** — the effective S3 connector (**EMRFS** vs **S3A**) derived
+  from the release label (S3A is the default from `emr-7.10.0`) and any explicit
+  `core-site fs.s3.impl` override, plus **EMRFS Consistent View** status (and its
+  DynamoDB metadata table, flagged obsolete when on) and S3 encryption. Pure read
+  of the describe response — no extra API calls. The same derivation backs the
+  `EMR-EMRFS-001` audit check.
 - **Services** — the installed applications and their versions.
 - **Compute, memory & storage** — each instance group (or fleet): node role,
   instance type and market, running/requested counts, per-instance **memory**

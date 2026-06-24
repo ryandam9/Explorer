@@ -192,6 +192,7 @@ EMR clusters:
 | `EMR-LOG-001` | Cluster with no S3 log URI — logs are lost when nodes terminate | 🟡 warning |
 | `EMR-SEC-001` | Cluster without a security configuration (encryption not enforced) | 🟡 warning |
 | `EMR-COST-002` | Long-running cluster (up over 7 days) with no auto-termination policy | 🔵 info |
+| `EMR-EMRFS-001` | Cluster with EMRFS Consistent View enabled — obsolete since S3 gained strong read-after-write consistency (Dec 2020); the DynamoDB metadata table is now pure cost | 🔵 info |
 
 EMR-category notes:
 
@@ -201,6 +202,11 @@ EMR-category notes:
 - `EMR-STEP-001` reads each live cluster's latest step via `ListSteps`; a denied
   call leaves step health unknown and fires nothing for that cluster
   (under-warn).
+- `EMR-EMRFS-001` derives the S3 connector (EMRFS vs S3A) from the cluster's
+  release label + `emrfs-site`/`core-site` configurations — data already in the
+  `DescribeCluster` response, so it adds no API calls. It stays silent unless the
+  posture was actually read (a denied `DescribeCluster` leaves it unknown). The
+  same derivation drives the **S3 connector** section in `emr describe`.
 - Uses `elasticmapreduce:{ListClusters,DescribeCluster,ListSteps}`.
 
 **Lambda category** (`--only lambda`; check IDs `LAM-*`) — runtime and health

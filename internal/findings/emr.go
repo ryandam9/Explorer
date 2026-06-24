@@ -8,12 +8,13 @@ import (
 
 // Amazon EMR check IDs (stable; see README "The checks").
 const (
-	CheckEMRIdleCluster    = "EMR-COST-001"
-	CheckEMRLongRunning    = "EMR-COST-002"
-	CheckEMRLatestStepFail = "EMR-STEP-001"
-	CheckEMRTerminatedErr  = "EMR-STEP-002"
-	CheckEMRNoLogURI       = "EMR-LOG-001"
-	CheckEMRNoSecurityConf = "EMR-SEC-001"
+	CheckEMRIdleCluster      = "EMR-COST-001"
+	CheckEMRLongRunning      = "EMR-COST-002"
+	CheckEMRLatestStepFail   = "EMR-STEP-001"
+	CheckEMRTerminatedErr    = "EMR-STEP-002"
+	CheckEMRNoLogURI         = "EMR-LOG-001"
+	CheckEMRNoSecurityConf   = "EMR-SEC-001"
+	CheckEMRFSConsistentView = "EMR-EMRFS-001"
 )
 
 // Thresholds for the EMR checks. Tunable here; deliberately conservative so the
@@ -45,6 +46,13 @@ type EMRCluster struct {
 	// then stays silent for this cluster (under-warn, never guess).
 	StepsKnown      bool
 	LatestStepState string // newest step's state, "" when none
+
+	// EMRFS S3-connector posture, derived from the release label + configurations
+	// (see DeriveS3Connector). ConnectorKnown is false when DescribeCluster was
+	// denied, so the connector-based checks stay silent (§8).
+	ConnectorKnown      bool
+	ConsistentView      bool   // EMRFS Consistent View enabled
+	ConsistentViewTable string // its DynamoDB metadata table
 }
 
 // AnalyzeEMR runs every EMR health/cost check over the snapshot. Pure.
@@ -126,6 +134,9 @@ func checkEMRCluster(snap EMRSnapshot, c EMRCluster, out *[]Finding) {
 			Fix:    "Attach an EMR security configuration (EBS/S3/local-disk and in-transit encryption).",
 		})
 	}
+
+	// EMRFS Consistent View enabled (obsolete since S3 strong consistency).
+	checkEMRFSConsistentView(snap, c, out)
 
 	// Latest step failed.
 	if c.StepsKnown && isFailedStepState(c.LatestStepState) {
