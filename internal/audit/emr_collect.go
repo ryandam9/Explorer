@@ -7,6 +7,7 @@ import (
 
 	"github.com/aws/aws-sdk-go-v2/aws"
 	awsemr "github.com/aws/aws-sdk-go-v2/service/emr"
+	emrtypes "github.com/aws/aws-sdk-go-v2/service/emr/types"
 	"golang.org/x/sync/errgroup"
 
 	"github.com/ryandam9/aws_explorer/internal/findings"
@@ -91,6 +92,15 @@ func enrichEMRCluster(ctx context.Context, client *awsemr.Client, ec *findings.E
 		if cl.Status != nil && cl.Status.Timeline != nil && cl.Status.Timeline.CreationDateTime != nil {
 			ec.Created = *cl.Status.Timeline.CreationDateTime
 		}
+		// EMRFS S3-connector posture is derived from the release label +
+		// configurations already in this response — no extra API call.
+		conn := findings.DeriveS3Connector(findings.S3ConnectorInput{
+			ReleaseLabel:    aws.ToString(cl.ReleaseLabel),
+			Classifications: flattenEMRConfigs(cl.Configurations),
+		})
+		ec.ConnectorKnown = true
+		ec.ConsistentView = conn.ConsistentView
+		ec.ConsistentViewTable = conn.ConsistentViewTable
 	}
 
 	// Latest step state for live clusters (EMR returns steps newest-first).
@@ -109,6 +119,25 @@ func enrichEMRCluster(ctx context.Context, client *awsemr.Client, ec *findings.E
 			ec.LatestStepState = string(steps.Steps[0].Status.State)
 		}
 	}
+}
+
+// flattenEMRConfigs reduces a cluster's top-level configuration classifications
+// to classification -> property key/values, the SDK-free shape DeriveS3Connector
+// consumes. Only the top level is needed (emrfs-site / core-site live there).
+func flattenEMRConfigs(cfgs []emrtypes.Configuration) map[string]map[string]string {
+	out := make(map[string]map[string]string, len(cfgs))
+	for _, cfg := range cfgs {
+		cls := aws.ToString(cfg.Classification)
+		if cls == "" {
+			continue
+		}
+		props := make(map[string]string, len(cfg.Properties))
+		for k, v := range cfg.Properties {
+			props[k] = v
+		}
+		out[cls] = props
+	}
+	return out
 }
 
 func isLiveEMRState(state string) bool {

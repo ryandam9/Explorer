@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"sort"
 	"strings"
+
+	"github.com/ryandam9/aws_explorer/internal/findings"
 )
 
 // descSection is one titled block of the cluster-describe report. Body is the
@@ -68,6 +70,9 @@ func (d ClusterDescription) sections() []descSection {
 	cfg.WriteString(descKV("Instance profile", cl.InstanceProfile) + "\n")
 	cfg.WriteString(descKV("EC2 key", cl.KeyName))
 	out = append(out, descSection{Title: "Configuration & OS", Body: cfg.String()})
+
+	// S3 connector (EMRFS / S3A) — derived from the release label + configs.
+	out = append(out, descSection{Title: "S3 connector", Body: connectorBody(d)})
 
 	// Services (applications).
 	out = append(out, descSection{Title: "Services", Body: servicesBody(d.Applications)})
@@ -289,6 +294,62 @@ func networkBody(n NetworkInfo) string {
 		b.WriteString("\n\n  ⚠ " + n.Note)
 	}
 	return b.String()
+}
+
+// connectorBody renders the derived S3-connector posture (EMRFS vs S3A),
+// Consistent View, and S3 encryption. It is a pure read of data already in the
+// describe response (release label + configurations), so it adds no API calls.
+func connectorBody(d ClusterDescription) string {
+	v := findings.DeriveS3Connector(findings.S3ConnectorInput{
+		ReleaseLabel:    d.ReleaseLabel,
+		Classifications: classificationMap(d.Configurations),
+	})
+
+	var b strings.Builder
+	b.WriteString(descKV("Effective", connectorEffectiveLabel(v)) + "\n")
+	b.WriteString(descKV("Release default", connectorDefaultLabel(v)) + "\n")
+	b.WriteString(descKV("Consistent View", consistentViewLabel(v)) + "\n")
+	b.WriteString(descKV("S3 encryption", v.Encryption)) // "" → "—" (set elsewhere or via security config)
+	return b.String()
+}
+
+// connectorEffectiveLabel states the effective connector and why it was chosen.
+func connectorEffectiveLabel(v findings.S3Connector) string {
+	switch {
+	case v.OverrideKey != "":
+		return fmt.Sprintf("%s  (pinned by %s)", v.Effective, v.OverrideKey)
+	case v.DefaultKnown:
+		return fmt.Sprintf("%s  (release default)", v.Effective)
+	default:
+		return "unknown  (release label unrecognized)"
+	}
+}
+
+func connectorDefaultLabel(v findings.S3Connector) string {
+	if !v.DefaultKnown {
+		return "—"
+	}
+	if v.Default == "S3A" {
+		return "S3A  (since emr-7.10.0)"
+	}
+	return "EMRFS  (≤ emr-7.9.x; S3A is default from 7.10.0)"
+}
+
+func consistentViewLabel(v findings.S3Connector) string {
+	if !v.ConsistentView {
+		return "disabled"
+	}
+	return fmt.Sprintf("enabled — DynamoDB table %s  ⚠ obsolete (S3 is strongly consistent since 2020)", v.ConsistentViewTable)
+}
+
+// classificationMap flattens describe classifications to the SDK-free shape
+// DeriveS3Connector consumes.
+func classificationMap(cfgs []ConfigClassification) map[string]map[string]string {
+	out := make(map[string]map[string]string, len(cfgs))
+	for _, c := range cfgs {
+		out[c.Classification] = c.Properties
+	}
+	return out
 }
 
 // configurationsBody renders the configuration classifications and their
