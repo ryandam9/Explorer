@@ -95,12 +95,13 @@ type m struct {
 	// classifications flattened to one row per property (classification, key,
 	// value), shown as the on-disk files they become. Loaded async (one
 	// DescribeCluster) like the other drill-downs.
-	configActive  bool
-	configCluster Cluster
-	configLoading bool
-	configErr     error
-	configRows    []ConfigRow
-	configTbl     table.Model
+	configActive    bool
+	configCluster   Cluster
+	configLoading   bool
+	configErr       error
+	configRows      []ConfigRow
+	configTbl       table.Model
+	configEffective bool // false = declared (EMR API); true = merged (NameNode /conf)
 
 	// Cluster describe view (d on a cluster): a full-screen, btop-style grid of
 	// per-section panels (overview, config/OS, compute/memory/storage,
@@ -195,10 +196,13 @@ type stepsMsg struct {
 }
 
 // configMsg delivers a cluster's flattened configuration for the config browser.
+// effective tags which source the rows came from (declared vs merged /conf), so
+// a result from a superseded toggle is ignored.
 type configMsg struct {
-	cluster Cluster
-	rows    []ConfigRow
-	err     error
+	cluster   Cluster
+	rows      []ConfigRow
+	err       error
+	effective bool
 }
 
 // hdfsMsg delivers a cluster's HDFS/NameNode status for the HDFS browser.
@@ -418,7 +422,17 @@ func (mm *m) loadConfigCmd(cl Cluster) tea.Cmd {
 		ctx, cancel := context.WithTimeout(mm.ctx, drillTimeout)
 		defer cancel()
 		cfgs, err := mm.client.Configurations(ctx, cl.Region, cl.ID)
-		return configMsg{cluster: cl, rows: FlattenConfigRows(cfgs), err: err}
+		return configMsg{cluster: cl, rows: FlattenConfigRows(cfgs), err: err, effective: false}
+	}
+}
+
+func (mm *m) loadEffectiveConfigCmd(cl Cluster) tea.Cmd {
+	return func() tea.Msg {
+		slog.Info("Loading EMR effective config", "cluster", cl.ID, "region", cl.Region)
+		ctx, cancel := context.WithTimeout(mm.ctx, drillTimeout)
+		defer cancel()
+		rows, err := FetchEffectiveConfig(ctx, mm.dialer, cl.MasterDNS)
+		return configMsg{cluster: cl, rows: rows, err: err, effective: true}
 	}
 }
 
@@ -574,6 +588,10 @@ func (mm *m) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		mm.setRows(&mm.stepsTbl, len(msg.steps), func(i int) table.Row { return stepRow(msg.steps[i]) })
 
 	case configMsg:
+		// Ignore a result from a superseded declared/effective toggle.
+		if msg.effective != mm.configEffective {
+			break
+		}
 		mm.configLoading = false
 		mm.configErr = msg.err
 		mm.configRows = msg.rows
@@ -827,6 +845,17 @@ func (mm *m) handleKey(msg tea.KeyMsg) []tea.Cmd {
 				mm.setToast("Copied value")
 				cmds = append(cmds, toastCmd(3*time.Second))
 			}
+		case "e":
+			// Toggle declared (EMR API) ↔ effective (NameNode /conf, on-cluster).
+			mm.configEffective = !mm.configEffective
+			mm.configLoading = true
+			mm.configErr = nil
+			mm.configRows = nil
+			if mm.configEffective {
+				cmds = append(cmds, mm.loadEffectiveConfigCmd(mm.configCluster), mm.spinner.Tick)
+			} else {
+				cmds = append(cmds, mm.loadConfigCmd(mm.configCluster), mm.spinner.Tick)
+			}
 		case ui.KeyAbout:
 			mm.showAbout = true
 		}
@@ -1061,6 +1090,7 @@ func (mm *m) handleKey(msg tea.KeyMsg) []tea.Cmd {
 		if cl, ok := mm.selectedCluster(); ok {
 			mm.configActive = true
 			mm.configCluster = cl
+			mm.configEffective = false
 			mm.configLoading = true
 			mm.configRows = nil
 			mm.configErr = nil

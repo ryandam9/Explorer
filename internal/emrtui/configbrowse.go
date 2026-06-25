@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"sort"
 	"strings"
 	"text/tabwriter"
 
@@ -78,12 +77,7 @@ func FlattenConfigRows(cfgs []ConfigClassification) []ConfigRow {
 			})
 		}
 	}
-	sort.Slice(rows, func(i, j int) bool {
-		if rows[i].Classification != rows[j].Classification {
-			return rows[i].Classification < rows[j].Classification
-		}
-		return rows[i].Key < rows[j].Key
-	})
+	sortConfigRows(rows)
 	return rows
 }
 
@@ -148,6 +142,9 @@ func renderConfigTable(w io.Writer, rows []ConfigRow, noHeader bool) error {
 				fmt.Fprintln(tw)
 			}
 			if noHeader {
+				lastFile = r.File
+			} else if r.Classification == "" || r.Classification == r.File {
+				fmt.Fprintf(tw, "# %s\n", r.File)
 				lastFile = r.File
 			} else {
 				fmt.Fprintf(tw, "# %s  (%s)\n", r.File, r.Classification)

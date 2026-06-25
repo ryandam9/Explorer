@@ -91,7 +91,12 @@ nothing is clipped. The panels are:
   `hive-site.xml`, `emrfs-site.xml`, …), one row per property. Reads the
   classifications `DescribeCluster` already returns — no on-cluster access. The
   CLI takes `--classification hdfs-site` to scope to one file and the usual
-  `-o table|json|ndjson|csv`.
+  `-o table|json|ndjson|csv`. Press **`e`** (or pass **`--effective`**) to switch
+  from the *declared* config to the **effective merged** config read live from the
+  NameNode's `/conf` — every property after all site files and defaults are
+  applied, grouped by the source file it came from (`core-site.xml`,
+  `hdfs-default.xml`, …). Effective mode needs `emr.onCluster` configured and
+  degrades to the connect helper when off.
 - **Services** — the installed applications and their versions.
 - **Compute, memory & storage** — each instance group (or fleet): node role,
   instance type and market, running/requested counts, per-instance **memory**
@@ -237,7 +242,7 @@ aws_explorer emr steps <id>     [-r us-east-1] [--limit 50] [--status FAILED] [-
 aws_explorer emr instances <id> [-r us-east-1] [--limit N] [-o …]
 aws_explorer emr apps <id>      [-r us-east-1] [-o …]
 aws_explorer emr describe <id>  [-r us-east-1] [-o table|json|ndjson]   # full describe (config, OS, compute, storage, networking)
-aws_explorer emr config <id>    [-r us-east-1] [--classification hdfs-site] [-o …]   # config files (core-site, hdfs-site, spark-defaults, …)
+aws_explorer emr config <id>    [-r us-east-1] [--classification hdfs-site] [--effective] [-o …]   # config files (declared, or --effective = live merged /conf)
 aws_explorer emr hdfs <id>      [-r us-east-1] [-o …]   # HDFS / NameNode status (on-cluster)
 aws_explorer emr yarn <id>      [-r us-east-1] [-o …]   # live YARN apps (on-cluster)
 aws_explorer emr hbase <id>     [-r us-east-1] [-o …]   # HBase tables (on-cluster)

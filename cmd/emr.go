@@ -543,7 +543,10 @@ on an EMR cluster, read from the Oozie REST API on the cluster's primary node.
 	},
 }
 
-var emrConfigClassification string
+var (
+	emrConfigClassification string
+	emrConfigEffective      bool
+)
 
 var emrConfigCmd = &cobra.Command{
 	Use:   "config <cluster-id>",
@@ -552,13 +555,20 @@ var emrConfigCmd = &cobra.Command{
 core-site.xml, hdfs-site.xml, yarn-site.xml, spark-defaults.conf, hive-site.xml,
 emrfs-site.xml and so on — with every property key/value.
 
-This reads the configuration classifications EMR returns from DescribeCluster
-(the declared setup); it needs no on-cluster access. Use --classification to
-scope to one file. For the interactive browser, press 'c' on a cluster in
-'aws_explorer emr'.`,
+By default this reads the configuration classifications EMR returns from
+DescribeCluster (the *declared* setup); it needs no on-cluster access.
+
+With --effective it instead reads the NameNode's /conf endpoint — the *merged*
+configuration the cluster is actually running (every property after all site
+files and defaults are applied, tagged with the source file it came from). That
+needs on-cluster access (emr.onCluster); see 'aws_explorer emr hbase --help'.
+
+Use --classification to scope to one file. For the interactive browser, press
+'c' on a cluster in 'aws_explorer emr' ('e' there toggles declared/effective).`,
 	Args: cobra.ExactArgs(1),
 	Example: `  aws_explorer emr config j-1A2B3C4D5 -r us-east-1
   aws_explorer emr config j-1A2B3C4D5 --classification hdfs-site
+  aws_explorer emr config j-1A2B3C4D5 --effective          # live merged config (on-cluster)
   aws_explorer emr config j-1A2B3C4D5 -o json | jq '.[] | select(.classification=="core-site")'`,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		if err := output.ValidateFormat(outputFormat); err != nil {
@@ -571,16 +581,48 @@ scope to one file. For the interactive browser, press 'c' on a cluster in
 			return err
 		}
 		region := emrRegionForCommand(client)
-		cfgs, err := client.Configurations(ctx, region, args[0])
+
+		rows, err := emrConfigRows(ctx, client, region, args[0])
 		if err != nil {
-			return fmt.Errorf("failed to get configuration for cluster %q in %s: %w", args[0], region, err)
+			return err
 		}
-		rows := emrtui.FlattenConfigRows(cfgs)
 		if emrConfigClassification != "" {
 			rows = emrtui.FilterConfigRows(rows, emrConfigClassification)
 		}
 		return emrtui.RenderConfig(os.Stdout, rows, outputFormat, noHeader)
 	},
+}
+
+// emrConfigRows resolves the config rows for the config command: the declared
+// classifications (EMR API) by default, or the effective merged config from the
+// NameNode's /conf (on-cluster) under --effective.
+func emrConfigRows(ctx context.Context, client *emrtui.Client, region, clusterID string) ([]emrtui.ConfigRow, error) {
+	if !emrConfigEffective {
+		cfgs, err := client.Configurations(ctx, region, clusterID)
+		if err != nil {
+			return nil, fmt.Errorf("failed to get configuration for cluster %q in %s: %w", clusterID, region, err)
+		}
+		return emrtui.FlattenConfigRows(cfgs), nil
+	}
+
+	var onCluster config.OnClusterConfig
+	if AppConfig != nil {
+		onCluster = AppConfig.EMR.OnCluster
+	}
+	dialer, err := emrconn.New(onCluster)
+	if err != nil {
+		return nil, fmt.Errorf("on-cluster access not available: %w\n\nEnable it in config.yaml under emr.onCluster (mode: socks|direct|tunnel)", err)
+	}
+	defer dialer.Close()
+	dns, err := client.MasterDNS(ctx, region, clusterID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to resolve cluster %q primary DNS in %s: %w", clusterID, region, err)
+	}
+	rows, err := emrtui.FetchEffectiveConfig(ctx, dialer, dns)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read effective config from cluster %q: %w", clusterID, err)
+	}
+	return rows, nil
 }
 
 var emrConnCheckService string
@@ -690,6 +732,7 @@ func init() {
 	emrConnCheckCmd.Flags().StringVar(&emrConnCheckService, "service", "all", "which services to check: all, or a comma list of hdfs,hbase,yarn,oozie,hive")
 
 	emrConfigCmd.Flags().StringVar(&emrConfigClassification, "classification", "", "show only this classification/file (e.g. hdfs-site, core-site)")
+	emrConfigCmd.Flags().BoolVar(&emrConfigEffective, "effective", false, "read the live merged config from the NameNode /conf (on-cluster) instead of the declared classifications")
 
 	emrCmd.AddCommand(emrClustersCmd, emrStepsCmd, emrInstancesCmd, emrAppsCmd, emrDescribeCmd, emrYarnCmd, emrHDFSCmd, emrHBaseCmd, emrOozieCmd, emrConnCheckCmd, emrConfigCmd)
 	rootCmd.AddCommand(emrCmd)
