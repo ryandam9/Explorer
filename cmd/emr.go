@@ -371,6 +371,54 @@ on the cluster's primary node.
 	},
 }
 
+var emrHDFSCmd = &cobra.Command{
+	Use:   "hdfs <cluster-id>",
+	Short: "Show a cluster's HDFS / NameNode status (requires on-cluster access)",
+	Long: `Show the HDFS NameNode's view of the filesystem — capacity used/free/total,
+live vs dead DataNodes, file and block totals, missing / under-replicated /
+corrupt blocks, safe-mode state, and the per-DataNode breakdown — read from the
+NameNode's JMX endpoint on the cluster's primary node.
+
+` + emrOnClusterHelp("HDFS NameNode", emrconn.DefaultNameNodePort),
+	Args: cobra.ExactArgs(1),
+	Example: emrTunnelExamplePreamble + `
+  # 4. Show HDFS / NameNode status:
+  aws_explorer emr hdfs j-1A2B3C4D5 -r us-east-1
+  aws_explorer emr hdfs j-1A2B3C4D5 -r us-east-1 -o json`,
+	RunE: func(cmd *cobra.Command, args []string) error {
+		if err := output.ValidateFormat(outputFormat); err != nil {
+			return err
+		}
+		ctx := context.Background()
+		SilenceScanLogs()
+
+		var onCluster config.OnClusterConfig
+		if AppConfig != nil {
+			onCluster = AppConfig.EMR.OnCluster
+		}
+		dialer, err := emrconn.New(onCluster)
+		if err != nil {
+			return fmt.Errorf("on-cluster access not available: %w\n\nEnable it in config.yaml under emr.onCluster (mode: socks|direct|tunnel)", err)
+		}
+		defer dialer.Close()
+
+		client, err := newEMRClient(ctx)
+		if err != nil {
+			return err
+		}
+		region := emrRegionForCommand(client)
+		dns, err := client.MasterDNS(ctx, region, args[0])
+		if err != nil {
+			return fmt.Errorf("failed to resolve cluster %q primary DNS in %s: %w", args[0], region, err)
+		}
+		status, err := emrtui.FetchHDFS(ctx, dialer, dns)
+		if err != nil {
+			return fmt.Errorf("failed to query HDFS on cluster %q: %w", args[0], err)
+		}
+		return emrtui.RenderHDFS(os.Stdout, status, outputFormat, noHeader)
+	},
+}
+
 var emrHBaseCmd = &cobra.Command{
 	Use:   "hbase <cluster-id>",
 	Short: "List a cluster's HBase tables (requires on-cluster access)",
@@ -539,9 +587,9 @@ var emrConnCheckService string
 
 var emrConnCheckCmd = &cobra.Command{
 	Use:   "connect-check <cluster-id>",
-	Short: "Diagnose on-cluster access step by step (YARN/HBase/Oozie/Hive)",
-	Long: `Verify, one layer at a time, why a live YARN / HBase / Oozie / Hive connection
-does or doesn't work — and tell you exactly what to fix. It walks the same path a
+	Short: "Diagnose on-cluster access step by step (HDFS/YARN/HBase/Oozie/Hive)",
+	Long: `Verify, one layer at a time, why a live HDFS / YARN / HBase / Oozie / Hive
+connection does or doesn't work — and tell you exactly what to fix. It walks the same path a
 real connection uses and prints a pass/fail line with a concrete next step for
 each layer:
 
@@ -639,10 +687,10 @@ func init() {
 
 	emrOozieCmd.Flags().BoolVar(&emrOozieCoordinators, "coordinators", false, "list coordinator jobs instead of workflows")
 
-	emrConnCheckCmd.Flags().StringVar(&emrConnCheckService, "service", "all", "which services to check: all, or a comma list of hbase,yarn,oozie,hive")
+	emrConnCheckCmd.Flags().StringVar(&emrConnCheckService, "service", "all", "which services to check: all, or a comma list of hdfs,hbase,yarn,oozie,hive")
 
 	emrConfigCmd.Flags().StringVar(&emrConfigClassification, "classification", "", "show only this classification/file (e.g. hdfs-site, core-site)")
 
-	emrCmd.AddCommand(emrClustersCmd, emrStepsCmd, emrInstancesCmd, emrAppsCmd, emrDescribeCmd, emrYarnCmd, emrHBaseCmd, emrOozieCmd, emrConnCheckCmd, emrConfigCmd)
+	emrCmd.AddCommand(emrClustersCmd, emrStepsCmd, emrInstancesCmd, emrAppsCmd, emrDescribeCmd, emrYarnCmd, emrHDFSCmd, emrHBaseCmd, emrOozieCmd, emrConnCheckCmd, emrConfigCmd)
 	rootCmd.AddCommand(emrCmd)
 }

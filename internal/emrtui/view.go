@@ -24,6 +24,8 @@ func (mm *m) View() string {
 
 	if mm.detailActive {
 		sb.WriteString(mm.renderDescribe())
+	} else if mm.hdfsActive {
+		sb.WriteString(mm.renderHDFS())
 	} else if mm.configActive {
 		sb.WriteString(mm.renderConfig())
 	} else if mm.stepsActive {
@@ -88,8 +90,9 @@ const emrAboutText = "This is the Amazon EMR dashboard. Each row is a cluster, c
 	"Press L to open the cluster's (or a step's) logs in the S3 browser, and u to open " +
 	"a persistent application UI (Spark History, YARN Timeline, Tez) — hosted off-cluster, " +
 	"so no SSH tunnel is needed.\n\n" +
-	"Press y for the live YARN application browser, b for the HBase table browser and z for " +
-	"the Oozie workflow/coordinator browser; these read on-cluster REST daemons and need " +
+	"Press n for the HDFS / NameNode status (capacity, live/dead DataNodes, blocks, safe mode), " +
+	"y for the live YARN application browser, b for the HBase table browser and z for " +
+	"the Oozie workflow/coordinator browser; these read on-cluster daemons and need " +
 	"emr.onCluster configured (off by default).\n\n" +
 	"The list shows only live clusters by default; press t to include the terminated " +
 	"tail (and again to hide it).\n\n" +
@@ -204,6 +207,49 @@ func (mm *m) renderSubTable(tbl *table.Model, head, foot string) string {
 		out += "\n" + foot
 	}
 	return out
+}
+
+func (mm *m) renderHDFS() string {
+	head := heading(fmt.Sprintf(" HDFS — %s [%s]", mm.hdfsCluster.Name, mm.hdfsCluster.Region))
+	via := ""
+	if mm.dialer != nil {
+		via = fmt.Sprintf("via %s · ", mm.dialer.Mode())
+	}
+	head += "\n" + muted("  "+via+"NameNode JMX · ←/h back · r refresh")
+
+	switch {
+	case mm.hdfsLoading:
+		return head + fmt.Sprintf("\n\n  %s Querying the NameNode…", mm.spinner.View())
+	case mm.hdfsErr != nil && emrconn.IsUnreachable(mm.hdfsErr):
+		return head + "\n\n" + emrconn.ConnectHelp(mm.hdfsCluster.MasterDNS, namenodePort(mm.dialer))
+	case mm.hdfsErr != nil:
+		return head + "\n\n  " + errLine("Could not load HDFS status: "+mm.hdfsErr.Error())
+	default:
+		head += "\n" + hdfsSummaryLine(mm.hdfsStatus)
+		if len(mm.hdfsStatus.DataNodes) == 0 {
+			return head + "\n\n  No DataNodes reported by the NameNode."
+		}
+		foot := lipgloss.NewStyle().Foreground(lipgloss.Color(ui.ColorText())).Render(
+			fmt.Sprintf("  %d DataNodes · %d live / %d dead", len(mm.hdfsStatus.DataNodes), mm.hdfsStatus.LiveDataNodes, mm.hdfsStatus.DeadDataNodes))
+		return mm.renderSubTable(&mm.hdfsTbl, head, foot)
+	}
+}
+
+// hdfsSummaryLine renders the cluster-wide HDFS header (capacity, blocks, safemode).
+func hdfsSummaryLine(s HDFSStatus) string {
+	safe := "safe mode off"
+	if s.SafemodeOn() {
+		safe = errLine("SAFE MODE ON")
+	}
+	capLine := fmt.Sprintf("%s / %s used (%.1f%%)", humanBytes(s.CapacityUsed), humanBytes(s.CapacityTotal), s.PercentUsed)
+	blocks := fmt.Sprintf("%s blocks", itoa64(s.BlocksTotal))
+	if s.MissingBlocks > 0 {
+		blocks += errLine(fmt.Sprintf(" · %s missing", itoa64(s.MissingBlocks)))
+	}
+	if s.UnderReplicated > 0 {
+		blocks += muted(fmt.Sprintf(" · %s under-replicated", itoa64(s.UnderReplicated)))
+	}
+	return muted("  "+capLine+" · ") + blocks + muted(" · ") + safe
 }
 
 func (mm *m) renderConfig() string {
@@ -394,6 +440,13 @@ func yarnPort(d *emrconn.Dialer) int {
 	return d.Port(emrconn.ServiceYARN)
 }
 
+func namenodePort(d *emrconn.Dialer) int {
+	if d == nil {
+		return emrconn.DefaultNameNodePort
+	}
+	return d.Port(emrconn.ServiceNameNode)
+}
+
 // mib renders mebibytes as GiB when large enough, else MiB.
 func mib(mbytes int64) string {
 	if mbytes >= 1024 {
@@ -429,6 +482,9 @@ func (mm *m) statusLeft() string {
 			left += fmt.Sprintf("  ·  panel %d/%d", mm.descFocus+1, len(mm.descSections))
 		}
 		return left
+	}
+	if mm.hdfsActive {
+		return fmt.Sprintf("Cluster: %s  ·  DataNodes: %d (%d live)", mm.hdfsCluster.Name, len(mm.hdfsStatus.DataNodes), mm.hdfsStatus.LiveDataNodes)
 	}
 	if mm.configActive {
 		return fmt.Sprintf("Cluster: %s  ·  Config properties: %d", mm.configCluster.Name, len(mm.configRows))
@@ -469,6 +525,15 @@ func (mm *m) helpHints() []ui.KeyHint {
 		return []ui.KeyHint{
 			ui.H("Tab", "panel"),
 			ui.H("↑/↓", "scroll"),
+			ui.H("Esc", "back"),
+			ui.H("i", "about"),
+			ui.H("q", "quit"),
+		}
+	}
+	if mm.hdfsActive {
+		return []ui.KeyHint{
+			ui.H("↑/↓", "datanodes"),
+			ui.H("r", "refresh"),
 			ui.H("Esc", "back"),
 			ui.H("i", "about"),
 			ui.H("q", "quit"),
@@ -535,6 +600,7 @@ func (mm *m) helpHints() []ui.KeyHint {
 		ui.H("Enter", "steps"),
 		ui.H("d", "describe"),
 		ui.H("c", "config"),
+		ui.H("n", "hdfs"),
 		ui.H("f", "findings"),
 		ui.H("L", "logs"),
 		ui.H("u", "app UIs"),

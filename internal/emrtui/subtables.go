@@ -141,6 +141,32 @@ func hbaseRow(t HBaseTable) table.Row {
 	}
 }
 
+// --- HDFS DataNodes ---------------------------------------------------------
+
+func hdfsColumns() []table.Column {
+	return []table.Column{
+		{Title: "DATANODE", Width: 28},
+		{Title: "STATE", Width: 14},
+		{Title: "USED", Width: 10},
+		{Title: "CAPACITY", Width: 10},
+		{Title: "USED%", Width: 6},
+		{Title: "BLOCKS", Width: 9},
+		{Title: "CONTACT", Width: 8},
+	}
+}
+
+func hdfsRow(dn DataNode) table.Row {
+	return table.Row{
+		dn.Name,
+		dn.State,
+		humanBytes(dn.Used),
+		humanBytes(dn.Capacity),
+		dnUsedPct(dn),
+		itoa64(dn.NumBlocks),
+		itoa64(dn.LastContact) + "s",
+	}
+}
+
 // --- Oozie -----------------------------------------------------------------
 
 func oozieWFColumns() []table.Column {
