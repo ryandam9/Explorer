@@ -83,7 +83,9 @@ const emrAboutText = "This is the Amazon EMR dashboard. Each row is a cluster, c
 	"groups with per-instance memory, vCPU and EBS storage), running EC2 instances, " +
 	"installed services and VPC networking (subnet, security-group rules, routes, " +
 	"network ACL). Press c to browse the cluster's configuration files (core-site, " +
-	"hdfs-site, yarn-site, spark-defaults, …) as their on-disk files, and f for the " +
+	"hdfs-site, yarn-site, spark-defaults, …) as their on-disk files — e there toggles " +
+	"between the declared config (EMR API) and the effective merged config read live " +
+	"from the NameNode — and f for the " +
 	"findings panel — deterministic posture/cost checks (idle/long-running clusters, " +
 	"no log destination or security configuration, terminated-with-errors) over the " +
 	"loaded clusters.\n\n" +
@@ -254,10 +256,17 @@ func hdfsSummaryLine(s HDFSStatus) string {
 
 func (mm *m) renderConfig() string {
 	head := heading(fmt.Sprintf(" Config — %s [%s]", mm.configCluster.Name, mm.configCluster.Region))
-	head += "\n" + muted("  classifications shown as their on-disk files · ←/h back · y copies value")
+	source := "declared (EMR API)"
+	if mm.configEffective {
+		source = "effective (NameNode /conf)"
+	}
+	head += "\n" + muted("  source: "+source+" · e toggles declared/effective · ←/h back · y copies value")
 	switch {
 	case mm.configLoading:
 		return head + fmt.Sprintf("\n\n  %s Loading configuration…", mm.spinner.View())
+	case mm.configErr != nil && mm.configEffective && emrconn.IsUnreachable(mm.configErr):
+		// Effective config needs on-cluster access — render the connect helper.
+		return head + "\n\n" + emrconn.ConnectHelp(mm.configCluster.MasterDNS, namenodePort(mm.dialer))
 	case mm.configErr != nil:
 		return head + "\n\n  " + errLine("Could not load configuration: "+mm.configErr.Error())
 	case len(mm.configRows) == 0:
@@ -542,7 +551,7 @@ func (mm *m) helpHints() []ui.KeyHint {
 	if mm.configActive {
 		return []ui.KeyHint{
 			ui.H("↑/↓", "properties"),
-			ui.H("</>", "columns"),
+			ui.H("e", "declared/effective"),
 			ui.H("y", "copy value"),
 			ui.H("Esc", "back"),
 			ui.H("i", "about"),
