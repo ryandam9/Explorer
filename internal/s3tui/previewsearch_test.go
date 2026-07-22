@@ -201,6 +201,33 @@ func TestPreviewSearchEnterJumpsFromCurrentOffset(t *testing.T) {
 	}
 }
 
+// "?" over the preview opens a context-aware help page that documents the
+// search keys; while the Find input is active, "?" is text instead.
+func TestPreviewHelpListsSearchKeys(t *testing.T) {
+	m := previewModel(t, "some text")
+
+	m.Update(keyRunes("?"))
+	if !m.showHelp {
+		t.Fatal("? should open the help overlay over the preview")
+	}
+	help := ansi.Strip(m.helpView())
+	for _, want := range []string{"Object Preview", "Find in the previewed text", "n / N", "CloudWatch log page"} {
+		if !strings.Contains(help, want) {
+			t.Errorf("preview help missing %q", want)
+		}
+	}
+	m.Update(keyRunes("?")) // close help again
+
+	m.Update(keyRunes("/"))
+	m.Update(keyRunes("?"))
+	if m.showHelp {
+		t.Error("? typed into the Find input must not open help")
+	}
+	if got := m.previewSearchInput.Value(); got != "?" {
+		t.Errorf("input value = %q, want %q", got, "?")
+	}
+}
+
 // A new preview starts clean: no term, matches, or input text carried over.
 func TestPreviewSearchResetOnNewPreview(t *testing.T) {
 	m := previewModel(t, "alpha beta")

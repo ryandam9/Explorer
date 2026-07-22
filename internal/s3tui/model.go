@@ -3312,8 +3312,29 @@ func (m *Model) helpView() string {
 	}
 
 	title := "S3 Explorer Help"
-	switch m.state {
-	case stateBucketList, stateBucketDetail:
+	switch {
+	case m.showPreview:
+		// Help opened over the text preview documents the preview's own keys
+		// (the state sections behind it don't apply while it is up).
+		title = "S3 Explorer Help — Object Preview"
+		sections = []string{
+			"Scrolling",
+			"  ↑/↓, PgUp/PgDn     Scroll the preview",
+			"",
+			"Search (works like the CloudWatch log page)",
+			"  /                  Find in the previewed text (highlights live as you type)",
+			"  Enter              Accept the term; jump to the first match from the current position",
+			"  n / N              Next / previous matching line (wraps; current line marked ▸)",
+			"  Esc                In the Find input: clear the search",
+			"",
+			"Views",
+			"  t                  Render the text as a delimited table",
+			"  L                  Apply a local fixed-width layout file (name,start,length per line)",
+			"",
+			"Close",
+			"  Esc                Close the preview (back to the object list or archive)",
+		}
+	case m.state == stateBucketList, m.state == stateBucketDetail:
 		title = "S3 Explorer Help — Buckets"
 		sections = append(sections,
 			"",
@@ -3324,7 +3345,7 @@ func (m *Model) helpView() string {
 			"  Tab / Shift+Tab    Switch tabs (in detail view)",
 			"  r                  Refresh bucket list",
 		)
-	case stateObjectList:
+	case m.state == stateObjectList:
 		title = "S3 Explorer Help — Objects"
 		deleteSection := ""
 		if m.allowDelete {
