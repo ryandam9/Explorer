@@ -78,6 +78,28 @@ Object previews are syntax-highlighted too: opening a recognised source or data
 file (by extension) or an XML document colours it for readability; plain text and
 logs are shown as-is.
 
+## Text preview shortcuts
+
+Previewing a text object (source, logs, JSON/XML, an archive member, …) opens a
+full-screen scrollable pane with a `Find:` line under the title.
+
+| Key | Action |
+|-----|--------|
+| `↑` / `↓` · `PgUp` / `PgDn` | Scroll |
+| `/` | Search within the previewed text (`Enter` accept · `Esc` clear) |
+| `n` / `N` | Jump to the next / previous matching line |
+| `t` | Render the text as a delimited table |
+| `L` | Apply a local fixed-width layout file (`name,start,length` per line) |
+| `Esc` | Close the preview |
+
+The search works exactly like the CloudWatch log page's in-log search:
+matching is case-insensitive and highlights live as the term is typed, `Enter`
+jumps to the first match at or after the current position, the current
+matching line is marked `▸`, and the `Find:` line shows `k/N matches`. `Esc`
+inside the input clears the search. It searches only the fetched preview
+window — for a truncated preview, raise `app.previewMaxSize` to search more of
+the object.
+
 ## Table preview shortcuts
 
 Previewing a delimited (CSV/TSV/…), Parquet, or fixed-width object opens a
