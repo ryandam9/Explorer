@@ -233,18 +233,20 @@ type Model struct {
 	previewErr        error
 	previewNotTabular bool // user pressed "t" but the text isn't table-shaped
 
-	// Text search inside the preview overlay ("/"). previewLines holds the
-	// styled display lines the viewport was built from and previewPlain the
-	// same lines with ANSI stripped, so match offsets index plain text and can
-	// never drift inside an escape sequence. previewSearching gates the typed
-	// prompt; previewSearchQuery is the active query ("" = no search);
-	// previewMatches/previewMatchIdx are the occurrences and the current one.
+	// Text search inside the preview overlay ("/"), mirroring the CloudWatch
+	// log viewer's in-page search (see previewsearch.go). previewLines holds
+	// the styled display lines — wrapped two columns short of the viewport so
+	// the "▸" match gutter never reflows them — and previewPlain the same
+	// lines with ANSI stripped, so match highlighting indexes plain text and
+	// can never drift inside an escape sequence. previewSearchTerm is the
+	// live/accepted term ("" = no search); previewMatches are the matching
+	// line indices, previewMatchIdx the current one.
 	previewSearching   bool
 	previewSearchInput textinput.Model
-	previewSearchQuery string
+	previewSearchTerm  string
 	previewLines       []string
 	previewPlain       []string
-	previewMatches     []previewMatch
+	previewMatches     []int
 	previewMatchIdx    int
 
 	// Full-screen CSV table view (a CSV/TSV object previewed with "p").
@@ -485,10 +487,9 @@ func NewModel(ctx context.Context, awsCfg *config.AWSConfig, region, bucket, pre
 	m.findInput.Cursor.Style = lipgloss.NewStyle().Foreground(lipgloss.Color(ui.ColorAccent()))
 
 	m.previewSearchInput = textinput.New()
-	m.previewSearchInput.Prompt = "search: "
-	m.previewSearchInput.Placeholder = "text to find…"
+	m.previewSearchInput.Placeholder = "Find in preview…"
 	m.previewSearchInput.CharLimit = 128
-	m.previewSearchInput.Width = 32
+	m.previewSearchInput.Width = 40
 	m.previewSearchInput.PromptStyle = lipgloss.NewStyle().Foreground(lipgloss.Color(ui.ColorAccent())).Bold(true)
 	m.previewSearchInput.TextStyle = lipgloss.NewStyle().Foreground(lipgloss.Color(ui.ColorText()))
 	m.previewSearchInput.PlaceholderStyle = lipgloss.NewStyle().Foreground(lipgloss.Color(ui.ColorMuted()))
@@ -976,7 +977,7 @@ func (m *Model) initPreviewViewport(content string, err error) {
 	m.previewNotTabular = false
 	panelW, panelH := m.previewPanelSize()
 	vpW := panelW - 8 // border + padding + scrollbar gutter
-	vpH := panelH - 8 // title, blank lines, help text, border
+	vpH := panelH - 9 // title, Find line, blank lines, help text, border
 	if vpW < 10 {
 		vpW = 10
 	}
@@ -984,17 +985,21 @@ func (m *Model) initPreviewViewport(content string, err error) {
 		vpH = 2
 	}
 	m.previewViewport = viewport.New(vpW, vpH)
-	// A fresh preview starts without an active search; the last query stays in
-	// the input as a pre-fill for the next "/".
+	// A fresh preview starts with the search fully reset, like the log
+	// viewer's open().
 	m.previewSearching = false
-	m.previewSearchQuery = ""
+	m.previewSearchInput.SetValue("")
+	m.previewSearchInput.Blur()
+	m.previewSearchTerm = ""
 	m.previewMatches = nil
 	m.previewMatchIdx = 0
-	m.previewSearchInput.Blur()
 	m.previewLines = nil
 	m.previewPlain = nil
 	if err == nil && content != "" {
-		display := buildPreviewDisplay(content, m.previewKey, m.previewTruncated, vpW)
+		// Wrap two columns short of the viewport: every rendered line carries
+		// the reserved "▸" match gutter (see renderPreviewContent), so the
+		// gutter can never push a full-width line past the panel edge.
+		display := buildPreviewDisplay(content, m.previewKey, m.previewTruncated, max(10, vpW-previewGutterWidth))
 		// Keep the display lines and their ANSI-stripped forms so the "/"
 		// search can match on plain text while re-rendering styled lines.
 		m.previewLines = strings.Split(display, "\n")
@@ -1002,7 +1007,7 @@ func (m *Model) initPreviewViewport(content string, err error) {
 		for i, line := range m.previewLines {
 			m.previewPlain[i] = ansi.Strip(line)
 		}
-		m.previewViewport.SetContent(display)
+		m.refreshPreviewContent()
 	}
 }
 
@@ -1642,27 +1647,22 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, tea.Batch(cmds...)
 		}
 
-		// Object-preview search prompt ("/" in the text preview). It captures
-		// every key while the query is being typed (a query may contain "q",
-		// "?", "t", …), so it is handled before the global keys and the
-		// preview's own keys. ↑/↓ step through matches without leaving the
-		// prompt, mirroring the ":" jump prompt.
+		// Object-preview Find input ("/" in the text preview), mirroring the
+		// log viewer's search handling: Enter accepts the term and jumps to
+		// the first match from the current position; Esc clears the search;
+		// typing highlights matches live without scrolling. It captures every
+		// key while active (a term may contain "q", "?", "t", …), so it is
+		// handled before the global keys and the preview's own keys.
 		if m.showPreview && m.previewSearching {
 			switch msg.String() {
 			case "enter":
 				m.acceptPreviewSearch()
 			case "esc":
-				m.clearPreviewSearch()
-			case "down", "ctrl+n":
-				m.stepPreviewMatch(1)
-			case "up", "ctrl+p":
-				m.stepPreviewMatch(-1)
+				m.cancelPreviewSearch()
 			default:
 				m.previewSearchInput, cmd = m.previewSearchInput.Update(msg)
 				cmds = append(cmds, cmd)
-				// Re-scan on every keystroke so the highlight tracks the
-				// query live.
-				m.searchPreview(m.previewSearchInput.Value())
+				m.setPreviewSearchTerm(m.previewSearchInput.Value())
 			}
 			return m, tea.Batch(cmds...)
 		}
@@ -1752,11 +1752,6 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		if m.showPreview {
 			if msg.String() == "esc" {
-				// An active search clears first; the next Esc closes the view.
-				if m.previewSearchQuery != "" {
-					m.clearPreviewSearch()
-					return m, nil
-				}
 				// A member opened from an archive returns to the member list.
 				if m.previewFromArchive {
 					m.previewFromArchive = false
@@ -1769,12 +1764,12 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				return m, nil
 			}
 			// "/" searches within the previewed text; n/N step through the
-			// matches once a query is active.
+			// matching lines while a term is active (as in the log viewer).
 			if msg.String() == "/" && !m.previewLoading && m.previewErr == nil && m.previewContent != "" {
 				m.startPreviewSearch()
 				return m, nil
 			}
-			if m.previewSearchQuery != "" && len(m.previewMatches) > 0 {
+			if m.previewSearchTerm != "" {
 				switch msg.String() {
 				case "n":
 					m.stepPreviewMatch(1)
@@ -3395,16 +3390,13 @@ func (m *Model) previewView() string {
 	width, height := m.previewPanelSize()
 	title := ui.PanelTitleStyle().Render("OBJECT PREVIEW: " + m.previewKey)
 	hint := "[↑/↓/PgUp/PgDn] Scroll  [/] Search  [t] View as table  [L] Fixed-width layout  [Esc] Close"
-	switch {
-	case m.enteringLayout:
+	if m.enteringLayout {
 		hint = layoutPromptLine(m.layoutInput.View(), m.layoutErr)
-	case m.previewSearching:
-		hint = m.previewSearchPromptLine()
-	case m.previewSearchQuery != "":
-		hint = "[n/N] Next/prev match  [/] Edit search  [Esc] Clear search   " + m.previewSearchCount()
-	case m.previewNotTabular:
+	} else if m.previewNotTabular {
 		hint += "   " + ui.ErrorStyle().Render("not delimited — staying in text")
 	}
+	// The Find line is always present (like the log viewer's search line), so
+	// opening the search never reflows the preview body.
 	return lipgloss.NewStyle().
 		Width(width).
 		Height(height).
@@ -3414,5 +3406,5 @@ func (m *Model) previewView() string {
 		BorderForeground(lipgloss.Color(ui.ColorBorderFocus())).
 		Foreground(lipgloss.Color(ui.ColorText())).
 		Padding(1, 2).
-		Render(lipgloss.JoinVertical(lipgloss.Left, title, "", body, "", ui.MutedStyle().Render(hint)))
+		Render(lipgloss.JoinVertical(lipgloss.Left, title, m.previewFindLine(), "", body, "", ui.MutedStyle().Render(hint)))
 }

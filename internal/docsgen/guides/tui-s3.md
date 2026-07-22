@@ -81,21 +81,24 @@ logs are shown as-is.
 ## Text preview shortcuts
 
 Previewing a text object (source, logs, JSON/XML, an archive member, …) opens a
-full-screen scrollable pane.
+full-screen scrollable pane with a `Find:` line under the title.
 
 | Key | Action |
 |-----|--------|
 | `↑` / `↓` · `PgUp` / `PgDn` | Scroll |
-| `/` | Search within the previewed text (`Enter` accept · `Esc` cancel) |
-| `n` / `N` | Jump to the next / previous match |
+| `/` | Search within the previewed text (`Enter` accept · `Esc` clear) |
+| `n` / `N` | Jump to the next / previous matching line |
 | `t` | Render the text as a delimited table |
 | `L` | Apply a local fixed-width layout file (`name,start,length` per line) |
-| `Esc` | Clear the search (if one is active), then close the preview |
+| `Esc` | Close the preview |
 
-The search is case-insensitive and live: every occurrence is highlighted as the
-query is typed, the current match is scrolled into view, and a `match k/N`
-counter shows where you are. It searches only the fetched preview window — for
-a truncated preview, raise `app.previewMaxSize` to search more of the object.
+The search works exactly like the CloudWatch log page's in-log search:
+matching is case-insensitive and highlights live as the term is typed, `Enter`
+jumps to the first match at or after the current position, the current
+matching line is marked `▸`, and the `Find:` line shows `k/N matches`. `Esc`
+inside the input clears the search. It searches only the fetched preview
+window — for a truncated preview, raise `app.previewMaxSize` to search more of
+the object.
 
 ## Table preview shortcuts
 

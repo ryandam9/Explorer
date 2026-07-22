@@ -24,63 +24,78 @@ func previewModel(t *testing.T, content string) *Model {
 	return m
 }
 
-func TestFindPreviewMatchesCaseInsensitiveAndOrdered(t *testing.T) {
-	plain := []string{"Error: retry", "ok", "error ERROR"}
-	ms := findPreviewMatches(plain, "error")
-	want := []previewMatch{{line: 0, start: 0, end: 5}, {line: 2, start: 0, end: 5}, {line: 2, start: 6, end: 11}}
-	if len(ms) != len(want) {
-		t.Fatalf("matches = %v, want %v", ms, want)
+func TestComputePreviewMatchesCaseInsensitiveLineIndices(t *testing.T) {
+	plain := []string{"Error: retry", "ok", "error ERROR", "fine"}
+	if got := computePreviewMatches(plain, "error"); len(got) != 2 || got[0] != 0 || got[1] != 2 {
+		t.Errorf("matches = %v, want [0 2]", got)
 	}
-	for i := range want {
-		if ms[i] != want[i] {
-			t.Errorf("match[%d] = %v, want %v", i, ms[i], want[i])
-		}
+	if got := computePreviewMatches(plain, ""); got != nil {
+		t.Errorf("empty term matched: %v", got)
 	}
-	if got := findPreviewMatches(plain, "  "); got != nil {
-		t.Errorf("blank query matched: %v", got)
-	}
-	if got := findPreviewMatches(plain, "absent"); got != nil {
-		t.Errorf("non-occurring query matched: %v", got)
+	if got := computePreviewMatches(plain, "absent"); got != nil {
+		t.Errorf("non-occurring term matched: %v", got)
 	}
 }
 
-// A matched line is re-rendered from plain text with the matches styled; its
-// stripped form must equal the plain line (nothing lost or duplicated), and
-// unmatched lines keep their original (possibly styled) form.
-func TestRenderPreviewSearchContentPreservesText(t *testing.T) {
-	lines := []string{"\x1b[32mhello world\x1b[0m", "plain hello"}
-	plain := []string{"hello world", "plain hello"}
-	ms := findPreviewMatches(plain, "hello")
-
-	out := strings.Split(renderPreviewSearchContent(lines, plain, ms, 0), "\n")
-	if len(out) != 2 {
-		t.Fatalf("rendered %d lines, want 2", len(out))
+func TestTermSpansFindsAllOccurrences(t *testing.T) {
+	spans := termSpans("error ERROR err", "error")
+	want := [][2]int{{0, 5}, {6, 11}}
+	if len(spans) != len(want) {
+		t.Fatalf("spans = %v, want %v", spans, want)
 	}
-	for i, line := range out {
-		if got := ansi.Strip(line); got != plain[i] {
-			t.Errorf("line %d stripped = %q, want %q", i, got, plain[i])
+	for i := range want {
+		if spans[i] != want[i] {
+			t.Errorf("span[%d] = %v, want %v", i, spans[i], want[i])
 		}
 	}
-	// A matched styled line is rebuilt from its plain text (the highlight
-	// offsets index plain text, so the old ANSI must be gone).
+}
+
+// Every rendered line carries the two-column gutter; the current match line is
+// marked "▸"; matched lines are rebuilt from plain text so the highlight can
+// never drift inside pre-existing ANSI; and nothing is lost or duplicated.
+func TestRenderPreviewContentGutterAndText(t *testing.T) {
+	lines := []string{"\x1b[32mhello world\x1b[0m", "no match here", "plain hello"}
+	plain := []string{"hello world", "no match here", "plain hello"}
+	matches := computePreviewMatches(plain, "hello") // lines 0 and 2
+
+	out := strings.Split(renderPreviewContent(lines, plain, "hello", matches, 1), "\n")
+	if len(out) != 3 {
+		t.Fatalf("rendered %d lines, want 3", len(out))
+	}
+	for i, line := range out {
+		stripped := ansi.Strip(line)
+		wantGutter := "  "
+		if i == 2 { // matches[1] == line 2 is the current match
+			wantGutter = "▸ "
+		}
+		if !strings.HasPrefix(stripped, wantGutter) {
+			t.Errorf("line %d gutter = %q, want prefix %q", i, stripped, wantGutter)
+		}
+		if got := strings.TrimPrefix(stripped, wantGutter); got != plain[i] {
+			t.Errorf("line %d text = %q, want %q", i, got, plain[i])
+		}
+	}
+	// The matched styled line is rebuilt from its plain text.
 	if strings.Contains(out[0], "\x1b[32m") {
 		t.Errorf("matched line kept its original ANSI styling: %q", out[0])
 	}
-
-	// With no matches the original styled content is returned untouched.
-	if got := renderPreviewSearchContent(lines, plain, nil, 0); got != strings.Join(lines, "\n") {
-		t.Errorf("no-match render altered content: %q", got)
+	// Without a term no line is marked.
+	for i, line := range strings.Split(renderPreviewContent(lines, plain, "", nil, 0), "\n") {
+		if !strings.HasPrefix(ansi.Strip(line), "  ") {
+			t.Errorf("no-search line %d not gutter-padded: %q", i, ansi.Strip(line))
+		}
 	}
 }
 
-// "/" opens the prompt, typing matches live, Enter keeps the query for n/N,
-// and Esc clears the search before a second Esc closes the preview.
+// "/" opens the Find input, typing highlights live without scrolling, Enter
+// accepts and jumps, n/N step matching lines with wrap-around, and Esc (in
+// the input) clears the search — mirroring the CloudWatch log viewer.
 func TestPreviewSearchKeyFlow(t *testing.T) {
 	m := previewModel(t, "alpha\nbeta\nalpha beta\ngamma")
 
 	m.Update(keyRunes("/"))
 	if !m.previewSearching {
-		t.Fatal("/ should open the preview search prompt")
+		t.Fatal("/ should activate the Find input")
 	}
 	for _, r := range "beta" {
 		m.Update(keyRunes(string(r)))
@@ -88,10 +103,16 @@ func TestPreviewSearchKeyFlow(t *testing.T) {
 	if len(m.previewMatches) != 2 {
 		t.Fatalf("live matches = %d, want 2", len(m.previewMatches))
 	}
+	if m.previewViewport.YOffset != 0 {
+		t.Error("typing must not scroll the preview")
+	}
 
 	m.Update(tea.KeyMsg{Type: tea.KeyEnter})
-	if m.previewSearching || m.previewSearchQuery != "beta" {
-		t.Fatalf("enter should accept the query: searching=%v query=%q", m.previewSearching, m.previewSearchQuery)
+	if m.previewSearching || m.previewSearchTerm != "beta" {
+		t.Fatalf("enter should accept the term: searching=%v term=%q", m.previewSearching, m.previewSearchTerm)
+	}
+	if m.previewMatchIdx != 0 {
+		t.Errorf("enter should land on the first match from the top, idx=%d", m.previewMatchIdx)
 	}
 
 	m.Update(keyRunes("n"))
@@ -107,16 +128,32 @@ func TestPreviewSearchKeyFlow(t *testing.T) {
 		t.Errorf("N should wrap to the last match, idx=%d", m.previewMatchIdx)
 	}
 
-	m.Update(tea.KeyMsg{Type: tea.KeyEsc})
-	if m.previewSearchQuery != "" || m.previewMatches != nil {
-		t.Fatalf("first esc should clear the search, query=%q", m.previewSearchQuery)
-	}
-	if !m.showPreview {
-		t.Fatal("first esc must not close the preview")
-	}
+	// Esc with an accepted term closes the preview (the term is cleared only
+	// via / then Esc, as in the log viewer).
 	m.Update(tea.KeyMsg{Type: tea.KeyEsc})
 	if m.showPreview {
-		t.Error("second esc should close the preview")
+		t.Fatal("esc should close the preview")
+	}
+}
+
+// Esc while the Find input is active clears the whole search but keeps the
+// preview open.
+func TestPreviewSearchEscInInputClears(t *testing.T) {
+	m := previewModel(t, "alpha\nbeta")
+	m.Update(keyRunes("/"))
+	for _, r := range "beta" {
+		m.Update(keyRunes(string(r)))
+	}
+	m.Update(tea.KeyMsg{Type: tea.KeyEsc})
+	if m.previewSearching || m.previewSearchTerm != "" || m.previewMatches != nil {
+		t.Errorf("esc in the input should clear the search: searching=%v term=%q matches=%v",
+			m.previewSearching, m.previewSearchTerm, m.previewMatches)
+	}
+	if got := m.previewSearchInput.Value(); got != "" {
+		t.Errorf("esc should clear the input text, got %q", got)
+	}
+	if !m.showPreview {
+		t.Error("esc in the input must not close the preview")
 	}
 }
 
@@ -129,32 +166,42 @@ func TestPreviewSearchTypingCapturesGlobalKeys(t *testing.T) {
 		t.Errorf("input value = %q, want %q", got, "q")
 	}
 	if !m.showPreview || !m.previewSearching {
-		t.Error("preview and prompt should stay open while typing")
+		t.Error("preview and Find input should stay open while typing")
 	}
 }
 
-// Stepping to a match beyond the viewport scrolls it into view.
-func TestPreviewSearchScrollsToMatch(t *testing.T) {
+// Enter jumps to the first match at or after the current scroll position, not
+// back to the top (the log viewer's jumpToFirstMatchFrom).
+func TestPreviewSearchEnterJumpsFromCurrentOffset(t *testing.T) {
 	var b strings.Builder
+	b.WriteString("needle first\n")
 	for i := 0; i < 60; i++ {
 		b.WriteString("filler line\n")
 	}
 	b.WriteString("needle at the bottom")
 	m := previewModel(t, b.String())
 
+	// Scroll well past the first match before searching.
+	m.previewViewport.SetYOffset(30)
+
 	m.Update(keyRunes("/"))
 	for _, r := range "needle" {
 		m.Update(keyRunes(string(r)))
 	}
-	if len(m.previewMatches) != 1 {
-		t.Fatalf("matches = %d, want 1", len(m.previewMatches))
+	m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+
+	if len(m.previewMatches) != 2 {
+		t.Fatalf("matches = %d, want 2", len(m.previewMatches))
 	}
-	if m.previewViewport.YOffset == 0 {
-		t.Error("viewport should scroll so the match is visible")
+	if m.previewMatchIdx != 1 {
+		t.Errorf("enter should pick the match after the scroll position, idx=%d", m.previewMatchIdx)
+	}
+	if m.previewViewport.YOffset <= 30 {
+		t.Errorf("viewport should centre the bottom match, YOffset=%d", m.previewViewport.YOffset)
 	}
 }
 
-// A new preview starts clean: no active query or highlights carried over.
+// A new preview starts clean: no term, matches, or input text carried over.
 func TestPreviewSearchResetOnNewPreview(t *testing.T) {
 	m := previewModel(t, "alpha beta")
 	m.Update(keyRunes("/"))
@@ -164,7 +211,10 @@ func TestPreviewSearchResetOnNewPreview(t *testing.T) {
 	m.Update(tea.KeyMsg{Type: tea.KeyEnter})
 
 	m.initPreviewViewport("other content", nil)
-	if m.previewSearchQuery != "" || m.previewMatches != nil || m.previewSearching {
-		t.Errorf("search state leaked into a new preview: query=%q matches=%v", m.previewSearchQuery, m.previewMatches)
+	if m.previewSearchTerm != "" || m.previewMatches != nil || m.previewSearching {
+		t.Errorf("search state leaked into a new preview: term=%q matches=%v", m.previewSearchTerm, m.previewMatches)
+	}
+	if got := m.previewSearchInput.Value(); got != "" {
+		t.Errorf("input text leaked into a new preview: %q", got)
 	}
 }
