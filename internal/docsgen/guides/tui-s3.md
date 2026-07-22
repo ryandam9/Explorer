@@ -78,6 +78,25 @@ Object previews are syntax-highlighted too: opening a recognised source or data
 file (by extension) or an XML document colours it for readability; plain text and
 logs are shown as-is.
 
+## Text preview shortcuts
+
+Previewing a text object (source, logs, JSON/XML, an archive member, …) opens a
+full-screen scrollable pane.
+
+| Key | Action |
+|-----|--------|
+| `↑` / `↓` · `PgUp` / `PgDn` | Scroll |
+| `/` | Search within the previewed text (`Enter` accept · `Esc` cancel) |
+| `n` / `N` | Jump to the next / previous match |
+| `t` | Render the text as a delimited table |
+| `L` | Apply a local fixed-width layout file (`name,start,length` per line) |
+| `Esc` | Clear the search (if one is active), then close the preview |
+
+The search is case-insensitive and live: every occurrence is highlighted as the
+query is typed, the current match is scrolled into view, and a `match k/N`
+counter shows where you are. It searches only the fetched preview window — for
+a truncated preview, raise `app.previewMaxSize` to search more of the object.
+
 ## Table preview shortcuts
 
 Previewing a delimited (CSV/TSV/…), Parquet, or fixed-width object opens a
