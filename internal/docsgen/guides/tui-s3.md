@@ -101,7 +101,10 @@ inside the input clears the search). `&` renders only the lines matching a
 regex — the in-preview equivalent of piping through grep. The pattern
 live-applies as it is typed (an invalid in-progress regex keeps the last valid
 filter), whole logical lines are kept so a long matching line retains its
-wrapped continuations, and the grep bar reports `k of N lines`. The `/` search
+wrapped continuations, and the grep bar reports `k of N lines`. Matching uses
+smart case, like `less`/ripgrep: an all-lowercase pattern is case-insensitive
+(so `error` also keeps `ERROR` lines), while an uppercase letter anywhere
+makes it exact. The `/` search
 then operates on the filtered lines. Both act only on the fetched preview
 window — for a truncated preview, raise `app.previewMaxSize` to cover more of
 the object.

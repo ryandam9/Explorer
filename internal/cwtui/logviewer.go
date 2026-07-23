@@ -72,6 +72,7 @@ type logViewer struct {
 	grepActive bool // the grep input has the keyboard
 	grepInput  textinput.Model
 	grepRe     *regexp.Regexp
+	grepPat    string // the typed pattern behind grepRe, for display
 	grepErr    string
 	grepSrc    []string // unwrapped lines that passed the filter
 	grepTotal  int      // unwrapped lines before filtering
@@ -110,6 +111,7 @@ func (v *logViewer) open(key viewerKey, title string, wrapW int) {
 	v.grepActive = false
 	v.grepInput.SetValue("")
 	v.grepRe = nil
+	v.grepPat = ""
 	v.grepErr = ""
 	v.grepSrc = nil
 	v.grepTotal = 0
@@ -190,19 +192,22 @@ func (v *logViewer) grepVisible() bool {
 
 // setGrep live-applies the grep pattern. An empty pattern clears the filter;
 // a pattern that doesn't compile is flagged but keeps the last valid filter
-// applied, so a half-typed regex never blanks the screen.
+// applied, so a half-typed regex never blanks the screen. Matching uses smart
+// case — an all-lowercase pattern is case-insensitive, like the "/" search on
+// this same page, while an uppercase letter makes it exact
+// (ui.SmartCaseRegexp).
 func (v *logViewer) setGrep(pattern string) {
 	if strings.TrimSpace(pattern) == "" {
-		v.grepRe, v.grepErr = nil, ""
+		v.grepRe, v.grepPat, v.grepErr = nil, "", ""
 		v.rebuild(v.wrapW)
 		return
 	}
-	re, err := regexp.Compile(pattern)
+	re, err := ui.SmartCaseRegexp(pattern)
 	if err != nil {
 		v.grepErr = "invalid regex"
 		return
 	}
-	v.grepRe, v.grepErr = re, ""
+	v.grepRe, v.grepPat, v.grepErr = re, pattern, ""
 	v.rebuild(v.wrapW)
 }
 
@@ -627,7 +632,7 @@ func (m *model) renderViewer() string {
 		}
 	} else if v.grepRe != nil {
 		grepLine = fmt.Sprintf(" Grep: %s  (%d of %d lines, & to edit, y/s copy/export matches)",
-			lipgloss.NewStyle().Foreground(lipgloss.Color(ui.ColorAccent())).Render(v.grepRe.String()),
+			lipgloss.NewStyle().Foreground(lipgloss.Color(ui.ColorAccent())).Render(v.grepPat),
 			len(v.grepSrc), v.grepTotal)
 	}
 
@@ -642,7 +647,7 @@ func (m *model) renderViewer() string {
 	if v.loading {
 		b.WriteString(fmt.Sprintf("  %s Loading full log…\n", m.spinner.View()))
 	} else if len(v.lines) == 0 && v.grepRe != nil {
-		b.WriteString(fmt.Sprintf("  No lines match the grep filter %s. Esc (in &) clears it.\n", v.grepRe.String()))
+		b.WriteString(fmt.Sprintf("  No lines match the grep filter %s. Esc (in &) clears it.\n", v.grepPat))
 	} else if len(v.lines) == 0 {
 		b.WriteString("  No log events in the last 24 hours. Streaming for new events…\n")
 	} else {

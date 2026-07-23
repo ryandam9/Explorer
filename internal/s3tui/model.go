@@ -258,6 +258,7 @@ type Model struct {
 	previewGrepActive bool
 	previewGrepInput  textinput.Model
 	previewGrepRe     *regexp.Regexp
+	previewGrepPat    string // the typed pattern behind previewGrepRe, for display
 	previewGrepErr    string
 	previewSrc        []string
 	previewSrcPlain   []string
@@ -507,7 +508,7 @@ func NewModel(ctx context.Context, awsCfg *config.AWSConfig, region, bucket, pre
 	m.previewSearchInput.Width = 40
 
 	m.previewGrepInput = textinput.New()
-	m.previewGrepInput.Placeholder = "grep regex (e.g. ERROR|timeout)…"
+	m.previewGrepInput.Placeholder = "grep regex (smart case; e.g. error|timeout)…"
 	m.previewGrepInput.CharLimit = 256
 	m.previewGrepInput.Width = 40
 	m.previewSearchInput.PromptStyle = lipgloss.NewStyle().Foreground(lipgloss.Color(ui.ColorAccent())).Bold(true)
@@ -1013,6 +1014,7 @@ func (m *Model) initPreviewViewport(content string, err error) {
 	m.previewGrepInput.SetValue("")
 	m.previewGrepInput.Blur()
 	m.previewGrepRe = nil
+	m.previewGrepPat = ""
 	m.previewGrepErr = ""
 	m.previewGrepTotal = 0
 	m.previewGrepKept = 0
@@ -3388,7 +3390,7 @@ func (m *Model) helpView() string {
 			"",
 			"Search & filter (work like the CloudWatch log page)",
 			"  /                  Find in the previewed text (highlights live as you type)",
-			"  &                  Grep filter: show only lines matching a regex (live; Esc in & clears)",
+			"  &                  Grep filter: show only lines matching a regex (smart case; live; Esc in & clears)",
 			"  Enter              Accept the term/pattern; Find jumps to the first match from the current position",
 			"  n / N              Next / previous matching line (wraps; current line marked ▸)",
 			"  Esc                In the Find or Grep input: clear that search/filter",

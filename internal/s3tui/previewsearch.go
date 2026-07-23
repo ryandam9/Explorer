@@ -124,7 +124,7 @@ func (m *Model) refreshPreviewContent() {
 	if len(m.previewLines) == 0 {
 		if m.previewGrepRe != nil {
 			m.previewViewport.SetContent(ui.MutedStyle().Render(
-				"No lines match the grep filter " + m.previewGrepRe.String() + ". Esc (in &) clears it."))
+				"No lines match the grep filter " + m.previewGrepPat + ". Esc (in &) clears it."))
 		}
 		return
 	}
