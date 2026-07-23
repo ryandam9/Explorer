@@ -20,6 +20,7 @@ func previewModel(t *testing.T, content string) *Model {
 	m := &Model{width: 100, height: 30, state: stateObjectList, focus: focusObjects,
 		showPreview: true, previewKey: "notes.txt", previewContent: content}
 	m.previewSearchInput = textinput.New()
+	m.previewGrepInput = textinput.New()
 	m.initPreviewViewport(content, nil)
 	return m
 }

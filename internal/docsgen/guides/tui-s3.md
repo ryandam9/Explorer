@@ -87,17 +87,23 @@ full-screen scrollable pane with a `Find:` line under the title.
 |-----|--------|
 | `↑` / `↓` · `PgUp` / `PgDn` | Scroll |
 | `/` | Search within the previewed text (`Enter` accept · `Esc` clear) |
+| `&` | Grep filter: show only the lines matching a regex (`Enter` keep · `Esc` clear) |
 | `n` / `N` | Jump to the next / previous matching line |
 | `t` | Render the text as a delimited table |
 | `L` | Apply a local fixed-width layout file (`name,start,length` per line) |
 | `Esc` | Close the preview |
 
-The search works exactly like the CloudWatch log page's in-log search:
+The search and filter work exactly like the CloudWatch log page's: `/`
 matching is case-insensitive and highlights live as the term is typed, `Enter`
 jumps to the first match at or after the current position, the current
-matching line is marked `▸`, and the `Find:` line shows `k/N matches`. `Esc`
-inside the input clears the search. It searches only the fetched preview
-window — for a truncated preview, raise `app.previewMaxSize` to search more of
+matching line is marked `▸`, and the `Find:` line shows `k/N matches` (`Esc`
+inside the input clears the search). `&` renders only the lines matching a
+regex — the in-preview equivalent of piping through grep. The pattern
+live-applies as it is typed (an invalid in-progress regex keeps the last valid
+filter), whole logical lines are kept so a long matching line retains its
+wrapped continuations, and the grep bar reports `k of N lines`. The `/` search
+then operates on the filtered lines. Both act only on the fetched preview
+window — for a truncated preview, raise `app.previewMaxSize` to cover more of
 the object.
 
 ## Table preview shortcuts

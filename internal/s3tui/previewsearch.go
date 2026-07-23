@@ -117,9 +117,15 @@ func renderPreviewContent(lines, plain []string, term string, matches []int, mat
 }
 
 // refreshPreviewContent re-renders the viewport content for the current search
-// state. The scroll position is untouched.
+// state. The scroll position is untouched. When the grep filter leaves nothing
+// to show, it says so (the log viewer's empty-filter notice) rather than
+// letting an empty pane read as an empty object.
 func (m *Model) refreshPreviewContent() {
 	if len(m.previewLines) == 0 {
+		if m.previewGrepRe != nil {
+			m.previewViewport.SetContent(ui.MutedStyle().Render(
+				"No lines match the grep filter " + m.previewGrepRe.String() + ". Esc (in &) clears it."))
+		}
 		return
 	}
 	m.previewViewport.SetContent(renderPreviewContent(m.previewLines, m.previewPlain, m.previewSearchTerm, m.previewMatches, m.previewMatchIdx))
