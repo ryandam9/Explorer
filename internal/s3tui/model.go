@@ -6,6 +6,7 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"regexp"
 	"sort"
 	"strings"
 	"time"
@@ -249,6 +250,20 @@ type Model struct {
 	previewMatches     []int
 	previewMatchIdx    int
 
+	// Grep filter inside the preview overlay ("&"), mirroring the log
+	// viewer's grep (see previewgrep.go): when previewGrepRe is set only
+	// matching lines render. previewSrc / previewSrcPlain hold the formatted
+	// but *unwrapped* logical lines (styled / ANSI-stripped) the filter
+	// selects from, so a long matching line keeps its wrapped continuations.
+	previewGrepActive bool
+	previewGrepInput  textinput.Model
+	previewGrepRe     *regexp.Regexp
+	previewGrepErr    string
+	previewSrc        []string
+	previewSrcPlain   []string
+	previewGrepTotal  int // logical lines before filtering
+	previewGrepKept   int // logical lines after filtering
+
 	// Full-screen CSV table view (a CSV/TSV object previewed with "p").
 	showCSV      bool
 	csvTable     table.Model
@@ -490,6 +505,11 @@ func NewModel(ctx context.Context, awsCfg *config.AWSConfig, region, bucket, pre
 	m.previewSearchInput.Placeholder = "Find in preview…"
 	m.previewSearchInput.CharLimit = 128
 	m.previewSearchInput.Width = 40
+
+	m.previewGrepInput = textinput.New()
+	m.previewGrepInput.Placeholder = "grep regex (e.g. ERROR|timeout)…"
+	m.previewGrepInput.CharLimit = 256
+	m.previewGrepInput.Width = 40
 	m.previewSearchInput.PromptStyle = lipgloss.NewStyle().Foreground(lipgloss.Color(ui.ColorAccent())).Bold(true)
 	m.previewSearchInput.TextStyle = lipgloss.NewStyle().Foreground(lipgloss.Color(ui.ColorText()))
 	m.previewSearchInput.PlaceholderStyle = lipgloss.NewStyle().Foreground(lipgloss.Color(ui.ColorMuted()))
@@ -608,7 +628,7 @@ func applyObjectSortHeader(cols []table.Column, sortCol int, asc bool) {
 func (m *Model) restyleForTheme() {
 	m.applyTableStyle(&m.bucketTable)
 	m.applyTableStyle(&m.objectTable)
-	for _, in := range []*textinput.Model{&m.prefixInput, &m.bucketSearch, &m.findInput, &m.previewSearchInput, &m.deleteConfirm} {
+	for _, in := range []*textinput.Model{&m.prefixInput, &m.bucketSearch, &m.findInput, &m.previewSearchInput, &m.previewGrepInput, &m.deleteConfirm} {
 		in.PromptStyle = lipgloss.NewStyle().Foreground(lipgloss.Color(ui.ColorAccent())).Bold(true)
 		in.TextStyle = lipgloss.NewStyle().Foreground(lipgloss.Color(ui.ColorText()))
 		in.PlaceholderStyle = lipgloss.NewStyle().Foreground(lipgloss.Color(ui.ColorMuted()))
@@ -939,21 +959,27 @@ func decompressedPreview(out []byte, truncated, isCSV bool) string {
 // (now unclosed) XML element when the preview window cut the document
 // mid-element.
 func buildPreviewDisplay(content, key string, truncated bool, width int) string {
-	display := sanitizeForDisplay(content)
-	if looksLikeXMLContent(display) {
-		if formatted, ok := formatXML(display); ok {
-			display = ui.HighlightLang(formatted, "xml")
-		}
-	} else {
-		// Syntax-highlight recognised source/data files (by extension). Plain
-		// text and logs have no lexer match and stay uncoloured.
-		display = ui.HighlightByExt(display, key)
-	}
-	display = ansi.Hardwrap(display, width, false) // ANSI-aware so highlight survives
+	display := ansi.Hardwrap(formatPreviewText(content, key), width, false) // ANSI-aware so highlight survives
 	if truncated {
 		display += "\n\n… preview truncated …"
 	}
 	return display
+}
+
+// formatPreviewText sanitizes and syntax-highlights fetched content without
+// wrapping it — the per-logical-line formatted source that the "&" grep filter
+// selects from before the wrap (see rebuildPreviewLines).
+func formatPreviewText(content, key string) string {
+	display := sanitizeForDisplay(content)
+	if looksLikeXMLContent(display) {
+		if formatted, ok := formatXML(display); ok {
+			return ui.HighlightLang(formatted, "xml")
+		}
+		return display
+	}
+	// Syntax-highlight recognised source/data files (by extension). Plain
+	// text and logs have no lexer match and stay uncoloured.
+	return ui.HighlightByExt(display, key)
 }
 
 // previewPanelSize returns the object-preview overlay's outer panel dimensions.
@@ -975,40 +1001,56 @@ func (m *Model) previewPanelSize() (panelW, panelH int) {
 // preview from the fetched content.
 func (m *Model) initPreviewViewport(content string, err error) {
 	m.previewNotTabular = false
-	panelW, panelH := m.previewPanelSize()
-	vpW := panelW - 8 // border + padding + scrollbar gutter
-	vpH := panelH - 9 // title, Find line, blank lines, help text, border
-	if vpW < 10 {
-		vpW = 10
-	}
-	if vpH < 2 {
-		vpH = 2
-	}
-	m.previewViewport = viewport.New(vpW, vpH)
-	// A fresh preview starts with the search fully reset, like the log
-	// viewer's open().
+	// A fresh preview starts with the search and grep filter fully reset,
+	// like the log viewer's open().
 	m.previewSearching = false
 	m.previewSearchInput.SetValue("")
 	m.previewSearchInput.Blur()
 	m.previewSearchTerm = ""
 	m.previewMatches = nil
 	m.previewMatchIdx = 0
+	m.previewGrepActive = false
+	m.previewGrepInput.SetValue("")
+	m.previewGrepInput.Blur()
+	m.previewGrepRe = nil
+	m.previewGrepErr = ""
+	m.previewGrepTotal = 0
+	m.previewGrepKept = 0
 	m.previewLines = nil
 	m.previewPlain = nil
+	m.previewSrc = nil
+	m.previewSrcPlain = nil
+	vpW, vpH := m.previewViewportSize()
+	m.previewViewport = viewport.New(vpW, vpH)
 	if err == nil && content != "" {
-		// Wrap two columns short of the viewport: every rendered line carries
-		// the reserved "▸" match gutter (see renderPreviewContent), so the
-		// gutter can never push a full-width line past the panel edge.
-		display := buildPreviewDisplay(content, m.previewKey, m.previewTruncated, max(10, vpW-previewGutterWidth))
-		// Keep the display lines and their ANSI-stripped forms so the "/"
-		// search can match on plain text while re-rendering styled lines.
-		m.previewLines = strings.Split(display, "\n")
-		m.previewPlain = make([]string, len(m.previewLines))
-		for i, line := range m.previewLines {
-			m.previewPlain[i] = ansi.Strip(line)
+		// Keep the formatted logical lines and their ANSI-stripped forms: the
+		// "&" grep filters plain text, and the "/" search matches on the
+		// plain forms of the wrapped lines rebuildPreviewLines derives.
+		formatted := formatPreviewText(content, m.previewKey)
+		m.previewSrc = strings.Split(formatted, "\n")
+		m.previewSrcPlain = make([]string, len(m.previewSrc))
+		for i, line := range m.previewSrc {
+			m.previewSrcPlain[i] = ansi.Strip(line)
 		}
-		m.refreshPreviewContent()
+		m.rebuildPreviewLines()
 	}
+}
+
+// previewViewportSize returns the inner viewport dimensions for the current
+// panel size: the width less border, padding and the scrollbar gutter; the
+// height less the title, Find line, blank lines, help text and border — and
+// one more line while the grep bar is visible (see previewGrepVisible), like
+// the log viewer's viewerBodyHeight. Content wraps a further two columns
+// short of the width so the reserved "▸" match gutter can never push a
+// full-width line past the panel edge (see renderPreviewContent).
+func (m *Model) previewViewportSize() (w, h int) {
+	panelW, panelH := m.previewPanelSize()
+	w = max(10, panelW-8)
+	h = panelH - 9
+	if m.previewGrepVisible() {
+		h--
+	}
+	return w, max(2, h)
 }
 
 // accessDeniedCodes are the error codes S3/STS return when the caller lacks a
@@ -1667,6 +1709,24 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, tea.Batch(cmds...)
 		}
 
+		// Object-preview grep input ("&" in the text preview), mirroring the
+		// log viewer's grep handling: the pattern live-applies while typed
+		// (an invalid regex keeps the last valid filter), Enter keeps the
+		// filter, Esc clears it. Captures every key while active.
+		if m.showPreview && m.previewGrepActive {
+			switch msg.String() {
+			case "enter":
+				m.acceptPreviewGrep()
+			case "esc":
+				m.cancelPreviewGrep()
+			default:
+				m.previewGrepInput, cmd = m.previewGrepInput.Update(msg)
+				cmds = append(cmds, cmd)
+				m.setPreviewGrep(m.previewGrepInput.Value())
+			}
+			return m, tea.Batch(cmds...)
+		}
+
 		// Global keys — skipped while typing into an input so that bucket
 		// names / prefixes / jump queries containing these characters work as
 		// expected.
@@ -1763,10 +1823,15 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.previewLoading = false
 				return m, nil
 			}
-			// "/" searches within the previewed text; n/N step through the
-			// matching lines while a term is active (as in the log viewer).
+			// "/" searches within the previewed text; "&" grep-filters its
+			// lines; n/N step through the matching lines while a term is
+			// active (as in the log viewer).
 			if msg.String() == "/" && !m.previewLoading && m.previewErr == nil && m.previewContent != "" {
 				m.startPreviewSearch()
+				return m, nil
+			}
+			if msg.String() == "&" && !m.previewLoading && m.previewErr == nil && m.previewContent != "" {
+				m.startPreviewGrep()
 				return m, nil
 			}
 			if m.previewSearchTerm != "" {
@@ -3321,11 +3386,12 @@ func (m *Model) helpView() string {
 			"Scrolling",
 			"  ↑/↓, PgUp/PgDn     Scroll the preview",
 			"",
-			"Search (works like the CloudWatch log page)",
+			"Search & filter (work like the CloudWatch log page)",
 			"  /                  Find in the previewed text (highlights live as you type)",
-			"  Enter              Accept the term; jump to the first match from the current position",
+			"  &                  Grep filter: show only lines matching a regex (live; Esc in & clears)",
+			"  Enter              Accept the term/pattern; Find jumps to the first match from the current position",
 			"  n / N              Next / previous matching line (wraps; current line marked ▸)",
-			"  Esc                In the Find input: clear the search",
+			"  Esc                In the Find or Grep input: clear that search/filter",
 			"",
 			"Views",
 			"  t                  Render the text as a delimited table",
@@ -3410,14 +3476,21 @@ func (m *Model) previewView() string {
 
 	width, height := m.previewPanelSize()
 	title := ui.PanelTitleStyle().Render("OBJECT PREVIEW: " + m.previewKey)
-	hint := "[↑/↓/PgUp/PgDn] Scroll  [/] Search  [t] View as table  [L] Fixed-width layout  [Esc] Close"
+	hint := "[↑/↓/PgUp/PgDn] Scroll  [/] Search  [&] Filter lines  [t] View as table  [L] Fixed-width layout  [Esc] Close"
 	if m.enteringLayout {
 		hint = layoutPromptLine(m.layoutInput.View(), m.layoutErr)
 	} else if m.previewNotTabular {
 		hint += "   " + ui.ErrorStyle().Render("not delimited — staying in text")
 	}
 	// The Find line is always present (like the log viewer's search line), so
-	// opening the search never reflows the preview body.
+	// opening the search never reflows the preview body; the grep bar appears
+	// only while typed or applied, with the viewport ceding it the line (see
+	// previewViewportSize).
+	rows := []string{title, m.previewFindLine()}
+	if grep := m.previewGrepLine(); grep != "" {
+		rows = append(rows, grep)
+	}
+	rows = append(rows, "", body, "", ui.MutedStyle().Render(hint))
 	return lipgloss.NewStyle().
 		Width(width).
 		Height(height).
@@ -3427,5 +3500,5 @@ func (m *Model) previewView() string {
 		BorderForeground(lipgloss.Color(ui.ColorBorderFocus())).
 		Foreground(lipgloss.Color(ui.ColorText())).
 		Padding(1, 2).
-		Render(lipgloss.JoinVertical(lipgloss.Left, title, m.previewFindLine(), "", body, "", ui.MutedStyle().Render(hint)))
+		Render(lipgloss.JoinVertical(lipgloss.Left, rows...))
 }
