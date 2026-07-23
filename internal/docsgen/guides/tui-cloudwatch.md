@@ -39,7 +39,7 @@ whole group in group-level search — streaming new events live as they arrive.
 | `f` | Toggle follow (auto-scroll as new events stream in) |
 | `J` | Toggle JSON formatting — pretty-prints embedded JSON (a `{} json` badge shows while on) |
 | `/` | Search within the log (case-insensitive, matches highlighted) |
-| `&` | Grep filter (as in `less`): a regex keeps only matching lines, with a `kept/total` count |
+| `&` | Grep filter (as in `less`): a regex keeps only matching lines, with a `kept/total` count. Smart case: all-lowercase matches case-insensitively; an uppercase letter makes it exact |
 | `n` / `N` | Jump to next / previous match |
 | `y` | Copy the whole log — or only the matching lines while a grep filter is applied |
 | `s` | Export the log to `~/.aws_explorer/logs/` (suffixed `-grep` while filtered) |

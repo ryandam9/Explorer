@@ -61,6 +61,30 @@ func TestPreviewGrepEscClears(t *testing.T) {
 	}
 }
 
+// The filter uses smart case, like the "/" search on the same page: an
+// all-lowercase pattern keeps ERROR/Error/error lines alike, while an
+// uppercase letter makes the match exact.
+func TestPreviewGrepSmartCase(t *testing.T) {
+	m := previewModel(t, "ERROR one\nError two\nerror three\nok")
+	m.Update(keyRunes("&"))
+	for _, r := range "error" {
+		m.Update(keyRunes(string(r)))
+	}
+	if m.previewGrepKept != 3 {
+		t.Fatalf("lowercase pattern kept %d of %d lines, want 3 (case-insensitive): %q",
+			m.previewGrepKept, m.previewGrepTotal, m.previewPlain)
+	}
+
+	m.previewGrepInput.SetValue("")
+	for _, r := range "Error" {
+		m.Update(keyRunes(string(r)))
+	}
+	if m.previewGrepKept != 1 || !strings.Contains(m.previewPlain[0], "Error two") {
+		t.Errorf("uppercase pattern kept %d lines (%q), want just \"Error two\"",
+			m.previewGrepKept, m.previewPlain)
+	}
+}
+
 // An invalid in-progress regex is flagged but keeps the last valid filter, so
 // a half-typed pattern never blanks the screen.
 func TestPreviewGrepInvalidRegexKeepsLastFilter(t *testing.T) {
@@ -74,8 +98,8 @@ func TestPreviewGrepInvalidRegexKeepsLastFilter(t *testing.T) {
 	if m.previewGrepErr != "invalid regex" {
 		t.Errorf("invalid pattern not flagged: err=%q", m.previewGrepErr)
 	}
-	if m.previewGrepRe == nil || m.previewGrepRe.String() != "a" || m.previewGrepKept != 2 {
-		t.Errorf("last valid filter lost: re=%v kept=%d", m.previewGrepRe, m.previewGrepKept)
+	if m.previewGrepRe == nil || m.previewGrepPat != "a" || m.previewGrepKept != 2 {
+		t.Errorf("last valid filter lost: pat=%q kept=%d", m.previewGrepPat, m.previewGrepKept)
 	}
 }
 

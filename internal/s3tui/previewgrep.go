@@ -2,7 +2,6 @@ package s3tui
 
 import (
 	"fmt"
-	"regexp"
 	"strings"
 
 	"github.com/charmbracelet/lipgloss"
@@ -73,19 +72,21 @@ func (m *Model) rebuildPreviewLines() {
 
 // setPreviewGrep live-applies the grep pattern (the log viewer's setGrep). An
 // empty pattern clears the filter; a pattern that doesn't compile is flagged
-// but keeps the last valid filter applied.
+// but keeps the last valid filter applied. Matching uses smart case — an
+// all-lowercase pattern is case-insensitive, like the "/" search on this same
+// page, while an uppercase letter makes it exact (ui.SmartCaseRegexp).
 func (m *Model) setPreviewGrep(pattern string) {
 	if strings.TrimSpace(pattern) == "" {
-		m.previewGrepRe, m.previewGrepErr = nil, ""
+		m.previewGrepRe, m.previewGrepPat, m.previewGrepErr = nil, "", ""
 		m.rebuildPreviewLines()
 		return
 	}
-	re, err := regexp.Compile(pattern)
+	re, err := ui.SmartCaseRegexp(pattern)
 	if err != nil {
 		m.previewGrepErr = "invalid regex"
 		return
 	}
-	m.previewGrepRe, m.previewGrepErr = re, ""
+	m.previewGrepRe, m.previewGrepPat, m.previewGrepErr = re, pattern, ""
 	m.rebuildPreviewLines()
 }
 
@@ -138,7 +139,7 @@ func (m *Model) previewGrepLine() string {
 		return line
 	case m.previewGrepRe != nil:
 		return fmt.Sprintf("Grep: %s  (%d of %d lines, & to edit)",
-			lipgloss.NewStyle().Foreground(lipgloss.Color(ui.ColorAccent())).Render(m.previewGrepRe.String()),
+			lipgloss.NewStyle().Foreground(lipgloss.Color(ui.ColorAccent())).Render(m.previewGrepPat),
 			m.previewGrepKept, m.previewGrepTotal)
 	default:
 		return ""

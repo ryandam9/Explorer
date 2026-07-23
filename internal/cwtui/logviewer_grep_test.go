@@ -73,6 +73,21 @@ func TestGrepInvalidRegexKeepsLastFilter(t *testing.T) {
 	}
 }
 
+// The filter uses smart case, like the "/" search on the same page: an
+// all-lowercase pattern matches any capitalisation, while an uppercase letter
+// makes the match exact.
+func TestGrepSmartCase(t *testing.T) {
+	v := newGrepViewer()
+	v.setGrep("error")
+	if len(v.grepSrc) != 1 || !strings.Contains(v.grepSrc[0], "ERROR db timeout") {
+		t.Errorf("lowercase pattern should match the ERROR line, kept %v", v.grepSrc)
+	}
+	v.setGrep("Error")
+	if len(v.grepSrc) != 0 {
+		t.Errorf("uppercase pattern must stay exact, kept %v", v.grepSrc)
+	}
+}
+
 func TestGrepKeepsWrappedContinuations(t *testing.T) {
 	v := &logViewer{seen: map[string]bool{}, wrapW: 30}
 	v.append([]types.FilteredLogEvent{

@@ -151,7 +151,7 @@ func NewModel(ctx context.Context, awsCfg *config.AWSConfig, regions []string, a
 	vSearch.Width = 40
 
 	vGrep := textinput.New()
-	vGrep.Placeholder = "grep regex (e.g. ERROR|timeout)…"
+	vGrep.Placeholder = "grep regex (smart case; e.g. error|timeout)…"
 	vGrep.Width = 40
 
 	gSearch.SetValue(groupFilter)
