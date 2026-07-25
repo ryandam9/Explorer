@@ -978,6 +978,12 @@ func formatPreviewText(content, key string) string {
 		}
 		return display
 	}
+	// A JSON document is pretty-printed and coloured whatever the key is
+	// called — content-detected, like the XML path above — so a minified
+	// dump, an extension-less object, or a .json.gz reads indented (#225).
+	if formatted, ok := formatJSONContent(display); ok {
+		return ui.HighlightLang(formatted, "json")
+	}
 	// Syntax-highlight recognised source/data files (by extension). Plain
 	// text and logs have no lexer match and stay uncoloured.
 	return ui.HighlightByExt(display, key)
