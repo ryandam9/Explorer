@@ -78,7 +78,10 @@ Object previews are syntax-highlighted too: opening a recognised source or data
 file (by extension) colours it for readability, and XML or JSON documents are
 detected by *content* — a minified document is pretty-printed and coloured even
 when the key doesn't say `.xml`/`.json` (an extension-less object, a `.txt`, or
-the inner document of a `.gz`). Plain text and logs are shown as-is.
+the inner document of a `.gz`). JSON *streams* format too: NDJSON / JSON Lines
+and Firehose-style concatenated objects are indented document by document, and
+the truncated tail of a capped preview is kept verbatim after the formatted
+part. Plain text and logs are shown as-is.
 
 ## Text preview shortcuts
 
