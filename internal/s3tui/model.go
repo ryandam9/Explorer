@@ -196,6 +196,13 @@ type Model struct {
 	prefix      string
 	endpointURL string
 
+	// objectPathFallback holds a "/"-jump path the user entered without a
+	// trailing slash. It was optimistically loaded as a folder; when that
+	// listing comes back empty, the path is retried as a full object key —
+	// its parent folder is listed and objectJumpTarget selects the entry.
+	objectPathFallback string
+	objectJumpTarget   string
+
 	width   int
 	height  int
 	err     error
@@ -476,7 +483,7 @@ func NewModel(ctx context.Context, awsCfg *config.AWSConfig, region, bucket, pre
 	m.initObjectTable()
 
 	m.prefixInput = textinput.New()
-	m.prefixInput.Placeholder = "Enter prefix (e.g. photos/2024/)"
+	m.prefixInput.Placeholder = "Enter prefix or object path (e.g. photos/2024/ or photos/2024/cat.jpg)"
 	m.prefixInput.CharLimit = 256
 	m.prefixInput.Width = 50
 	m.prefixInput.PromptStyle = lipgloss.NewStyle().Foreground(lipgloss.Color(ui.ColorAccent())).Bold(true)
@@ -653,13 +660,23 @@ func (m *Model) sortObjects(objs []map[string]string) {
 	fieldKey := fields[col].Key
 
 	sort.SliceStable(objs, func(i, j int) bool {
+		// The ".." up-dir entry stays pinned to the very first row.
+		if objs[i]["name"] == ".." || objs[j]["name"] == ".." {
+			return objs[i]["name"] == ".."
+		}
 		// Directories always sort before files regardless of direction.
 		di, dj := objs[i]["type"] == "DIR", objs[j]["type"] == "DIR"
 		if di != dj {
 			return di
 		}
 		if di && dj {
-			return strings.ToLower(objs[i]["name"]) < strings.ToLower(objs[j]["name"])
+			// Folders have no size/date, so they order by name — but honor
+			// the sort direction so R visibly reverses folder-only listings.
+			ni, nj := strings.ToLower(objs[i]["name"]), strings.ToLower(objs[j]["name"])
+			if m.sortAsc {
+				return ni < nj
+			}
+			return ni > nj
 		}
 		if fieldKey == "size" {
 			li := parseSize(objs[i]["size"])
@@ -1239,12 +1256,20 @@ func buildObjectMaps(res *ListObjectsResult, prefix string, flat, includeUp bool
 	}
 
 	for _, o := range res.Objects {
-		name := aws.ToString(o.Key)
+		key := aws.ToString(o.Key)
+		name := key
 		if prefix != "" && strings.HasPrefix(name, prefix) {
 			name = strings.TrimPrefix(name, prefix)
 		}
 		if name == "" {
-			continue
+			// The key equals the prefix. A "/"-terminated key is the folder
+			// placeholder of the folder being listed — skip it. A real object
+			// (a flat-mode prefix naming the exact key) stays visible, shown
+			// by its final path segment.
+			if strings.HasSuffix(key, "/") {
+				continue
+			}
+			name = key[strings.LastIndex(key, "/")+1:]
 		}
 		count++
 		sizeBytes := aws.ToInt64(o.Size)
@@ -2030,7 +2055,15 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.focus = focusObjects
 				m.prefixInput.Blur()
 				m.prefix = m.prefixInput.Value()
-				if m.prefix != "" && !strings.HasSuffix(m.prefix, "/") {
+				m.objectPathFallback = ""
+				m.objectJumpTarget = ""
+				if m.prefix != "" && !strings.HasSuffix(m.prefix, "/") && !m.flatMode {
+					// Optimistically treat the path as a folder. If that
+					// listing comes back empty it is retried as a full object
+					// key — the parent folder is listed and the object
+					// selected (see the objectsLoadedMsg handler). Flat mode
+					// needs neither: its prefix is a free-form key filter.
+					m.objectPathFallback = m.prefix
 					m.prefix += "/"
 					m.prefixInput.SetValue(m.prefix)
 				}
@@ -2409,6 +2442,32 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.updateObjectColumns()
 		m.objectTable.SetRows(m.buildObjectRows())
 
+		// A "/"-jump path without a trailing slash was loaded as a folder. An
+		// empty result means it wasn't one — retry it as a full object key:
+		// list the parent folder and select the entry there.
+		if fallback := m.objectPathFallback; fallback != "" {
+			m.objectPathFallback = ""
+			if emptyObjectListing(m.objectMaps) {
+				parent, target := "", fallback
+				if i := strings.LastIndex(fallback, "/"); i >= 0 {
+					parent, target = fallback[:i+1], fallback[i+1:]
+				}
+				m.prefix = parent
+				m.prefixInput.SetValue(parent)
+				m.objectJumpTarget = target
+				return m, tea.Batch(append(cmds, m.loadObjects())...)
+			}
+		}
+		if target := m.objectJumpTarget; target != "" {
+			m.objectJumpTarget = ""
+			if idx := objectRowIndex(m.objectMaps, target); idx >= 0 {
+				m.objectTable.SetCursor(idx)
+				m.statusMsg = "Jumped to " + target
+			} else {
+				m.statusMsg = fmt.Sprintf("No object or folder named %q in %s", target, displayPrefix(m.prefix))
+			}
+		}
+
 		// Point the details panel at whatever row the cursor lands on, serving
 		// cached metadata if present. On-demand: nothing is fetched on load.
 		m.syncSelectionDetails()
@@ -2516,6 +2575,10 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.loading = false
 		m.detailsLoading = false
 		m.previewLoading = false
+		// A failed load must not leave a "/"-jump fallback armed for a later,
+		// unrelated listing.
+		m.objectPathFallback = ""
+		m.objectJumpTarget = ""
 		m.err = msg.err
 	}
 
@@ -3368,8 +3431,8 @@ const s3AboutText = "This is the dedicated S3 browser. The first screen lists yo
 	"and shown by its inner type, and a .tar/.tar.gz/.tgz opens a browser of its " +
 	"members so you can open any file inside. You can also copy its S3 URI (y), open it " +
 	"in the AWS console (o), generate a 1-hour presigned URL (g) and download it " +
-	"(D). Use / to jump to a prefix, f to flatten the listing, s to sort, and L to " +
-	"load more when a listing is truncated.\n\n" +
+	"(D). Use / to jump to a prefix or a full object path, f to flatten the " +
+	"listing, s to sort, and L to load more when a listing is truncated.\n\n" +
 	"Press ? for the full, context-aware list of keyboard shortcuts."
 
 // helpView renders the help overlay. It is context-aware: only the sections
@@ -3428,7 +3491,7 @@ func (m *Model) helpView() string {
 		sections = append(sections,
 			"",
 			"Objects",
-			"  /                  Jump to prefix",
+			"  /                  Jump to a prefix or full object path",
 			"  :                  Jump to first file/folder whose name contains the typed text",
 			"  p                  Preview object (CSV/Parquet→table, .gz→decompress, .tar→browse members)",
 			"  d                  Load extended metadata for the selected object (on demand)",

@@ -76,6 +76,28 @@ func displayPrefix(prefix string) string {
 	return prefix
 }
 
+// emptyObjectListing reports whether a listing has no real entries — nothing
+// at all, or only the ".." up-dir row.
+func emptyObjectListing(maps []map[string]string) bool {
+	for _, r := range maps {
+		if r["name"] != ".." {
+			return false
+		}
+	}
+	return true
+}
+
+// objectRowIndex finds the row whose name matches target as a file, or as a
+// folder ("target/"), returning -1 when absent.
+func objectRowIndex(maps []map[string]string, target string) int {
+	for i, r := range maps {
+		if r["name"] == target || r["name"] == target+"/" {
+			return i
+		}
+	}
+	return -1
+}
+
 // seqRows returns a new slice of rows where the first element of each row is
 // replaced with its 1-based sequence number. The source rows are not modified.
 func seqRows(rows []table.Row) []table.Row {
