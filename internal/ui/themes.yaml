@@ -12,6 +12,11 @@
 # related role at render time (see the accessors in theme.go).
 #
 # The comment above each theme lists the source feathers palette.
+#
+# tableRowAltBg (the zebra stripe behind alternate CSV/TSV rows) is not a
+# palette colour: it is the theme's border hue at roughly half intensity, so
+# the stripe stays a subtle tint under light cell text instead of the heavy
+# band the raw border colour produced when the role fell back to it.
 
 # feathers: #feca00 #d36328 #cb0300 #b4b9b3 #424847 #000100
 - name: spotted-pardalote
@@ -25,6 +30,7 @@
   muted: "#d36328"
   tableHeader: "#d36328"
   tableHeaderLine: "#424847"
+  tableRowAltBg: "#212423"
   statusBarBg: "#feca00"
   statusBarText: "#000100"
   accent: "#d36328"
@@ -43,6 +49,7 @@
   muted: "#d09a5e"
   tableHeader: "#d09a5e"
   tableHeaderLine: "#442c0e"
+  tableRowAltBg: "#39240d"
   statusBarBg: "#e7aa01"
   statusBarText: "#442c0e"
   accent: "#d09a5e"
@@ -61,6 +68,7 @@
   muted: "#007CBF"
   tableHeader: "#F5A200"
   tableHeaderLine: "#424D0C"
+  tableRowAltBg: "#001a37"
   statusBarBg: "#F5A200"
   statusBarText: "#00346E"
   accent: "#6D8600"
@@ -79,6 +87,7 @@
   muted: "#8098A2"
   tableHeader: "#EB8252"
   tableHeaderLine: "#014820"
+  tableRowAltBg: "#2f3c14"
   statusBarBg: "#EB8252"
   statusBarText: "#014820"
   accent: "#F5DC83"
@@ -97,6 +106,7 @@
   muted: "#b8c9dc"
   tableHeader: "#2f7ab9"
   tableHeaderLine: "#2f533c"
+  tableRowAltBg: "#17291e"
   statusBarBg: "#f4c623"
   statusBarText: "#2f533c"
   accent: "#2f7ab9"
@@ -115,6 +125,7 @@
   muted: "#a29eb8"
   tableHeader: "#bb5645"
   tableHeaderLine: "#4d4019"
+  tableRowAltBg: "#36353a"
   statusBarBg: "#b8a53f"
   statusBarText: "#4d4019"
   accent: "#d0cfe9"
@@ -133,6 +144,7 @@
   muted: "#afbe9f"
   tableHeader: "#7090c9"
   tableHeaderLine: "#214917"
+  tableRowAltBg: "#10240b"
   statusBarBg: "#6eb245"
   statusBarText: "#214917"
   accent: "#d683ad"
@@ -151,6 +163,7 @@
   muted: "#AA7853"
   tableHeader: "#AA7853"
   tableHeaderLine: "#4F3321"
+  tableRowAltBg: "#271910"
   statusBarBg: "#AA7853"
   statusBarText: "#020503"
   accent: "#AA7853"
@@ -169,6 +182,7 @@
   muted: "#A56EB6"
   tableHeader: "#0169C4"
   tableHeaderLine: "#4B1C57"
+  tableRowAltBg: "#0a1a30"
   statusBarBg: "#3EBCB6"
   statusBarText: "#09090C"
   accent: "#A56EB6"
@@ -187,6 +201,7 @@
   muted: "#85773A"
   tableHeader: "#E19E00"
   tableHeaderLine: "#454B56"
+  tableRowAltBg: "#22252b"
   statusBarBg: "#FBEB5B"
   statusBarText: "#201B1E"
   accent: "#727B98"
@@ -205,6 +220,7 @@
   muted: "#AAB9CC"
   tableHeader: "#E9A7BB"
   tableHeaderLine: "#4C5766"
+  tableRowAltBg: "#262b33"
   statusBarBg: "#D05478"
   statusBarText: "#FFD2CF"
   accent: "#8390A2"
@@ -223,6 +239,7 @@
   muted: "#b8bcd8"
   tableHeader: "#c45829"
   tableHeaderLine: "#06213a"
+  tableRowAltBg: "#01203e"
   statusBarBg: "#c45829"
   statusBarText: "#06213a"
   accent: "#ad8d9f"

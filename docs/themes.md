@@ -55,6 +55,12 @@ leave out falls back to a sensible related role (noted below).
 | `tableSelectedText` | Text on the selected table row | `highlightText` |
 | `tableRowAltBg` | Zebra background for alternate rows (CSV/TSV table) | `tableBorder` |
 
+Every built-in theme sets `tableRowAltBg` explicitly to a dark, low-intensity
+tint of its palette, so the zebra stripe stays subtle under the cell text. The
+`tableBorder` fallback only applies if a config override clears the value. If
+the stripe looks too dark or too bright in your terminal, override it per theme
+in `config.yaml` (`ui.themes.<name>.tableRowAltBg`) or from the settings panel.
+
 **Status bar & shortcut hints**
 
 | Role | Used for | Fallback |

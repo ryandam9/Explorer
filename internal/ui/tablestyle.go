@@ -40,11 +40,13 @@ func TableStyles() table.Styles {
 }
 
 // TableStylesZebra is TableStyles with zebra striping enabled: alternate data
-// rows get a subtle background drawn in the themable tableRowAltBg role (which
-// defaults to the table-border colour, and is editable in the settings panel and
-// config.yaml). Used by data-grid views (the CSV/TSV table) where tracing a
-// value to its row matters most; other tables keep the plain TableStyles so the
-// look stays consistent.
+// rows get a subtle background drawn in the themable tableRowAltBg role. Every
+// built-in theme sets it to a dark, low-intensity tint of its palette — border
+// colours are too heavy to paint whole rows — and it stays editable in the
+// settings panel and config.yaml (falling back to tableBorder only when a
+// custom override clears it). Used by data-grid views (the CSV/TSV table)
+// where tracing a value to its row matters most; other tables keep the plain
+// TableStyles so the look stays consistent.
 func TableStylesZebra() table.Styles {
 	s := TableStyles()
 	if bg := ColorTableRowAltBg(); bg != "" {
