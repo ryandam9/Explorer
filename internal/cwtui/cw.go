@@ -204,10 +204,11 @@ func (c *CWLogsClient) ListLogStreams(ctx context.Context, region, logGroupName 
 
 // GetLogEvents retrieves the most recent events from a log group/stream,
 // optionally constrained by a server-side filter pattern. FilterLogEvents
-// pages oldest-first, so it scans a 24-hour lookback window to the end and
-// keeps the last `limit` events.
-func (c *CWLogsClient) GetLogEvents(ctx context.Context, region, logGroupName, logStreamName, filterPattern string, limit int32) ([]types.FilteredLogEvent, error) {
-	start := time.Now().Add(-24 * time.Hour).UnixMilli()
+// pages oldest-first, so it scans the lookback window to the end and keeps
+// the last `limit` events. A narrower lookback scans less data, which is the
+// main lever for query speed on busy groups.
+func (c *CWLogsClient) GetLogEvents(ctx context.Context, region, logGroupName, logStreamName, filterPattern string, lookback time.Duration, limit int32) ([]types.FilteredLogEvent, error) {
+	start := time.Now().Add(-lookback).UnixMilli()
 	return c.GetLogEventsSince(ctx, region, logGroupName, logStreamName, filterPattern, start, limit)
 }
 

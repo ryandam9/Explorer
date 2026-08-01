@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"strings"
+	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/spf13/cobra"
@@ -16,6 +17,7 @@ var (
 	cwGroup  string
 	cwStream string
 	cwFilter string
+	cwSince  string
 	cwTheme  string
 )
 
@@ -32,7 +34,10 @@ list; otherwise the config's aws.regions list is used.`,
   aws_explorer cw --region us-east-1
 
   # Open a group and tail events matching a pattern
-  aws_explorer cw -g /aws/lambda/my-fn -f ERROR`,
+  aws_explorer cw -g /aws/lambda/my-fn -f ERROR
+
+  # Only scan the last 30 minutes of events (faster on busy groups)
+  aws_explorer cw -g /aws/lambda/my-fn --since 30m`,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		ctx, cancel := context.WithCancel(context.Background())
 		defer cancel()
@@ -65,7 +70,15 @@ list; otherwise the config's aws.regions list is used.`,
 			regions = []string{"us-east-1"}
 		}
 
-		m, err := cwtui.NewModel(ctx, cwCfg, regions, scanAll, configFilePath(), AppConfig, cwGroup, cwStream, cwFilter)
+		var since time.Duration
+		if cwSince != "" {
+			var err error
+			if since, err = cwtui.ParseLookback(cwSince); err != nil {
+				return fmt.Errorf("--since: %w", err)
+			}
+		}
+
+		m, err := cwtui.NewModel(ctx, cwCfg, regions, scanAll, configFilePath(), AppConfig, cwGroup, cwStream, cwFilter, since)
 		if err != nil {
 			return fmt.Errorf("initializing CloudWatch Logs TUI: %w", err)
 		}
@@ -83,6 +96,7 @@ func init() {
 	cwCmd.Flags().StringVarP(&cwGroup, "group", "g", "", "Initial CloudWatch log group filter/pattern")
 	cwCmd.Flags().StringVarP(&cwStream, "stream", "s", "", "Initial CloudWatch log stream filter")
 	cwCmd.Flags().StringVarP(&cwFilter, "filter", "f", "", "Initial query pattern for log events")
+	cwCmd.Flags().StringVar(&cwSince, "since", "", "Event query window, e.g. 30m, 2h, 3d (default 24h; the p key cycles it)")
 	cwCmd.Flags().StringVar(&cwTheme, "theme", defaultThemeName, "Color theme ("+strings.Join(ui.ThemeNames(), ", ")+")")
 	registerAlwaysTUIFlag(cwCmd)
 	registerThemeCompletion(cwCmd, ui.ThemeNames())
