@@ -46,13 +46,14 @@ faster. The active window shows in the panel header and the status bar.
 | `/` | Set the server-side query pattern (CloudWatch filter syntax) |
 | `p` | Cycle the query window: 30m → 1h → 3h → 6h → 12h → 24h → 3d → 7d |
 | `t` | Toggle between the plain list and a zebra-striped table (Time / Stream / Message, the same table widget used across the app) |
-| `←`/`→` | In table mode, scroll columns (the time column stays pinned) |
+| `←`/`→` | In table mode, pan long messages sideways in 40-char steps (a `msg panned +N chars` note tracks the offset; ellipses mark text hidden off either edge). Hidden columns are revealed first, and the time column stays pinned |
 | `Enter` | Open the full log viewer for the selected event's target |
 | `W` | Toggle live tail watch mode |
 | `y` / `s` | Copy the selected event / export the listed events |
 
-Table cells clip long messages so the layout stays stable; the full message is
-always available via `Enter` (full log viewer) or `y` (copy). The `Stream`
+Table cells show a 160-character window of each message so the layout stays
+stable; `←`/`→` slide that window across the full text, and the whole message
+is always available via `Enter` (full log viewer) or `y` (copy). The `Stream`
 column appears in group-level search (`G`), where events interleave from many
 streams.
 

@@ -83,9 +83,13 @@ type model struct {
 	lookback          time.Duration // server-side query window (FilterLogEvents StartTime)
 
 	// Table rendering of the events panel ("t"): the shared table widget with
-	// zebra striping, like every other data grid in the app.
+	// zebra striping, like every other data grid in the app. msgShift pans the
+	// message column left by that many runes (←/→) so long messages can be
+	// read without leaving the table; maxMsgLen bounds the pan.
 	eventsTableMode bool
 	eventsTable     table.Model
+	msgShift        int
+	maxMsgLen       int
 
 	// Full log viewer (opened with Enter on an event)
 	viewer logViewer
@@ -461,14 +465,11 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 
 		case "left", "right":
-			// Column scrolling for the events table (the message column can be
-			// wider than the panel).
+			// Pan the events table: hidden columns first, then the message
+			// text itself (the message column is the last one, so plain
+			// column scrolling alone could never reveal the rest of it).
 			if m.view == viewEvents && m.eventsTableMode {
-				if msg.String() == "left" {
-					m.eventsTable.ScrollLeft()
-				} else {
-					m.eventsTable.ScrollRight()
-				}
+				m.panEventsTable(msg.String() == "right")
 			}
 		}
 	}
@@ -1089,7 +1090,16 @@ func (m *model) renderEventsPanel(width int) string {
 		m.eventsTable.SetWidth(width - 2)
 		m.eventsTable.SetHeight(tableH)
 		b.WriteString(m.eventsTable.View() + "\n")
-		b.WriteString(" " + ui.TableScrollIndicator(&m.eventsTable))
+		ind := ui.TableScrollIndicator(&m.eventsTable)
+		if m.msgShift > 0 {
+			pan := ui.MutedStyle().Render(fmt.Sprintf("msg panned +%d chars ◀ ←", m.msgShift))
+			if ind != "" {
+				ind += "  " + pan
+			} else {
+				ind = pan
+			}
+		}
+		b.WriteString(" " + ind)
 	} else {
 		visibleHeight := m.height - 8
 		if visibleHeight < 5 {
@@ -1231,7 +1241,7 @@ func (m *model) getHelpHints() []ui.KeyHint {
 			ui.H("t", tableHint),
 		)
 		if m.eventsTableMode {
-			hints = append(hints, ui.H("←/→", "columns"))
+			hints = append(hints, ui.H("←/→", "pan message"))
 		}
 		hints = append(hints,
 			ui.H("W", "tail watch"),
