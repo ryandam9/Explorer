@@ -21,6 +21,7 @@ import (
 	"github.com/ryandam9/aws_explorer/internal/config"
 	"github.com/ryandam9/aws_explorer/internal/consolelink"
 	"github.com/ryandam9/aws_explorer/internal/debugpane"
+	"github.com/ryandam9/aws_explorer/internal/table"
 	"github.com/ryandam9/aws_explorer/internal/ui"
 )
 
@@ -78,7 +79,13 @@ type model struct {
 	eventSearch       textinput.Model
 	eventSearchActive bool
 	eventsLoading     bool
-	groupLevelSearch  bool // If true, queries entire group instead of specific stream
+	groupLevelSearch  bool          // If true, queries entire group instead of specific stream
+	lookback          time.Duration // server-side query window (FilterLogEvents StartTime)
+
+	// Table rendering of the events panel ("t"): the shared table widget with
+	// zebra striping, like every other data grid in the app.
+	eventsTableMode bool
+	eventsTable     table.Model
 
 	// Full log viewer (opened with Enter on an event)
 	viewer logViewer
@@ -123,8 +130,9 @@ type watchTickMsg struct{}
 // NewModel builds the CloudWatch Logs explorer over one or more regions (all
 // enabled regions when allRegions is true). groupFilter, streamFilter and
 // eventPattern pre-populate the three search inputs (the event pattern is
-// applied server-side on the first event query).
-func NewModel(ctx context.Context, awsCfg *config.AWSConfig, regions []string, allRegions bool, configPath string, appCfg *config.Config, groupFilter, streamFilter, eventPattern string) (tea.Model, error) {
+// applied server-side on the first event query). since bounds how far back
+// event queries scan (0 means the 24h default); the "p" key cycles it later.
+func NewModel(ctx context.Context, awsCfg *config.AWSConfig, regions []string, allRegions bool, configPath string, appCfg *config.Config, groupFilter, streamFilter, eventPattern string, since time.Duration) (tea.Model, error) {
 	client, err := NewCWLogsClient(ctx, awsCfg, regions, allRegions)
 	if err != nil {
 		return nil, err
@@ -158,6 +166,10 @@ func NewModel(ctx context.Context, awsCfg *config.AWSConfig, regions []string, a
 	sSearch.SetValue(streamFilter)
 	eSearch.SetValue(eventPattern)
 
+	if since <= 0 {
+		since = defaultLookback
+	}
+
 	m := &model{
 		ctx:          ctx,
 		awsCfg:       awsCfg,
@@ -172,6 +184,7 @@ func NewModel(ctx context.Context, awsCfg *config.AWSConfig, regions []string, a
 		groupSearch:  gSearch,
 		streamSearch: sSearch,
 		eventSearch:  eSearch,
+		lookback:     since,
 		viewer:       logViewer{search: vSearch, grepInput: vGrep},
 	}
 
@@ -256,6 +269,9 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			// Keep selected index in bounds
 			if m.selectedEventIdx >= len(m.events) {
 				m.selectedEventIdx = max(0, len(m.events)-1)
+			}
+			if m.eventsTableMode {
+				m.buildEventsTable()
 			}
 		}
 
@@ -424,6 +440,36 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.watchMode = false
 				cmds = append(cmds, m.loadEventsCmd())
 			}
+
+		case "t":
+			// Toggle the events panel between the plain list and the shared
+			// zebra-striped table (Time / [Stream] / Message columns).
+			if m.view == viewEvents {
+				m.eventsTableMode = !m.eventsTableMode
+				if m.eventsTableMode {
+					m.buildEventsTable()
+				}
+			}
+
+		case "p":
+			// Cycle the server-side query window (30m → … → 7d). Narrower
+			// windows scan less data, so busy groups answer faster.
+			if m.view == viewEvents {
+				m.lookback = nextLookback(m.lookback)
+				m.eventsLoading = true
+				cmds = append(cmds, m.loadEventsCmd())
+			}
+
+		case "left", "right":
+			// Column scrolling for the events table (the message column can be
+			// wider than the panel).
+			if m.view == viewEvents && m.eventsTableMode {
+				if msg.String() == "left" {
+					m.eventsTable.ScrollLeft()
+				} else {
+					m.eventsTable.ScrollRight()
+				}
+			}
 		}
 	}
 
@@ -489,6 +535,9 @@ func (m *model) navigateList(dir int) tea.Cmd {
 			return nil
 		}
 		m.selectedEventIdx = (m.selectedEventIdx + dir + len(m.events)) % len(m.events)
+		if m.eventsTableMode {
+			m.syncEventsTableCursor()
+		}
 	}
 	return nil
 }
@@ -730,10 +779,11 @@ func (m *model) loadEventsCmd() tea.Cmd {
 		streamName = aws.ToString(m.filteredStreams[m.selectedStreamIdx].LogStreamName)
 	}
 	pattern := m.eventSearch.Value()
+	lookback := m.lookback
 
 	return func() tea.Msg {
-		slog.Info("Fetching log events", "group", grpName, "region", region, "stream", streamName, "pattern", pattern)
-		events, err := m.client.GetLogEvents(m.ctx, region, grpName, streamName, pattern, 100)
+		slog.Info("Fetching log events", "group", grpName, "region", region, "stream", streamName, "pattern", pattern, "window", formatLookback(lookback))
+		events, err := m.client.GetLogEvents(m.ctx, region, grpName, streamName, pattern, lookback, 100)
 		if err != nil {
 			slog.Warn("Fetching log events failed", "group", grpName, "region", region, "error", err.Error())
 		}
@@ -794,6 +844,9 @@ func (m *model) View() string {
 	}
 	statusText := fmt.Sprintf("Region: %s  ·  Groups: %d  ·  Streams: %d  ·  Events: %d",
 		regionLabel, len(m.filteredGroups), len(m.filteredStreams), len(m.events))
+	if m.view == viewEvents {
+		statusText += "  ·  Window: " + formatLookback(m.lookback)
+	}
 	if m.watchMode {
 		statusText += "  ·  [WATCH ACTIVE]"
 	}
@@ -812,6 +865,9 @@ func (m *model) View() string {
 const cwAboutText = "This is the CloudWatch Logs explorer. The sidebar lists log groups; pick " +
 	"one to see its streams, and open a stream (or the whole group) into a " +
 	"full-screen, live-tailing log page.\n\n" +
+	"On the events page, t switches between the plain list and a zebra-striped " +
+	"table, and p cycles the server-side query window (30m up to 7d) — narrower " +
+	"windows scan less data, so busy groups answer faster.\n\n" +
 	"In the log page you can search within the log (/), grep-filter lines (&), " +
 	"pretty-print embedded JSON (J), follow new events (f), and copy or export " +
 	"what you see. Lines are tinted by severity so errors stand out.\n\n" +
@@ -1004,10 +1060,12 @@ func (m *model) renderEventsPanel(width int) string {
 	}
 	b.WriteString(headingStyle.Render(title) + "\n")
 
+	accent := lipgloss.NewStyle().Foreground(lipgloss.Color(ui.ColorAccent()))
+	window := "  ·  Window: last " + accent.Render(formatLookback(m.lookback)) + " (p)"
 	if m.eventSearchActive {
-		b.WriteString(" Query pattern: " + m.eventSearch.View() + "\n")
+		b.WriteString(" Query pattern: " + m.eventSearch.View() + window + "\n")
 	} else {
-		b.WriteString("  Pattern filter: " + lipgloss.NewStyle().Foreground(lipgloss.Color(ui.ColorAccent())).Render(m.eventSearch.Value()) + "  (Press / to set serverside query pattern)\n")
+		b.WriteString("  Pattern filter: " + accent.Render(m.eventSearch.Value()) + "  (Press / to set serverside query pattern)" + window + "\n")
 	}
 
 	b.WriteString("\n")
@@ -1016,6 +1074,22 @@ func (m *model) renderEventsPanel(width int) string {
 		b.WriteString(fmt.Sprintf("  %s Filtering and loading log events…\n", m.spinner.View()))
 	} else if len(m.events) == 0 {
 		b.WriteString("  No matching log events found in this window.\n")
+	} else if m.eventsTableMode {
+		// Shared zebra-striped table. Size it against what the header block
+		// actually renders as (measure, don't assume), leaving one line for
+		// the more-columns indicator so toggling it never reflows the table.
+		// The block ends in "\n", so the consumed lines equal the newline
+		// count (lipgloss.Height would count the empty line after it too).
+		hdrLines := strings.Count(b.String(), "\n")
+		innerH := m.height - 4 // the panel border style pins this content height
+		tableH := innerH - hdrLines - 1
+		if tableH < 3 {
+			tableH = 3
+		}
+		m.eventsTable.SetWidth(width - 2)
+		m.eventsTable.SetHeight(tableH)
+		b.WriteString(m.eventsTable.View() + "\n")
+		b.WriteString(" " + ui.TableScrollIndicator(&m.eventsTable))
 	} else {
 		visibleHeight := m.height - 8
 		if visibleHeight < 5 {
@@ -1145,10 +1219,21 @@ func (m *model) getHelpHints() []ui.KeyHint {
 			ui.H("Esc", "back"),
 		)
 	case focusEvents:
+		tableHint := "table view"
+		if m.eventsTableMode {
+			tableHint = "list view"
+		}
 		hints = append(hints,
 			ui.H("↑/↓", "events"),
 			ui.H("Enter", "full log"),
 			ui.H("/", "pattern"),
+			ui.H("p", "window "+formatLookback(m.lookback)),
+			ui.H("t", tableHint),
+		)
+		if m.eventsTableMode {
+			hints = append(hints, ui.H("←/→", "columns"))
+		}
+		hints = append(hints,
 			ui.H("W", "tail watch"),
 			ui.H("y", "copy"),
 			ui.H("s", "export"),

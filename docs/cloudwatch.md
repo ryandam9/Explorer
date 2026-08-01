@@ -17,6 +17,7 @@ otherwise the config's `aws.regions` list is used.
 | `--group` / `-g` | — | Initial log group filter/pattern |
 | `--stream` / `-s` | — | Initial log stream filter |
 | `--filter` / `-f` | — | Initial query pattern for log events |
+| `--since` | `24h` | Event query window, e.g. `30m`, `2h`, `3d` |
 | `--theme` | `spotted-pardalote` | UI theme name |
 
 ```bash
@@ -25,17 +26,42 @@ otherwise the config's `aws.regions` list is used.
 
 # Open a group and search for errors
 ./bin/aws_explorer cw -g /aws/lambda/my-fn -f ERROR
+
+# Only scan the last 30 minutes of events (faster on busy groups)
+./bin/aws_explorer cw -g /aws/lambda/my-fn --since 30m
 ```
 
 Press `o` on a log group to open it in the CloudWatch console (URL copied;
 browser opened when the session is local).
 
+### Events panel
+
+Opening a stream (`Enter`) or searching a whole group (`G`) lists matching
+events. The query runs server-side (`FilterLogEvents`) over a bounded
+**query window** — narrower windows scan less data, so busy groups answer
+faster. The active window shows in the panel header and the status bar.
+
+| Key | Action |
+|-----|--------|
+| `/` | Set the server-side query pattern (CloudWatch filter syntax) |
+| `p` | Cycle the query window: 30m → 1h → 3h → 6h → 12h → 24h → 3d → 7d |
+| `t` | Toggle between the plain list and a zebra-striped table (Time / Stream / Message, the same table widget used across the app) |
+| `←`/`→` | In table mode, scroll columns (the time column stays pinned) |
+| `Enter` | Open the full log viewer for the selected event's target |
+| `W` | Toggle live tail watch mode |
+| `y` / `s` | Copy the selected event / export the listed events |
+
+Table cells clip long messages so the layout stays stable; the full message is
+always available via `Enter` (full log viewer) or `y` (copy). The `Stream`
+column appears in group-level search (`G`), where events interleave from many
+streams.
+
 ### Full log viewer
 
 Pressing `Enter` on a log event opens the **full log viewer**: a full-screen
-page with the entire log (24-hour lookback, most recent 2000 events) for the
-selected stream — or the whole group in group-level search — that streams new
-events live as they arrive. Each line is tinted by severity (error/fail/panic
+page with the entire log (the selected query window, most recent 2000 events)
+for the selected stream — or the whole group in group-level search — that
+streams new events live as they arrive. Each line is tinted by severity (error/fail/panic
 in red, warnings amber, info/notice in the info color, debug/trace muted) so
 errors stand out while you scroll.
 

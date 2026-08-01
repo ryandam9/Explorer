@@ -404,7 +404,9 @@ func (m *model) loadViewerEventsCmd(initial bool) tea.Cmd {
 	key := m.viewer.key
 	since := m.viewer.lastTS
 	if initial || since == 0 {
-		since = time.Now().Add(-24 * time.Hour).UnixMilli()
+		// The initial backfill honors the selected query window, matching the
+		// events panel it was opened from.
+		since = time.Now().Add(-m.lookback).UnixMilli()
 	}
 	return func() tea.Msg {
 		events, err := m.client.GetLogEventsSince(m.ctx, key.region, key.group, key.stream, key.pattern, since, viewerBackfillLimit)
