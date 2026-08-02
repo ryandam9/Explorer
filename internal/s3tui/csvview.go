@@ -277,6 +277,7 @@ func (m *Model) initCSV(content string) bool {
 	m.csvAll = recs
 	m.csvHeaderRow = 1            // row 1 is the header by default (reset per file)
 	m.csvColFilter = colFilterAll // show every column by default (reset per file)
+	m.csvNames = nil              // a names layout applies to one file only
 	m.csvRecordActive = false
 	if m.csvRowCap == 0 && !m.csvRowCapSet {
 		m.csvRowCap = defaultCSVRowCap
@@ -297,6 +298,7 @@ func (m *Model) initParquet(header []string, rows [][]string, total int64) {
 	m.csvHeaderRow = 1            // the synthesised schema row is the header
 	m.csvColFilter = colFilterAll // show every column by default (reset per file)
 	m.csvDelim = ','              // unused for parquet, kept for a stable info line
+	m.csvNames = nil              // the schema names its columns
 	m.csvRecordActive = false
 	m.parquetFileRows = total
 	if m.csvRowCap == 0 && !m.csvRowCapSet {
@@ -310,7 +312,36 @@ func (m *Model) initParquet(header []string, rows [][]string, total int64) {
 // per csvHeaderRow (1-based; 0 = no header, so column names are synthesised and
 // every row is data). Rows before the header row are skipped — handy for files
 // that prepend their own header section before the real columns.
+//
+// A names-only layout (csvNames, applied via L) is authoritative when set:
+// rows up to and including the configured header row are skipped for position
+// only — their values are never read — and the layout supplies the titles.
+// Extra names surface as empty columns and missing ones are synthesised, so a
+// count mismatch is visible rather than silently mislabelling data.
 func (m *Model) headerAndData() (header []string, data [][]string) {
+	if len(m.csvNames) > 0 && !m.previewIsFixed && !m.previewIsParquet {
+		data = m.csvAll
+		if m.csvHeaderRow > 0 {
+			idx := m.csvHeaderRow - 1
+			if idx >= len(m.csvAll) {
+				idx = len(m.csvAll) - 1
+			}
+			data = m.csvAll[idx+1:]
+		}
+		n := maxCols(data)
+		if len(m.csvNames) > n {
+			n = len(m.csvNames)
+		}
+		header = make([]string, n)
+		for i := range header {
+			if i < len(m.csvNames) {
+				header[i] = m.csvNames[i]
+			} else {
+				header[i] = fmt.Sprintf("col %d", i+1)
+			}
+		}
+		return header, data
+	}
 	if m.csvHeaderRow <= 0 {
 		n := maxCols(m.csvAll)
 		header = make([]string, n)
@@ -997,7 +1028,7 @@ func (m *Model) csvRecordView() string {
 // csvInfoLine summarises the delimiter, header row, the column window and the
 // row window.
 func (m *Model) csvInfoLine() string {
-	header, _ := m.headerAndData()
+	header, data := m.headerAndData()
 	cols := len(header)
 	if m.previewIsParquet {
 		return m.parquetInfoLine(cols)
@@ -1010,6 +1041,16 @@ func (m *Model) csvInfoLine() string {
 	headerPart := fmt.Sprintf("header: row %d", m.csvHeaderRow)
 	if m.csvHeaderRow == 0 {
 		headerPart = "header: none"
+	}
+	if len(m.csvNames) > 0 {
+		headerPart = "names: layout"
+		if m.csvHeaderRow > 0 {
+			headerPart += fmt.Sprintf(" (rows 1-%d skipped)", m.csvHeaderRow)
+		}
+		// A name/column count mismatch must be stated, not left to inference.
+		if dataCols := maxCols(data); dataCols != len(m.csvNames) {
+			headerPart += fmt.Sprintf(" — %d names for %d data columns", len(m.csvNames), dataCols)
+		}
 	}
 	rowsPart := fmt.Sprintf("%d rows", m.csvTotal)
 	if m.csvHidden > 0 {
