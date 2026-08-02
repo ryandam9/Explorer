@@ -51,6 +51,7 @@ faster. The active window shows in the panel header and the status bar.
 | `J` | In table mode, toggle JSON splitting (on by default): structured events get one column per top-level JSON field, numbered `(1) (2) …` for orientation, with a `Message` column holding whatever wasn't JSON (plain-text events, prefixes like Lambda's `INFO` tag, suffixes). Off = plain Time / Stream / Message |
 | `←`/`→` | In table mode, pan long messages sideways in 40-char steps (a `msg panned +N chars` note tracks the offset; ellipses mark text hidden off either edge). Hidden columns are revealed first, and the time column stays pinned |
 | `Enter` | Open the full log viewer for the selected event's target |
+| `v` | Record view: the selected event vertically, with every JSON field's **full value** (table cells clip at 80/160 chars; this is the escape hatch). Scrollable, `y` copies the record, `Esc` closes |
 | `W` | Toggle live tail watch mode |
 | `y` / `s` | Copy the selected event / export the listed events |
 

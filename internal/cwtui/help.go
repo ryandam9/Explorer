@@ -37,6 +37,7 @@ func helpSections() []helpSection {
 		{"Events", []row{
 			{"↑/↓, j/k", "Navigate events"},
 			{"Enter", "Open the full log viewer"},
+			{"v", "Record view: every field of the event in full, unclipped"},
 			{"/", "Server-side query pattern (CloudWatch filter syntax)"},
 			{"p", "Cycle the query window: 30m → 1h → … → 24h → 3d → 7d"},
 			{"t", "Toggle the zebra-striped table view"},

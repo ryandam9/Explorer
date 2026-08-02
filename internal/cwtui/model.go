@@ -14,6 +14,7 @@ import (
 	"github.com/aws/aws-sdk-go-v2/service/cloudwatchlogs/types"
 	"github.com/charmbracelet/bubbles/spinner"
 	"github.com/charmbracelet/bubbles/textinput"
+	"github.com/charmbracelet/bubbles/viewport"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/dustin/go-humanize"
@@ -98,6 +99,12 @@ type model struct {
 
 	// Full log viewer (opened with Enter on an event)
 	viewer logViewer
+
+	// Event record view ("v" on an event): the selected event vertically with
+	// every field's full value, unclipped.
+	recordActive bool
+	recordVP     viewport.Model
+	recordText   string // plain text of the open record, for y (copy)
 
 	// Watch Mode (Live tailing)
 	watchMode bool
@@ -328,6 +335,13 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, tea.Batch(cmds...)
 		}
 
+		// Event record view: owns its scroll/copy/close keys; everything else
+		// is ignored so a stray key can't mutate the browser underneath.
+		if m.recordActive {
+			m.handleRecordKeys(msg, &cmds)
+			return m, tea.Batch(cmds...)
+		}
+
 		// Full log viewer captures all keys while open
 		if m.viewer.active {
 			m.handleViewerKeys(msg, &cmds)
@@ -499,6 +513,13 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			// column scrolling alone could never reveal the rest of it).
 			if m.view == viewEvents && m.eventsTableMode {
 				m.panEventsTable(msg.String() == "right")
+			}
+
+		case "v":
+			// Record view: the selected event vertically, every field's full
+			// value unclipped — the escape hatch from table-cell truncation.
+			if m.view == viewEvents {
+				m.openEventRecord()
 			}
 		}
 	}
@@ -888,10 +909,13 @@ func (m *model) View() string {
 	sb.WriteString(ui.StatusBar(m.width, statusText, m.getHelpHints()))
 
 	frame := m.applyToast(sb.String())
-	if m.showAbout {
+	switch {
+	case m.showAbout:
 		frame = ui.OverlayCenterBlank(ui.AboutView("About — CloudWatch Logs", cwAboutText, ui.AboutWidth(m.width)), m.width, m.height)
-	} else if m.showHelp {
+	case m.showHelp:
 		frame = ui.OverlayCenterBlank(m.helpOverlay(), m.width, m.height)
+	case m.recordActive:
+		frame = ui.OverlayCenterBlank(m.renderEventRecord(), m.width, m.height)
 	}
 	return m.debug.Overlay(frame, m.width, m.height)
 }
@@ -1216,6 +1240,15 @@ func (m *model) getBorderColor(area focusArea) string {
 func (m *model) getHelpHints() []ui.KeyHint {
 	var hints []ui.KeyHint
 
+	if m.recordActive {
+		return []ui.KeyHint{
+			ui.H("↑/↓", "scroll"),
+			ui.H("PgUp/PgDn", "page"),
+			ui.H("y", "copy record"),
+			ui.H("Esc", "close"),
+		}
+	}
+
 	if m.viewer.active {
 		if m.viewer.searchActive {
 			return []ui.KeyHint{
@@ -1274,6 +1307,7 @@ func (m *model) getHelpHints() []ui.KeyHint {
 		hints = append(hints,
 			ui.H("↑/↓", "events"),
 			ui.H("Enter", "full log"),
+			ui.H("v", "record"),
 			ui.H("/", "pattern"),
 			ui.H("p", "window "+formatLookback(m.lookback)),
 			ui.H("t", tableHint),
