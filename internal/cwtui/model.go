@@ -83,9 +83,18 @@ type model struct {
 	lookback          time.Duration // server-side query window (FilterLogEvents StartTime)
 
 	// Table rendering of the events panel ("t"): the shared table widget with
-	// zebra striping, like every other data grid in the app.
+	// zebra striping, like every other data grid in the app. msgShift pans the
+	// message column left by that many runes (←/→) so long messages can be
+	// read without leaving the table; maxMsgLen bounds the pan. jsonSplit
+	// ("J") breaks structured JSON messages into one column per top-level
+	// field; eventsSplit/hiddenFields report what the current build did.
 	eventsTableMode bool
 	eventsTable     table.Model
+	msgShift        int
+	maxMsgLen       int
+	jsonSplit       bool
+	eventsSplit     bool
+	hiddenFields    int
 
 	// Full log viewer (opened with Enter on an event)
 	viewer logViewer
@@ -96,6 +105,10 @@ type model struct {
 	// showAbout toggles the "what is this page" overlay ("i"), shown over the
 	// group/stream browser.
 	showAbout bool
+
+	// showHelp toggles the "?" key-reference overlay. Unlike showAbout it also
+	// works over the full log viewer, since the viewer has its own key set.
+	showHelp bool
 
 	// TUI Utilities
 	spinner  spinner.Model
@@ -185,6 +198,7 @@ func NewModel(ctx context.Context, awsCfg *config.AWSConfig, regions []string, a
 		streamSearch: sSearch,
 		eventSearch:  eSearch,
 		lookback:     since,
+		jsonSplit:    true, // split structured JSON events into columns by default
 		viewer:       logViewer{search: vSearch, grepInput: vGrep},
 	}
 
@@ -307,6 +321,13 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, tea.Batch(cmds...)
 		}
 
+		// Help overlay: static key reference, any key closes it. Checked
+		// before the viewer guard so it also closes over the full log viewer.
+		if m.showHelp {
+			m.showHelp = false
+			return m, tea.Batch(cmds...)
+		}
+
 		// Full log viewer captures all keys while open
 		if m.viewer.active {
 			m.handleViewerKeys(msg, &cmds)
@@ -419,6 +440,9 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case ui.KeyAbout:
 			m.showAbout = true
 
+		case ui.KeyHelp:
+			m.showHelp = true
+
 		case "W":
 			if m.view == viewEvents {
 				m.watchMode = !m.watchMode
@@ -451,6 +475,15 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				}
 			}
 
+		case "J":
+			// In table mode, toggle splitting structured JSON messages into
+			// one column per top-level field (mirrors the viewer's J, which
+			// pretty-prints the same JSON).
+			if m.view == viewEvents && m.eventsTableMode {
+				m.jsonSplit = !m.jsonSplit
+				m.buildEventsTable()
+			}
+
 		case "p":
 			// Cycle the server-side query window (30m → … → 7d). Narrower
 			// windows scan less data, so busy groups answer faster.
@@ -461,14 +494,11 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 
 		case "left", "right":
-			// Column scrolling for the events table (the message column can be
-			// wider than the panel).
+			// Pan the events table: hidden columns first, then the message
+			// text itself (the message column is the last one, so plain
+			// column scrolling alone could never reveal the rest of it).
 			if m.view == viewEvents && m.eventsTableMode {
-				if msg.String() == "left" {
-					m.eventsTable.ScrollLeft()
-				} else {
-					m.eventsTable.ScrollRight()
-				}
+				m.panEventsTable(msg.String() == "right")
 			}
 		}
 	}
@@ -801,7 +831,11 @@ func (m *model) View() string {
 	}
 
 	if m.viewer.active {
-		return m.debug.Overlay(m.applyToast(m.renderViewer()), m.width, m.height)
+		frame := m.applyToast(m.renderViewer())
+		if m.showHelp {
+			frame = ui.OverlayCenterBlank(m.helpOverlay(), m.width, m.height)
+		}
+		return m.debug.Overlay(frame, m.width, m.height)
 	}
 
 	var sb strings.Builder
@@ -856,6 +890,8 @@ func (m *model) View() string {
 	frame := m.applyToast(sb.String())
 	if m.showAbout {
 		frame = ui.OverlayCenterBlank(ui.AboutView("About — CloudWatch Logs", cwAboutText, ui.AboutWidth(m.width)), m.width, m.height)
+	} else if m.showHelp {
+		frame = ui.OverlayCenterBlank(m.helpOverlay(), m.width, m.height)
 	}
 	return m.debug.Overlay(frame, m.width, m.height)
 }
@@ -873,7 +909,7 @@ const cwAboutText = "This is the CloudWatch Logs explorer. The sidebar lists log
 	"what you see. Lines are tinted by severity so errors stand out.\n\n" +
 	"You often arrive here by pressing L on a resource in the Summary or VPC " +
 	"explorer, which pre-filters to that resource's log group. The status bar " +
-	"shows the keys usable right now."
+	"shows the keys usable right now; ? opens the full key reference."
 
 // applyToast paints the active toast notification over the rendered view.
 func (m *model) applyToast(rendered string) string {
@@ -1089,7 +1125,18 @@ func (m *model) renderEventsPanel(width int) string {
 		m.eventsTable.SetWidth(width - 2)
 		m.eventsTable.SetHeight(tableH)
 		b.WriteString(m.eventsTable.View() + "\n")
-		b.WriteString(" " + ui.TableScrollIndicator(&m.eventsTable))
+		parts := make([]string, 0, 3)
+		if s := ui.TableScrollIndicator(&m.eventsTable); s != "" {
+			parts = append(parts, s)
+		}
+		if m.hiddenFields > 0 {
+			// A capped field set must never read as "all fields" (§ no silent caps).
+			parts = append(parts, ui.MutedStyle().Render(fmt.Sprintf("+%d more json fields in raw event", m.hiddenFields)))
+		}
+		if m.msgShift > 0 {
+			parts = append(parts, ui.MutedStyle().Render(fmt.Sprintf("msg panned +%d chars ◀ ←", m.msgShift)))
+		}
+		b.WriteString(" " + strings.Join(parts, "  "))
 	} else {
 		visibleHeight := m.height - 8
 		if visibleHeight < 5 {
@@ -1198,6 +1245,7 @@ func (m *model) getHelpHints() []ui.KeyHint {
 			ui.H("J", "format json"),
 			ui.H("y", copyHint),
 			ui.H("s", exportHint),
+			ui.H("?", "help"),
 			ui.H("Esc", "close"),
 		}
 	}
@@ -1231,7 +1279,11 @@ func (m *model) getHelpHints() []ui.KeyHint {
 			ui.H("t", tableHint),
 		)
 		if m.eventsTableMode {
-			hints = append(hints, ui.H("←/→", "columns"))
+			jsonHint := "split json"
+			if m.eventsSplit {
+				jsonHint = "raw message"
+			}
+			hints = append(hints, ui.H("←/→", "pan message"), ui.H("J", jsonHint))
 		}
 		hints = append(hints,
 			ui.H("W", "tail watch"),
@@ -1243,6 +1295,7 @@ func (m *model) getHelpHints() []ui.KeyHint {
 
 	hints = append(hints,
 		ui.H("Tab", "panel"),
+		ui.H("?", "help"),
 		ui.H("~", "debug"),
 		ui.H("i", "about"),
 		ui.H("q", "quit"),

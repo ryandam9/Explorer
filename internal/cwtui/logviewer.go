@@ -496,6 +496,9 @@ func (m *model) handleViewerKeys(msg tea.KeyMsg, cmds *[]tea.Cmd) {
 	case "esc", "q":
 		v.active = false
 
+	case ui.KeyHelp:
+		m.showHelp = true
+
 	case "up", "k":
 		v.follow = false
 		v.scrollBy(-1, bodyH)

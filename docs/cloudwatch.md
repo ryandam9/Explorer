@@ -32,7 +32,9 @@ otherwise the config's `aws.regions` list is used.
 ```
 
 Press `o` on a log group to open it in the CloudWatch console (URL copied;
-browser opened when the session is local).
+browser opened when the session is local). Press `?` anywhere — including
+inside the full log viewer — for the full key reference; the status bar only
+shows the keys usable right now (eliding on narrow terminals).
 
 ### Events panel
 
@@ -45,14 +47,21 @@ faster. The active window shows in the panel header and the status bar.
 |-----|--------|
 | `/` | Set the server-side query pattern (CloudWatch filter syntax) |
 | `p` | Cycle the query window: 30m → 1h → 3h → 6h → 12h → 24h → 3d → 7d |
-| `t` | Toggle between the plain list and a zebra-striped table (Time / Stream / Message, the same table widget used across the app) |
-| `←`/`→` | In table mode, scroll columns (the time column stays pinned) |
+| `t` | Toggle between the plain list and a zebra-striped table (the same table widget used across the app) |
+| `J` | In table mode, toggle JSON splitting (on by default): structured events get one column per top-level JSON field, numbered `(1) (2) …` for orientation, with a `Message` column holding whatever wasn't JSON (plain-text events, prefixes like Lambda's `INFO` tag, suffixes). Off = plain Time / Stream / Message |
+| `←`/`→` | In table mode, pan long messages sideways in 40-char steps (a `msg panned +N chars` note tracks the offset; ellipses mark text hidden off either edge). Hidden columns are revealed first, and the time column stays pinned |
 | `Enter` | Open the full log viewer for the selected event's target |
 | `W` | Toggle live tail watch mode |
 | `y` / `s` | Copy the selected event / export the listed events |
 
-Table cells clip long messages so the layout stays stable; the full message is
-always available via `Enter` (full log viewer) or `y` (copy). The `Stream`
+With JSON splitting on, field columns come from the union of top-level keys
+across the listed events in first-appearance order (capped at 24 — a
+`+N more json fields` note appears when the cap bites); JSON embedded after a
+prefix (`2026-08-02T10:00:00Z  INFO  {…}`) is recognized, numbers keep their
+source formatting, and `null` is distinguished from an absent field (blank).
+Message cells show a 160-character window so the layout stays stable; `←`/`→`
+slide that window across the full text, and the whole message is always
+available via `Enter` (full log viewer) or `y` (copy). The `Stream`
 column appears in group-level search (`G`), where events interleave from many
 streams.
 
@@ -76,4 +85,5 @@ errors stand out while you scroll.
 | `n` / `N` | Jump to next / previous match |
 | `y` | Copy the entire log to the clipboard — or only the matching lines while a grep filter is applied |
 | `s` | Export the log to `~/.aws_explorer/logs/` — or only the matching lines (file suffixed `-grep`) while a filter is applied |
+| `?` | Full key reference |
 | `Esc` / `q` | Close the viewer |

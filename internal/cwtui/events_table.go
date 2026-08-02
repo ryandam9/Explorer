@@ -94,19 +94,69 @@ func ParseLookback(s string) (time.Duration, error) {
 
 // maxEventCell caps how many runes of a log message go into a table cell. The
 // shared table sizes each column to its widest cell, so an unclipped megabyte
-// message would blow up layout; the full text stays reachable via Enter (full
-// log viewer) and y (copy).
+// message would blow up layout; ←/→ pan the window across the full text, which
+// also stays reachable via Enter (full log viewer) and y (copy).
 const maxEventCell = 160
 
-// clipEventCell flattens a log message onto one line and truncates it for a
-// table cell, marking the cut with an ellipsis.
+// msgShiftStep is how many runes one ←/→ press pans the message window by.
+const msgShiftStep = 40
+
+// flattenEventText puts a log message on one line for a table cell.
+func flattenEventText(s string) string {
+	return strings.NewReplacer("\r\n", " ", "\n", " ", "\r", " ", "\t", " ").Replace(s)
+}
+
+// clipEventCell flattens a value and truncates it for a table cell, marking
+// the cut with an ellipsis. Used for cells that don't pan (stream names).
 func clipEventCell(s string) string {
-	s = strings.NewReplacer("\r\n", " ", "\n", " ", "\r", " ", "\t", " ").Replace(s)
-	r := []rune(s)
-	if len(r) <= maxEventCell {
-		return s
+	return eventMessageCell(s, 0)
+}
+
+// eventMessageCell renders the visible window of a message cell: the text is
+// flattened, shifted left by `shift` runes and capped at maxEventCell. Leading
+// and trailing ellipses mark text panned off either edge, so a truncated cell
+// is never mistaken for the whole message.
+func eventMessageCell(s string, shift int) string {
+	r := []rune(flattenEventText(s))
+	if shift <= 0 {
+		if len(r) <= maxEventCell {
+			return string(r)
+		}
+		return string(r[:maxEventCell-1]) + "…"
 	}
-	return string(r[:maxEventCell-1]) + "…"
+	if shift >= len(r) {
+		return "…" // fully panned past this (shorter) message
+	}
+	w := r[shift:]
+	if len(w) <= maxEventCell-1 {
+		return "…" + string(w)
+	}
+	return "…" + string(w[:maxEventCell-2]) + "…"
+}
+
+// maxEventMsgLen returns the longest flattened message length, the bound for
+// how far the message window can pan.
+func maxEventMsgLen(events []types.FilteredLogEvent) int {
+	longest := 0
+	for _, ev := range events {
+		if n := len([]rune(flattenEventText(aws.ToString(ev.Message)))); n > longest {
+			longest = n
+		}
+	}
+	return longest
+}
+
+// clampMsgShift keeps the pan offset useful after events change: never
+// negative, and never so far right that even the longest message has panned
+// out of view (at least the last msgShiftStep runes stay visible).
+func clampMsgShift(shift, maxLen int) int {
+	if maxShift := maxLen - msgShiftStep; shift > maxShift {
+		shift = maxShift
+	}
+	if shift < 0 {
+		return 0
+	}
+	return shift
 }
 
 // eventTableColumns returns the column set for the events table. The stream
@@ -120,34 +170,78 @@ func eventTableColumns(withStream bool) []table.Column {
 	return append(cols, table.Column{Title: "Message", Width: 4})
 }
 
-// eventTableRows maps events onto rows matching eventTableColumns. Timestamps
-// include the date because the query window can span days.
-func eventTableRows(events []types.FilteredLogEvent, withStream bool) []table.Row {
+// eventTimestamp renders an event's timestamp for the table; the date is
+// included because the query window can span days.
+func eventTimestamp(ev types.FilteredLogEvent) string {
+	t := time.Unix(0, aws.ToInt64(ev.Timestamp)*int64(time.Millisecond))
+	return t.Format("2006-01-02 15:04:05.000")
+}
+
+// eventTableRows maps events onto rows matching eventTableColumns, with the
+// message column panned msgShift runes to the left.
+func eventTableRows(events []types.FilteredLogEvent, withStream bool, msgShift int) []table.Row {
 	rows := make([]table.Row, 0, len(events))
 	for _, ev := range events {
-		t := time.Unix(0, aws.ToInt64(ev.Timestamp)*int64(time.Millisecond))
-		row := table.Row{t.Format("2006-01-02 15:04:05.000")}
+		row := table.Row{eventTimestamp(ev)}
 		if withStream {
 			row = append(row, clipEventCell(aws.ToString(ev.LogStreamName)))
 		}
-		rows = append(rows, append(row, clipEventCell(aws.ToString(ev.Message))))
+		rows = append(rows, append(row, eventMessageCell(aws.ToString(ev.Message), msgShift)))
 	}
 	return rows
 }
 
 // buildEventsTable (re)creates the shared-widget table from the current
-// events, preserving the selection. Called when table mode turns on and when
-// a fresh event batch lands while it is on.
+// events, preserving the selection. Called when table mode turns on, when the
+// JSON-split toggle flips, and when a fresh event batch lands while it is on.
 func (m *model) buildEventsTable() {
-	withStream := m.groupLevelSearch
+	data := buildEventTableData(m.events, m.groupLevelSearch, m.jsonSplit, m.msgShift)
+	m.msgShift = data.shift
+	m.maxMsgLen = data.maxMsgLen
+	m.hiddenFields = data.hiddenFields
+	m.eventsSplit = data.split
 	m.eventsTable = table.New(
-		table.WithColumns(eventTableColumns(withStream)),
-		table.WithRows(eventTableRows(m.events, withStream)),
+		table.WithColumns(data.cols),
+		table.WithRows(data.rows),
 		table.WithFocused(true),
 		table.WithStyles(ui.TableStylesZebra()),
-		table.WithFrozenColumns(1), // pin the time column when scrolling wide messages
+		table.WithFrozenColumns(1),       // pin the time column while panning/scrolling
+		table.WithColNumbers(data.split), // number the field columns for orientation
 	)
 	m.eventsTable.SetCursor(m.selectedEventIdx)
+}
+
+// refreshEventsTableRows re-renders the rows for a new pan offset without
+// recreating the table, so the cursor and scroll position stay put. The
+// events are unchanged, so the derived columns are identical by construction.
+func (m *model) refreshEventsTableRows() {
+	data := buildEventTableData(m.events, m.groupLevelSearch, m.jsonSplit, m.msgShift)
+	m.msgShift = data.shift
+	m.eventsTable.SetRows(data.rows)
+}
+
+// panEventsTable handles ←/→ in table mode. Right first reveals hidden
+// columns (group search can push the message column off), then pans the
+// message window; left pans back before un-scrolling columns, so the two
+// directions retrace each other.
+func (m *model) panEventsTable(right bool) {
+	if right {
+		if _, hiddenRight := m.eventsTable.ColScrollInfo(); hiddenRight > 0 {
+			m.eventsTable.ScrollRight()
+			return
+		}
+		if shifted := clampMsgShift(m.msgShift+msgShiftStep, m.maxMsgLen); shifted != m.msgShift {
+			m.msgShift = shifted
+			m.refreshEventsTableRows()
+		}
+		return
+	}
+	if m.msgShift > 0 {
+		m.msgShift = clampMsgShift(m.msgShift-msgShiftStep, m.maxMsgLen)
+		m.refreshEventsTableRows()
+		return
+	}
+	m.eventsTable.ScrollLeft()
 }
 
 // syncEventsTableCursor moves the table cursor to selectedEventIdx using the

@@ -99,7 +99,7 @@ func TestEventTableRows(t *testing.T) {
 		},
 	}
 
-	rows := eventTableRows(events, true)
+	rows := eventTableRows(events, true, 0)
 	if len(rows) != 2 {
 		t.Fatalf("rows = %d, want 2", len(rows))
 	}
@@ -125,9 +125,99 @@ func TestEventTableRows(t *testing.T) {
 	}
 
 	// Without the stream column each row is just Time + Message.
-	rows = eventTableRows(events, false)
+	rows = eventTableRows(events, false, 0)
 	if len(rows[0]) != 2 {
 		t.Errorf("row width without stream = %d, want 2", len(rows[0]))
+	}
+}
+
+// ←/→ pan the message window across the full text; ellipses mark text hidden
+// off either edge so a partial view is never mistaken for the whole message.
+func TestEventMessageCellPanning(t *testing.T) {
+	long := strings.Repeat("abcdefghij", 50) // 500 runes
+
+	if got := eventMessageCell("short", 0); got != "short" {
+		t.Errorf("unshifted short = %q", got)
+	}
+
+	// Unshifted long: head window with trailing ellipsis.
+	got := eventMessageCell(long, 0)
+	if !strings.HasPrefix(got, "abcdefghij") || !strings.HasSuffix(got, "…") {
+		t.Errorf("unshifted long = %q", got)
+	}
+
+	// Mid-pan: both edges elided, window starts at the shift offset.
+	got = eventMessageCell(long, 40)
+	if !strings.HasPrefix(got, "…") || !strings.HasSuffix(got, "…") {
+		t.Errorf("mid-pan should be elided on both edges: %q", got)
+	}
+	if want := string([]rune(long)[40:50]); !strings.Contains(got, want) {
+		t.Errorf("mid-pan window should start at rune 40: %q", got)
+	}
+	if n := len([]rune(got)); n != maxEventCell {
+		t.Errorf("mid-pan cell runes = %d, want %d", n, maxEventCell)
+	}
+
+	// Panned to the tail: leading ellipsis only, remainder shown in full.
+	got = eventMessageCell(long, 460)
+	if want := "…" + string([]rune(long)[460:]); got != want {
+		t.Errorf("tail pan = %q, want %q", got, want)
+	}
+
+	// Panned past a shorter message: a bare ellipsis, not an empty cell.
+	if got := eventMessageCell("tiny", 40); got != "…" {
+		t.Errorf("past-the-end pan = %q, want …", got)
+	}
+}
+
+func TestClampMsgShift(t *testing.T) {
+	cases := []struct {
+		shift, maxLen, want int
+	}{
+		{0, 500, 0},
+		{40, 500, 40},
+		{480, 500, 460}, // keep the last msgShiftStep runes reachable
+		{400, 100, 60},  // events replaced by shorter ones: pull the pan back
+		{40, 0, 0},      // no events
+		{-10, 500, 0},   // never negative
+		{40, 20, 0},     // maxLen below one step: no panning possible
+	}
+	for _, c := range cases {
+		if got := clampMsgShift(c.shift, c.maxLen); got != c.want {
+			t.Errorf("clampMsgShift(%d, %d) = %d, want %d", c.shift, c.maxLen, got, c.want)
+		}
+	}
+}
+
+// panEventsTable must pan the message window right and retrace left, with the
+// pan bounded by the longest message.
+func TestPanEventsTable(t *testing.T) {
+	m := &model{}
+	m.events = []types.FilteredLogEvent{
+		{Timestamp: aws.Int64(1700000000000), Message: aws.String(strings.Repeat("x", 100))},
+		{Timestamp: aws.Int64(1700000000000), Message: aws.String("short")},
+	}
+	m.buildEventsTable()
+
+	m.panEventsTable(true)
+	if m.msgShift != msgShiftStep {
+		t.Fatalf("after one right pan msgShift = %d, want %d", m.msgShift, msgShiftStep)
+	}
+	// The longest message is 100 runes, so the pan stops at 100-40=60.
+	for i := 0; i < 5; i++ {
+		m.panEventsTable(true)
+	}
+	if m.msgShift != 60 {
+		t.Errorf("pan should stop at 60 (maxLen-step), got %d", m.msgShift)
+	}
+	m.panEventsTable(false)
+	m.panEventsTable(false)
+	if m.msgShift != 0 {
+		t.Errorf("panning back should reach 0, got %d", m.msgShift)
+	}
+	m.panEventsTable(false) // at 0: no-op (no hidden columns to unscroll)
+	if m.msgShift != 0 {
+		t.Errorf("msgShift went negative: %d", m.msgShift)
 	}
 }
 

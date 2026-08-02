@@ -91,6 +91,13 @@ type Column struct {
 	// have been filtered out (e.g. showing only the populated columns of a
 	// 400-column file). 0 means "use the computed ordinal" (the default).
 	Number int
+
+	// Note is a short per-column annotation rendered after the ordinal on the
+	// "(1) (2) …" header line, e.g. the byte positions of a fixed-width column
+	// ("(2) 11-24"). It only renders when column numbers are enabled
+	// (WithColNumbers) and the column is not NoNumber. The column is widened so
+	// the note is never clipped.
+	Note string
 }
 
 // KeyMap defines keybindings. It satisfies to the help.KeyMap interface, which
@@ -265,6 +272,15 @@ func (m *Model) fitColumns() {
 			continue
 		}
 		w := max(base, runewidth.StringWidth(m.cols[i].Title))
+		if m.colNumbers && m.cols[i].Note != "" && !m.cols[i].NoNumber {
+			// Reserve room for "(nn) " + the note so the annotation line is
+			// never clipped mid-note.
+			n := m.cols[i].Number
+			if n <= 0 {
+				n = m.colOrdinal(i)
+			}
+			w = max(w, runewidth.StringWidth(fmt.Sprintf("(%d) %s", n, m.cols[i].Note)))
+		}
 		for _, row := range m.rows {
 			if i < len(row) {
 				if cw := runewidth.StringWidth(row[i]); cw > w {
@@ -888,6 +904,7 @@ func (m Model) headersView() string {
 	// and dimmed, aligned under its title using the same per-column width.
 	// Columns flagged NoNumber (e.g. a leading "!" marker) are left blank and
 	// don't consume an ordinal, so the first real data column is numbered (1).
+	// A column's Note (e.g. fixed-width byte positions) follows the ordinal.
 	nums := make([]string, 0, len(vis))
 	for _, i := range vis {
 		col := m.cols[i]
@@ -897,7 +914,11 @@ func (m Model) headersView() string {
 			if n <= 0 {
 				n = m.colOrdinal(i)
 			}
-			label = runewidth.Truncate(fmt.Sprintf("(%d)", n), col.Width, "…")
+			label = fmt.Sprintf("(%d)", n)
+			if col.Note != "" {
+				label += " " + col.Note
+			}
+			label = runewidth.Truncate(label, col.Width, "…")
 		}
 		cell := m.colStyle(i).Align(lipgloss.Center).Render(label)
 		nums = append(nums, m.styles.Header.Faint(true).Render(cell))

@@ -369,6 +369,12 @@ func (m *Model) buildCSVTable() {
 			// Show each column's original file position so filtering away the
 			// empty columns doesn't renumber the survivors.
 			col.Number = m.dataOrdinal(i)
+			// Fixed-width columns also carry their layout positions, so the
+			// numbering line reads "(2) 11-24" — sequence plus the 1-based
+			// start–end bytes straight from the user's layout file.
+			if pos := m.fixedColPos(i); pos != "" {
+				col.Note = pos
+			}
 		}
 		cols[n] = col
 	}
@@ -853,6 +859,16 @@ func (m *Model) openCSVRecord() {
 	if seqW < 1 {
 		seqW = 1
 	}
+
+	// Fixed-width previews add each field's layout positions ("[1-10]") between
+	// the name and the value, aligned so the values still line up.
+	posW := 0
+	for _, h := range cols {
+		if p := m.fixedColPos(h); p != "" && len(p)+2 > posW {
+			posW = len(p) + 2 // "[" + p + "]"
+		}
+	}
+
 	var b strings.Builder
 	for _, h := range cols {
 		name := ""
@@ -868,6 +884,14 @@ func (m *Model) openCSVRecord() {
 		val := ""
 		if h < len(rec) {
 			val = strings.ReplaceAll(rec[h], "\r", "")
+		}
+		if posW > 0 {
+			pos := ""
+			if p := m.fixedColPos(h); p != "" {
+				pos = "[" + p + "]"
+			}
+			fmt.Fprintf(&b, "%*d: %-*s %-*s : %s\n", seqW, m.dataOrdinal(h), labelW, name, posW, pos, val)
+			continue
 		}
 		fmt.Fprintf(&b, "%*d: %-*s : %s\n", seqW, m.dataOrdinal(h), labelW, name, val)
 	}
