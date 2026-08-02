@@ -203,15 +203,18 @@ func (m *Model) applyLayoutPrompt() {
 	m.lastLayoutPath = path
 	m.enteringLayout = false
 	m.layoutErr = ""
-	m.initFixed(recs, bad)
+	m.initFixed(recs, fields, bad)
 }
 
 // initFixed loads fixed-width records into the shared table. Mirrors initParquet
 // so the existing table, record view, row-window and copy-as-Markdown machinery
-// all work unchanged; the schema is fixed (no delimiter/header controls).
-func (m *Model) initFixed(recs [][]string, badRows int) {
+// all work unchanged; the schema is fixed (no delimiter/header controls). The
+// layout fields are kept so each column can show its 1-based start–end byte
+// positions next to its sequence number.
+func (m *Model) initFixed(recs [][]string, fields []fixedField, badRows int) {
 	m.previewIsParquet = false
 	m.previewIsFixed = true
+	m.fixedFields = fields
 	m.csvAll = recs
 	m.csvHeaderRow = 1            // the synthesised column-name row is the header
 	m.csvColFilter = colFilterAll // show every column by default (reset per file)
@@ -225,6 +228,18 @@ func (m *Model) initFixed(recs [][]string, badRows int) {
 	m.showPreview = false
 	m.showCSV = true
 	m.buildCSVTable()
+}
+
+// fixedColPos returns the "start-end" (1-based, inclusive) byte positions of
+// the fixed-width column at header index h, or "" when the preview is not
+// fixed-width or h has no layout field (e.g. the leading "!" marker column at
+// index 0).
+func (m *Model) fixedColPos(h int) string {
+	if !m.previewIsFixed || h < 1 || h > len(m.fixedFields) {
+		return ""
+	}
+	f := m.fixedFields[h-1]
+	return fmt.Sprintf("%d-%d", f.start, f.width())
 }
 
 // fixedInfoLine summarises the column/row windows and the malformed-row count

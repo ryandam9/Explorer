@@ -308,6 +308,7 @@ type Model struct {
 	// an overlay that can be opened over either the text or the table preview.
 	previewIsFixed bool
 	fixedBadRows   int
+	fixedFields    []fixedField // the applied layout, for the position annotations
 	layoutInput    textinput.Model
 	enteringLayout bool
 	layoutErr      string

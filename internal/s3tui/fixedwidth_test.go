@@ -91,7 +91,7 @@ func TestFixedInfoLineExcludesMarkerColumn(t *testing.T) {
 	recs, bad := buildFixedRecords(content, fields)
 
 	m := &Model{width: 40, height: 20}
-	m.initFixed(recs, bad)
+	m.initFixed(recs, fields, bad)
 	m.csvTable.ScrollRight() // hide a leading data column so the window info shows
 
 	info := m.csvInfoLine()
@@ -101,6 +101,60 @@ func TestFixedInfoLineExcludesMarkerColumn(t *testing.T) {
 	}
 	if strings.Contains(info, "of 6") || strings.Contains(info, "col 6:") {
 		t.Errorf("info line should not count the marker column: %q", info)
+	}
+}
+
+// Fixed-width columns carry their layout positions: the numbering line under
+// the headers reads "(1) 1-5", and the record view shows "[1-5]" per field.
+func TestFixedColumnPositions(t *testing.T) {
+	fields := []fixedField{
+		{name: "id", start: 1, length: 5},
+		{name: "name", start: 6, length: 10},
+	}
+	recs, bad := buildFixedRecords("00001alice     \n", fields)
+
+	m := &Model{width: 80, height: 20, showCSV: true}
+	m.initFixed(recs, fields, bad)
+
+	cols := m.csvTable.Columns()
+	if cols[0].Note != "" {
+		t.Errorf("marker column must have no position note, got %q", cols[0].Note)
+	}
+	if cols[1].Note != "1-5" || cols[2].Note != "6-15" {
+		t.Errorf("position notes = %q, %q; want 1-5, 6-15", cols[1].Note, cols[2].Note)
+	}
+	for _, want := range []string{"(1) 1-5", "(2) 6-15"} {
+		if v := m.csvTable.View(); !strings.Contains(v, want) {
+			t.Errorf("table numbering line missing %q:\n%s", want, v)
+		}
+	}
+
+	m.csvTable.SetCursor(0)
+	m.openCSVRecord()
+	v := m.csvRecordViewport.View()
+	for _, want := range []string{"[1-5]", "[6-15]", "alice"} {
+		if !strings.Contains(v, want) {
+			t.Errorf("record view missing %q:\n%s", want, v)
+		}
+	}
+}
+
+// A non-fixed preview must not gain position notes or the record positions
+// column.
+func TestCSVHasNoPositionNotes(t *testing.T) {
+	m := &Model{width: 80, height: 20, showCSV: true}
+	if !m.initCSV("id,name\n1,alice\n") {
+		t.Fatal("initCSV should parse")
+	}
+	for _, c := range m.csvTable.Columns() {
+		if c.Note != "" {
+			t.Errorf("CSV column %q unexpectedly has note %q", c.Title, c.Note)
+		}
+	}
+	m.csvTable.SetCursor(0)
+	m.openCSVRecord()
+	if v := m.csvRecordViewport.View(); strings.Contains(v, "[1-") {
+		t.Errorf("CSV record view should have no position column:\n%s", v)
 	}
 }
 
