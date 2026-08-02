@@ -40,6 +40,7 @@ func helpSections() []helpSection {
 			{"/", "Server-side query pattern (CloudWatch filter syntax)"},
 			{"p", "Cycle the query window: 30m → 1h → … → 24h → 3d → 7d"},
 			{"t", "Toggle the zebra-striped table view"},
+			{"J", "Table view: split JSON events into one column per field"},
 			{"←/→", "Table view: pan long messages (hidden columns first)"},
 			{"W", "Toggle live tail watch mode"},
 			{"y", "Copy the selected event"},

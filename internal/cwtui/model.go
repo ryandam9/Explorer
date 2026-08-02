@@ -85,11 +85,16 @@ type model struct {
 	// Table rendering of the events panel ("t"): the shared table widget with
 	// zebra striping, like every other data grid in the app. msgShift pans the
 	// message column left by that many runes (←/→) so long messages can be
-	// read without leaving the table; maxMsgLen bounds the pan.
+	// read without leaving the table; maxMsgLen bounds the pan. jsonSplit
+	// ("J") breaks structured JSON messages into one column per top-level
+	// field; eventsSplit/hiddenFields report what the current build did.
 	eventsTableMode bool
 	eventsTable     table.Model
 	msgShift        int
 	maxMsgLen       int
+	jsonSplit       bool
+	eventsSplit     bool
+	hiddenFields    int
 
 	// Full log viewer (opened with Enter on an event)
 	viewer logViewer
@@ -193,6 +198,7 @@ func NewModel(ctx context.Context, awsCfg *config.AWSConfig, regions []string, a
 		streamSearch: sSearch,
 		eventSearch:  eSearch,
 		lookback:     since,
+		jsonSplit:    true, // split structured JSON events into columns by default
 		viewer:       logViewer{search: vSearch, grepInput: vGrep},
 	}
 
@@ -467,6 +473,15 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				if m.eventsTableMode {
 					m.buildEventsTable()
 				}
+			}
+
+		case "J":
+			// In table mode, toggle splitting structured JSON messages into
+			// one column per top-level field (mirrors the viewer's J, which
+			// pretty-prints the same JSON).
+			if m.view == viewEvents && m.eventsTableMode {
+				m.jsonSplit = !m.jsonSplit
+				m.buildEventsTable()
 			}
 
 		case "p":
@@ -1110,16 +1125,18 @@ func (m *model) renderEventsPanel(width int) string {
 		m.eventsTable.SetWidth(width - 2)
 		m.eventsTable.SetHeight(tableH)
 		b.WriteString(m.eventsTable.View() + "\n")
-		ind := ui.TableScrollIndicator(&m.eventsTable)
-		if m.msgShift > 0 {
-			pan := ui.MutedStyle().Render(fmt.Sprintf("msg panned +%d chars ◀ ←", m.msgShift))
-			if ind != "" {
-				ind += "  " + pan
-			} else {
-				ind = pan
-			}
+		parts := make([]string, 0, 3)
+		if s := ui.TableScrollIndicator(&m.eventsTable); s != "" {
+			parts = append(parts, s)
 		}
-		b.WriteString(" " + ind)
+		if m.hiddenFields > 0 {
+			// A capped field set must never read as "all fields" (§ no silent caps).
+			parts = append(parts, ui.MutedStyle().Render(fmt.Sprintf("+%d more json fields in raw event", m.hiddenFields)))
+		}
+		if m.msgShift > 0 {
+			parts = append(parts, ui.MutedStyle().Render(fmt.Sprintf("msg panned +%d chars ◀ ←", m.msgShift)))
+		}
+		b.WriteString(" " + strings.Join(parts, "  "))
 	} else {
 		visibleHeight := m.height - 8
 		if visibleHeight < 5 {
@@ -1262,7 +1279,11 @@ func (m *model) getHelpHints() []ui.KeyHint {
 			ui.H("t", tableHint),
 		)
 		if m.eventsTableMode {
-			hints = append(hints, ui.H("←/→", "pan message"))
+			jsonHint := "split json"
+			if m.eventsSplit {
+				jsonHint = "raw message"
+			}
+			hints = append(hints, ui.H("←/→", "pan message"), ui.H("J", jsonHint))
 		}
 		hints = append(hints,
 			ui.H("W", "tail watch"),

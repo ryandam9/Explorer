@@ -170,14 +170,19 @@ func eventTableColumns(withStream bool) []table.Column {
 	return append(cols, table.Column{Title: "Message", Width: 4})
 }
 
+// eventTimestamp renders an event's timestamp for the table; the date is
+// included because the query window can span days.
+func eventTimestamp(ev types.FilteredLogEvent) string {
+	t := time.Unix(0, aws.ToInt64(ev.Timestamp)*int64(time.Millisecond))
+	return t.Format("2006-01-02 15:04:05.000")
+}
+
 // eventTableRows maps events onto rows matching eventTableColumns, with the
-// message column panned msgShift runes to the left. Timestamps include the
-// date because the query window can span days.
+// message column panned msgShift runes to the left.
 func eventTableRows(events []types.FilteredLogEvent, withStream bool, msgShift int) []table.Row {
 	rows := make([]table.Row, 0, len(events))
 	for _, ev := range events {
-		t := time.Unix(0, aws.ToInt64(ev.Timestamp)*int64(time.Millisecond))
-		row := table.Row{t.Format("2006-01-02 15:04:05.000")}
+		row := table.Row{eventTimestamp(ev)}
 		if withStream {
 			row = append(row, clipEventCell(aws.ToString(ev.LogStreamName)))
 		}
@@ -187,26 +192,32 @@ func eventTableRows(events []types.FilteredLogEvent, withStream bool, msgShift i
 }
 
 // buildEventsTable (re)creates the shared-widget table from the current
-// events, preserving the selection. Called when table mode turns on and when
-// a fresh event batch lands while it is on.
+// events, preserving the selection. Called when table mode turns on, when the
+// JSON-split toggle flips, and when a fresh event batch lands while it is on.
 func (m *model) buildEventsTable() {
-	withStream := m.groupLevelSearch
-	m.maxMsgLen = maxEventMsgLen(m.events)
-	m.msgShift = clampMsgShift(m.msgShift, m.maxMsgLen)
+	data := buildEventTableData(m.events, m.groupLevelSearch, m.jsonSplit, m.msgShift)
+	m.msgShift = data.shift
+	m.maxMsgLen = data.maxMsgLen
+	m.hiddenFields = data.hiddenFields
+	m.eventsSplit = data.split
 	m.eventsTable = table.New(
-		table.WithColumns(eventTableColumns(withStream)),
-		table.WithRows(eventTableRows(m.events, withStream, m.msgShift)),
+		table.WithColumns(data.cols),
+		table.WithRows(data.rows),
 		table.WithFocused(true),
 		table.WithStyles(ui.TableStylesZebra()),
-		table.WithFrozenColumns(1), // pin the time column while panning wide messages
+		table.WithFrozenColumns(1),       // pin the time column while panning/scrolling
+		table.WithColNumbers(data.split), // number the field columns for orientation
 	)
 	m.eventsTable.SetCursor(m.selectedEventIdx)
 }
 
 // refreshEventsTableRows re-renders the rows for a new pan offset without
-// recreating the table, so the cursor and scroll position stay put.
+// recreating the table, so the cursor and scroll position stay put. The
+// events are unchanged, so the derived columns are identical by construction.
 func (m *model) refreshEventsTableRows() {
-	m.eventsTable.SetRows(eventTableRows(m.events, m.groupLevelSearch, m.msgShift))
+	data := buildEventTableData(m.events, m.groupLevelSearch, m.jsonSplit, m.msgShift)
+	m.msgShift = data.shift
+	m.eventsTable.SetRows(data.rows)
 }
 
 // panEventsTable handles ←/→ in table mode. Right first reveals hidden
