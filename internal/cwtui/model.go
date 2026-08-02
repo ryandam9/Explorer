@@ -101,6 +101,10 @@ type model struct {
 	// group/stream browser.
 	showAbout bool
 
+	// showHelp toggles the "?" key-reference overlay. Unlike showAbout it also
+	// works over the full log viewer, since the viewer has its own key set.
+	showHelp bool
+
 	// TUI Utilities
 	spinner  spinner.Model
 	err      error
@@ -311,6 +315,13 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, tea.Batch(cmds...)
 		}
 
+		// Help overlay: static key reference, any key closes it. Checked
+		// before the viewer guard so it also closes over the full log viewer.
+		if m.showHelp {
+			m.showHelp = false
+			return m, tea.Batch(cmds...)
+		}
+
 		// Full log viewer captures all keys while open
 		if m.viewer.active {
 			m.handleViewerKeys(msg, &cmds)
@@ -422,6 +433,9 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 		case ui.KeyAbout:
 			m.showAbout = true
+
+		case ui.KeyHelp:
+			m.showHelp = true
 
 		case "W":
 			if m.view == viewEvents {
@@ -802,7 +816,11 @@ func (m *model) View() string {
 	}
 
 	if m.viewer.active {
-		return m.debug.Overlay(m.applyToast(m.renderViewer()), m.width, m.height)
+		frame := m.applyToast(m.renderViewer())
+		if m.showHelp {
+			frame = ui.OverlayCenterBlank(m.helpOverlay(), m.width, m.height)
+		}
+		return m.debug.Overlay(frame, m.width, m.height)
 	}
 
 	var sb strings.Builder
@@ -857,6 +875,8 @@ func (m *model) View() string {
 	frame := m.applyToast(sb.String())
 	if m.showAbout {
 		frame = ui.OverlayCenterBlank(ui.AboutView("About — CloudWatch Logs", cwAboutText, ui.AboutWidth(m.width)), m.width, m.height)
+	} else if m.showHelp {
+		frame = ui.OverlayCenterBlank(m.helpOverlay(), m.width, m.height)
 	}
 	return m.debug.Overlay(frame, m.width, m.height)
 }
@@ -874,7 +894,7 @@ const cwAboutText = "This is the CloudWatch Logs explorer. The sidebar lists log
 	"what you see. Lines are tinted by severity so errors stand out.\n\n" +
 	"You often arrive here by pressing L on a resource in the Summary or VPC " +
 	"explorer, which pre-filters to that resource's log group. The status bar " +
-	"shows the keys usable right now."
+	"shows the keys usable right now; ? opens the full key reference."
 
 // applyToast paints the active toast notification over the rendered view.
 func (m *model) applyToast(rendered string) string {
@@ -1208,6 +1228,7 @@ func (m *model) getHelpHints() []ui.KeyHint {
 			ui.H("J", "format json"),
 			ui.H("y", copyHint),
 			ui.H("s", exportHint),
+			ui.H("?", "help"),
 			ui.H("Esc", "close"),
 		}
 	}
@@ -1253,6 +1274,7 @@ func (m *model) getHelpHints() []ui.KeyHint {
 
 	hints = append(hints,
 		ui.H("Tab", "panel"),
+		ui.H("?", "help"),
 		ui.H("~", "debug"),
 		ui.H("i", "about"),
 		ui.H("q", "quit"),

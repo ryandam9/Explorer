@@ -32,7 +32,9 @@ otherwise the config's `aws.regions` list is used.
 ```
 
 Press `o` on a log group to open it in the CloudWatch console (URL copied;
-browser opened when the session is local).
+browser opened when the session is local). Press `?` anywhere — including
+inside the full log viewer — for the full key reference; the status bar only
+shows the keys usable right now (eliding on narrow terminals).
 
 ### Events panel
 
@@ -77,4 +79,5 @@ errors stand out while you scroll.
 | `n` / `N` | Jump to next / previous match |
 | `y` | Copy the entire log to the clipboard — or only the matching lines while a grep filter is applied |
 | `s` | Export the log to `~/.aws_explorer/logs/` — or only the matching lines (file suffixed `-grep`) while a filter is applied |
+| `?` | Full key reference |
 | `Esc` / `q` | Close the viewer |
