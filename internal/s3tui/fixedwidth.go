@@ -65,6 +65,43 @@ func readLayoutFile(path string) (string, error) {
 	return string(b), nil
 }
 
+// layoutSpecIsNamesOnly reports whether a layout spec is a names-only layout
+// (for delimited files without a header) rather than a fixed-width one: the
+// first content line decides — no comma means names-only. Each parser then
+// rejects mixed files with a line-numbered error.
+func layoutSpecIsNamesOnly(spec string) bool {
+	for _, raw := range strings.Split(spec, "\n") {
+		line := strings.TrimSpace(strings.TrimSuffix(raw, "\r"))
+		if line == "" || strings.HasPrefix(line, "#") {
+			continue
+		}
+		return !strings.Contains(line, ",")
+	}
+	return false
+}
+
+// parseNamesLayout parses a names-only layout: one column name per line,
+// supplying titles for a delimited file that has no header row. Blank lines
+// and '#' comments are ignored, like the fixed-width layout. Comma lines are
+// rejected so a fixed-width layout is never silently misread as names.
+func parseNamesLayout(spec string) ([]string, error) {
+	var names []string
+	for i, raw := range strings.Split(spec, "\n") {
+		line := strings.TrimSpace(strings.TrimSuffix(raw, "\r"))
+		if line == "" || strings.HasPrefix(line, "#") {
+			continue
+		}
+		if strings.Contains(line, ",") {
+			return nil, fmt.Errorf("layout line %d: mixes name-only and name,start,length lines", i+1)
+		}
+		names = append(names, line)
+	}
+	if len(names) == 0 {
+		return nil, errors.New("no column names found in layout file (one name per line)")
+	}
+	return names, nil
+}
+
 // parseLayout parses a layout spec into ordered columns. Each non-blank,
 // non-comment line is "name,start,length" with a 1-based start. Blank lines and
 // lines beginning with '#' are ignored. The error names the offending line so a
@@ -186,6 +223,10 @@ func (m *Model) applyLayoutPrompt() {
 		m.layoutErr = err.Error()
 		return
 	}
+	if layoutSpecIsNamesOnly(spec) {
+		m.applyNamesLayout(path, spec)
+		return
+	}
 	fields, err := parseLayout(spec)
 	if err != nil {
 		m.layoutErr = err.Error()
@@ -206,6 +247,41 @@ func (m *Model) applyLayoutPrompt() {
 	m.initFixed(recs, fields, bad)
 }
 
+// applyNamesLayout applies a names-only layout to the delimited preview: the
+// names become the column titles, and any configured header row (h) is only
+// skipped, not read — so "header row 1" over a file whose first record is a
+// dummy line drops that line while the layout supplies real names.
+func (m *Model) applyNamesLayout(path, spec string) {
+	names, err := parseNamesLayout(spec)
+	if err != nil {
+		m.layoutErr = err.Error()
+		return
+	}
+	if m.previewIsParquet {
+		m.layoutErr = "Parquet has a typed schema; a names-only layout applies to delimited files"
+		return
+	}
+	if m.previewIsFixed {
+		m.layoutErr = "this preview uses a fixed-width layout, which already names its columns"
+		return
+	}
+	if !m.showCSV {
+		// L was pressed over the raw-text preview: parse the object as
+		// delimited first, so the names have a table to apply to.
+		if !m.initCSV(m.previewContent) {
+			m.layoutErr = "object is not delimited; use name,start,length lines for fixed-width files"
+			return
+		}
+		m.showPreview = false
+		m.showCSV = true
+	}
+	m.csvNames = names
+	m.lastLayoutPath = path
+	m.enteringLayout = false
+	m.layoutErr = ""
+	m.buildCSVTable()
+}
+
 // initFixed loads fixed-width records into the shared table. Mirrors initParquet
 // so the existing table, record view, row-window and copy-as-Markdown machinery
 // all work unchanged; the schema is fixed (no delimiter/header controls). The
@@ -219,6 +295,7 @@ func (m *Model) initFixed(recs [][]string, fields []fixedField, badRows int) {
 	m.csvHeaderRow = 1            // the synthesised column-name row is the header
 	m.csvColFilter = colFilterAll // show every column by default (reset per file)
 	m.csvDelim = ','              // unused for fixed-width, kept for a stable info line
+	m.csvNames = nil              // the layout names its columns
 	m.csvRecordActive = false
 	m.fixedBadRows = badRows
 	if m.csvRowCap == 0 && !m.csvRowCapSet {

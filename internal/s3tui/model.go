@@ -314,6 +314,11 @@ type Model struct {
 	layoutErr      string
 	lastLayoutPath string
 
+	// csvNames holds a names-only layout (one name per line via L) applied to a
+	// delimited preview whose file has no header: the names become the column
+	// titles, and the configured header row is skipped without being read.
+	csvNames []string
+
 	// Single-row "record" view (Enter on a table row) — Col : value pairs.
 	csvRecordActive   bool
 	csvRecordViewport viewport.Model
