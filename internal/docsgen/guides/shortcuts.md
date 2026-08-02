@@ -16,7 +16,7 @@ per-screen guides list the rest.
 | `s` / `R` | Sort by the next column / reverse the direction |
 | `y` | Copy the selection (ARN, ID, URI or line, per screen) |
 | `o` | Open the selection in the AWS console (copies a deep link; opens a browser when local) |
-| `C` | Export the current view to CSV under `~/.aws_explorer/exports/` |
+| `C` | Export the current view to CSV to the downloads directory (default `~/.aws_explorer/downloads`) |
 | `Esc` | Close an overlay / go back one level |
 | `?` | Help overlay |
 | `q` / `Ctrl+C` | Quit |

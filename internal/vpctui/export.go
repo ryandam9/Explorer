@@ -10,6 +10,7 @@ import (
 	_ "time/tzdata" // embed the zone database so Australia/Melbourne always resolves
 
 	"github.com/ryandam9/aws_explorer/internal/csvexport"
+	"github.com/ryandam9/aws_explorer/internal/downloads"
 )
 
 // reportLoc is the timezone report timestamps are shown in. Melbourne observes
@@ -650,17 +651,10 @@ func itoa(n int) string { return fmt.Sprintf("%d", n) }
 // File output
 // ---------------------------------------------------------------------------
 
-// exportDir returns the directory where reports are written, creating it.
+// exportDir returns the directory where reports are written — the shared
+// downloads directory (app.downloadDir, default ~/.aws_explorer/downloads).
 func exportDir() (string, error) {
-	home, err := os.UserHomeDir()
-	if err != nil {
-		return "", err
-	}
-	dir := filepath.Join(home, ".aws_explorer", "exports")
-	if err := os.MkdirAll(dir, 0o755); err != nil {
-		return "", err
-	}
-	return dir, nil
+	return downloads.Dir()
 }
 
 // writeExport writes the Markdown and HTML reports and the standalone SVG

@@ -35,8 +35,11 @@ app:
   defaultMode: cli            # cli | tui
   timeoutSeconds: 30          # per-collector timeout
   maxConcurrency: 8           # max parallel collectors
-  downloadDir: ""             # S3 browser download target ("D"); ~ expands to home,
-                              # empty = current dir; created automatically if missing
+  downloadDir: ""             # where every export/download is written: S3 object
+                              # downloads, CSV exports, saved CloudWatch logs, VPC
+                              # reports, EMR Markdown reports. ~ expands to home;
+                              # empty = ~/.aws_explorer/downloads; created
+                              # automatically if missing
   previewMaxSize: ""          # S3 "p" preview read cap: "10MB"/"512KB"/bytes;
                               # empty = 10MB default, clamped to 4KB–64MB
 

@@ -26,6 +26,7 @@ import (
 	"github.com/ryandam9/aws_explorer/internal/csvexport"
 	"github.com/ryandam9/aws_explorer/internal/debugpane"
 	"github.com/ryandam9/aws_explorer/internal/display"
+	"github.com/ryandam9/aws_explorer/internal/downloads"
 	"github.com/ryandam9/aws_explorer/internal/table"
 	"github.com/ryandam9/aws_explorer/internal/ui"
 )
@@ -1350,18 +1351,23 @@ func (m *Model) generatePresignCmd(key string) tea.Cmd {
 	}
 }
 
-// resolveDownloadDir determines where downloaded objects are written, from the
-// app.downloadDir config value. A leading "~" is expanded to the user's home
-// directory and an empty value falls back to the current working directory.
+// resolveDownloadDir determines where downloaded objects are written: the
+// shared downloads directory (app.downloadDir override, default
+// ~/.aws_explorer/downloads). The current working directory is only a
+// last resort when even the home directory can't be resolved.
 func resolveDownloadDir(cfg *config.Config) string {
-	dir := "."
 	if cfg != nil && strings.TrimSpace(cfg.App.DownloadDir) != "" {
-		dir = strings.TrimSpace(cfg.App.DownloadDir)
-	}
-	if dir == "~" || strings.HasPrefix(dir, "~/") {
-		if home, err := os.UserHomeDir(); err == nil {
-			dir = filepath.Join(home, strings.TrimPrefix(dir, "~"))
+		dir := strings.TrimSpace(cfg.App.DownloadDir)
+		if dir == "~" || strings.HasPrefix(dir, "~/") {
+			if home, err := os.UserHomeDir(); err == nil {
+				dir = filepath.Join(home, strings.TrimPrefix(dir, "~"))
+			}
 		}
+		return dir
+	}
+	dir, err := downloads.Dir()
+	if err != nil {
+		return "."
 	}
 	return dir
 }

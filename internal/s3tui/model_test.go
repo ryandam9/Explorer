@@ -83,19 +83,22 @@ func TestFeatherRailRendersEveryThemeColor(t *testing.T) {
 }
 
 func TestResolveDownloadDir(t *testing.T) {
-	home, err := os.UserHomeDir()
-	if err != nil {
-		t.Skipf("no home dir available: %v", err)
-	}
+	// Isolate the home dir so the shared-downloads default is exercised
+	// without touching the real profile.
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
 
+	// With no config, downloads land in the shared default directory.
+	shared := filepath.Join(home, ".aws_explorer", "downloads")
 	cases := []struct {
 		name string
 		cfg  *config.Config
 		want string
 	}{
-		{"nil config", nil, "."},
-		{"empty value", &config.Config{}, "."},
-		{"whitespace value", &config.Config{App: config.AppConfig{DownloadDir: "   "}}, "."},
+		{"nil config", nil, shared},
+		{"empty value", &config.Config{}, shared},
+		{"whitespace value", &config.Config{App: config.AppConfig{DownloadDir: "   "}}, shared},
 		{"explicit dir", &config.Config{App: config.AppConfig{DownloadDir: "/tmp/dl"}}, "/tmp/dl"},
 		{"tilde alone", &config.Config{App: config.AppConfig{DownloadDir: "~"}}, home},
 		{"tilde prefix", &config.Config{App: config.AppConfig{DownloadDir: "~/Downloads"}}, filepath.Join(home, "Downloads")},

@@ -164,9 +164,11 @@ type AppConfig struct {
 	DefaultMode    string `mapstructure:"defaultMode"`
 	TimeoutSeconds int    `mapstructure:"timeoutSeconds"`
 	MaxConcurrency int    `mapstructure:"maxConcurrency"`
-	// DownloadDir is the directory the S3 browser writes downloaded objects to.
-	// A leading "~" is expanded to the user's home directory. Empty means the
-	// current working directory ("."). The directory is created if missing.
+	// DownloadDir is the directory every user-facing export is written to: S3
+	// object downloads, CSV exports, saved CloudWatch logs, VPC reports and
+	// EMR Markdown reports. A leading "~" is expanded to the user's home
+	// directory. Empty means the default, ~/.aws_explorer/downloads. The
+	// directory is created if missing.
 	DownloadDir string `mapstructure:"downloadDir"`
 	// PreviewMaxSize caps how much of a text/XML/JSON object the S3 browser reads
 	// when previewing it with "p". Accepts a human-readable size such as "10MB",

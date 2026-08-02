@@ -534,6 +534,7 @@ func (mm *m) helpHints() []ui.KeyHint {
 		return []ui.KeyHint{
 			ui.H("Tab", "panel"),
 			ui.H("↑/↓", "scroll"),
+			ui.H("s", "export markdown"),
 			ui.H("Esc", "back"),
 			ui.H("i", "about"),
 			ui.H("q", "quit"),

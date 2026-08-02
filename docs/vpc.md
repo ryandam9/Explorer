@@ -61,7 +61,7 @@ type in `config.yaml` — see [Customizing displayed columns](configuration.md#c
 | `s` / `R` | Sort the resource table by the next column / reverse the direction |
 | `c` / `y` | Copy the selected resource's ID to the clipboard |
 | `o` | Open the selected resource in the AWS console — copies the deep-link URL, opens a browser when local |
-| `C` | Export the current resource table to CSV under `~/.aws_explorer/exports/` |
+| `C` | Export the current resource table to CSV to the downloads directory (default `~/.aws_explorer/downloads`) |
 | `r` | Refresh the VPC list or the current resource list |
 | `Esc` | Go back one level (overlay → table → sidebar → VPC list) |
 | `S` | Open the settings panel (themes & colors) |
@@ -330,7 +330,7 @@ a NACL re-association or an endpoint SG swap.
 Writes a self-contained report — a resource-count summary, all findings grouped
 by severity with fixes, and inventory tables (subnets, security groups, route
 tables, NAT gateways, endpoints, network interfaces) — in three formats sharing
-a basename under `~/.aws_explorer/exports/<vpc-id>-<timestamp>.{md,html,svg}`:
+a basename under the downloads directory as `<vpc-id>-<timestamp>.{md,html,svg}`:
 
 - **Markdown** (`.md`) — ideal for pasting into a support case or runbook.
 - **HTML** (`.html`) — styled, with a sticky table-of-contents and searchable,
@@ -376,5 +376,5 @@ until it completes (up to ~2 minutes), and prepends the result. This is the only
 VPC Explorer feature that mutates AWS or incurs a charge.
 
 > **Files written by the toolkit.** Snapshots: `~/.aws_explorer/vpc-snapshots/`.
-> Exports: `~/.aws_explorer/exports/`. Both directories are created on demand.
+> Exports: the downloads directory (`app.downloadDir`, default `~/.aws_explorer/downloads`). Both directories are created on demand.
 > All other features are purely in-memory.

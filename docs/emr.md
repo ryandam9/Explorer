@@ -39,7 +39,7 @@ Step history (Enter on a cluster):
 |-----|--------|
 | `↑/↓` (`j/k`) | Move selection |
 | `Enter` / `s` | Open the selected cluster's step history |
-| `d` | **Describe** the selected cluster — a full-screen, btop-style grid of panels (overview, configuration & OS, services, compute/memory/storage, EC2 instances, VPC networking, configurations). `Tab`/`Shift+Tab` (or `←/→`) move focus between panels; the focused panel scrolls (`↑/↓`, `PgUp/PgDn`, `g/G`). `Esc` closes. On a small terminal it collapses to one scrolling pane |
+| `d` | **Describe** the selected cluster — a full-screen, btop-style grid of panels (overview, configuration & OS, services, compute/memory/storage, EC2 instances, VPC networking, configurations). `Tab`/`Shift+Tab` (or `←/→`) move focus between panels; the focused panel scrolls (`↑/↓`, `PgUp/PgDn`, `g/G`). `s` exports the whole describe report as a **sectioned Markdown file** to the downloads directory (default `~/.aws_explorer/downloads`) — overview, configuration/OS, S3 connector, applications, node groups, EC2 instances, networking with security-group/route/NACL tables, configuration classifications, and any best-effort gaps as notes. `Esc` closes. On a small terminal it collapses to one scrolling pane |
 | `f` | **Findings** — deterministic posture/cost checks (idle/long-running clusters, no log destination or security config, terminated-with-errors) over the loaded clusters; `y` copies the suggested fix |
 | `L` | Open the cluster's (or selected step's) logs in the S3 browser |
 | `u` | Open a persistent application UI (Spark History / YARN Timeline / Tez) |

@@ -45,7 +45,7 @@ func helpSections() []helpSection {
 			{"←/→", "Table view: pan long messages (hidden columns first)"},
 			{"W", "Toggle live tail watch mode"},
 			{"y", "Copy the selected event"},
-			{"s", "Export the listed events to ~/.aws_explorer/logs/"},
+			{"s", "Export the listed events to the downloads directory"},
 			{"Esc", "Back to streams (or groups from a whole-group search)"},
 		}},
 		{"Full log viewer", []row{

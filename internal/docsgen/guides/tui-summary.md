@@ -40,7 +40,7 @@ works right now.
 | `y` / `Y` | Copy the selected resource's ARN / ID |
 | `o` | Open the resource in the AWS console (copies a deep link; opens a browser when local) |
 | `J` | Toggle a raw-JSON view in the detail panel (`y` then copies the JSON) |
-| `C` | Export the current (filtered, sorted) view to CSV under `~/.aws_explorer/exports/` |
+| `C` | Export the current (filtered, sorted) view to CSV to the downloads directory (default `~/.aws_explorer/downloads`) |
 | `D` | **What changed**: first press saves a baseline snapshot, later presses diff the live inventory against it (`b` re-baselines) |
 | `t` | Timeline — recent CloudTrail "who changed this" events for the selected resource |
 | `P` | Switch AWS profile and/or region scope, then rescan — no restart |

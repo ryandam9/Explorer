@@ -319,7 +319,7 @@ scrolling and context-aware status bar as every other TUI in the app.
 | `r` | Reset filter and sort |
 | `<` / `>` (or `,` / `.`) | Scroll table columns on narrow terminals |
 | `y` | Copy the selected finding's ARN (or resource ID) to the clipboard |
-| `C` | Export the current (filtered, sorted) view to CSV under `~/.aws_explorer/exports/` |
+| `C` | Export the current (filtered, sorted) view to CSV to the downloads directory (`app.downloadDir`, default `~/.aws_explorer/downloads`) |
 | `e` | Collection-errors overlay (shown as a `⚠ n errors` badge in the header) |
 | `?` | Help overlay |
 | `q` / `Ctrl+C` | Quit |
