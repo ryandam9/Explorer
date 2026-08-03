@@ -42,5 +42,5 @@ whole group in group-level search — streaming new events live as they arrive.
 | `&` | Grep filter (as in `less`): a regex keeps only matching lines, with a `kept/total` count. Smart case: all-lowercase matches case-insensitively; an uppercase letter makes it exact |
 | `n` / `N` | Jump to next / previous match |
 | `y` | Copy the whole log — or only the matching lines while a grep filter is applied |
-| `s` | Export the log to `~/.aws_explorer/logs/` (suffixed `-grep` while filtered) |
+| `s` | Export the log to the downloads directory (default `~/.aws_explorer/downloads`) (suffixed `-grep` while filtered) |
 | `Esc` / `q` | Close the viewer |

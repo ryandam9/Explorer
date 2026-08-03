@@ -22,6 +22,7 @@ import (
 	"github.com/ryandam9/aws_explorer/internal/config"
 	"github.com/ryandam9/aws_explorer/internal/consolelink"
 	"github.com/ryandam9/aws_explorer/internal/debugpane"
+	"github.com/ryandam9/aws_explorer/internal/downloads"
 	"github.com/ryandam9/aws_explorer/internal/table"
 	"github.com/ryandam9/aws_explorer/internal/ui"
 )
@@ -691,7 +692,7 @@ func formatEvents(events []types.FilteredLogEvent) string {
 	return sb.String()
 }
 
-// exportEvents writes events to ~/.aws_explorer/logs and returns the path.
+// exportEvents writes events to the downloads directory and returns the path.
 func exportEvents(events []types.FilteredLogEvent, grpLabel, streamLabel string) (string, error) {
 	if len(events) == 0 {
 		return "", fmt.Errorf("no events to export")
@@ -700,17 +701,13 @@ func exportEvents(events []types.FilteredLogEvent, grpLabel, streamLabel string)
 }
 
 // exportText writes already-rendered log text (e.g. the grep-filtered lines)
-// to ~/.aws_explorer/logs and returns the path.
+// to the shared downloads directory and returns the path.
 func exportText(content, grpLabel, streamLabel string) (string, error) {
 	if strings.TrimSpace(content) == "" {
 		return "", fmt.Errorf("no log lines to export")
 	}
-	home, err := os.UserHomeDir()
+	dir, err := downloads.Dir()
 	if err != nil {
-		return "", fmt.Errorf("failed to find home: %w", err)
-	}
-	dir := filepath.Join(home, ".aws_explorer", "logs")
-	if err := os.MkdirAll(dir, 0755); err != nil {
 		return "", err
 	}
 	filename := fmt.Sprintf("cw-logs-%s-%s-%s.log", grpLabel, streamLabel, time.Now().Format("20060102-150405"))

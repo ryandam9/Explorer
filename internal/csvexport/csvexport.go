@@ -10,20 +10,15 @@ import (
 	"path/filepath"
 	"strings"
 	"time"
+
+	"github.com/ryandam9/aws_explorer/internal/downloads"
 )
 
-// DefaultDir returns the directory exports are written to
-// (~/.aws_explorer/exports), creating it if needed.
+// DefaultDir returns the directory exports are written to — the shared
+// downloads directory (app.downloadDir, default ~/.aws_explorer/downloads)
+// — creating it if needed.
 func DefaultDir() (string, error) {
-	home, err := os.UserHomeDir()
-	if err != nil {
-		return "", fmt.Errorf("cannot resolve home directory: %w", err)
-	}
-	dir := filepath.Join(home, ".aws_explorer", "exports")
-	if err := os.MkdirAll(dir, 0o755); err != nil {
-		return "", fmt.Errorf("cannot create export directory: %w", err)
-	}
-	return dir, nil
+	return downloads.Dir()
 }
 
 // Write writes header+rows as RFC 4180 CSV to <dir>/<name>-<timestamp>.csv

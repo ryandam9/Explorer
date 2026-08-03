@@ -729,6 +729,21 @@ func (mm *m) handleKey(msg tea.KeyMsg) []tea.Cmd {
 			if p := mm.focusedPanel(); p != nil {
 				p.GotoBottom()
 			}
+		case "s":
+			// Export the full describe report as a sectioned Markdown file.
+			switch {
+			case mm.descLoading:
+				mm.setToast("Describe still loading — try again in a moment")
+			case mm.descErr != nil:
+				mm.setToast("Cannot export: describe failed (" + mm.descErr.Error() + ")")
+			default:
+				if path, err := exportClusterMarkdown(mm.desc); err != nil {
+					mm.setToast("Export failed: " + err.Error())
+				} else {
+					mm.setToast("Exported cluster report to " + path)
+				}
+			}
+			cmds = append(cmds, toastCmd(5*time.Second))
 		case ui.KeyAbout:
 			mm.showAbout = true
 		}

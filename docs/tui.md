@@ -34,7 +34,7 @@ what you see in the bar is always what works right now.
 | `J` | Toggle a raw-JSON view in the detail panel (`y` then copies the JSON) |
 | `t` / `l` / `g` / `x` | In the detail panel: CloudTrail timeline / inline recent ERROR logs / headline-metric **sparkline** (now·max·min over the last hour) / cross-references |
 | `L` | In the detail panel: **open the CloudWatch Logs explorer** pre-filtered to this resource's log group (Lambda → `/aws/lambda/…`, RDS → `/aws/rds/instance/…`, EKS → `/aws/eks/…/cluster`); `q` returns you here with selection and scroll intact |
-| `C` | Export the current (filtered, sorted) view to CSV under `~/.aws_explorer/exports/` |
+| `C` | Export the current (filtered, sorted) view to CSV to the downloads directory (`app.downloadDir`, default `~/.aws_explorer/downloads`) |
 | `D` | **What changed**: first press saves an account baseline snapshot, later presses diff the live inventory against it (`b` inside the overlay re-baselines) |
 | `P` | Switch AWS profile and/or region scope, then rescan — no restart needed |
 | `e` | Open the scan-errors overlay (services with errors also carry a `⚠n` badge in the sidebar) |

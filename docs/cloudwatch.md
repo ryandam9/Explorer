@@ -85,6 +85,6 @@ errors stand out while you scroll.
 | `&` | Grep filter (as in `less`): enter a regex and only matching lines are rendered, with a `kept/total` count; `Enter` keeps the filter, `Esc` clears it. Invalid patterns are flagged while the last valid filter stays applied |
 | `n` / `N` | Jump to next / previous match |
 | `y` | Copy the entire log to the clipboard — or only the matching lines while a grep filter is applied |
-| `s` | Export the log to `~/.aws_explorer/logs/` — or only the matching lines (file suffixed `-grep`) while a filter is applied |
+| `s` | Export the log to the downloads directory (default `~/.aws_explorer/downloads`) — or only the matching lines (file suffixed `-grep`) while a filter is applied |
 | `?` | Full key reference |
 | `Esc` / `q` | Close the viewer |

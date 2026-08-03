@@ -12,6 +12,7 @@ import (
 
 	"github.com/ryandam9/aws_explorer/internal/auth"
 	"github.com/ryandam9/aws_explorer/internal/config"
+	"github.com/ryandam9/aws_explorer/internal/downloads"
 	"github.com/ryandam9/aws_explorer/internal/engine"
 	"github.com/ryandam9/aws_explorer/internal/model"
 	"github.com/ryandam9/aws_explorer/internal/output"
@@ -249,4 +250,9 @@ func initConfig() {
 		fmt.Fprintf(os.Stderr, "Error parsing config file: %s\n", err)
 		os.Exit(1)
 	}
+
+	// Every user-facing export (CSV, saved logs, reports, S3 downloads) goes
+	// to the shared downloads directory; app.downloadDir overrides the
+	// ~/.aws_explorer/downloads default.
+	downloads.Init(AppConfig.App.DownloadDir)
 }
