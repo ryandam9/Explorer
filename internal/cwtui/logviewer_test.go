@@ -8,6 +8,7 @@ import (
 	"github.com/aws/aws-sdk-go-v2/service/cloudwatchlogs/types"
 	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/mattn/go-runewidth"
 )
 
 func testEvent(id string, ts int64, msg string) types.FilteredLogEvent {
@@ -33,6 +34,49 @@ func TestWrapLine(t *testing.T) {
 	}
 	if !strings.HasPrefix(long[1], "    ") {
 		t.Errorf("continuation should be indented, got %q", long[1])
+	}
+}
+
+func TestSanitizeLogLine(t *testing.T) {
+	if got := sanitizeLogLine("plain ascii line"); got != "plain ascii line" {
+		t.Errorf("clean line should pass through unchanged, got %q", got)
+	}
+	if got := sanitizeLogLine("col1\tcol2\r"); got != "col1    col2" {
+		t.Errorf("tabs should expand and CR drop, got %q", got)
+	}
+}
+
+func TestWrapLineCellWidths(t *testing.T) {
+	// 30 CJK runes are 60 terminal cells; a rune-counted wrap would emit
+	// segments twice as wide as the row and the renderer would clip them.
+	wide := strings.Repeat("界", 30)
+	out := wrapLine(wide, 20, "    ")
+	if len(out) < 2 {
+		t.Fatalf("wide line should wrap, got %v", out)
+	}
+	for i, seg := range out {
+		if w := runewidth.StringWidth(seg); w > 20 {
+			t.Errorf("segment %d is %d cells wide, must be ≤ 20: %q", i, w, seg)
+		}
+		if i > 0 && !strings.HasPrefix(seg, "    ") {
+			t.Errorf("continuation %d should be indented, got %q", i, seg)
+		}
+	}
+}
+
+func TestViewerRebuildSanitizesTabsAndWidths(t *testing.T) {
+	v := &logViewer{seen: map[string]bool{}, wrapW: 40}
+	v.append([]types.FilteredLogEvent{
+		testEvent("e1", 1000, "goroutine 1:\n\tat main.go:10\tin main.main"),
+		testEvent("e2", 2000, strings.Repeat("宽", 40)),
+	})
+	for i, line := range v.lines {
+		if strings.ContainsAny(line, "\t\r") {
+			t.Errorf("line %d still contains tab/CR: %q", i, line)
+		}
+		if w := runewidth.StringWidth(line); w > 40 {
+			t.Errorf("line %d is %d cells wide, must be ≤ wrapW 40: %q", i, w, line)
+		}
 	}
 }
 

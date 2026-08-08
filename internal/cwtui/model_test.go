@@ -1,6 +1,7 @@
 package cwtui
 
 import (
+	"strings"
 	"testing"
 	"time"
 
@@ -253,6 +254,71 @@ type testingError string
 
 func (e testingError) Error() string {
 	return string(e)
+}
+
+func TestDownloadKeyStartsAndGuards(t *testing.T) {
+	m := &model{
+		focus: focusGroups,
+		filteredGroups: []LogGroup{
+			{LogGroup: types.LogGroup{LogGroupName: aws.String("g1")}, Region: "us-east-1"},
+		},
+		eventSearch: textinput.New(),
+		lookback:    defaultLookback,
+	}
+
+	keyD := tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'D'}}
+	newModel, cmd := m.Update(keyD)
+	m2 := newModel.(*model)
+	if !m2.downloading {
+		t.Error("expected D to start a download")
+	}
+	if cmd == nil {
+		t.Error("expected D to return a command")
+	}
+
+	// A second D while one is running must not start another fetch.
+	newModel, _ = m2.Update(keyD)
+	m3 := newModel.(*model)
+	if m3.toast != "A download is already running…" {
+		t.Errorf("expected in-progress guard toast, got %q", m3.toast)
+	}
+}
+
+func TestDownloadKeyNoGroupSelected(t *testing.T) {
+	m := &model{focus: focusGroups, eventSearch: textinput.New(), lookback: defaultLookback}
+	newModel, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'D'}})
+	if newModel.(*model).downloading {
+		t.Error("D with no group selected must not start a download")
+	}
+}
+
+func TestDownloadMsgOutcomes(t *testing.T) {
+	m := &model{downloading: true}
+	newModel, _ := m.Update(downloadMsg{path: "/tmp/x.log", count: 42})
+	m2 := newModel.(*model)
+	if m2.downloading {
+		t.Error("downloadMsg should clear the downloading flag")
+	}
+	if !strings.Contains(m2.toast, "42") || !strings.Contains(m2.toast, "/tmp/x.log") {
+		t.Errorf("success toast should carry count and path, got %q", m2.toast)
+	}
+
+	m2.downloading = true
+	newModel, _ = m2.Update(downloadMsg{path: "/tmp/x.log", count: 50000, truncated: true})
+	if got := newModel.(*model).toast; !strings.Contains(got, "truncated") {
+		t.Errorf("truncated download must say so, got %q", got)
+	}
+
+	m3 := newModel.(*model)
+	m3.downloading = true
+	newModel, _ = m3.Update(downloadMsg{err: testingError("boom")})
+	m4 := newModel.(*model)
+	if m4.downloading {
+		t.Error("downloadMsg error should clear the downloading flag")
+	}
+	if !strings.Contains(m4.toast, "boom") {
+		t.Errorf("failure toast should carry the error, got %q", m4.toast)
+	}
 }
 
 func TestFilterGroupsMatchesRegion(t *testing.T) {

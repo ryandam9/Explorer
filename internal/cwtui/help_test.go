@@ -77,8 +77,13 @@ func TestHelpOverlayContent(t *testing.T) {
 	m := &model{width: 100, height: 40}
 	out := m.helpOverlay()
 	for _, want := range []string{
-		"Log groups", "Log streams", "Events", "Full log viewer", "Everywhere",
+		"Log groups", "Log streams", "Events", "Event record", "Full log viewer",
+		"Everywhere",
 		"query window", "table view", "pan long messages", "Grep filter",
+		// Every binding must be discoverable here, not only via the
+		// (eliding) status bar.
+		"Download", "Shift+Tab", "Backspace", "g/Home, G/End", "n / N",
+		"Ctrl+U", "Copy the full record",
 	} {
 		if !strings.Contains(out, want) {
 			t.Errorf("help overlay missing %q", want)

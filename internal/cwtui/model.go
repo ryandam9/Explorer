@@ -110,6 +110,10 @@ type model struct {
 	// Watch Mode (Live tailing)
 	watchMode bool
 
+	// downloading guards the "D" full-window event download: one at a time,
+	// and the status bar shows progress while it runs.
+	downloading bool
+
 	// showAbout toggles the "what is this page" overlay ("i"), shown over the
 	// group/stream browser.
 	showAbout bool
@@ -143,6 +147,15 @@ type streamsMsg struct {
 type eventsMsg struct {
 	events []types.FilteredLogEvent
 	err    error
+}
+
+// downloadMsg reports the outcome of a "D" download: the full-window event
+// fetch plus the file write, both done off the UI loop.
+type downloadMsg struct {
+	path      string
+	count     int
+	truncated bool
+	err       error
 }
 
 type clearToastMsg struct{}
@@ -297,6 +310,19 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 		}
 
+	case downloadMsg:
+		m.downloading = false
+		if msg.err != nil {
+			m.setToast("Download failed: " + msg.err.Error())
+		} else {
+			note := ""
+			if msg.truncated {
+				note = fmt.Sprintf(" (truncated at %d events)", downloadMaxEvents)
+			}
+			m.setToast(fmt.Sprintf("Downloaded %d events to %s%s", msg.count, msg.path, note))
+		}
+		cmds = append(cmds, toastCmd(4*time.Second))
+
 	case viewerEventsMsg:
 		m.handleViewerEvents(msg, &cmds)
 
@@ -448,6 +474,9 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 		case "s":
 			m.handleExport(&cmds)
+
+		case "D":
+			m.handleDownload(&cmds)
 
 		case ui.KeyDebug:
 			m.debug.Open(m.width, m.height)
@@ -681,6 +710,75 @@ func (m *model) handleExport(cmds *[]tea.Cmd) {
 	*cmds = append(*cmds, toastCmd(4*time.Second))
 }
 
+// handleDownload ("D") fetches every event for the current selection over the
+// query window — not just the ~100 the events panel lists — and writes them to
+// the downloads directory. The scope follows the focused panel: the whole
+// group from the sidebar, the highlighted stream from the streams panel, and
+// whatever the events panel is showing (stream or whole group). The fetch runs
+// async so the UI keeps responding; the status bar shows progress and a toast
+// reports the file path (or the failure).
+func (m *model) handleDownload(cmds *[]tea.Cmd) {
+	if m.downloading {
+		m.setToast("A download is already running…")
+		*cmds = append(*cmds, toastCmd(3*time.Second))
+		return
+	}
+	grp, ok := m.selectedGroup()
+	if !ok {
+		return
+	}
+	var streamName string
+	switch m.focus {
+	case focusStreams:
+		if len(m.filteredStreams) == 0 {
+			return
+		}
+		streamName = aws.ToString(m.filteredStreams[m.selectedStreamIdx].LogStreamName)
+	case focusEvents:
+		if !m.groupLevelSearch && len(m.filteredStreams) > 0 {
+			streamName = aws.ToString(m.filteredStreams[m.selectedStreamIdx].LogStreamName)
+		}
+	}
+
+	// The server-side query pattern applies to the download too (it is what
+	// the events panel shows); say so up front so a leftover pattern can't
+	// silently shrink the file.
+	toast := "Downloading events (window " + formatLookback(m.lookback) + ")…"
+	if p := m.eventSearch.Value(); p != "" {
+		toast = "Downloading events matching " + p + " (window " + formatLookback(m.lookback) + ")…"
+	}
+	m.downloading = true
+	m.setToast(toast)
+	*cmds = append(*cmds, toastCmd(3*time.Second), m.downloadEventsCmd(grp, streamName))
+}
+
+// downloadEventsCmd runs the full-window fetch and the file write off the UI
+// loop, reporting back via downloadMsg.
+func (m *model) downloadEventsCmd(grp LogGroup, streamName string) tea.Cmd {
+	grpName := aws.ToString(grp.LogGroupName)
+	region := grp.Region
+	pattern := m.eventSearch.Value()
+	lookback := m.lookback
+	return func() tea.Msg {
+		slog.Info("Downloading log events", "group", grpName, "region", region, "stream", streamName, "pattern", pattern, "window", formatLookback(lookback))
+		events, truncated, err := m.client.DownloadLogEvents(m.ctx, region, grpName, streamName, pattern, lookback)
+		if err != nil {
+			slog.Warn("Downloading log events failed", "group", grpName, "region", region, "error", err.Error())
+			return downloadMsg{err: err}
+		}
+		if len(events) == 0 {
+			return downloadMsg{err: fmt.Errorf("no matching events in the last %s", formatLookback(lookback))}
+		}
+		grpLabel := sanitizeFilename(region + "-" + grpName)
+		streamLabel := "all_streams"
+		if streamName != "" {
+			streamLabel = sanitizeFilename(streamName)
+		}
+		path, err := exportEvents(events, grpLabel, streamLabel)
+		return downloadMsg{path: path, count: len(events), truncated: truncated, err: err}
+	}
+}
+
 // formatEvents renders events as timestamped plain-text lines, the shared
 // format for clipboard copies and file exports.
 func formatEvents(events []types.FilteredLogEvent) string {
@@ -901,6 +999,9 @@ func (m *model) View() string {
 	}
 	if m.watchMode {
 		statusText += "  ·  [WATCH ACTIVE]"
+	}
+	if m.downloading {
+		statusText += "  ·  Downloading events…"
 	}
 
 	sb.WriteString(ui.StatusBar(m.width, statusText, m.getHelpHints()))
@@ -1287,6 +1388,7 @@ func (m *model) getHelpHints() []ui.KeyHint {
 			ui.H("Enter", "select"),
 			ui.H("/", "filter"),
 			ui.H("G", "search entire group"),
+			ui.H("D", "download events"),
 			ui.H("o", "console"),
 		)
 	case focusStreams:
@@ -1294,6 +1396,7 @@ func (m *model) getHelpHints() []ui.KeyHint {
 			ui.H("↑/↓", "streams"),
 			ui.H("Enter", "events"),
 			ui.H("/", "filter"),
+			ui.H("D", "download events"),
 			ui.H("Esc", "back"),
 		)
 	case focusEvents:
@@ -1320,6 +1423,7 @@ func (m *model) getHelpHints() []ui.KeyHint {
 			ui.H("W", "tail watch"),
 			ui.H("y", "copy"),
 			ui.H("s", "export"),
+			ui.H("D", "download all"),
 			ui.H("Esc", "back"),
 		)
 	}

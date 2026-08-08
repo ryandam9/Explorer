@@ -14,6 +14,7 @@ import (
 	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
+	"github.com/mattn/go-runewidth"
 
 	"github.com/ryandam9/aws_explorer/internal/ui"
 )
@@ -164,6 +165,7 @@ func (v *logViewer) rebuild(wrapW int) {
 			msg = prettifyJSON(msg)
 		}
 		for i, raw := range strings.Split(msg, "\n") {
+			raw = sanitizeLogLine(raw)
 			line := indent + raw
 			if i == 0 {
 				line = prefix + raw
@@ -258,26 +260,54 @@ func extractJSON(s string) (prefix string, raw []byte, suffix string, ok bool) {
 	return "", nil, "", false
 }
 
-// wrapLine hard-wraps a line to width, indenting wrapped continuations.
+// sanitizeLogLine prepares a raw message line for cell-accurate wrapping:
+// tabs become four spaces (lipgloss would otherwise expand them after the
+// wrap math, pushing the row past its width where MaxHeight(1) clips it) and
+// stray carriage returns are dropped.
+func sanitizeLogLine(s string) string {
+	if !strings.ContainsAny(s, "\t\r") {
+		return s
+	}
+	s = strings.ReplaceAll(s, "\t", "    ")
+	return strings.ReplaceAll(s, "\r", "")
+}
+
+// wrapLine hard-wraps a line to a display width, indenting wrapped
+// continuations. Width is measured in terminal cells, not runes — wide
+// characters (CJK, emoji) occupy two cells, and a rune-counted wrap would
+// overflow the row, where the renderer's one-line clamp truncates it.
 func wrapLine(line string, width int, indent string) []string {
-	runes := []rune(line)
-	if len(runes) <= width {
+	if runewidth.StringWidth(line) <= width {
 		return []string{line}
 	}
-	var out []string
-	out = append(out, string(runes[:width]))
-	rest := runes[width:]
-	contW := width - len([]rune(indent))
+	contW := width - runewidth.StringWidth(indent)
 	if contW < 10 {
 		contW = 10
 	}
-	for len(rest) > 0 {
-		n := contW
-		if n > len(rest) {
-			n = len(rest)
+	var out []string
+	var seg strings.Builder
+	segW := 0
+	limit := width // the first segment keeps the full width
+	flush := func() {
+		if len(out) == 0 {
+			out = append(out, seg.String())
+		} else {
+			out = append(out, indent+seg.String())
 		}
-		out = append(out, indent+string(rest[:n]))
-		rest = rest[n:]
+		seg.Reset()
+		segW = 0
+		limit = contW
+	}
+	for _, r := range line {
+		rw := runewidth.RuneWidth(r)
+		if segW+rw > limit && segW > 0 {
+			flush()
+		}
+		seg.WriteRune(r)
+		segW += rw
+	}
+	if segW > 0 {
+		flush()
 	}
 	return out
 }
