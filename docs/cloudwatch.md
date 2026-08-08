@@ -81,6 +81,7 @@ errors stand out while you scroll.
 | `↑`/`↓`, `PgUp`/`PgDn`, `Ctrl+U`/`Ctrl+D` | Scroll (scrolling up pauses tailing) |
 | `g` / `G` | Jump to top / jump to bottom and resume tailing |
 | `f` | Toggle follow (auto-scroll as new events stream in) |
+| `t` | Toggle a table view of the streamed events — the same zebra-striped table as the events panel, with JSON splitting (`J`), message panning (`←`/`→`), record view (`v`) and per-row copy (`y`). Clear any grep filter first; follow (`f`/`G`) keeps the cursor on the newest row as events stream in |
 | `J` | Toggle JSON formatting: pretty-prints JSON objects/arrays embedded in log messages (a `{} json` badge shows while on) |
 | `/` | Search within the log (case-insensitive, matches highlighted; search works on the formatted lines when `J` is on) |
 | `&` | Grep filter (as in `less`): enter a regex and only matching lines are rendered, with a `kept/total` count; `Enter` keeps the filter, `Esc` clears it. Invalid patterns are flagged while the last valid filter stays applied |

@@ -16,6 +16,7 @@ import (
 	"github.com/charmbracelet/lipgloss"
 	"github.com/mattn/go-runewidth"
 
+	"github.com/ryandam9/aws_explorer/internal/table"
 	"github.com/ryandam9/aws_explorer/internal/ui"
 )
 
@@ -58,6 +59,20 @@ type logViewer struct {
 	// (J toggles it). A viewing preference, so it survives re-opening the
 	// viewer on another stream.
 	formatJSON bool
+
+	// Table mode ("t"): the streamed events rendered through the shared
+	// zebra-striped table — the same view the events panel offers — instead
+	// of wrapped log lines. tableSplit mirrors the events panel's JSON-split
+	// toggle (J while the table is showing); like formatJSON, both are
+	// viewing preferences that survive re-opening the viewer. The remaining
+	// fields carry the pan/build state, as on the events panel.
+	tableMode    bool
+	tableSplit   bool
+	table        table.Model
+	msgShift     int
+	maxMsgLen    int
+	hiddenFields int
+	tableSplitOn bool // whether the current build produced field columns
 
 	search       textinput.Model
 	searchActive bool
@@ -117,6 +132,10 @@ func (v *logViewer) open(key viewerKey, title string, wrapW int) {
 	v.grepSrc = nil
 	v.grepTotal = 0
 	v.wrapW = wrapW
+	v.msgShift = 0
+	if v.tableMode {
+		v.rebuildTable()
+	}
 }
 
 // append merges new events (deduplicated by event ID — the streaming fetch
@@ -142,7 +161,67 @@ func (v *logViewer) append(events []types.FilteredLogEvent) {
 	}
 	if added {
 		v.rebuild(v.wrapW)
+		if v.tableMode {
+			v.rebuildTable()
+		}
 	}
+}
+
+// rebuildTable (re)creates the shared-widget table from the streamed events,
+// pinning the cursor to the newest row while following or restoring it
+// otherwise. The stream column appears only for whole-group viewers, where
+// events interleave from many streams.
+func (v *logViewer) rebuildTable() {
+	cur := v.table.Cursor()
+	data := buildEventTableData(v.events, v.key.stream == "", v.tableSplit, v.msgShift)
+	v.msgShift = data.shift
+	v.maxMsgLen = data.maxMsgLen
+	v.hiddenFields = data.hiddenFields
+	v.tableSplitOn = data.split
+	v.table = table.New(
+		table.WithColumns(data.cols),
+		table.WithRows(data.rows),
+		table.WithFocused(true),
+		table.WithStyles(ui.TableStylesZebra()),
+		table.WithFrozenColumns(1),       // pin the time column while panning/scrolling
+		table.WithColNumbers(data.split), // number the field columns for orientation
+	)
+	if v.follow {
+		v.table.GotoBottom()
+	} else if cur > 0 {
+		v.table.MoveDown(cur) // MoveDown scrolls the viewport; bare SetCursor does not
+	}
+}
+
+// refreshTableRows re-renders the rows for a new pan offset without recreating
+// the table, so the cursor and scroll position stay put.
+func (v *logViewer) refreshTableRows() {
+	data := buildEventTableData(v.events, v.key.stream == "", v.tableSplit, v.msgShift)
+	v.msgShift = data.shift
+	v.table.SetRows(data.rows)
+}
+
+// panTable handles ←/→ in table mode, retracing the events panel's order:
+// right reveals hidden columns before panning the message window; left pans
+// back before un-scrolling columns.
+func (v *logViewer) panTable(right bool) {
+	if right {
+		if _, hiddenRight := v.table.ColScrollInfo(); hiddenRight > 0 {
+			v.table.ScrollRight()
+			return
+		}
+		if shifted := clampMsgShift(v.msgShift+msgShiftStep, v.maxMsgLen); shifted != v.msgShift {
+			v.msgShift = shifted
+			v.refreshTableRows()
+		}
+		return
+	}
+	if v.msgShift > 0 {
+		v.msgShift = clampMsgShift(v.msgShift-msgShiftStep, v.maxMsgLen)
+		v.refreshTableRows()
+		return
+	}
+	v.table.ScrollLeft()
 }
 
 // rebuild flattens events into wrapped display lines and recomputes search
@@ -522,12 +601,79 @@ func (m *model) handleViewerKeys(msg tea.KeyMsg, cmds *[]tea.Cmd) {
 		return
 	}
 
+	if v.tableMode {
+		switch msg.String() {
+		case "esc", "q":
+			v.active = false
+		case ui.KeyHelp:
+			m.showHelp = true
+		case "t":
+			v.tableMode = false
+		case "up", "k":
+			v.follow = false
+			v.table.MoveUp(1)
+		case "down", "j":
+			v.table.MoveDown(1)
+		case "pgup", "ctrl+u":
+			v.follow = false
+			v.table.MoveUp(10)
+		case "pgdown", "ctrl+d":
+			v.table.MoveDown(10)
+		case "g", "home":
+			v.follow = false
+			v.table.GotoTop()
+		case "G", "end":
+			v.follow = true
+			v.table.GotoBottom()
+		case "f":
+			v.follow = !v.follow
+			if v.follow {
+				v.table.GotoBottom()
+			}
+		case "left", "right":
+			v.panTable(msg.String() == "right")
+		case "J":
+			// Mirrors the events panel's J: split structured JSON messages
+			// into one column per top-level field, or back to Time/Message.
+			v.tableSplit = !v.tableSplit
+			v.rebuildTable()
+		case "v":
+			// Record view for the highlighted row — full field values,
+			// unclipped, same as v on the events panel.
+			if cur := v.table.Cursor(); cur >= 0 && cur < len(v.events) {
+				m.openEventRecordFor(v.events[cur])
+			}
+		case "y":
+			if cur := v.table.Cursor(); cur >= 0 && cur < len(v.events) {
+				_ = clipboard.WriteAll(aws.ToString(v.events[cur].Message))
+				m.setToast("Copied log event to clipboard")
+				*cmds = append(*cmds, toastCmd(3*time.Second))
+			}
+		case "s":
+			m.exportViewerEvents(cmds)
+		}
+		return
+	}
+
 	switch msg.String() {
 	case "esc", "q":
 		v.active = false
 
 	case ui.KeyHelp:
 		m.showHelp = true
+
+	case "t":
+		// The same table view the events panel offers with t, over the
+		// streamed events. The grep filter belongs to the line view, so it
+		// must be cleared first — a table silently ignoring it would show
+		// more than the header claims.
+		if v.grepRe != nil {
+			m.setToast("Clear the grep filter (& then Esc) before switching to table view")
+			*cmds = append(*cmds, toastCmd(3*time.Second))
+			break
+		}
+		v.tableMode = true
+		v.rebuildTable()
 
 	case "up", "k":
 		v.follow = false
@@ -599,26 +745,34 @@ func (m *model) handleViewerKeys(msg tea.KeyMsg, cmds *[]tea.Cmd) {
 		*cmds = append(*cmds, toastCmd(3*time.Second))
 
 	case "s":
-		streamLabel := "all_streams"
-		if v.key.stream != "" {
-			streamLabel = sanitizeFilename(v.key.stream)
-		}
-		grpLabel := sanitizeFilename(v.key.region + "-" + v.key.group)
-		var path string
-		var err error
-		if v.grepRe != nil {
-			// Export what is on screen: the grep-filtered lines.
-			path, err = exportText(strings.Join(v.grepSrc, "\n")+"\n", grpLabel+"-grep", streamLabel)
-		} else {
-			path, err = exportEvents(v.events, grpLabel, streamLabel)
-		}
-		if err != nil {
-			m.setToast("Export failed: " + err.Error())
-		} else {
-			m.setToast("Exported logs to " + path)
-		}
-		*cmds = append(*cmds, toastCmd(4*time.Second))
+		m.exportViewerEvents(cmds)
 	}
+}
+
+// exportViewerEvents writes the viewer's log to the downloads directory: the
+// grep-filtered lines while a filter is applied (line mode only — table mode
+// requires the filter to be cleared), otherwise all streamed events.
+func (m *model) exportViewerEvents(cmds *[]tea.Cmd) {
+	v := &m.viewer
+	streamLabel := "all_streams"
+	if v.key.stream != "" {
+		streamLabel = sanitizeFilename(v.key.stream)
+	}
+	grpLabel := sanitizeFilename(v.key.region + "-" + v.key.group)
+	var path string
+	var err error
+	if v.grepRe != nil {
+		// Export what is on screen: the grep-filtered lines.
+		path, err = exportText(strings.Join(v.grepSrc, "\n")+"\n", grpLabel+"-grep", streamLabel)
+	} else {
+		path, err = exportEvents(v.events, grpLabel, streamLabel)
+	}
+	if err != nil {
+		m.setToast("Export failed: " + err.Error())
+	} else {
+		m.setToast("Exported logs to " + path)
+	}
+	*cmds = append(*cmds, toastCmd(4*time.Second))
 }
 
 // renderViewer draws the full-screen log page.
@@ -640,8 +794,14 @@ func (m *model) renderViewer() string {
 	} else {
 		header += "  " + mutedStyle.Render("⏸ paused (G to resume tail)")
 	}
-	if v.formatJSON {
+	if v.tableMode {
+		header += "  " + lipgloss.NewStyle().Foreground(lipgloss.Color(ui.ColorAccent())).Render("[table]")
+	} else if v.formatJSON {
 		header += "  " + lipgloss.NewStyle().Foreground(lipgloss.Color(ui.ColorAccent())).Render("{} json")
+	}
+
+	if v.tableMode {
+		return m.renderViewerTable(header)
 	}
 
 	var searchLine string
@@ -723,6 +883,67 @@ func (m *model) renderViewer() string {
 	if len(v.lines) > 0 {
 		bottom := min(v.offset+bodyH, len(v.lines))
 		pos = fmt.Sprintf("lines %d-%d of %d", v.offset+1, bottom, len(v.lines))
+	}
+	statusText := fmt.Sprintf("Region: %s  ·  Events: %d  ·  %s", v.key.region, len(v.events), pos)
+	if v.key.pattern != "" {
+		statusText += "  ·  Pattern: " + v.key.pattern
+	}
+
+	return box + "\n" + ui.StatusBar(m.width, statusText, m.getHelpHints())
+}
+
+// renderViewerTable draws the viewer's table mode: the streamed events through
+// the shared zebra-striped table, sized against what the header block actually
+// renders as (measure, don't assume), with the scroll/pan/field-cap indicators
+// the events panel shows.
+func (m *model) renderViewerTable(header string) string {
+	v := &m.viewer
+	mutedStyle := lipgloss.NewStyle().Foreground(lipgloss.Color(ui.ColorMuted()))
+
+	var b strings.Builder
+	b.WriteString(header + "\n")
+	b.WriteString(mutedStyle.Render("  Table view — ↑/↓ rows · ←/→ pan · J split json · v record · t log view") + "\n")
+	b.WriteString("\n")
+
+	if v.loading {
+		b.WriteString(fmt.Sprintf("  %s Loading full log…\n", m.spinner.View()))
+	} else if len(v.events) == 0 {
+		b.WriteString("  No log events in this window. Streaming for new events…\n")
+	} else {
+		// The block ends in "\n", so the consumed lines equal the newline
+		// count; one line is reserved for the indicator row below the table.
+		hdrLines := strings.Count(b.String(), "\n")
+		tableH := (m.height - 4) - hdrLines - 1
+		if tableH < 3 {
+			tableH = 3
+		}
+		v.table.SetWidth(max(20, m.width-4))
+		v.table.SetHeight(tableH)
+		b.WriteString(v.table.View() + "\n")
+		parts := make([]string, 0, 3)
+		if s := ui.TableScrollIndicator(&v.table); s != "" {
+			parts = append(parts, s)
+		}
+		if v.hiddenFields > 0 {
+			// A capped field set must never read as "all fields".
+			parts = append(parts, ui.MutedStyle().Render(fmt.Sprintf("+%d more json fields in raw event", v.hiddenFields)))
+		}
+		if v.msgShift > 0 {
+			parts = append(parts, ui.MutedStyle().Render(fmt.Sprintf("msg panned +%d chars ◀ ←", v.msgShift)))
+		}
+		b.WriteString(" " + strings.Join(parts, "  "))
+	}
+
+	box := lipgloss.NewStyle().
+		Border(lipgloss.RoundedBorder()).
+		BorderForeground(lipgloss.Color(ui.ColorBorderFocus())).
+		Width(max(20, m.width-2)).
+		Height(m.height - 4).
+		Render(b.String())
+
+	pos := "no events"
+	if len(v.events) > 0 {
+		pos = fmt.Sprintf("event %d of %d", v.table.Cursor()+1, len(v.events))
 	}
 	statusText := fmt.Sprintf("Region: %s  ·  Events: %d  ·  %s", v.key.region, len(v.events), pos)
 	if v.key.pattern != "" {

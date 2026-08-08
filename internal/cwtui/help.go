@@ -62,6 +62,7 @@ func helpSections() []helpSection {
 			{"PgUp, PgDn", "Page up / down (also Ctrl+U / Ctrl+D)"},
 			{"g/Home, G/End", "Jump to top / bottom (bottom resumes tailing)"},
 			{"f", "Toggle follow (auto-scroll on new events)"},
+			{"t", "Table view of the streamed events — same table as the events panel, with JSON splitting (J), panning (←/→), record view (v) and per-row copy (y)"},
 			{"J", "Pretty-print JSON embedded in messages"},
 			{"/", "Find in the log"},
 			{"n / N", "Jump to the next / previous find match"},
