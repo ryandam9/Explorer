@@ -97,12 +97,17 @@ func (m *model) recordOverlayWidth() int {
 	return w
 }
 
-// openEventRecord opens the record view for the selected event.
+// openEventRecord opens the record view for the events panel's selection.
 func (m *model) openEventRecord() {
 	if len(m.events) == 0 || m.selectedEventIdx >= len(m.events) {
 		return
 	}
-	ev := m.events[m.selectedEventIdx]
+	m.openEventRecordFor(m.events[m.selectedEventIdx])
+}
+
+// openEventRecordFor opens the record view for any event — the events panel's
+// selection or the log viewer table's highlighted row.
+func (m *model) openEventRecordFor(ev types.FilteredLogEvent) {
 	entries := eventRecordEntries(ev)
 	w := m.recordOverlayWidth()
 	h := m.height - 10

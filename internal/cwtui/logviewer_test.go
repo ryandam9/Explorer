@@ -280,6 +280,140 @@ func TestViewerTickStopsWhenClosed(t *testing.T) {
 	}
 }
 
+// viewerModel builds a model with an open viewer holding the given events,
+// the shared fixture for the table-mode tests.
+func viewerModel(stream string, events ...types.FilteredLogEvent) *model {
+	m := &model{
+		width:  120,
+		height: 40,
+		viewer: logViewer{
+			active:     true,
+			key:        viewerKey{region: "us-east-1", group: "g", stream: stream},
+			seen:       map[string]bool{},
+			wrapW:      100,
+			tableSplit: true,
+		},
+	}
+	m.viewer.append(events)
+	return m
+}
+
+func TestViewerTableModeToggle(t *testing.T) {
+	m := viewerModel("s1",
+		testEvent("e1", 1000, "first"),
+		testEvent("e2", 2000, "second"),
+	)
+
+	newModel, _ := m.Update(keyMsg("t"))
+	m2 := newModel.(*model)
+	if !m2.viewer.tableMode {
+		t.Fatal("t should switch the viewer to table mode")
+	}
+	if got := len(m2.viewer.table.Rows()); got != 2 {
+		t.Errorf("table should hold one row per event, got %d", got)
+	}
+
+	newModel, _ = m2.Update(keyMsg("t"))
+	if newModel.(*model).viewer.tableMode {
+		t.Error("t again should return to the log view")
+	}
+}
+
+func TestViewerTableModeBlockedByGrep(t *testing.T) {
+	m := viewerModel("s1", testEvent("e1", 1000, "first"))
+	m.viewer.setGrep("first")
+
+	newModel, _ := m.Update(keyMsg("t"))
+	m2 := newModel.(*model)
+	if m2.viewer.tableMode {
+		t.Error("t must not enter table mode while a grep filter is applied")
+	}
+	if m2.toast == "" {
+		t.Error("blocking t should explain itself via a toast")
+	}
+}
+
+func TestViewerTableFollowsNewEvents(t *testing.T) {
+	m := viewerModel("s1", testEvent("e1", 1000, "first"))
+	m.viewer.tableMode = true
+	m.viewer.follow = true
+	m.viewer.rebuildTable()
+
+	m.viewer.append([]types.FilteredLogEvent{
+		testEvent("e2", 2000, "second"),
+		testEvent("e3", 3000, "third"),
+	})
+	if cur := m.viewer.table.Cursor(); cur != 2 {
+		t.Errorf("following table should pin the cursor to the newest row, got %d", cur)
+	}
+
+	// With follow off, the cursor stays where the user left it.
+	m.viewer.follow = false
+	m.viewer.table.GotoTop()
+	m.viewer.table.MoveDown(1)
+	m.viewer.append([]types.FilteredLogEvent{testEvent("e4", 4000, "fourth")})
+	if cur := m.viewer.table.Cursor(); cur != 1 {
+		t.Errorf("paused table should keep the cursor at 1, got %d", cur)
+	}
+}
+
+func TestViewerTableStreamColumnOnlyForGroup(t *testing.T) {
+	ev := testEvent("e1", 1000, "hello")
+	ev.LogStreamName = aws.String("stream-a")
+
+	group := viewerModel("", ev) // whole-group viewer
+	group.viewer.tableMode = true
+	group.viewer.rebuildTable()
+	single := viewerModel("stream-a", ev)
+	single.viewer.tableMode = true
+	single.viewer.rebuildTable()
+
+	hasStream := func(m *model) bool {
+		for _, c := range m.viewer.table.Columns() {
+			if c.Title == "Stream" {
+				return true
+			}
+		}
+		return false
+	}
+	if !hasStream(group) {
+		t.Error("whole-group table should include the Stream column")
+	}
+	if hasStream(single) {
+		t.Error("single-stream table should not include the Stream column")
+	}
+}
+
+func TestViewerTableOpensRecordView(t *testing.T) {
+	m := viewerModel("s1",
+		testEvent("e1", 1000, "first message"),
+		testEvent("e2", 2000, "second message"),
+	)
+	m.viewer.tableMode = true
+	m.viewer.rebuildTable()
+	m.viewer.follow = true
+	m.viewer.table.GotoBottom()
+
+	newModel, _ := m.Update(keyMsg("v"))
+	m2 := newModel.(*model)
+	if !m2.recordActive {
+		t.Fatal("v in viewer table mode should open the record view")
+	}
+	if !strings.Contains(m2.recordText, "second message") {
+		t.Errorf("record should show the highlighted row's event, got %q", m2.recordText)
+	}
+
+	// Esc closes the record and leaves the viewer open.
+	newModel, _ = m2.Update(tea.KeyMsg{Type: tea.KeyEsc})
+	m3 := newModel.(*model)
+	if m3.recordActive {
+		t.Error("Esc should close the record view")
+	}
+	if !m3.viewer.active {
+		t.Error("closing the record must leave the viewer open")
+	}
+}
+
 func TestFormatEvents(t *testing.T) {
 	out := formatEvents([]types.FilteredLogEvent{
 		testEvent("e1", 1700000000000, "hello world"),

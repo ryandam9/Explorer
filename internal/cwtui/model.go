@@ -220,7 +220,7 @@ func NewModel(ctx context.Context, awsCfg *config.AWSConfig, regions []string, a
 		eventSearch:  eSearch,
 		lookback:     since,
 		jsonSplit:    true, // split structured JSON events into columns by default
-		viewer:       logViewer{search: vSearch, grepInput: vGrep},
+		viewer:       logViewer{search: vSearch, grepInput: vGrep, tableSplit: true},
 	}
 
 	return m, nil
@@ -948,8 +948,12 @@ func (m *model) View() string {
 
 	if m.viewer.active {
 		frame := m.applyToast(m.renderViewer())
-		if m.showHelp {
+		switch {
+		case m.showHelp:
 			frame = ui.OverlayCenterBlank(m.helpOverlay(), m.width, m.height)
+		case m.recordActive:
+			// Record view opened from the viewer's table mode (v).
+			frame = ui.OverlayCenterBlank(m.renderEventRecord(), m.width, m.height)
 		}
 		return m.debug.Overlay(frame, m.width, m.height)
 	}
@@ -1027,8 +1031,9 @@ const cwAboutText = "This is the CloudWatch Logs explorer. The sidebar lists log
 	"table, and p cycles the server-side query window (30m up to 7d) — narrower " +
 	"windows scan less data, so busy groups answer faster.\n\n" +
 	"In the log page you can search within the log (/), grep-filter lines (&), " +
-	"pretty-print embedded JSON (J), follow new events (f), and copy or export " +
-	"what you see. Lines are tinted by severity so errors stand out.\n\n" +
+	"pretty-print embedded JSON (J), switch to the table view (t), follow new " +
+	"events (f), and copy or export what you see. Lines are tinted by severity " +
+	"so errors stand out.\n\n" +
 	"You often arrive here by pressing L on a resource in the Summary or VPC " +
 	"explorer, which pre-filters to that resource's log group. The status bar " +
 	"shows the keys usable right now; ? opens the full key reference."
@@ -1361,6 +1366,25 @@ func (m *model) getHelpHints() []ui.KeyHint {
 				ui.H("Esc", "clear"),
 			}
 		}
+		if m.viewer.tableMode {
+			jsonHint := "split json"
+			if m.viewer.tableSplitOn {
+				jsonHint = "raw message"
+			}
+			return []ui.KeyHint{
+				ui.H("↑/↓", "rows"),
+				ui.H("←/→", "pan"),
+				ui.H("J", jsonHint),
+				ui.H("v", "record"),
+				ui.H("G", "tail"),
+				ui.H("f", "follow"),
+				ui.H("y", "copy event"),
+				ui.H("s", "export"),
+				ui.H("t", "log view"),
+				ui.H("?", "help"),
+				ui.H("Esc", "close"),
+			}
+		}
 		copyHint, exportHint := "copy all", "export"
 		if m.viewer.grepRe != nil {
 			copyHint, exportHint = "copy matches", "export matches"
@@ -1371,6 +1395,7 @@ func (m *model) getHelpHints() []ui.KeyHint {
 			ui.H("/", "find"),
 			ui.H("&", "grep"),
 			ui.H("n/N", "next/prev"),
+			ui.H("t", "table view"),
 			ui.H("G", "tail"),
 			ui.H("f", "follow"),
 			ui.H("J", "format json"),
