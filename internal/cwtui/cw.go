@@ -212,6 +212,49 @@ func (c *CWLogsClient) GetLogEvents(ctx context.Context, region, logGroupName, l
 	return c.GetLogEventsSince(ctx, region, logGroupName, logStreamName, filterPattern, start, limit)
 }
 
+// downloadMaxEvents caps how many events a download ("D") fetches, bounding
+// memory and API round-trips on very busy groups. Hitting the cap is surfaced
+// to the user via the truncated flag — a capped download must never read as
+// the complete window.
+const downloadMaxEvents = 50000
+
+// DownloadLogEvents pages FilterLogEvents across the whole lookback window and
+// returns every matching event oldest-first — unlike GetLogEventsSince, which
+// keeps only the most recent `limit`. truncated reports that downloadMaxEvents
+// ended the download before the window was exhausted.
+func (c *CWLogsClient) DownloadLogEvents(ctx context.Context, region, logGroupName, logStreamName, filterPattern string, lookback time.Duration) ([]types.FilteredLogEvent, bool, error) {
+	input := &cloudwatchlogs.FilterLogEventsInput{
+		LogGroupName: aws.String(logGroupName),
+		StartTime:    aws.Int64(time.Now().Add(-lookback).UnixMilli()),
+	}
+	if logStreamName != "" {
+		input.LogStreamNames = []string{logStreamName}
+	}
+	if filterPattern != "" {
+		input.FilterPattern = aws.String(filterPattern)
+	}
+
+	ctxWithTimeout, cancel := context.WithTimeout(ctx, 5*time.Minute)
+	defer cancel()
+
+	var events []types.FilteredLogEvent
+	for {
+		resp, err := c.clientFor(region).FilterLogEvents(ctxWithTimeout, input)
+		if err != nil {
+			return nil, false, err
+		}
+		events = append(events, resp.Events...)
+		if len(events) >= downloadMaxEvents {
+			truncated := len(events) > downloadMaxEvents || resp.NextToken != nil
+			return events[:downloadMaxEvents], truncated, nil
+		}
+		if resp.NextToken == nil {
+			return events, false, nil
+		}
+		input.NextToken = resp.NextToken
+	}
+}
+
 // GetLogEventsSince pages FilterLogEvents forward from startMillis (inclusive),
 // keeping at most `limit` of the most recent events. The full log viewer uses
 // it for the initial backfill and to stream events newer than the last one

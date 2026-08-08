@@ -26,12 +26,14 @@ func helpSections() []helpSection {
 			{"Enter", "Open the group's streams"},
 			{"/", "Filter groups by name or region"},
 			{"G", "Search events across the whole group (all streams)"},
+			{"D", "Download the group's events in the query window to a file"},
 			{"o", "Copy the console URL (opens the browser when local)"},
 		}},
 		{"Log streams", []row{
 			{"↑/↓, j/k", "Navigate streams"},
 			{"Enter", "List the stream's events"},
 			{"/", "Filter streams by name"},
+			{"D", "Download the selected stream's events to a file"},
 			{"Esc", "Back to the group list"},
 		}},
 		{"Events", []row{
@@ -46,6 +48,7 @@ func helpSections() []helpSection {
 			{"W", "Toggle live tail watch mode"},
 			{"y", "Copy the selected event"},
 			{"s", "Export the listed events to the downloads directory"},
+			{"D", "Download every event in the window (full fetch, not just the listed page)"},
 			{"Esc", "Back to streams (or groups from a whole-group search)"},
 		}},
 		{"Full log viewer", []row{

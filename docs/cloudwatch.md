@@ -54,6 +54,7 @@ faster. The active window shows in the panel header and the status bar.
 | `v` | Record view: the selected event vertically, with every JSON field's **full value** (table cells clip at 80/160 chars; this is the escape hatch). Scrollable, `y` copies the record, `Esc` closes |
 | `W` | Toggle live tail watch mode |
 | `y` / `s` | Copy the selected event / export the listed events |
+| `D` | Download **every** matching event in the query window to the downloads directory — `s` writes only the events currently listed (~100), while `D` re-queries the window in full (up to 50,000 events; the toast notes when that cap truncates). Also works from the group sidebar (whole group) and the streams panel (selected stream); the active query pattern and window apply |
 
 With JSON splitting on, field columns come from the union of top-level keys
 across the listed events in first-appearance order (capped at 24 — a
