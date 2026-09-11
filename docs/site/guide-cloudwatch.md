@@ -33,8 +33,10 @@ See the [`cw` command reference](cw.md) for every flag.
 ## Full log viewer
 
 Pressing `Enter` on an event opens the full-screen log viewer: the entire log
-(24-hour lookback, most recent 2000 events) for the selected stream — or the
-whole group in group-level search — streaming new events live as they arrive.
+for the selected stream — every event in the query window (24 hours by default),
+not just the most recent few — or the whole group in group-level search,
+streaming new events live as they arrive. Only a very large window is capped
+(at 50,000 events, newest kept), and the header says so when it happens.
 
 | Key | Action |
 |-----|--------|
@@ -43,8 +45,8 @@ whole group in group-level search — streaming new events live as they arrive.
 | `f` | Toggle follow (auto-scroll as new events stream in) |
 | `J` | Toggle JSON formatting — pretty-prints embedded JSON (a `{} json` badge shows while on) |
 | `/` | Search within the log (case-insensitive, matches highlighted) |
-| `&` | Grep filter (as in `less`): a regex keeps only matching lines, with a `kept/total` count |
+| `&` | Grep filter (as in `less`): a regex keeps only matching lines, with a `kept/total` count. Smart case: all-lowercase matches case-insensitively; an uppercase letter makes it exact |
 | `n` / `N` | Jump to next / previous match |
 | `y` | Copy the whole log — or only the matching lines while a grep filter is applied |
-| `s` | Export the log to `~/.aws_explorer/logs/` (suffixed `-grep` while filtered) |
+| `s` | Export the log to the downloads directory (default `~/.aws_explorer/downloads`) (suffixed `-grep` while filtered) |
 | `Esc` / `q` | Close the viewer |

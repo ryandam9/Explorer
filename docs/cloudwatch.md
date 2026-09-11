@@ -108,11 +108,15 @@ streams.
 ### Log viewer
 
 Pressing `Enter` on a log event opens the **Log viewer**: a full-screen
-page with the entire log (the selected query window, most recent 2000 events)
-for the selected stream — or the whole group in group-level search — that
-streams new events live as they arrive. Each line is tinted by severity (error/fail/panic
-in red, warnings amber, info/notice in the info color, debug/trace muted) so
-errors stand out while you scroll.
+page with the entire log for the selected stream (or the whole group in
+group-level search), streaming new events live as they arrive. The initial
+load pages the *whole* selected query window — every event in it, not just the
+most recent few — so `p` (the query window) is the lever that decides how much
+history you see. Only very large logs are capped, at 50,000 events with the
+newest kept; when that happens the header and status bar say `truncated`
+rather than passing a partial log off as the complete one. Each line is tinted
+by severity (error/fail/panic in red, warnings amber, info/notice in the info
+color, debug/trace muted) so errors stand out while you scroll.
 
 | Key | Action |
 |-----|--------|
