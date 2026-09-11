@@ -85,6 +85,10 @@ type model struct {
 	lookback          time.Duration // server-side query window (FilterLogEvents StartTime)
 	maxEvents         int           // full log viewer's event ceiling (0 = unlimited)
 
+	// streamMatch is the [2] Log streams panel's "which streams contain this
+	// string?" mode (F): one group-wide query, tallied per stream.
+	streamMatch streamMatchState
+
 	// Table rendering of the events panel ("t"): the shared table widget with
 	// zebra striping, like every other data grid in the app. msgShift pans the
 	// message column left by that many runes (←/→) so long messages can be
@@ -197,6 +201,10 @@ func NewModel(ctx context.Context, awsCfg *config.AWSConfig, regions []string, a
 	vGrep.Placeholder = "grep regex (smart case; e.g. error|timeout)…"
 	vGrep.Width = 40
 
+	mSearch := textinput.New()
+	mSearch.Placeholder = "string or pattern to find across every stream…"
+	mSearch.Width = 40
+
 	gSearch.SetValue(groupFilter)
 	sSearch.SetValue(streamFilter)
 	eSearch.SetValue(eventPattern)
@@ -231,6 +239,7 @@ func NewModel(ctx context.Context, awsCfg *config.AWSConfig, regions []string, a
 		maxEvents:    resolvedMaxEvents,
 		jsonSplit:    true, // split structured JSON events into columns by default
 		viewer:       logViewer{search: vSearch, grepInput: vGrep, tableSplit: true},
+		streamMatch:  streamMatchState{input: mSearch},
 	}
 
 	return m, nil
@@ -338,6 +347,9 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.setToast(fmt.Sprintf("Downloaded %d events to %s%s", msg.count, msg.path, note))
 		}
 		cmds = append(cmds, toastCmd(4*time.Second))
+
+	case streamMatchMsg:
+		m.handleStreamMatchResult(msg, &cmds)
 
 	case viewerEventsMsg:
 		m.handleViewerEvents(msg, &cmds)
@@ -460,6 +472,14 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, tea.Batch(cmds...)
 		}
 
+		// The stream-match mode owns the streams panel while it is showing;
+		// anything it doesn't own falls through to the global keys below.
+		if m.streamMatch.visible() && m.focus == focusStreams {
+			if m.handleStreamMatchKeys(msg, &cmds) {
+				return m, tea.Batch(cmds...)
+			}
+		}
+
 		// Global navigation
 		switch msg.String() {
 		case "q", "ctrl+c":
@@ -529,6 +549,13 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					m.setToast("Live tail watch mode deactivated")
 					cmds = append(cmds, toastCmd(3*time.Second))
 				}
+			}
+
+		case "F":
+			// Which streams contain this string? One group-wide query,
+			// tallied per stream — no per-stream fan-out.
+			if m.focus == focusStreams && m.view == viewStreams {
+				m.openStreamMatch()
 			}
 
 		case "G":
@@ -640,6 +667,9 @@ func (m *model) navigateList(dir int) tea.Cmd {
 			return nil
 		}
 		m.selectedGroupIdx = (m.selectedGroupIdx + dir + len(m.filteredGroups)) % len(m.filteredGroups)
+		// A stream tally belongs to the group it was run against — moving to
+		// another group drops it rather than letting it describe the wrong one.
+		m.streamMatch.reset()
 		// Eagerly query streams for the newly selected group; the streamsMsg
 		// handler drops responses for groups that are no longer selected.
 		m.streamsLoading = true
@@ -711,6 +741,7 @@ func (m *model) handleSelection(cmds *[]tea.Cmd) {
 
 func (m *model) handleBack(cmds *[]tea.Cmd) {
 	m.watchMode = false
+	m.streamMatch.reset()
 	if m.focus == focusEvents {
 		if m.groupLevelSearch {
 			m.groupLevelSearch = false
@@ -761,11 +792,13 @@ func (m *model) handleExport(cmds *[]tea.Cmd) {
 // the event query re-runs when the events panel is showing (its pattern
 // changed).
 func (m *model) clearAllFilters(cmds *[]tea.Cmd) {
-	if m.groupSearch.Value() == "" && m.streamSearch.Value() == "" && m.eventSearch.Value() == "" {
+	if m.groupSearch.Value() == "" && m.streamSearch.Value() == "" && m.eventSearch.Value() == "" &&
+		!m.streamMatch.visible() {
 		m.setToast("No filters active")
 		*cmds = append(*cmds, toastCmd(3*time.Second))
 		return
 	}
+	m.streamMatch.reset()
 	selGroup, hadGroup := m.selectedGroup()
 	var selStream string
 	if len(m.filteredStreams) > 0 && m.selectedStreamIdx < len(m.filteredStreams) {
@@ -806,7 +839,8 @@ func (m *model) clearAllFilters(cmds *[]tea.Cmd) {
 // anyFilterActive reports whether any of the three browser filters is set,
 // for the status-bar hint and the x/y counts.
 func (m *model) anyFilterActive() bool {
-	return m.groupSearch.Value() != "" || m.streamSearch.Value() != "" || m.eventSearch.Value() != ""
+	return m.groupSearch.Value() != "" || m.streamSearch.Value() != "" || m.eventSearch.Value() != "" ||
+		m.streamMatch.visible()
 }
 
 // countLabel renders a list count for the status bar: plain when unfiltered,
@@ -1074,6 +1108,17 @@ func (m *model) watchTickCmd() tea.Cmd {
 	return tea.Tick(3*time.Second, func(time.Time) tea.Msg { return watchTickMsg{} })
 }
 
+// sidebarSideWidth is the fixed width of the [1] Log groups sidebar; the
+// right-hand panel takes what is left.
+const sidebarSideWidth = 42
+
+// streamsPanelWidth is the usable width of the right-hand panel, shared by the
+// panel renderers and the stream-match table so they can't disagree about how
+// much room there is.
+func (m *model) streamsPanelWidth() int {
+	return max(20, m.width-sidebarSideWidth-4)
+}
+
 func (m *model) View() string {
 	if m.err != nil {
 		return m.debug.Overlay(m.renderErrorView(), m.width, m.height)
@@ -1100,13 +1145,9 @@ func (m *model) View() string {
 	}
 
 	// Main Layout: Sidebar & Content Panel
-	sidebarW := 42
-	contentW := m.width - sidebarW - 4
-	if contentW < 20 {
-		contentW = 20
-	}
+	contentW := m.streamsPanelWidth()
 
-	sidebar := m.renderSidebar(sidebarW)
+	sidebar := m.renderSidebar(sidebarSideWidth)
 	var content string
 
 	if m.view == viewStreams {
@@ -1295,13 +1336,23 @@ func (m *model) renderStreamsPanel(width int) string {
 		b.WriteString(headingStyle.Render(" [2] Log streams") + "\n")
 	}
 
+	if m.streamMatch.visible() {
+		b.WriteString(m.renderStreamMatch(width))
+		return lipgloss.NewStyle().
+			Border(lipgloss.RoundedBorder()).
+			BorderForeground(lipgloss.Color(m.getBorderColor(focusStreams))).
+			Width(width).
+			Height(m.height - 4).
+			Render(b.String())
+	}
+
 	if m.streamSearchActive {
 		b.WriteString(" " + m.streamSearch.View() + "\n")
 	} else if v := m.streamSearch.Value(); v != "" {
 		accent := lipgloss.NewStyle().Foreground(lipgloss.Color(ui.ColorAccent()))
 		b.WriteString(" Filter: " + accent.Render(v) + "  (/ edits · C clears)\n")
 	} else {
-		b.WriteString("  (Press / to filter streams)\n")
+		b.WriteString("  (Press / to filter streams by name · F to find which streams contain a string)\n")
 	}
 
 	b.WriteString("\n")
@@ -1583,10 +1634,29 @@ func (m *model) getHelpHints() []ui.KeyHint {
 			ui.H("o", "console"),
 		)
 	case focusStreams:
+		// The status bar is ordered by importance, so the mode's own keys
+		// come first while it owns the panel.
+		if m.streamMatch.prompting {
+			return []ui.KeyHint{
+				ui.H("Enter", "search all streams"),
+				ui.H("Esc", "cancel"),
+			}
+		}
+		if m.streamMatch.active {
+			hints = append(hints,
+				ui.H("↑/↓", "matched streams"),
+				ui.H("Enter", "open stream"),
+				ui.H("F", "edit search"),
+				ui.H("p", "window "+formatLookback(m.lookback)),
+				ui.H("Esc", "clear matches"),
+			)
+			break
+		}
 		hints = append(hints,
 			ui.H("↑/↓", "streams"),
 			ui.H("Enter", "events"),
 			ui.H("/", "filter"),
+			ui.H("F", "find in streams"),
 			ui.H("D", "download events"),
 			ui.H("Esc", "back"),
 		)

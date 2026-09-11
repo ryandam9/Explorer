@@ -50,7 +50,7 @@ the Tab-cycle order.
 |------|------------|
 | **Browser** | The main screen: the sidebar plus one right-hand panel |
 | **[1] Log groups** | Sidebar listing groups across the region scope |
-| **[2] Log streams** | Right panel: the selected group's streams |
+| **[2] Log streams** | Right panel: the selected group's streams — or, after `F`, the streams that contain a given string |
 | **[3] Log events** | Right panel: events for the selected stream — or the whole group after `G` (the heading shows which) |
 | **Log viewer** | Full-screen page (`Enter` on an event): live tail, find/grep, table mode |
 | **Event record** | Overlay (`v`): one event, every field unclipped |
@@ -63,20 +63,60 @@ There are five narrowing tools, one per layer. `C` clears them all at once.
 |-----|-------|-----------------|------|
 | `/` | Group sidebar | The **list of group names** shown (also matches region) | Client-side, cosmetic |
 | `/` | Streams panel | The **list of stream names** shown | Client-side, cosmetic |
+| `F` | Streams panel | Not a filter — **a search**: which streams contain a string. One group-wide query, tallied per stream (matches, first/last match), so you find the right stream before opening any events. `Enter` on a result opens that stream with the pattern applied | **Server-side** |
 | `/` | Events panel | **Which events AWS returns** — one or more [CloudWatch filter patterns](https://docs.aws.amazon.com/AmazonCloudWatch/latest/logs/FilterAndPatternSyntax.html) separated by `;` (e.g. `ERROR; timeout; { $.level = "error" }`). Each pattern runs as its own query and an event matching **any** of them is included, deduplicated into one timeline. Narrower patterns scan less data, so busy groups answer faster | **Server-side** |
 | `G` | Group sidebar | Not a filter — **scope**: search events across the whole group (all streams interleaved) instead of one stream, with the same pattern and window. With no pattern set, `G` opens the pattern prompt first — `Enter` on the empty prompt explicitly browses everything, `Esc` backs out | Server-side |
 | `/` | Full log viewer | Nothing — **find-in-page**: highlights matches, `n`/`N` jump between them, every line stays visible | In-page |
 | `&` | Full log viewer | The **lines rendered** — only lines matching the regex show (like `less`), with a kept/total count | In-page |
 
-Rules of thumb: use the list `/`s to *find* a group or stream by name; use the
-events-panel `/` (plus the `p` window) when the log is busy and you only want
-certain events fetched at all; use `G` when you don't know which stream an
-event landed in; and inside the viewer use `/` to *locate* something while
+Rules of thumb: use the list `/`s to *find* a group or stream by name; use `F`
+when you know the string but not the stream — it names the streams instead of
+dumping their events; use the events-panel `/` (plus the `p` window) when the
+log is busy and you only want certain events fetched at all; use `G` when you
+want the matching events themselves, interleaved across streams; and inside the viewer use `/` to *locate* something while
 keeping context, or `&` to *isolate* matching lines.
 
 Applied filters stay visible: each panel shows its active filter value, the
 status bar switches to `shown/total` counts while a list is filtered, and
 `C` resets everything (in the viewer, `C` clears find and grep).
+
+### Finding the right stream (`F`)
+
+When you know the string but not which stream it landed in, `F` on the **[2]
+Log streams** panel answers that directly — without opening a single event.
+
+It runs **one** `FilterLogEvents` query over the whole group (the same call `G`
+makes) and tallies the result by stream, because AWS returns the stream name on
+every matched event. There is no per-stream fan-out, so the cost is one group
+query regardless of how many streams the group has.
+
+| Column | Meaning |
+|--------|---------|
+| `Stream` | The log stream that contained a match |
+| `Matches` | How many events matched in the window (`≥N` when the scan was capped) |
+| `First match` / `Last match` | When the first and last match landed |
+
+Streams are ordered by last match, so whatever is active right now is on top.
+
+| Key | Action |
+|-----|--------|
+| `F` | Open the prompt (seeded with the active event pattern, if any); `F` again edits it |
+| `Enter` | In the prompt: run the search. On a result: open that stream's events **with the pattern already applied** |
+| `↑`/`↓` | Move between matched streams |
+| `Esc` | Cancel the prompt / clear the results and return to the plain stream list |
+
+Three things the view is careful about:
+
+- **It answers for the query window only** — the header says which (`p` changes
+  it). "No stream matched in the last 24h" is not "this string appears
+  nowhere"; widen the window and ask again.
+- **Only matching streams are listed**, and the header counts them against the
+  group's total (`12 of 40 streams matched`), so "no match" never looks like
+  "not queried".
+- **A capped scan is labelled.** Counting reads up to 50,000 matched events; past
+  that the counts become minimums (shown `≥N`), a warning appears, and a very
+  quiet stream may be missing entirely — narrow the pattern or the window for an
+  exact answer.
 
 ### [3] Log events panel
 
