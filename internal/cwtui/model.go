@@ -83,6 +83,7 @@ type model struct {
 	eventsLoading     bool
 	groupLevelSearch  bool          // If true, queries entire group instead of specific stream
 	lookback          time.Duration // server-side query window (FilterLogEvents StartTime)
+	maxEvents         int           // full log viewer's event ceiling (0 = unlimited)
 
 	// Table rendering of the events panel ("t"): the shared table widget with
 	// zebra striping, like every other data grid in the app. msgShift pans the
@@ -166,7 +167,7 @@ type watchTickMsg struct{}
 // eventPattern pre-populate the three search inputs (the event pattern is
 // applied server-side on the first event query). since bounds how far back
 // event queries scan (0 means the 24h default); the "p" key cycles it later.
-func NewModel(ctx context.Context, awsCfg *config.AWSConfig, regions []string, allRegions bool, configPath string, appCfg *config.Config, groupFilter, streamFilter, eventPattern string, since time.Duration) (tea.Model, error) {
+func NewModel(ctx context.Context, awsCfg *config.AWSConfig, regions []string, allRegions bool, configPath string, appCfg *config.Config, groupFilter, streamFilter, eventPattern string, since time.Duration, maxEvents int) (tea.Model, error) {
 	client, err := NewCWLogsClient(ctx, awsCfg, regions, allRegions)
 	if err != nil {
 		return nil, err
@@ -204,6 +205,14 @@ func NewModel(ctx context.Context, awsCfg *config.AWSConfig, regions []string, a
 		since = defaultLookback
 	}
 
+	// The flag wins over cw.maxEvents, which wins over the built-in default;
+	// 0 here means "unlimited" (see ResolveMaxEvents).
+	cfgMaxEvents := 0
+	if appCfg != nil {
+		cfgMaxEvents = appCfg.CW.MaxEvents
+	}
+	resolvedMaxEvents := ResolveMaxEvents(maxEvents, cfgMaxEvents)
+
 	m := &model{
 		ctx:          ctx,
 		awsCfg:       awsCfg,
@@ -219,6 +228,7 @@ func NewModel(ctx context.Context, awsCfg *config.AWSConfig, regions []string, a
 		streamSearch: sSearch,
 		eventSearch:  eSearch,
 		lookback:     since,
+		maxEvents:    resolvedMaxEvents,
 		jsonSplit:    true, // split structured JSON events into columns by default
 		viewer:       logViewer{search: vSearch, grepInput: vGrep, tableSplit: true},
 	}

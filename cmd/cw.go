@@ -19,6 +19,11 @@ var (
 	cwFilter string
 	cwSince  string
 	cwTheme  string
+
+	// cwMaxEvents mirrors cw.maxEvents in the config: 0 = unset (config, then
+	// the built-in default), negative = no ceiling. Resolved by
+	// cwtui.ResolveMaxEvents.
+	cwMaxEvents int
 )
 
 var cwCmd = &cobra.Command{
@@ -37,7 +42,10 @@ list; otherwise the config's aws.regions list is used.`,
   aws_explorer cw -g /aws/lambda/my-fn -f ERROR
 
   # Only scan the last 30 minutes of events (faster on busy groups)
-  aws_explorer cw -g /aws/lambda/my-fn --since 30m`,
+  aws_explorer cw -g /aws/lambda/my-fn --since 30m
+
+  # Hold every event in the window in the log viewer, with no ceiling
+  aws_explorer cw -g /aws/lambda/my-fn --max-events -1`,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		ctx, cancel := context.WithCancel(context.Background())
 		defer cancel()
@@ -78,7 +86,7 @@ list; otherwise the config's aws.regions list is used.`,
 			}
 		}
 
-		m, err := cwtui.NewModel(ctx, cwCfg, regions, scanAll, configFilePath(), AppConfig, cwGroup, cwStream, cwFilter, since)
+		m, err := cwtui.NewModel(ctx, cwCfg, regions, scanAll, configFilePath(), AppConfig, cwGroup, cwStream, cwFilter, since, cwMaxEvents)
 		if err != nil {
 			return fmt.Errorf("initializing CloudWatch Logs TUI: %w", err)
 		}
@@ -97,6 +105,7 @@ func init() {
 	cwCmd.Flags().StringVarP(&cwStream, "stream", "s", "", "Initial CloudWatch log stream filter")
 	cwCmd.Flags().StringVarP(&cwFilter, "filter", "f", "", "Initial query pattern for log events")
 	cwCmd.Flags().StringVar(&cwSince, "since", "", "Event query window, e.g. 30m, 2h, 3d (default 24h; the p key cycles it)")
+	cwCmd.Flags().IntVar(&cwMaxEvents, "max-events", 0, "Max events the full log viewer holds (0 = cw.maxEvents from the config, else 50000; negative = no limit)")
 	cwCmd.Flags().StringVar(&cwTheme, "theme", defaultThemeName, "Color theme ("+strings.Join(ui.ThemeNames(), ", ")+")")
 	registerAlwaysTUIFlag(cwCmd)
 	registerThemeCompletion(cwCmd, ui.ThemeNames())

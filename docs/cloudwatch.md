@@ -18,6 +18,7 @@ otherwise the config's `aws.regions` list is used.
 | `--stream` / `-s` | — | Initial log stream filter |
 | `--filter` / `-f` | — | Initial query pattern for log events |
 | `--since` | `24h` | Event query window, e.g. `30m`, `2h`, `3d` |
+| `--max-events` | `0` | Event ceiling for the full log viewer. `0` uses `cw.maxEvents` from the config, falling back to `50000`; a negative value removes the ceiling entirely |
 | `--theme` | `spotted-pardalote` | UI theme name |
 
 ```bash
@@ -29,6 +30,9 @@ otherwise the config's `aws.regions` list is used.
 
 # Only scan the last 30 minutes of events (faster on busy groups)
 ./bin/aws_explorer cw -g /aws/lambda/my-fn --since 30m
+
+# Hold every event in the window in the log viewer, with no ceiling
+./bin/aws_explorer cw -g /aws/lambda/my-fn --max-events -1
 ```
 
 Press `o` on a log group to open it in the CloudWatch console (URL copied;
@@ -114,7 +118,9 @@ load pages the *whole* selected query window — every event in it, not just the
 most recent few — so `p` (the query window) is the lever that decides how much
 history you see. Only very large logs are capped, at 50,000 events with the
 newest kept; when that happens the header and status bar say `truncated`
-rather than passing a partial log off as the complete one. Each line is tinted
+rather than passing a partial log off as the complete one. The ceiling is
+yours to set — `--max-events`, or `cw.maxEvents` in the config, with a negative
+value removing it altogether (the query window then being the only bound). Each line is tinted
 by severity (error/fail/panic in red, warnings amber, info/notice in the info
 color, debug/trace muted) so errors stand out while you scroll.
 
