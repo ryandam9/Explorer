@@ -24,6 +24,7 @@ See the [`cw` command reference](cw.md) for every flag.
 | `↑` / `↓` | Move through groups, streams or events |
 | `Enter` | Select a group → its streams → a stream's events → the full log viewer |
 | `/` | Filter the current list |
+| `F` | On the streams panel: find **which streams contain a string** — one group-wide query tallied per stream (matches, first/last), then `Enter` opens that stream with the pattern applied |
 | `G` | Search the **entire group** (across streams) |
 | `W` | Tail-watch the event list |
 | `o` | Open the selected log group in the CloudWatch console |
@@ -36,7 +37,9 @@ Pressing `Enter` on an event opens the full-screen log viewer: the entire log
 for the selected stream — every event in the query window (24 hours by default),
 not just the most recent few — or the whole group in group-level search,
 streaming new events live as they arrive. Only a very large window is capped
-(at 50,000 events, newest kept), and the header says so when it happens.
+(at 50,000 events, newest kept), and the header says so when it happens. Set
+your own ceiling with `--max-events` (or `cw.maxEvents` in the config); a
+negative value removes it.
 
 | Key | Action |
 |-----|--------|

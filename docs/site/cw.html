@@ -420,6 +420,7 @@ footer .birds { color:var(--accent); }
 <a class="nav" href="guide-vpc.html">VPC explorer TUI</a>
 <a class="nav" href="guide-s3.html">S3 browser TUI</a>
 <a class="nav" href="guide-cloudwatch.html">CloudWatch Logs TUI</a>
+<a class="nav" href="guide-tags.html">Tags explorer TUI</a>
 <a class="nav" href="guide-reports.html">Audit &amp; Bill TUIs</a>
 <a class="nav" href="guide-shortcuts.html">Keyboard shortcut cheat sheet</a>
 <h3>Command reference</h3>
@@ -435,8 +436,11 @@ footer .birds { color:var(--accent); }
 <a class="nav" href="emr.html">aws_explorer emr</a>
 <a class="nav" href="emr_apps.html">aws_explorer emr apps</a>
 <a class="nav" href="emr_clusters.html">aws_explorer emr clusters</a>
+<a class="nav" href="emr_config.html">aws_explorer emr config</a>
+<a class="nav" href="emr_connect-check.html">aws_explorer emr connect-check</a>
 <a class="nav" href="emr_describe.html">aws_explorer emr describe</a>
 <a class="nav" href="emr_hbase.html">aws_explorer emr hbase</a>
+<a class="nav" href="emr_hdfs.html">aws_explorer emr hdfs</a>
 <a class="nav" href="emr_instances.html">aws_explorer emr instances</a>
 <a class="nav" href="emr_oozie.html">aws_explorer emr oozie</a>
 <a class="nav" href="emr_steps.html">aws_explorer emr steps</a>
@@ -453,10 +457,20 @@ footer .birds { color:var(--accent); }
 <a class="nav" href="iam_can.html">aws_explorer iam can</a>
 <a class="nav" href="iam_decode.html">aws_explorer iam decode</a>
 <a class="nav" href="lake.html">aws_explorer lake</a>
+<a class="nav" href="lambda.html">aws_explorer lambda</a>
+<a class="nav" href="lambda_event-sources.html">aws_explorer lambda event-sources</a>
+<a class="nav" href="lambda_functions.html">aws_explorer lambda functions</a>
+<a class="nav" href="lambda_layers.html">aws_explorer lambda layers</a>
 <a class="nav" href="quotas.html">aws_explorer quotas</a>
+<a class="nav" href="related.html">aws_explorer related</a>
 <a class="nav" href="s3.html">aws_explorer s3</a>
 <a class="nav" href="snapshot-diff.html">aws_explorer snapshot-diff</a>
+<a class="nav" href="sqs.html">aws_explorer sqs</a>
 <a class="nav" href="summary.html">aws_explorer summary</a>
+<a class="nav" href="tags.html">aws_explorer tags</a>
+<a class="nav" href="tags_keys.html">aws_explorer tags keys</a>
+<a class="nav" href="tags_resources.html">aws_explorer tags resources</a>
+<a class="nav" href="tags_values.html">aws_explorer tags values</a>
 <a class="nav" href="trail.html">aws_explorer trail</a>
 <a class="nav" href="vpc.html">aws_explorer vpc</a>
 <a class="nav" href="whereused.html">aws_explorer whereused</a>
@@ -489,6 +503,12 @@ aws_explorer cw --region us-east-1
 
 # Open a group and tail events matching a pattern
 aws_explorer cw -g /aws/lambda/my-fn -f ERROR
+
+# Only scan the last 30 minutes of events (faster on busy groups)
+aws_explorer cw -g /aws/lambda/my-fn --since 30m
+
+# Hold every event in the window in the log viewer, with no ceiling
+aws_explorer cw -g /aws/lambda/my-fn --max-events -1
 </code></pre>
 
 <h2 id="flags">Flags</h2>
@@ -513,6 +533,18 @@ aws_explorer cw -g /aws/lambda/my-fn -f ERROR
 <td><code>--group</code> / <code>-g</code></td>
 <td>—</td>
 <td>Initial CloudWatch log group filter/pattern</td>
+</tr>
+
+<tr>
+<td><code>--max-events</code></td>
+<td>0</td>
+<td>Max events the full log viewer holds (0 = cw.maxEvents from the config, else 50000; negative = no limit)</td>
+</tr>
+
+<tr>
+<td><code>--since</code></td>
+<td>—</td>
+<td>Event query window, e.g. 30m, 2h, 3d (default 24h; the p key cycles it)</td>
 </tr>
 
 <tr>

@@ -20,13 +20,32 @@ import (
 	"github.com/ryandam9/aws_explorer/internal/ui"
 )
 
-// viewerMaxEvents bounds how many events the viewer holds. The initial load
-// backfills the ENTIRE query window — every event in it, not a fixed slice of
-// the newest ones — and this ceiling exists only to bound memory on a log with
-// millions of events in the window; the oldest are dropped once a backfill or
-// a long tail pushes past it. Hitting the ceiling is never silent: the viewer
-// flags the log as truncated (see logViewer.truncated).
-const viewerMaxEvents = 50000
+// defaultMaxEvents bounds how many events the viewer holds unless the user
+// says otherwise (`--max-events`, or `cw.maxEvents` in the config). The initial
+// load backfills the ENTIRE query window — every event in it, not a fixed slice
+// of the newest ones — and this ceiling exists only to bound memory on a log
+// with millions of events in the window; the oldest are dropped once a backfill
+// or a long tail pushes past it. Hitting the ceiling is never silent: the
+// viewer flags the log as truncated (see logViewer.truncated).
+const defaultMaxEvents = 50000
+
+// ResolveMaxEvents settles the viewer's event ceiling from the `--max-events`
+// flag and the config's cw.maxEvents, in that order of precedence. For both,
+// 0 means "not set" (fall through to the next source, then to
+// defaultMaxEvents) and any negative value means "no ceiling" — the query
+// window becomes the only bound. The returned value is the ceiling, or 0 for
+// unlimited.
+func ResolveMaxEvents(flagValue, configValue int) int {
+	for _, v := range []int{flagValue, configValue} {
+		switch {
+		case v < 0:
+			return 0 // explicit "no ceiling"
+		case v > 0:
+			return v
+		}
+	}
+	return defaultMaxEvents
+}
 
 // viewerKey identifies what the viewer is showing, so async responses for a
 // viewer that has since been closed or re-opened on another stream are dropped.
@@ -49,9 +68,11 @@ type logViewer struct {
 	seen   map[string]bool
 	lastTS int64 // newest event timestamp seen (ms)
 
-	// truncated records that the window held more events than viewerMaxEvents,
-	// so the oldest were dropped — surfaced in the header and status bar so a
-	// capped log never reads as the whole log.
+	// maxEvents is the resolved event ceiling (0 = unlimited), and truncated
+	// records that the window held more than that, so the oldest were dropped
+	// — surfaced in the header and status bar so a capped log never reads as
+	// the whole log.
+	maxEvents int
 	truncated bool
 
 	lines   []string // wrapped display lines, rebuilt on resize/new events
@@ -113,10 +134,11 @@ type viewerTickMsg struct {
 }
 
 // open resets the viewer for a new group/stream selection.
-func (v *logViewer) open(key viewerKey, title string, wrapW int) {
+func (v *logViewer) open(key viewerKey, title string, wrapW int, maxEvents int) {
 	v.active = true
 	v.key = key
 	v.title = title
+	v.maxEvents = maxEvents
 	v.events = nil
 	v.seen = map[string]bool{}
 	v.lastTS = 0
@@ -162,8 +184,8 @@ func (v *logViewer) append(events []types.FilteredLogEvent) {
 		}
 		added = true
 	}
-	if len(v.events) > viewerMaxEvents {
-		v.events = v.events[len(v.events)-viewerMaxEvents:]
+	if v.maxEvents > 0 && len(v.events) > v.maxEvents {
+		v.events = v.events[len(v.events)-v.maxEvents:]
 		v.truncated = true // oldest events dropped — say so, don't hide it
 	}
 	if added {
@@ -278,7 +300,10 @@ func (v *logViewer) truncNote() string {
 	if !v.truncated {
 		return ""
 	}
-	return fmt.Sprintf(" (truncated, newest %d kept)", viewerMaxEvents)
+	if v.maxEvents <= 0 {
+		return " (truncated)" // no ceiling: the page budget ended the sweep
+	}
+	return fmt.Sprintf(" (truncated, newest %d kept)", v.maxEvents)
 }
 
 // grepVisible reports whether the grep bar occupies a line of the viewer:
@@ -521,7 +546,7 @@ func (m *model) openViewer(cmds *[]tea.Cmd) {
 	title += " [" + key.region + "]"
 
 	m.watchMode = false
-	m.viewer.open(key, title, m.viewerWrapWidth())
+	m.viewer.open(key, title, m.viewerWrapWidth(), m.maxEvents)
 	*cmds = append(*cmds, m.loadViewerEventsCmd(true), m.viewerTickCmd())
 }
 
@@ -533,19 +558,15 @@ func (m *model) loadViewerEventsCmd(initial bool) tea.Cmd {
 		// the events panel the viewer was opened from.
 		since = time.Now().Add(-m.lookback).UnixMilli()
 	}
-	if initial {
-		return func() tea.Msg {
-			// The backfill pages the whole window — every event in it, not
-			// just the most recent few — bounded only by viewerMaxEvents,
-			// whose truncation is reported back rather than hidden.
-			events, truncated, err := m.client.GetAllLogEventsSinceMulti(m.ctx, key.region, key.group, key.stream, SplitPatterns(key.pattern), since, viewerMaxEvents)
-			return viewerEventsMsg{key: key, initial: true, events: events, truncated: truncated, err: err}
-		}
-	}
+	maxEvents := int32(m.maxEvents)
 	return func() tea.Msg {
-		// Streaming poll: just what arrived since the last event seen.
-		events, err := m.client.GetLogEventsSinceMulti(m.ctx, key.region, key.group, key.stream, SplitPatterns(key.pattern), since, viewerMaxEvents)
-		return viewerEventsMsg{key: key, initial: false, events: events, err: err}
+		// Both the initial backfill and each streaming poll page their window
+		// to the end — every event in it, not just the most recent few. The
+		// backfill's window is the full lookback; a poll's is only what has
+		// arrived since the last event seen, so it is normally a page or two.
+		// Either way the ceiling's truncation is reported back, never hidden.
+		events, truncated, err := m.client.GetAllLogEventsSinceMulti(m.ctx, key.region, key.group, key.stream, SplitPatterns(key.pattern), since, maxEvents)
+		return viewerEventsMsg{key: key, initial: initial, events: events, truncated: truncated, err: err}
 	}
 }
 
@@ -573,7 +594,7 @@ func (m *model) handleViewerEvents(msg viewerEventsMsg, cmds *[]tea.Cmd) {
 	if msg.truncated && !m.viewer.truncated {
 		m.viewer.truncated = true
 		if msg.err == nil { // an error toast is the more urgent message
-			m.setToast(fmt.Sprintf("Log truncated to the newest %d events — narrow the window (p) or download it (D)", viewerMaxEvents))
+			m.setToast(fmt.Sprintf("Log truncated to the newest %d events — narrow the window (p), download it (D), or raise --max-events", m.maxEvents))
 			*cmds = append(*cmds, toastCmd(5*time.Second))
 		}
 	}

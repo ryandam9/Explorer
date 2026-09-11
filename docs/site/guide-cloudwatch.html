@@ -523,6 +523,11 @@ aws_explorer cw -g /aws/lambda/my-fn -f ERROR
 </tr>
 
 <tr>
+<td><code>F</code></td>
+<td>On the streams panel: find <strong>which streams contain a string</strong> — one group-wide query tallied per stream (matches, first/last), then <code>Enter</code> opens that stream with the pattern applied</td>
+</tr>
+
+<tr>
 <td><code>G</code></td>
 <td>Search the <strong>entire group</strong> (across streams)</td>
 </tr>
@@ -555,7 +560,9 @@ aws_explorer cw -g /aws/lambda/my-fn -f ERROR
 for the selected stream — every event in the query window (24 hours by default),
 not just the most recent few — or the whole group in group-level search,
 streaming new events live as they arrive. Only a very large window is capped
-(at 50,000 events, newest kept), and the header says so when it happens.</p>
+(at 50,000 events, newest kept), and the header says so when it happens. Set
+your own ceiling with <code>--max-events</code> (or <code>cw.maxEvents</code> in the config); a
+negative value removes it.</p>
 
 <table>
 <thead>

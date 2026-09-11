@@ -13,6 +13,23 @@ type Config struct {
 	Trail    TrailConfig              `mapstructure:"trail"`
 	Summary  SummaryConfig            `mapstructure:"summary"`
 	EMR      EMRConfig                `mapstructure:"emr"`
+	CW       CWConfig                 `mapstructure:"cw"`
+}
+
+// CWConfig configures the CloudWatch Logs explorer (the `cw` command).
+//
+// Example config.yaml:
+//
+//	cw:
+//	  maxEvents: 100000
+type CWConfig struct {
+	// MaxEvents caps how many events the full log viewer holds — the initial
+	// backfill of the query window plus everything streamed on top of it. The
+	// cap bounds memory; it does not decide what you see, so the viewer marks
+	// the log "truncated" whenever it bites. 0 uses the built-in default
+	// (50000); a negative value means no cap at all, leaving the query window
+	// (`--since` / `p`) as the only bound. `--max-events` overrides it.
+	MaxEvents int `mapstructure:"maxEvents"`
 }
 
 // EMRConfig configures the `emr` dashboard's optional on-cluster features

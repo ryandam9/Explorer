@@ -28,9 +28,10 @@ func helpSections() []helpSection {
 		{"[2] Log streams", []row{
 			{"↑/↓, j/k", "Navigate streams"},
 			{"Enter", "List the stream's events"},
-			{"/", "Filter streams by name"},
+			{"/", "Filter streams by name (client-side, cosmetic)"},
+			{"F", "Find which streams contain a string: one group-wide query, tallied per stream (matches, first/last), over the current window. Enter on a result opens that stream with the pattern applied"},
 			{"D", "Download the selected stream's events to a file"},
-			{"Esc, Backspace", "Back to the group list"},
+			{"Esc, Backspace", "Back to the group list (clears a stream tally first)"},
 		}},
 		{"[3] Log events", []row{
 			{"↑/↓, j/k", "Navigate events"},

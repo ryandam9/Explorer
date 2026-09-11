@@ -101,6 +101,14 @@ output:
 
 ui:
   theme: spotted-pardalote    # active theme name (see themes.md)
+
+cw:
+  maxEvents: 50000            # event ceiling for the `cw` full log viewer: the
+                              # backfill of the query window plus what streams in
+                              # on top. 0 = built-in default (50000); negative =
+                              # no ceiling, leaving --since / p as the only bound.
+                              # --max-events overrides it. The viewer marks the
+                              # log "truncated" whenever the ceiling bites
 ```
 
 ### Customizing displayed columns
