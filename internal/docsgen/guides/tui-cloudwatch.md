@@ -29,8 +29,10 @@ See the [`cw` command reference](cw.md) for every flag.
 ## Full log viewer
 
 Pressing `Enter` on an event opens the full-screen log viewer: the entire log
-(24-hour lookback, most recent 2000 events) for the selected stream — or the
-whole group in group-level search — streaming new events live as they arrive.
+for the selected stream — every event in the query window (24 hours by default),
+not just the most recent few — or the whole group in group-level search,
+streaming new events live as they arrive. Only a very large window is capped
+(at 50,000 events, newest kept), and the header says so when it happens.
 
 | Key | Action |
 |-----|--------|

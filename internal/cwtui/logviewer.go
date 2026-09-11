@@ -20,14 +20,13 @@ import (
 	"github.com/ryandam9/aws_explorer/internal/ui"
 )
 
-// viewerBackfillLimit caps how many events the initial "entire log" load keeps
-// (most recent first, scanned over the 24-hour lookback window). New events
-// arrive on top of this via streaming.
-const viewerBackfillLimit = 2000
-
-// viewerMaxEvents bounds memory while tailing a busy log for a long time; the
-// oldest events are dropped once streaming pushes past this.
-const viewerMaxEvents = 10000
+// viewerMaxEvents bounds how many events the viewer holds. The initial load
+// backfills the ENTIRE query window — every event in it, not a fixed slice of
+// the newest ones — and this ceiling exists only to bound memory on a log with
+// millions of events in the window; the oldest are dropped once a backfill or
+// a long tail pushes past it. Hitting the ceiling is never silent: the viewer
+// flags the log as truncated (see logViewer.truncated).
+const viewerMaxEvents = 50000
 
 // viewerKey identifies what the viewer is showing, so async responses for a
 // viewer that has since been closed or re-opened on another stream are dropped.
@@ -49,6 +48,11 @@ type logViewer struct {
 	events []types.FilteredLogEvent
 	seen   map[string]bool
 	lastTS int64 // newest event timestamp seen (ms)
+
+	// truncated records that the window held more events than viewerMaxEvents,
+	// so the oldest were dropped — surfaced in the header and status bar so a
+	// capped log never reads as the whole log.
+	truncated bool
 
 	lines   []string // wrapped display lines, rebuilt on resize/new events
 	offset  int      // index of the first visible line
@@ -97,10 +101,11 @@ type logViewer struct {
 }
 
 type viewerEventsMsg struct {
-	key     viewerKey
-	initial bool
-	events  []types.FilteredLogEvent
-	err     error
+	key       viewerKey
+	initial   bool
+	events    []types.FilteredLogEvent
+	truncated bool
+	err       error
 }
 
 type viewerTickMsg struct {
@@ -115,6 +120,7 @@ func (v *logViewer) open(key viewerKey, title string, wrapW int) {
 	v.events = nil
 	v.seen = map[string]bool{}
 	v.lastTS = 0
+	v.truncated = false
 	v.lines = nil
 	v.offset = 0
 	v.follow = true
@@ -158,6 +164,7 @@ func (v *logViewer) append(events []types.FilteredLogEvent) {
 	}
 	if len(v.events) > viewerMaxEvents {
 		v.events = v.events[len(v.events)-viewerMaxEvents:]
+		v.truncated = true // oldest events dropped — say so, don't hide it
 	}
 	if added {
 		v.rebuild(v.wrapW)
@@ -263,6 +270,15 @@ func (v *logViewer) rebuild(wrapW int) {
 	}
 	v.computeMatches()
 	v.clampOffset()
+}
+
+// truncNote annotates the event count when the log was capped, so the status
+// bar never presents a truncated log as the complete one.
+func (v *logViewer) truncNote() string {
+	if !v.truncated {
+		return ""
+	}
+	return fmt.Sprintf(" (truncated, newest %d kept)", viewerMaxEvents)
 }
 
 // grepVisible reports whether the grep bar occupies a line of the viewer:
@@ -512,14 +528,24 @@ func (m *model) openViewer(cmds *[]tea.Cmd) {
 func (m *model) loadViewerEventsCmd(initial bool) tea.Cmd {
 	key := m.viewer.key
 	since := m.viewer.lastTS
-	if initial || since == 0 {
-		// The initial backfill honors the selected query window, matching the
-		// events panel it was opened from.
+	if since == 0 {
+		// Nothing seen yet: fall back to the selected query window, matching
+		// the events panel the viewer was opened from.
 		since = time.Now().Add(-m.lookback).UnixMilli()
 	}
+	if initial {
+		return func() tea.Msg {
+			// The backfill pages the whole window — every event in it, not
+			// just the most recent few — bounded only by viewerMaxEvents,
+			// whose truncation is reported back rather than hidden.
+			events, truncated, err := m.client.GetAllLogEventsSinceMulti(m.ctx, key.region, key.group, key.stream, SplitPatterns(key.pattern), since, viewerMaxEvents)
+			return viewerEventsMsg{key: key, initial: true, events: events, truncated: truncated, err: err}
+		}
+	}
 	return func() tea.Msg {
-		events, err := m.client.GetLogEventsSinceMulti(m.ctx, key.region, key.group, key.stream, SplitPatterns(key.pattern), since, viewerBackfillLimit)
-		return viewerEventsMsg{key: key, initial: initial, events: events, err: err}
+		// Streaming poll: just what arrived since the last event seen.
+		events, err := m.client.GetLogEventsSinceMulti(m.ctx, key.region, key.group, key.stream, SplitPatterns(key.pattern), since, viewerMaxEvents)
+		return viewerEventsMsg{key: key, initial: false, events: events, err: err}
 	}
 }
 
@@ -543,6 +569,13 @@ func (m *model) handleViewerEvents(msg viewerEventsMsg, cmds *[]tea.Cmd) {
 		// succeeded is shown, with the failure visible.
 		m.setToast("Log fetch failed: " + clipToastText(msg.err.Error()))
 		*cmds = append(*cmds, toastCmd(3*time.Second))
+	}
+	if msg.truncated && !m.viewer.truncated {
+		m.viewer.truncated = true
+		if msg.err == nil { // an error toast is the more urgent message
+			m.setToast(fmt.Sprintf("Log truncated to the newest %d events — narrow the window (p) or download it (D)", viewerMaxEvents))
+			*cmds = append(*cmds, toastCmd(5*time.Second))
+		}
 	}
 	m.viewer.append(msg.events)
 	if m.viewer.follow {
@@ -815,6 +848,12 @@ func (m *model) renderViewer() string {
 	} else if v.formatJSON {
 		header += "  " + lipgloss.NewStyle().Foreground(lipgloss.Color(ui.ColorAccent())).Render("{} json")
 	}
+	if v.truncated {
+		// A capped log must never read as the whole log. Kept short so it
+		// can't wrap the header line on a narrow terminal — the status bar
+		// carries the count.
+		header += "  " + lipgloss.NewStyle().Foreground(lipgloss.Color(ui.ColorWarning())).Render("! truncated")
+	}
 
 	if v.tableMode {
 		return m.renderViewerTable(header)
@@ -900,7 +939,7 @@ func (m *model) renderViewer() string {
 		bottom := min(v.offset+bodyH, len(v.lines))
 		pos = fmt.Sprintf("lines %d-%d of %d", v.offset+1, bottom, len(v.lines))
 	}
-	statusText := fmt.Sprintf("Region: %s  ·  Events: %d  ·  %s", v.key.region, len(v.events), pos)
+	statusText := fmt.Sprintf("Region: %s  ·  Events: %d%s  ·  %s", v.key.region, len(v.events), v.truncNote(), pos)
 	if v.key.pattern != "" {
 		statusText += "  ·  Pattern: " + v.key.pattern
 	}
@@ -961,7 +1000,7 @@ func (m *model) renderViewerTable(header string) string {
 	if len(v.events) > 0 {
 		pos = fmt.Sprintf("event %d of %d", v.table.Cursor()+1, len(v.events))
 	}
-	statusText := fmt.Sprintf("Region: %s  ·  Events: %d  ·  %s", v.key.region, len(v.events), pos)
+	statusText := fmt.Sprintf("Region: %s  ·  Events: %d%s  ·  %s", v.key.region, len(v.events), v.truncNote(), pos)
 	if v.key.pattern != "" {
 		statusText += "  ·  Pattern: " + v.key.pattern
 	}

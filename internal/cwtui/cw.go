@@ -414,3 +414,96 @@ func (c *CWLogsClient) GetLogEventsSince(ctx context.Context, region, logGroupNa
 	}
 	return events, nil
 }
+
+// backfillMaxPages bounds the page sweep of a full backfill. FilterLogEvents
+// returns up to 10k events (or 1 MB) per page, so this is a runaway guard for
+// pathological windows, not the normal stopping condition — the sweep ends
+// when the window is exhausted or the caller's event ceiling is reached.
+const backfillMaxPages = 500
+
+// GetAllLogEventsSinceMulti backfills the WHOLE query window: it pages
+// FilterLogEvents to the end of the window for each pattern (in parallel)
+// instead of stopping at a small event count, then merges the results into one
+// deduplicated, time-ordered timeline keeping the most recent maxEvents
+// (maxEvents <= 0 keeps everything).
+//
+// truncated reports that the window held more events than were returned —
+// either the ceiling trimmed the oldest or the page budget ran out — so the
+// caller can surface it; a capped backfill must never read as the whole log.
+// Failed patterns degrade the result like GetLogEventsSinceMulti: what
+// succeeded is returned alongside a joined error.
+func (c *CWLogsClient) GetAllLogEventsSinceMulti(ctx context.Context, region, logGroupName, logStreamName string, patterns []string, startMillis int64, maxEvents int32) ([]types.FilteredLogEvent, bool, error) {
+	if len(patterns) == 0 {
+		patterns = []string{""}
+	}
+	batches := make([][]types.FilteredLogEvent, len(patterns))
+	truncs := make([]bool, len(patterns))
+	errs := make([]error, len(patterns))
+	var wg sync.WaitGroup
+	for i, pattern := range patterns {
+		wg.Add(1)
+		go func(i int, pattern string) {
+			defer wg.Done()
+			events, truncated, err := c.getAllLogEventsSince(ctx, region, logGroupName, logStreamName, pattern, startMillis, maxEvents)
+			batches[i], truncs[i] = events, truncated // write-by-index: no shared-slice race
+			if err != nil {
+				errs[i] = fmt.Errorf("pattern %q: %w", pattern, err)
+			}
+		}(i, pattern)
+	}
+	wg.Wait()
+
+	merged := mergeDedupeSort(batches, 0)
+	truncated := false
+	for _, t := range truncs {
+		truncated = truncated || t
+	}
+	if maxEvents > 0 && int32(len(merged)) > maxEvents {
+		merged = merged[int32(len(merged))-maxEvents:]
+		truncated = true
+	}
+	return merged, truncated, errors.Join(errs...)
+}
+
+// getAllLogEventsSince pages FilterLogEvents forward from startMillis
+// (inclusive) for one pattern until the window is exhausted, keeping at most
+// maxEvents of the MOST RECENT events (the viewer tails, so the newest end of
+// the window is the one worth keeping). truncated reports that older events
+// were dropped or the page budget ended the sweep early.
+func (c *CWLogsClient) getAllLogEventsSince(ctx context.Context, region, logGroupName, logStreamName, filterPattern string, startMillis int64, maxEvents int32) ([]types.FilteredLogEvent, bool, error) {
+	input := &cloudwatchlogs.FilterLogEventsInput{
+		LogGroupName: aws.String(logGroupName),
+		StartTime:    aws.Int64(startMillis),
+	}
+	if logStreamName != "" {
+		input.LogStreamNames = []string{logStreamName}
+	}
+	if filterPattern != "" {
+		input.FilterPattern = aws.String(filterPattern)
+	}
+
+	// A whole-window sweep can span many pages on a busy group; give it the
+	// same headroom as the download path rather than the 60s streaming budget.
+	ctxWithTimeout, cancel := context.WithTimeout(ctx, 5*time.Minute)
+	defer cancel()
+
+	var events []types.FilteredLogEvent
+	truncated := false
+	for page := 0; page < backfillMaxPages; page++ {
+		resp, err := c.clientFor(region).FilterLogEvents(ctxWithTimeout, input)
+		if err != nil {
+			return nil, false, err
+		}
+		events = append(events, resp.Events...)
+		if maxEvents > 0 && int32(len(events)) > maxEvents {
+			events = events[int32(len(events))-maxEvents:]
+			truncated = true
+		}
+		if resp.NextToken == nil {
+			return events, truncated, nil
+		}
+		input.NextToken = resp.NextToken
+	}
+	// Page budget spent with more to read: the window was not exhausted.
+	return events, true, nil
+}

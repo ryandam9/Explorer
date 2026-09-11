@@ -334,8 +334,14 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case viewerTickMsg:
 		// Stream new events while the viewer stays open on the same target.
+		// The initial backfill sweeps the whole query window and can outlast a
+		// tick; re-issuing it every 3s would multiply the same scan (and its
+		// cost) for nothing, so keep ticking but wait for it to land.
 		if m.viewer.active && msg.key == m.viewer.key {
-			cmds = append(cmds, m.loadViewerEventsCmd(false), m.viewerTickCmd())
+			if !m.viewer.loading {
+				cmds = append(cmds, m.loadViewerEventsCmd(false))
+			}
+			cmds = append(cmds, m.viewerTickCmd())
 		}
 
 	case tea.KeyMsg:
