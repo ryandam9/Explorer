@@ -97,7 +97,7 @@ func TestEventTableRows(t *testing.T) {
 	}
 
 	const msgW = 40
-	rows, groups := eventTableRows(events, msgW)
+	rows, groups := eventTableRows(events, false, msgW)
 	if len(rows) != len(groups) {
 		t.Fatalf("rows = %d but groups = %d; every row needs an event", len(rows), len(groups))
 	}
@@ -232,7 +232,7 @@ func TestEventsTableFillsAvailableWidth(t *testing.T) {
 	}
 
 	for _, avail := range []int{120, 200, 320} {
-		d := buildEventTableData(events, avail)
+		d := buildEventTableData(events, false, avail)
 		msgCol := d.cols[len(d.cols)-1]
 		if msgCol.Title != "Message" {
 			t.Fatalf("last column is %q, want Message", msgCol.Title)
@@ -262,7 +262,7 @@ func TestEventsTableWrapsLongMessagesIntoRows(t *testing.T) {
 		{Timestamp: aws.Int64(2), Message: aws.String(long)},
 	}
 
-	d := buildEventTableData(events, 120)
+	d := buildEventTableData(events, false, 120)
 	if len(d.rows) != len(d.groups) {
 		t.Fatalf("rows = %d, groups = %d", len(d.rows), len(d.groups))
 	}

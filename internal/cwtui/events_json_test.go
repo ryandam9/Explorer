@@ -79,7 +79,7 @@ func TestBuildEventTableDataIsTimeAndMessageOnly(t *testing.T) {
 		},
 	}
 
-	d := buildEventTableData(events, 200)
+	d := buildEventTableData(events, false, 200)
 
 	if len(d.cols) != 2 {
 		t.Fatalf("columns = %d, want 2", len(d.cols))
@@ -103,5 +103,56 @@ func TestBuildEventTableDataIsTimeAndMessageOnly(t *testing.T) {
 	}
 	if len(d.rows) != len(d.groups) {
 		t.Errorf("rows = %d, groups = %d", len(d.rows), len(d.groups))
+	}
+}
+
+// J in table view expands embedded JSON into indented lines inside the Message
+// cell — the same thing J does to the viewer's log lines, rather than a
+// different meaning per view.
+func TestBuildEventTableDataFormatJSONExpandsInMessageCell(t *testing.T) {
+	events := []types.FilteredLogEvent{
+		{
+			Timestamp: aws.Int64(1),
+			Message:   aws.String(`{"level":"error","msg":"boom","id":7}`),
+		},
+	}
+
+	raw := buildEventTableData(events, false, 200)
+	if len(raw.rows) != 1 {
+		t.Fatalf("collapsed rows = %d, want the message on one row", len(raw.rows))
+	}
+
+	pretty := buildEventTableData(events, true, 200)
+	if len(pretty.rows) <= len(raw.rows) {
+		t.Fatalf("expanded rows = %d, want more than the %d collapsed", len(pretty.rows), len(raw.rows))
+	}
+
+	// Still two columns, still one event: only the cell's shape changed.
+	if len(pretty.cols) != 2 {
+		t.Errorf("columns = %d, want 2 — J must not add columns", len(pretty.cols))
+	}
+	for i, g := range pretty.groups {
+		if g != 0 {
+			t.Errorf("row %d maps to event %d, want every row on event 0", i, g)
+		}
+	}
+
+	// The document is indented, and continuation rows leave Time blank so the
+	// JSON lines up under the Message column.
+	var indented bool
+	for i, r := range pretty.rows {
+		if i > 0 && r[0] != "" {
+			t.Errorf("expanded row %d repeated the time cell %q", i, r[0])
+		}
+		if strings.HasPrefix(r[1], "  ") {
+			indented = true
+		}
+	}
+	if !indented {
+		var got []string
+		for _, r := range pretty.rows {
+			got = append(got, r[1])
+		}
+		t.Errorf("no indented line in the expanded cell: %q", got)
 	}
 }

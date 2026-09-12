@@ -117,7 +117,13 @@ const minMessageWidth = 24
 // maxWrapLines caps how many lines one event's message may occupy. A 40 KB
 // JSON blob would otherwise fill the page by itself; past the cap the last
 // line says how much was left, and v / Enter show the value in full.
-const maxWrapLines = 8
+// maxWrapLinesJSON is the more generous cap that applies while J has expanded
+// the JSON: the reader asked to see the document, so it gets more room — but
+// still a bound, still labelled when it bites.
+const (
+	maxWrapLines     = 8
+	maxWrapLinesJSON = 40
+)
 
 // fittedWidth returns the width the shared table will give a column: the wider
 // of its header and its widest cell. Mirrors table.fitColumns so the builder
@@ -264,13 +270,23 @@ func wrappedRows(fixed []string, msgLines []string) []table.Row {
 }
 
 // eventTableRows maps events onto rows matching eventTableColumns, wrapping
-// each message to msgWidth. The second return value is the row→event mapping.
-func eventTableRows(events []types.FilteredLogEvent, msgWidth int) ([]table.Row, []int) {
+// each message to msgWidth. With formatJSON on, an embedded JSON payload is
+// expanded first, so the cell shows the indented document. The second return
+// value is the row→event mapping.
+func eventTableRows(events []types.FilteredLogEvent, formatJSON bool, msgWidth int) ([]table.Row, []int) {
 	rows := make([]table.Row, 0, len(events))
 	groups := make([]int, 0, len(events))
 	for i, ev := range events {
 		fixed := []string{eventTimestamp(ev)}
-		evRows := wrappedRows(fixed, wrapEventMessage(aws.ToString(ev.Message), msgWidth, maxWrapLines))
+		msg := aws.ToString(ev.Message)
+		lineCap := maxWrapLines
+		if formatJSON {
+			// Expanding is an explicit request to see the document, so it gets
+			// more room than a message that merely happens to be long.
+			msg = prettifyJSON(msg)
+			lineCap = maxWrapLinesJSON
+		}
+		evRows := wrappedRows(fixed, wrapEventMessage(msg, msgWidth, lineCap))
 		for range evRows {
 			groups = append(groups, i)
 		}
@@ -292,9 +308,10 @@ func (m *model) eventsTableWidth() int {
 
 // buildEventsTable (re)creates the shared-widget table from the current
 // events, preserving the selection. Called when table mode turns on, when the
-// JSON-split toggle flips, and when a fresh event batch lands while it is on.
+// J (format JSON) toggle flips, on resize, and when a fresh event batch lands
+// while it is on.
 func (m *model) buildEventsTable() {
-	data := buildEventTableData(m.events, m.eventsTableWidth())
+	data := buildEventTableData(m.events, m.eventsJSON, m.eventsTableWidth())
 	m.eventsTable = table.New(
 		table.WithColumns(data.cols),
 		table.WithRows(data.rows),

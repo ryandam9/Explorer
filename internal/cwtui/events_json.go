@@ -127,15 +127,18 @@ type eventTableData struct {
 }
 
 // buildEventTableData assembles the table content: Time and Message, and
-// nothing else. Everything a row can't show — the stream, each JSON field's
-// full value — is one keystroke away in the record view (v), so the table
-// stays scannable instead of turning into a spreadsheet.
+// nothing else. The stream is one keystroke away in the record view (v), so
+// the table stays scannable instead of turning into a spreadsheet.
+//
+// formatJSON ("J") expands JSON embedded in a message into indented lines
+// inside the Message column — the same thing J does to the viewer's log lines,
+// rather than a different meaning in each view.
 //
 // avail is the table's usable width: the Message column takes whatever Time
 // leaves, so the table fills a wide terminal, and a message too long for that
 // width wraps onto extra rows (groups maps them back to their event) rather
 // than being cut off.
-func buildEventTableData(events []types.FilteredLogEvent, avail int) eventTableData {
+func buildEventTableData(events []types.FilteredLogEvent, formatJSON bool, avail int) eventTableData {
 	d := eventTableData{cols: eventTableColumns()}
 
 	times := make([]string, 0, len(events))
@@ -144,7 +147,7 @@ func buildEventTableData(events []types.FilteredLogEvent, avail int) eventTableD
 	}
 	msgW := messageColumnWidth(avail, []int{fittedWidth("Time", times)})
 
-	d.rows, d.groups = eventTableRows(events, msgW)
+	d.rows, d.groups = eventTableRows(events, formatJSON, msgW)
 	// Pin the Message column to the remaining width: the widget only grows a
 	// column to its widest cell, so without this floor a table of short
 	// messages would leave the right-hand side of the panel empty.

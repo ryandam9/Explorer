@@ -129,12 +129,18 @@ faster. The active window shows in the panel header and the status bar.
 |-----|--------|
 | `/` | Set the server-side query pattern(s). Separate several with `;` to OR them — `ERROR; timeout` shows events matching either, across every stream when combined with `G`. Each pattern runs as its own `FilterLogEvents` query; results are deduplicated and interleaved by time. The pattern(s) also scope the full log viewer and the `D` download, so "download only the matched lines across all streams" is: `G` → set patterns → `D` |
 | `p` | Cycle the query window: 30m → 1h → 3h → 6h → 12h → 24h → 3d → 7d |
+| `J` | In table view, expand JSON embedded in each message into indented lines **inside the Message column** — the same thing `J` does to the viewer's log lines, so the key means one thing everywhere. Expanded cells get a more generous line cap (40) than the default 8, since asking to expand is asking to read it |
 | `t` | Toggle between the plain list and a zebra-striped table. The table is **Time and Message, nothing else** — the stream and each JSON field's full value are in the record view (`v`), so the width goes to the message. The Message column takes whatever Time leaves, so the table fills the terminal, and a message too long for it wraps onto continuation rows aligned under the column rather than being cut off. A wrapped event still selects, stripes and navigates as one row; past 8 lines the last line says how many were left |
 | `Enter` | Open the full log viewer for the selected event's target |
 | `v` | Record view: the selected event vertically, with every JSON field's **full value** (table cells clip at 80/160 chars; this is the escape hatch). Scrollable, `y` copies the record, `Esc` closes |
 | `W` | Toggle live tail watch mode |
 | `y` / `s` | Copy the selected event / export the listed events |
 | `D` | Download **every** matching event in the query window to the downloads directory — `s` writes only the events currently listed (~100), while `D` re-queries the window in full (up to 50,000 events; the toast notes when that cap truncates). Also works from the group sidebar (whole group) and the streams panel (selected stream); the active query pattern and window apply |
+
+`J` never adds columns: it changes the shape of the Message cell, and the
+expanded document wraps and aligns under the column like any other long
+message. The choice is shared with the viewer's line view, so switching
+between `t` and the log lines keeps it.
 
 The `Stream` column is gone from the table: in a whole-group search (`G`) the
 stream of the selected event is named in the record view (`v`), which also

@@ -93,8 +93,11 @@ type model struct {
 	// zebra striping, like every other data grid in the app. It shows Time and
 	// Message only — the stream and each JSON field's full value live in the
 	// record view (v) — and a message too long for its column wraps onto
-	// continuation rows rather than being cut off.
+	// continuation rows rather than being cut off. eventsJSON ("J") expands
+	// embedded JSON into indented lines inside the Message cell, the same
+	// thing J does to the viewer's log lines.
 	eventsTableMode bool
+	eventsJSON      bool
 	eventsTable     table.Model
 
 	// Full log viewer (opened with Enter on an event)
@@ -591,6 +594,15 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				if m.eventsTableMode {
 					m.buildEventsTable()
 				}
+			}
+
+		case "J":
+			// In table mode, expand JSON embedded in each message into
+			// indented lines inside the Message cell (the viewer's J does the
+			// same to its log lines).
+			if m.view == viewEvents && m.eventsTableMode {
+				m.eventsJSON = !m.eventsJSON
+				m.buildEventsTable()
 			}
 
 		case "p":
@@ -1554,8 +1566,13 @@ func (m *model) getHelpHints() []ui.KeyHint {
 			}
 		}
 		if m.viewer.tableMode {
+			jsonHint := "format json"
+			if m.viewer.formatJSON {
+				jsonHint = "raw message"
+			}
 			return []ui.KeyHint{
 				ui.H("↑/↓", "rows"),
+				ui.H("J", jsonHint),
 				ui.H("v", "record"),
 				ui.H("G", "tail"),
 				ui.H("f", "follow"),
@@ -1642,6 +1659,13 @@ func (m *model) getHelpHints() []ui.KeyHint {
 			ui.H("p", "window "+formatLookback(m.lookback)),
 			ui.H("t", tableHint),
 		)
+		if m.eventsTableMode {
+			jsonHint := "format json"
+			if m.eventsJSON {
+				jsonHint = "raw message"
+			}
+			hints = append(hints, ui.H("J", jsonHint))
+		}
 		hints = append(hints,
 			ui.H("W", "tail watch"),
 			ui.H("y", "copy"),

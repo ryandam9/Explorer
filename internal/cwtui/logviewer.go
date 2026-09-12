@@ -195,7 +195,7 @@ func (v *logViewer) append(events []types.FilteredLogEvent) {
 // events interleave from many streams.
 func (v *logViewer) rebuildTable() {
 	cur := v.table.CursorGroup()
-	data := buildEventTableData(v.events, v.tableWidth)
+	data := buildEventTableData(v.events, v.formatJSON, v.tableWidth)
 	v.table = table.New(
 		table.WithColumns(data.cols),
 		table.WithRows(data.rows),
@@ -653,6 +653,11 @@ func (m *model) handleViewerKeys(msg tea.KeyMsg, cmds *[]tea.Cmd) {
 			if v.follow {
 				v.table.GotoBottom()
 			}
+		case "J":
+			// The same preference the line view's J toggles: expand embedded
+			// JSON. Shared, so switching between line and table view keeps it.
+			v.formatJSON = !v.formatJSON
+			v.rebuildTable()
 		case "v":
 			// Record view for the highlighted row — full field values,
 			// unclipped, same as v on the events panel.
@@ -828,7 +833,8 @@ func (m *model) renderViewer() string {
 	}
 	if v.tableMode {
 		header += "  " + lipgloss.NewStyle().Foreground(lipgloss.Color(ui.ColorAccent())).Render("[table]")
-	} else if v.formatJSON {
+	}
+	if v.formatJSON {
 		header += "  " + lipgloss.NewStyle().Foreground(lipgloss.Color(ui.ColorAccent())).Render("{} json")
 	}
 	if v.truncated {
@@ -940,7 +946,7 @@ func (m *model) renderViewerTable(header string) string {
 
 	var b strings.Builder
 	b.WriteString(header + "\n")
-	b.WriteString(mutedStyle.Render("  Table view — ↑/↓ rows · v record (all fields) · t log view") + "\n")
+	b.WriteString(mutedStyle.Render("  Table view — ↑/↓ rows · J format json · v record (all fields) · t log view") + "\n")
 	b.WriteString("\n")
 
 	if v.loading {
