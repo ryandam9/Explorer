@@ -91,7 +91,7 @@ func TestHelpOverlayContent(t *testing.T) {
 			// Section titles carry the panes' fixed names.
 			"[1] Log groups", "[2] Log streams", "[3] Log events", "Event record",
 			"Log viewer", "Everywhere",
-			"query window", "table view", "pan long messages", "Grep filter",
+			"query window", "table view", "Grep filter",
 			// Every binding must be discoverable here, not only via the
 			// (eliding) status bar.
 			"Download", "Shift+Tab", "Backspace", "g/Home, G/End", "n / N",

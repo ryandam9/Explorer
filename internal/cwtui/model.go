@@ -90,17 +90,12 @@ type model struct {
 	streamMatch streamMatchState
 
 	// Table rendering of the events panel ("t"): the shared table widget with
-	// zebra striping, like every other data grid in the app. A message too
-	// long for its column wraps onto continuation rows rather than being cut
-	// off, and ←/→ scroll the column window when the split layout is wider
-	// than the panel. jsonSplit
-	// ("J") breaks structured JSON messages into one column per top-level
-	// field; eventsSplit/hiddenFields report what the current build did.
+	// zebra striping, like every other data grid in the app. It shows Time and
+	// Message only — the stream and each JSON field's full value live in the
+	// record view (v) — and a message too long for its column wraps onto
+	// continuation rows rather than being cut off.
 	eventsTableMode bool
 	eventsTable     table.Model
-	jsonSplit       bool
-	eventsSplit     bool
-	hiddenFields    int
 
 	// Full log viewer (opened with Enter on an event)
 	viewer logViewer
@@ -236,8 +231,7 @@ func NewModel(ctx context.Context, awsCfg *config.AWSConfig, regions []string, a
 		eventSearch:  eSearch,
 		lookback:     since,
 		maxEvents:    resolvedMaxEvents,
-		jsonSplit:    true, // split structured JSON events into columns by default
-		viewer:       logViewer{search: vSearch, grepInput: vGrep, tableSplit: true},
+		viewer:       logViewer{search: vSearch, grepInput: vGrep},
 		streamMatch:  streamMatchState{input: mSearch},
 	}
 
@@ -599,15 +593,6 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				}
 			}
 
-		case "J":
-			// In table mode, toggle splitting structured JSON messages into
-			// one column per top-level field (mirrors the viewer's J, which
-			// pretty-prints the same JSON).
-			if m.view == viewEvents && m.eventsTableMode {
-				m.jsonSplit = !m.jsonSplit
-				m.buildEventsTable()
-			}
-
 		case "p":
 			// Cycle the server-side query window (30m → … → 7d). Narrower
 			// windows scan less data, so busy groups answer faster.
@@ -615,14 +600,6 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.lookback = nextLookback(m.lookback)
 				m.eventsLoading = true
 				cmds = append(cmds, m.loadEventsCmd())
-			}
-
-		case "left", "right":
-			// Pan the events table: hidden columns first, then the message
-			// text itself (the message column is the last one, so plain
-			// column scrolling alone could never reveal the rest of it).
-			if m.view == viewEvents && m.eventsTableMode {
-				m.panEventsTable(msg.String() == "right")
 			}
 
 		case "v":
@@ -1473,15 +1450,7 @@ func (m *model) renderEventsPanel(width int) string {
 		m.eventsTable.SetWidth(width - 2)
 		m.eventsTable.SetHeight(tableH)
 		b.WriteString(m.eventsTable.View() + "\n")
-		parts := make([]string, 0, 3)
-		if s := ui.TableScrollIndicator(&m.eventsTable); s != "" {
-			parts = append(parts, s)
-		}
-		if m.hiddenFields > 0 {
-			// A capped field set must never read as "all fields" (§ no silent caps).
-			parts = append(parts, ui.MutedStyle().Render(fmt.Sprintf("+%d more json fields in raw event", m.hiddenFields)))
-		}
-		b.WriteString(" " + strings.Join(parts, "  "))
+		b.WriteString(" " + ui.TableScrollIndicator(&m.eventsTable))
 	} else {
 		visibleHeight := m.height - 8
 		if visibleHeight < 5 {
@@ -1585,14 +1554,8 @@ func (m *model) getHelpHints() []ui.KeyHint {
 			}
 		}
 		if m.viewer.tableMode {
-			jsonHint := "split json"
-			if m.viewer.tableSplitOn {
-				jsonHint = "raw message"
-			}
 			return []ui.KeyHint{
 				ui.H("↑/↓", "rows"),
-				ui.H("←/→", "pan"),
-				ui.H("J", jsonHint),
 				ui.H("v", "record"),
 				ui.H("G", "tail"),
 				ui.H("f", "follow"),
@@ -1679,13 +1642,6 @@ func (m *model) getHelpHints() []ui.KeyHint {
 			ui.H("p", "window "+formatLookback(m.lookback)),
 			ui.H("t", tableHint),
 		)
-		if m.eventsTableMode {
-			jsonHint := "split json"
-			if m.eventsSplit {
-				jsonHint = "raw message"
-			}
-			hints = append(hints, ui.H("←/→", "pan message"), ui.H("J", jsonHint))
-		}
 		hints = append(hints,
 			ui.H("W", "tail watch"),
 			ui.H("y", "copy"),

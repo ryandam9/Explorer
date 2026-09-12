@@ -5,21 +5,10 @@ import (
 	"io"
 	"strings"
 
-	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/service/cloudwatchlogs/types"
 
 	"github.com/ryandam9/aws_explorer/internal/table"
 )
-
-// maxFieldCols caps how many JSON field columns the events table shows; the
-// overflow count is surfaced next to the table so a cap never reads as "these
-// are all the fields" (the raw message still holds everything).
-const maxFieldCols = 24
-
-// maxFieldCell caps one JSON field value inside a cell. Field columns are
-// meant to be scannable; a huge value would turn its column into the old
-// single-message problem. The full value is always in the raw event (Enter/y).
-const maxFieldCell = 80
 
 // splitEventJSON tries to interpret a log message as structured JSON. It
 // accepts a leading prefix before the JSON body — the common shape of Lambda
@@ -129,161 +118,36 @@ func renderJSONValue(v any) string {
 	}
 }
 
-// eventView is one event analyzed for the table: pre-rendered JSON fields
-// (nil for plain-text events) plus whatever text was not part of the JSON.
-type eventView struct {
-	fields map[string]string
-	raw    string
-}
-
-// analyzeEvents parses every message once and derives the union of JSON field
-// keys in first-appearance order. anyJSON reports whether field columns are
-// worth showing at all; anyRaw whether a Message column is still needed for
-// plain-text events, prefixes and suffixes.
-func analyzeEvents(events []types.FilteredLogEvent) (views []eventView, keys []string, anyJSON, anyRaw bool) {
-	views = make([]eventView, 0, len(events))
-	seen := make(map[string]bool)
-	for _, ev := range events {
-		fields, evKeys, raw := splitEventJSON(aws.ToString(ev.Message))
-		if fields != nil {
-			anyJSON = true
-			for _, k := range evKeys {
-				if !seen[k] {
-					seen[k] = true
-					keys = append(keys, k)
-				}
-			}
-		}
-		if raw != "" {
-			anyRaw = true
-		}
-		views = append(views, eventView{fields: fields, raw: raw})
-	}
-	return views, keys, anyJSON, anyRaw
-}
-
-// clipFieldCell truncates a JSON field value for its column.
-func clipFieldCell(s string) string {
-	s = flattenEventText(s)
-	r := []rune(s)
-	if len(r) <= maxFieldCell {
-		return s
-	}
-	return string(r[:maxFieldCell-1]) + "…"
-}
-
-// eventTableData is everything the events table needs for one build: columns,
-// rows, the pan state (shift comes back clamped) and the field-cap overflow.
+// eventTableData is everything the events table needs for one build: the two
+// columns, the rows, and the row→event mapping a wrapped message produces.
 type eventTableData struct {
-	cols         []table.Column
-	rows         []table.Row
-	groups       []int // row → event index; one event can span wrapped rows
-	split        bool  // JSON field columns in use
-	hiddenFields int   // field keys beyond maxFieldCols
+	cols   []table.Column
+	rows   []table.Row
+	groups []int // row → event index; one event can span wrapped rows
 }
 
-// buildEventTableData assembles the table content. With split enabled and at
-// least one JSON event, each top-level JSON field becomes its own column
-// (capped at maxFieldCols, first-appearance order) and the Message column
-// carries only what wasn't JSON; otherwise the plain Time/[Stream]/Message
-// layout is used.
+// buildEventTableData assembles the table content: Time and Message, and
+// nothing else. Everything a row can't show — the stream, each JSON field's
+// full value — is one keystroke away in the record view (v), so the table
+// stays scannable instead of turning into a spreadsheet.
 //
-// avail is the table's usable width: the Message column takes whatever the
-// other columns leave, so the table fills a wide terminal instead of stopping
-// at a fixed cap, and a message too long for that width wraps onto extra rows
-// (d.groups maps them back to their event) rather than being cut off.
-func buildEventTableData(events []types.FilteredLogEvent, withStream, split bool, avail int) eventTableData {
-	views, keys, anyJSON, anyRaw := analyzeEvents(events)
+// avail is the table's usable width: the Message column takes whatever Time
+// leaves, so the table fills a wide terminal, and a message too long for that
+// width wraps onto extra rows (groups maps them back to their event) rather
+// than being cut off.
+func buildEventTableData(events []types.FilteredLogEvent, avail int) eventTableData {
+	d := eventTableData{cols: eventTableColumns()}
 
-	if !split || !anyJSON {
-		d := eventTableData{cols: eventTableColumns(withStream)}
+	times := make([]string, 0, len(events))
+	for _, ev := range events {
+		times = append(times, eventTimestamp(ev))
+	}
+	msgW := messageColumnWidth(avail, []int{fittedWidth("Time", times)})
 
-		// Size the fixed columns from their own content, then give the message
-		// everything that is left.
-		times := make([]string, 0, len(events))
-		streams := make([]string, 0, len(events))
-		for _, ev := range events {
-			times = append(times, eventTimestamp(ev))
-			if withStream {
-				streams = append(streams, clipEventCell(aws.ToString(ev.LogStreamName)))
-			}
-		}
-		fixedW := []int{fittedWidth("Time", times)}
-		if withStream {
-			fixedW = append(fixedW, fittedWidth("Stream", streams))
-		}
-		msgW := messageColumnWidth(avail, fixedW)
-		d.rows, d.groups = eventTableRows(events, withStream, msgW)
-		// Pin the Message column to the remaining width: the widget only grows
-		// a column to its widest cell, so without this floor a table of short
-		// messages would leave the right-hand side of the panel empty.
-		d.cols[len(d.cols)-1].Width = msgW
-		return d
-	}
-
-	d := eventTableData{split: true}
-	if len(keys) > maxFieldCols {
-		d.hiddenFields = len(keys) - maxFieldCols
-		keys = keys[:maxFieldCols]
-	}
-	// Fixed columns are excluded from the "(1) (2) …" numbering so the field
-	// numbers survive column-scrolling landmarks.
-	d.cols = []table.Column{{Title: "Time", Width: 4, NoNumber: true}}
-	if withStream {
-		d.cols = append(d.cols, table.Column{Title: "Stream", Width: 4, NoNumber: true})
-	}
-	for _, k := range keys {
-		d.cols = append(d.cols, table.Column{Title: clipFieldCell(k), Width: 4})
-	}
-	if anyRaw {
-		d.cols = append(d.cols, table.Column{Title: "Message", Width: 4, NoNumber: true})
-	}
-
-	// Build the fixed cells first so the field columns' fitted widths are known
-	// before the Message column claims the remainder.
-	fixedRows := make([][]string, 0, len(events))
-	for i, ev := range events {
-		row := []string{eventTimestamp(ev)}
-		if withStream {
-			row = append(row, clipEventCell(aws.ToString(ev.LogStreamName)))
-		}
-		for _, k := range keys {
-			row = append(row, clipFieldCell(views[i].fields[k])) // "" when absent
-		}
-		fixedRows = append(fixedRows, row)
-	}
-
-	d.rows = make([]table.Row, 0, len(events))
-	d.groups = make([]int, 0, len(events))
-	if !anyRaw {
-		for i, row := range fixedRows {
-			d.rows = append(d.rows, table.Row(row))
-			d.groups = append(d.groups, i)
-		}
-		return d
-	}
-
-	if len(fixedRows) == 0 {
-		return d // no events: nothing to size the message column against
-	}
-
-	fixedW := make([]int, len(fixedRows[0]))
-	for c := range fixedW {
-		cells := make([]string, 0, len(fixedRows))
-		for _, row := range fixedRows {
-			cells = append(cells, row[c])
-		}
-		fixedW[c] = fittedWidth(d.cols[c].Title, cells)
-	}
-	msgW := messageColumnWidth(avail, fixedW)
+	d.rows, d.groups = eventTableRows(events, msgW)
+	// Pin the Message column to the remaining width: the widget only grows a
+	// column to its widest cell, so without this floor a table of short
+	// messages would leave the right-hand side of the panel empty.
 	d.cols[len(d.cols)-1].Width = msgW
-
-	for i, row := range fixedRows {
-		evRows := wrappedRows(row, wrapEventMessage(views[i].raw, msgW, maxWrapLines))
-		for range evRows {
-			d.groups = append(d.groups, i)
-		}
-		d.rows = append(d.rows, evRows...)
-	}
 	return d
 }

@@ -76,13 +76,9 @@ func TestParseLookback(t *testing.T) {
 }
 
 func TestEventTableColumns(t *testing.T) {
-	cols := eventTableColumns(false)
+	cols := eventTableColumns()
 	if len(cols) != 2 || cols[0].Title != "Time" || cols[1].Title != "Message" {
-		t.Errorf("without stream: got %+v", cols)
-	}
-	cols = eventTableColumns(true)
-	if len(cols) != 3 || cols[1].Title != "Stream" {
-		t.Errorf("with stream: got %+v", cols)
+		t.Errorf("columns = %+v, want exactly Time and Message", cols)
 	}
 }
 
@@ -101,29 +97,31 @@ func TestEventTableRows(t *testing.T) {
 	}
 
 	const msgW = 40
-	rows, groups := eventTableRows(events, true, msgW)
+	rows, groups := eventTableRows(events, msgW)
 	if len(rows) != len(groups) {
 		t.Fatalf("rows = %d but groups = %d; every row needs an event", len(rows), len(groups))
 	}
 
+	// Two cells per row: the stream is not in the table (it is in the record
+	// view), so a whole-group search looks the same as a single stream.
+	if len(rows[0]) != 2 {
+		t.Fatalf("row width = %d, want 2 (Time, Message)", len(rows[0]))
+	}
 	wantTime := time.UnixMilli(ts).Format("2006-01-02 15:04:05.000")
 	if rows[0][0] != wantTime {
 		t.Errorf("time cell = %q, want %q", rows[0][0], wantTime)
 	}
-	if rows[0][1] != "stream-a" {
-		t.Errorf("stream cell = %q", rows[0][1])
-	}
 
 	// A message with an embedded newline occupies one row per line, and only
-	// the first carries the fixed cells so the text aligns under the column.
-	if rows[0][2] != "line one" {
-		t.Errorf("first message line = %q, want %q", rows[0][2], "line one")
+	// the first carries the time so the text aligns under the column.
+	if rows[0][1] != "line one" {
+		t.Errorf("first message line = %q, want %q", rows[0][1], "line one")
 	}
-	if rows[1][2] != "line two    with tab" {
-		t.Errorf("second message line = %q (tabs expand, no flattening)", rows[1][2])
+	if rows[1][1] != "line two    with tab" {
+		t.Errorf("second message line = %q (tabs expand, spacing preserved)", rows[1][1])
 	}
-	if rows[1][0] != "" || rows[1][1] != "" {
-		t.Errorf("continuation row repeated the fixed cells: %q / %q", rows[1][0], rows[1][1])
+	if rows[1][0] != "" {
+		t.Errorf("continuation row repeated the time cell: %q", rows[1][0])
 	}
 	if groups[0] != 0 || groups[1] != 0 {
 		t.Errorf("both lines should map to event 0, got %v", groups[:2])
@@ -140,20 +138,10 @@ func TestEventTableRows(t *testing.T) {
 	if second == 0 {
 		t.Fatalf("no rows produced for the second event: groups %v", groups)
 	}
-	wrapped := rows[second:]
-	if len(wrapped) < 2 {
-		t.Errorf("500-rune message produced %d row(s) at width %d, want it wrapped", len(wrapped), msgW)
-	}
-	for i, r := range wrapped {
-		if w := runewidth.StringWidth(r[2]); w > msgW {
-			t.Errorf("wrapped line %d is %d wide, want <= %d: %q", i, w, msgW, r[2])
+	for i, r := range rows[second:] {
+		if w := runewidth.StringWidth(r[1]); w > msgW {
+			t.Errorf("wrapped line %d is %d wide, want <= %d: %q", i, w, msgW, r[1])
 		}
-	}
-
-	// Without the stream column each row is just Time + Message.
-	rows, _ = eventTableRows(events, false, msgW)
-	if len(rows[0]) != 2 {
-		t.Errorf("row width without stream = %d, want 2", len(rows[0]))
 	}
 }
 
@@ -215,29 +203,6 @@ func TestWrapEventMessage(t *testing.T) {
 	}
 }
 
-// ←/→ scroll the column window (the split-JSON layout can be wider than the
-// panel); the message itself wraps, so there is nothing to pan it past.
-func TestPanEventsTable(t *testing.T) {
-	m := &model{width: 100, height: 30}
-	m.events = []types.FilteredLogEvent{
-		{Timestamp: aws.Int64(1), Message: aws.String(`{"a":"1","b":"2","c":"3"}`)},
-	}
-	m.jsonSplit = true
-	m.eventsTableMode = true
-	m.buildEventsTable()
-
-	before, _ := m.eventsTable.ColScrollInfo()
-	m.panEventsTable(true)
-	afterRight, _ := m.eventsTable.ColScrollInfo()
-	if afterRight < before {
-		t.Errorf("panning right scrolled columns backwards: %d then %d", before, afterRight)
-	}
-	m.panEventsTable(false)
-	if got, _ := m.eventsTable.ColScrollInfo(); got != before {
-		t.Errorf("left then right did not retrace: %d, want %d", got, before)
-	}
-}
-
 func TestSyncEventsTableCursor(t *testing.T) {
 	m := &model{}
 	for i := 0; i < 5; i++ {
@@ -267,7 +232,7 @@ func TestEventsTableFillsAvailableWidth(t *testing.T) {
 	}
 
 	for _, avail := range []int{120, 200, 320} {
-		d := buildEventTableData(events, false, false, avail)
+		d := buildEventTableData(events, avail)
 		msgCol := d.cols[len(d.cols)-1]
 		if msgCol.Title != "Message" {
 			t.Fatalf("last column is %q, want Message", msgCol.Title)
@@ -297,7 +262,7 @@ func TestEventsTableWrapsLongMessagesIntoRows(t *testing.T) {
 		{Timestamp: aws.Int64(2), Message: aws.String(long)},
 	}
 
-	d := buildEventTableData(events, false, false, 120)
+	d := buildEventTableData(events, 120)
 	if len(d.rows) != len(d.groups) {
 		t.Fatalf("rows = %d, groups = %d", len(d.rows), len(d.groups))
 	}
