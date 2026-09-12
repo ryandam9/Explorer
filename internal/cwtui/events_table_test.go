@@ -7,6 +7,7 @@ import (
 
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/service/cloudwatchlogs/types"
+	"github.com/mattn/go-runewidth"
 )
 
 func TestNextLookbackCyclesPresets(t *testing.T) {
@@ -99,10 +100,12 @@ func TestEventTableRows(t *testing.T) {
 		},
 	}
 
-	rows := eventTableRows(events, true, 0)
-	if len(rows) != 2 {
-		t.Fatalf("rows = %d, want 2", len(rows))
+	const msgW = 40
+	rows, groups := eventTableRows(events, true, msgW)
+	if len(rows) != len(groups) {
+		t.Fatalf("rows = %d but groups = %d; every row needs an event", len(rows), len(groups))
 	}
+
 	wantTime := time.UnixMilli(ts).Format("2006-01-02 15:04:05.000")
 	if rows[0][0] != wantTime {
 		t.Errorf("time cell = %q, want %q", rows[0][0], wantTime)
@@ -110,119 +113,131 @@ func TestEventTableRows(t *testing.T) {
 	if rows[0][1] != "stream-a" {
 		t.Errorf("stream cell = %q", rows[0][1])
 	}
-	if want := "line one line two with tab"; rows[0][2] != want {
-		t.Errorf("message cell = %q, want newlines/tabs flattened to %q", rows[0][2], want)
+
+	// A message with an embedded newline occupies one row per line, and only
+	// the first carries the fixed cells so the text aligns under the column.
+	if rows[0][2] != "line one" {
+		t.Errorf("first message line = %q, want %q", rows[0][2], "line one")
+	}
+	if rows[1][2] != "line two    with tab" {
+		t.Errorf("second message line = %q (tabs expand, no flattening)", rows[1][2])
+	}
+	if rows[1][0] != "" || rows[1][1] != "" {
+		t.Errorf("continuation row repeated the fixed cells: %q / %q", rows[1][0], rows[1][1])
+	}
+	if groups[0] != 0 || groups[1] != 0 {
+		t.Errorf("both lines should map to event 0, got %v", groups[:2])
 	}
 
-	// Long messages are clipped for the cell (the widget sizes columns to the
-	// widest cell) and marked with an ellipsis.
-	clipped := rows[1][2]
-	if got := len([]rune(clipped)); got != maxEventCell {
-		t.Errorf("clipped cell runes = %d, want %d", got, maxEventCell)
+	// A long message wraps to the column width instead of being cut off.
+	second := 0
+	for i, g := range groups {
+		if g == 1 {
+			second = i
+			break
+		}
 	}
-	if !strings.HasSuffix(clipped, "…") {
-		t.Errorf("clipped cell should end in ellipsis: %q", clipped)
+	if second == 0 {
+		t.Fatalf("no rows produced for the second event: groups %v", groups)
+	}
+	wrapped := rows[second:]
+	if len(wrapped) < 2 {
+		t.Errorf("500-rune message produced %d row(s) at width %d, want it wrapped", len(wrapped), msgW)
+	}
+	for i, r := range wrapped {
+		if w := runewidth.StringWidth(r[2]); w > msgW {
+			t.Errorf("wrapped line %d is %d wide, want <= %d: %q", i, w, msgW, r[2])
+		}
 	}
 
 	// Without the stream column each row is just Time + Message.
-	rows = eventTableRows(events, false, 0)
+	rows, _ = eventTableRows(events, false, msgW)
 	if len(rows[0]) != 2 {
 		t.Errorf("row width without stream = %d, want 2", len(rows[0]))
 	}
 }
 
-// ←/→ pan the message window across the full text; ellipses mark text hidden
-// off either edge so a partial view is never mistaken for the whole message.
-func TestEventMessageCellPanning(t *testing.T) {
-	long := strings.Repeat("abcdefghij", 50) // 500 runes
-
-	if got := eventMessageCell("short", 0); got != "short" {
-		t.Errorf("unshifted short = %q", got)
+// The Message column takes whatever the other columns leave, so a wide
+// terminal is filled rather than stopping at a fixed width.
+func TestMessageColumnWidth(t *testing.T) {
+	// Time (23) + its padding, plus the scrollbar gutter, come off the top.
+	got := messageColumnWidth(200, []int{23})
+	if want := 200 - tableScrollGutter - (23 + tableCellPadding) - tableCellPadding; got != want {
+		t.Errorf("messageColumnWidth = %d, want %d", got, want)
 	}
 
-	// Unshifted long: head window with trailing ellipsis.
-	got := eventMessageCell(long, 0)
-	if !strings.HasPrefix(got, "abcdefghij") || !strings.HasSuffix(got, "…") {
-		t.Errorf("unshifted long = %q", got)
+	// A narrow terminal stops shrinking at the floor rather than collapsing.
+	if got := messageColumnWidth(30, []int{23, 40}); got != minMessageWidth {
+		t.Errorf("narrow width = %d, want the %d floor", got, minMessageWidth)
 	}
 
-	// Mid-pan: both edges elided, window starts at the shift offset.
-	got = eventMessageCell(long, 40)
-	if !strings.HasPrefix(got, "…") || !strings.HasSuffix(got, "…") {
-		t.Errorf("mid-pan should be elided on both edges: %q", got)
-	}
-	if want := string([]rune(long)[40:50]); !strings.Contains(got, want) {
-		t.Errorf("mid-pan window should start at rune 40: %q", got)
-	}
-	if n := len([]rune(got)); n != maxEventCell {
-		t.Errorf("mid-pan cell runes = %d, want %d", n, maxEventCell)
-	}
-
-	// Panned to the tail: leading ellipsis only, remainder shown in full.
-	got = eventMessageCell(long, 460)
-	if want := "…" + string([]rune(long)[460:]); got != want {
-		t.Errorf("tail pan = %q, want %q", got, want)
-	}
-
-	// Panned past a shorter message: a bare ellipsis, not an empty cell.
-	if got := eventMessageCell("tiny", 40); got != "…" {
-		t.Errorf("past-the-end pan = %q, want …", got)
+	// Width unknown (before the first resize): fall back, don't collapse.
+	if got := messageColumnWidth(0, []int{23}); got != maxEventCell {
+		t.Errorf("unknown width = %d, want the %d fallback", got, maxEventCell)
 	}
 }
 
-func TestClampMsgShift(t *testing.T) {
-	cases := []struct {
-		shift, maxLen, want int
-	}{
-		{0, 500, 0},
-		{40, 500, 40},
-		{480, 500, 460}, // keep the last msgShiftStep runes reachable
-		{400, 100, 60},  // events replaced by shorter ones: pull the pan back
-		{40, 0, 0},      // no events
-		{-10, 500, 0},   // never negative
-		{40, 20, 0},     // maxLen below one step: no panning possible
-	}
-	for _, c := range cases {
-		if got := clampMsgShift(c.shift, c.maxLen); got != c.want {
-			t.Errorf("clampMsgShift(%d, %d) = %d, want %d", c.shift, c.maxLen, got, c.want)
+func TestWrapEventMessage(t *testing.T) {
+	// Wraps at word boundaries when it can.
+	got := wrapEventMessage("the quick brown fox jumps", 12, 0)
+	for _, line := range got {
+		if runewidth.StringWidth(line) > 12 {
+			t.Errorf("line %q exceeds width 12", line)
 		}
 	}
+	if strings.Join(got, " ") != "the quick brown fox jumps" {
+		t.Errorf("word wrap lost or reordered text: %v", got)
+	}
+
+	// Hard-breaks a token with nowhere to break (an ARN, a JSON blob).
+	long := strings.Repeat("z", 25)
+	got = wrapEventMessage(long, 10, 0)
+	if len(got) != 3 {
+		t.Errorf("unbreakable token wrapped to %d lines, want 3: %v", len(got), got)
+	}
+	if strings.Join(got, "") != long {
+		t.Errorf("hard break lost characters: %v", got)
+	}
+
+	// The line cap is never silent about what it dropped.
+	many := strings.Repeat("word ", 200)
+	got = wrapEventMessage(many, 20, 3)
+	if len(got) != 3 {
+		t.Fatalf("capped output = %d lines, want 3", len(got))
+	}
+	if !strings.Contains(got[2], "more line") {
+		t.Errorf("last line %q should say how much was dropped", got[2])
+	}
+
+	// An empty message still yields exactly one line, so its row exists.
+	if got := wrapEventMessage("", 20, 4); len(got) != 1 || got[0] != "" {
+		t.Errorf("empty message = %v, want one empty line", got)
+	}
 }
 
-// panEventsTable must pan the message window right and retrace left, with the
-// pan bounded by the longest message.
+// ←/→ scroll the column window (the split-JSON layout can be wider than the
+// panel); the message itself wraps, so there is nothing to pan it past.
 func TestPanEventsTable(t *testing.T) {
-	m := &model{}
+	m := &model{width: 100, height: 30}
 	m.events = []types.FilteredLogEvent{
-		{Timestamp: aws.Int64(1700000000000), Message: aws.String(strings.Repeat("x", 100))},
-		{Timestamp: aws.Int64(1700000000000), Message: aws.String("short")},
+		{Timestamp: aws.Int64(1), Message: aws.String(`{"a":"1","b":"2","c":"3"}`)},
 	}
+	m.jsonSplit = true
+	m.eventsTableMode = true
 	m.buildEventsTable()
 
+	before, _ := m.eventsTable.ColScrollInfo()
 	m.panEventsTable(true)
-	if m.msgShift != msgShiftStep {
-		t.Fatalf("after one right pan msgShift = %d, want %d", m.msgShift, msgShiftStep)
-	}
-	// The longest message is 100 runes, so the pan stops at 100-40=60.
-	for i := 0; i < 5; i++ {
-		m.panEventsTable(true)
-	}
-	if m.msgShift != 60 {
-		t.Errorf("pan should stop at 60 (maxLen-step), got %d", m.msgShift)
+	afterRight, _ := m.eventsTable.ColScrollInfo()
+	if afterRight < before {
+		t.Errorf("panning right scrolled columns backwards: %d then %d", before, afterRight)
 	}
 	m.panEventsTable(false)
-	m.panEventsTable(false)
-	if m.msgShift != 0 {
-		t.Errorf("panning back should reach 0, got %d", m.msgShift)
-	}
-	m.panEventsTable(false) // at 0: no-op (no hidden columns to unscroll)
-	if m.msgShift != 0 {
-		t.Errorf("msgShift went negative: %d", m.msgShift)
+	if got, _ := m.eventsTable.ColScrollInfo(); got != before {
+		t.Errorf("left then right did not retrace: %d, want %d", got, before)
 	}
 }
 
-// The table cursor must follow selectedEventIdx through wraps in both
-// directions so Enter/y always act on the highlighted row.
 func TestSyncEventsTableCursor(t *testing.T) {
 	m := &model{}
 	for i := 0; i < 5; i++ {
@@ -238,6 +253,71 @@ func TestSyncEventsTableCursor(t *testing.T) {
 		m.syncEventsTableCursor()
 		if got := m.eventsTable.Cursor(); got != want {
 			t.Errorf("cursor = %d, want %d", got, want)
+		}
+	}
+}
+
+// The reported bug: on a wide monitor the table stopped at a fixed width and
+// left the right-hand side of the panel empty. The Message column must take
+// whatever the other columns leave, whether messages are short or long.
+func TestEventsTableFillsAvailableWidth(t *testing.T) {
+	events := []types.FilteredLogEvent{
+		{Timestamp: aws.Int64(1), Message: aws.String("short")},
+		{Timestamp: aws.Int64(2), Message: aws.String("also short")},
+	}
+
+	for _, avail := range []int{120, 200, 320} {
+		d := buildEventTableData(events, false, false, avail)
+		msgCol := d.cols[len(d.cols)-1]
+		if msgCol.Title != "Message" {
+			t.Fatalf("last column is %q, want Message", msgCol.Title)
+		}
+
+		timeW := fittedWidth("Time", []string{eventTimestamp(events[0])})
+		want := avail - tableScrollGutter - (timeW + tableCellPadding) - tableCellPadding
+		if msgCol.Width != want {
+			t.Errorf("avail %d: message column = %d, want %d (the whole remainder)", avail, msgCol.Width, want)
+		}
+
+		// End to end: the widget grows the fixed columns to their content, so
+		// the rendered table must occupy exactly the width it was given.
+		used := tableScrollGutter + timeW + tableCellPadding + msgCol.Width + tableCellPadding
+		if used != avail {
+			t.Errorf("avail %d: table occupies %d columns, leaving %d unused", avail, used, avail-used)
+		}
+	}
+}
+
+// A message longer than the column wraps onto continuation rows mapped back to
+// their event, instead of being truncated with an ellipsis.
+func TestEventsTableWrapsLongMessagesIntoRows(t *testing.T) {
+	long := strings.Repeat("alpha beta gamma delta ", 30)
+	events := []types.FilteredLogEvent{
+		{Timestamp: aws.Int64(1), Message: aws.String("one liner")},
+		{Timestamp: aws.Int64(2), Message: aws.String(long)},
+	}
+
+	d := buildEventTableData(events, false, false, 120)
+	if len(d.rows) != len(d.groups) {
+		t.Fatalf("rows = %d, groups = %d", len(d.rows), len(d.groups))
+	}
+	if len(d.rows) <= len(events) {
+		t.Errorf("rows = %d for %d events; the long message should have wrapped", len(d.rows), len(events))
+	}
+
+	msgIdx := len(d.cols) - 1
+	msgW := d.cols[msgIdx].Width
+	for i, r := range d.rows {
+		if w := runewidth.StringWidth(r[msgIdx]); w > msgW {
+			t.Errorf("row %d message is %d wide, past the %d column", i, w, msgW)
+		}
+	}
+
+	// Continuation rows leave the time cell empty so the text lines up under
+	// the message column.
+	for i := 1; i < len(d.rows); i++ {
+		if d.groups[i] == d.groups[i-1] && d.rows[i][0] != "" {
+			t.Errorf("continuation row %d repeated the time cell %q", i, d.rows[i][0])
 		}
 	}
 }

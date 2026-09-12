@@ -22,6 +22,7 @@ See the [`cw` command reference](cw.md) for every flag.
 | `/` | Filter the current list |
 | `F` | On the streams panel: find **which streams contain a string** — one group-wide query tallied per stream (matches, first/last), then `Enter` opens that stream with the pattern applied |
 | `G` | Search the **entire group** (across streams) |
+| `t` | Table view of the events: the Message column fills the width left on screen and wraps long messages onto aligned continuation rows |
 | `W` | Tail-watch the event list |
 | `o` | Open the selected log group in the CloudWatch console |
 | `y` / `s` | Copy / export events |

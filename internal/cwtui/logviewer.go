@@ -94,8 +94,7 @@ type logViewer struct {
 	tableMode    bool
 	tableSplit   bool
 	table        table.Model
-	msgShift     int
-	maxMsgLen    int
+	tableWidth   int // width the table is rendered at; the Message column takes what the rest leave
 	hiddenFields int
 	tableSplitOn bool // whether the current build produced field columns
 
@@ -160,7 +159,6 @@ func (v *logViewer) open(key viewerKey, title string, wrapW int, maxEvents int) 
 	v.grepSrc = nil
 	v.grepTotal = 0
 	v.wrapW = wrapW
-	v.msgShift = 0
 	if v.tableMode {
 		v.rebuildTable()
 	}
@@ -201,10 +199,8 @@ func (v *logViewer) append(events []types.FilteredLogEvent) {
 // otherwise. The stream column appears only for whole-group viewers, where
 // events interleave from many streams.
 func (v *logViewer) rebuildTable() {
-	cur := v.table.Cursor()
-	data := buildEventTableData(v.events, v.key.stream == "", v.tableSplit, v.msgShift)
-	v.msgShift = data.shift
-	v.maxMsgLen = data.maxMsgLen
+	cur := v.table.CursorGroup()
+	data := buildEventTableData(v.events, v.key.stream == "", v.tableSplit, v.tableWidth)
 	v.hiddenFields = data.hiddenFields
 	v.tableSplitOn = data.split
 	v.table = table.New(
@@ -214,7 +210,9 @@ func (v *logViewer) rebuildTable() {
 		table.WithStyles(ui.TableStylesZebra()),
 		table.WithFrozenColumns(1),       // pin the time column while panning/scrolling
 		table.WithColNumbers(data.split), // number the field columns for orientation
+		table.WithRowGroups(data.groups), // a wrapped message stays one event
 	)
+	v.table.SetWidth(v.tableWidth)
 	if v.follow {
 		v.table.GotoBottom()
 	} else if cur > 0 {
@@ -222,32 +220,12 @@ func (v *logViewer) rebuildTable() {
 	}
 }
 
-// refreshTableRows re-renders the rows for a new pan offset without recreating
-// the table, so the cursor and scroll position stay put.
-func (v *logViewer) refreshTableRows() {
-	data := buildEventTableData(v.events, v.key.stream == "", v.tableSplit, v.msgShift)
-	v.msgShift = data.shift
-	v.table.SetRows(data.rows)
-}
-
-// panTable handles ←/→ in table mode, retracing the events panel's order:
-// right reveals hidden columns before panning the message window; left pans
-// back before un-scrolling columns.
+// panTable handles ←/→ in table mode: it scrolls the column window when the
+// split-JSON layout is wider than the page. The message wraps into its column,
+// so there is nothing hidden off the right edge to pan to.
 func (v *logViewer) panTable(right bool) {
 	if right {
-		if _, hiddenRight := v.table.ColScrollInfo(); hiddenRight > 0 {
-			v.table.ScrollRight()
-			return
-		}
-		if shifted := clampMsgShift(v.msgShift+msgShiftStep, v.maxMsgLen); shifted != v.msgShift {
-			v.msgShift = shifted
-			v.refreshTableRows()
-		}
-		return
-	}
-	if v.msgShift > 0 {
-		v.msgShift = clampMsgShift(v.msgShift-msgShiftStep, v.maxMsgLen)
-		v.refreshTableRows()
+		v.table.ScrollRight()
 		return
 	}
 	v.table.ScrollLeft()
@@ -517,6 +495,14 @@ func (m *model) viewerWrapWidth() int {
 	return max(20, m.width-8)
 }
 
+// viewerTableWidth is the width the viewer's table mode is rendered at (see
+// renderViewerTable). The Message column claims whatever the other columns
+// leave of it, so the table fills the terminal rather than stopping at a
+// fixed width.
+func (m *model) viewerTableWidth() int {
+	return max(20, m.width-4)
+}
+
 // viewerBodyHeight is how many log lines fit between the viewer header and the
 // status bar.
 func (m *model) viewerBodyHeight() int {
@@ -546,6 +532,7 @@ func (m *model) openViewer(cmds *[]tea.Cmd) {
 	title += " [" + key.region + "]"
 
 	m.watchMode = false
+	m.viewer.tableWidth = m.viewerTableWidth()
 	m.viewer.open(key, title, m.viewerWrapWidth(), m.maxEvents)
 	*cmds = append(*cmds, m.loadViewerEventsCmd(true), m.viewerTickCmd())
 }
@@ -695,11 +682,11 @@ func (m *model) handleViewerKeys(msg tea.KeyMsg, cmds *[]tea.Cmd) {
 		case "v":
 			// Record view for the highlighted row — full field values,
 			// unclipped, same as v on the events panel.
-			if cur := v.table.Cursor(); cur >= 0 && cur < len(v.events) {
+			if cur := v.table.CursorGroup(); cur >= 0 && cur < len(v.events) {
 				m.openEventRecordFor(v.events[cur])
 			}
 		case "y":
-			if cur := v.table.Cursor(); cur >= 0 && cur < len(v.events) {
+			if cur := v.table.CursorGroup(); cur >= 0 && cur < len(v.events) {
 				_ = clipboard.WriteAll(aws.ToString(v.events[cur].Message))
 				m.setToast("Copied log event to clipboard")
 				*cmds = append(*cmds, toastCmd(3*time.Second))
@@ -728,6 +715,7 @@ func (m *model) handleViewerKeys(msg tea.KeyMsg, cmds *[]tea.Cmd) {
 			break
 		}
 		v.tableMode = true
+		v.tableWidth = m.viewerTableWidth()
 		v.rebuildTable()
 
 	case "up", "k":
@@ -978,7 +966,7 @@ func (m *model) renderViewerTable(header string) string {
 
 	var b strings.Builder
 	b.WriteString(header + "\n")
-	b.WriteString(mutedStyle.Render("  Table view — ↑/↓ rows · ←/→ pan · J split json · v record · t log view") + "\n")
+	b.WriteString(mutedStyle.Render("  Table view — ↑/↓ rows · ←/→ columns · J split json · v record · t log view") + "\n")
 	b.WriteString("\n")
 
 	if v.loading {
@@ -993,7 +981,7 @@ func (m *model) renderViewerTable(header string) string {
 		if tableH < 3 {
 			tableH = 3
 		}
-		v.table.SetWidth(max(20, m.width-4))
+		v.table.SetWidth(v.tableWidth)
 		v.table.SetHeight(tableH)
 		b.WriteString(v.table.View() + "\n")
 		parts := make([]string, 0, 3)
@@ -1003,9 +991,6 @@ func (m *model) renderViewerTable(header string) string {
 		if v.hiddenFields > 0 {
 			// A capped field set must never read as "all fields".
 			parts = append(parts, ui.MutedStyle().Render(fmt.Sprintf("+%d more json fields in raw event", v.hiddenFields)))
-		}
-		if v.msgShift > 0 {
-			parts = append(parts, ui.MutedStyle().Render(fmt.Sprintf("msg panned +%d chars ◀ ←", v.msgShift)))
 		}
 		b.WriteString(" " + strings.Join(parts, "  "))
 	}
@@ -1019,7 +1004,7 @@ func (m *model) renderViewerTable(header string) string {
 
 	pos := "no events"
 	if len(v.events) > 0 {
-		pos = fmt.Sprintf("event %d of %d", v.table.Cursor()+1, len(v.events))
+		pos = fmt.Sprintf("event %d of %d", v.table.CursorGroup()+1, len(v.events))
 	}
 	statusText := fmt.Sprintf("Region: %s  ·  Events: %d%s  ·  %s", v.key.region, len(v.events), v.truncNote(), pos)
 	if v.key.pattern != "" {

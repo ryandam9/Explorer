@@ -129,9 +129,9 @@ faster. The active window shows in the panel header and the status bar.
 |-----|--------|
 | `/` | Set the server-side query pattern(s). Separate several with `;` to OR them — `ERROR; timeout` shows events matching either, across every stream when combined with `G`. Each pattern runs as its own `FilterLogEvents` query; results are deduplicated and interleaved by time. The pattern(s) also scope the full log viewer and the `D` download, so "download only the matched lines across all streams" is: `G` → set patterns → `D` |
 | `p` | Cycle the query window: 30m → 1h → 3h → 6h → 12h → 24h → 3d → 7d |
-| `t` | Toggle between the plain list and a zebra-striped table (the same table widget used across the app) |
+| `t` | Toggle between the plain list and a zebra-striped table (the same table widget used across the app). The Message column is sized to whatever the other columns leave, so the table fills the terminal, and a message too long for it wraps onto continuation rows aligned under the column rather than being cut off. A wrapped event still selects, stripes and navigates as one row; past 8 lines the last line says how many were left, and `v` shows the event in full |
 | `J` | In table mode, toggle JSON splitting (on by default): structured events get one column per top-level JSON field, numbered `(1) (2) …` for orientation, with a `Message` column holding whatever wasn't JSON (plain-text events, prefixes like Lambda's `INFO` tag, suffixes). Off = plain Time / Stream / Message |
-| `←`/`→` | In table mode, pan long messages sideways in 40-char steps (a `msg panned +N chars` note tracks the offset; ellipses mark text hidden off either edge). Hidden columns are revealed first, and the time column stays pinned |
+| `←`/`→` | In table mode, scroll the column window when the split-JSON layout is wider than the panel (the time column stays pinned). Messages need no panning — the Message column takes the full width left on screen and wraps what doesn't fit |
 | `Enter` | Open the full log viewer for the selected event's target |
 | `v` | Record view: the selected event vertically, with every JSON field's **full value** (table cells clip at 80/160 chars; this is the escape hatch). Scrollable, `y` copies the record, `Esc` closes |
 | `W` | Toggle live tail watch mode |
