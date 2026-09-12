@@ -534,7 +534,12 @@ aws_explorer cw -g /aws/lambda/my-fn -f ERROR
 
 <tr>
 <td><code>t</code></td>
-<td>Table view of the events: the Message column fills the width left on screen and wraps long messages onto aligned continuation rows</td>
+<td>Table view of the events: Time and Message only, the Message column filling the width left on screen and wrapping long messages onto aligned continuation rows (<code>v</code> shows the stream and every JSON field)</td>
+</tr>
+
+<tr>
+<td><code>J</code></td>
+<td>Expand JSON embedded in messages — indented inside the table&rsquo;s Message column, or across the viewer&rsquo;s log lines; one shared preference</td>
 </tr>
 
 <tr>

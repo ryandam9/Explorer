@@ -86,17 +86,12 @@ type logViewer struct {
 	formatJSON bool
 
 	// Table mode ("t"): the streamed events rendered through the shared
-	// zebra-striped table — the same view the events panel offers — instead
-	// of wrapped log lines. tableSplit mirrors the events panel's JSON-split
-	// toggle (J while the table is showing); like formatJSON, both are
-	// viewing preferences that survive re-opening the viewer. The remaining
-	// fields carry the pan/build state, as on the events panel.
-	tableMode    bool
-	tableSplit   bool
-	table        table.Model
-	tableWidth   int // width the table is rendered at; the Message column takes what the rest leave
-	hiddenFields int
-	tableSplitOn bool // whether the current build produced field columns
+	// zebra-striped table — the same Time/Message view the events panel
+	// offers — instead of wrapped log lines. Like formatJSON, the mode is a
+	// viewing preference that survives re-opening the viewer.
+	tableMode  bool
+	table      table.Model
+	tableWidth int // width the table is rendered at; the Message column takes what Time leaves
 
 	search       textinput.Model
 	searchActive bool
@@ -200,16 +195,13 @@ func (v *logViewer) append(events []types.FilteredLogEvent) {
 // events interleave from many streams.
 func (v *logViewer) rebuildTable() {
 	cur := v.table.CursorGroup()
-	data := buildEventTableData(v.events, v.key.stream == "", v.tableSplit, v.tableWidth)
-	v.hiddenFields = data.hiddenFields
-	v.tableSplitOn = data.split
+	data := buildEventTableData(v.events, v.formatJSON, v.tableWidth)
 	v.table = table.New(
 		table.WithColumns(data.cols),
 		table.WithRows(data.rows),
 		table.WithFocused(true),
 		table.WithStyles(ui.TableStylesZebra()),
-		table.WithFrozenColumns(1),       // pin the time column while panning/scrolling
-		table.WithColNumbers(data.split), // number the field columns for orientation
+		table.WithFrozenColumns(1),       // pin the time column while scrolling
 		table.WithRowGroups(data.groups), // a wrapped message stays one event
 	)
 	v.table.SetWidth(v.tableWidth)
@@ -218,17 +210,6 @@ func (v *logViewer) rebuildTable() {
 	} else if cur > 0 {
 		v.table.MoveDown(cur) // MoveDown scrolls the viewport; bare SetCursor does not
 	}
-}
-
-// panTable handles ←/→ in table mode: it scrolls the column window when the
-// split-JSON layout is wider than the page. The message wraps into its column,
-// so there is nothing hidden off the right edge to pan to.
-func (v *logViewer) panTable(right bool) {
-	if right {
-		v.table.ScrollRight()
-		return
-	}
-	v.table.ScrollLeft()
 }
 
 // rebuild flattens events into wrapped display lines and recomputes search
@@ -672,12 +653,10 @@ func (m *model) handleViewerKeys(msg tea.KeyMsg, cmds *[]tea.Cmd) {
 			if v.follow {
 				v.table.GotoBottom()
 			}
-		case "left", "right":
-			v.panTable(msg.String() == "right")
 		case "J":
-			// Mirrors the events panel's J: split structured JSON messages
-			// into one column per top-level field, or back to Time/Message.
-			v.tableSplit = !v.tableSplit
+			// The same preference the line view's J toggles: expand embedded
+			// JSON. Shared, so switching between line and table view keeps it.
+			v.formatJSON = !v.formatJSON
 			v.rebuildTable()
 		case "v":
 			// Record view for the highlighted row — full field values,
@@ -854,7 +833,8 @@ func (m *model) renderViewer() string {
 	}
 	if v.tableMode {
 		header += "  " + lipgloss.NewStyle().Foreground(lipgloss.Color(ui.ColorAccent())).Render("[table]")
-	} else if v.formatJSON {
+	}
+	if v.formatJSON {
 		header += "  " + lipgloss.NewStyle().Foreground(lipgloss.Color(ui.ColorAccent())).Render("{} json")
 	}
 	if v.truncated {
@@ -966,7 +946,7 @@ func (m *model) renderViewerTable(header string) string {
 
 	var b strings.Builder
 	b.WriteString(header + "\n")
-	b.WriteString(mutedStyle.Render("  Table view — ↑/↓ rows · ←/→ columns · J split json · v record · t log view") + "\n")
+	b.WriteString(mutedStyle.Render("  Table view — ↑/↓ rows · J format json · v record (all fields) · t log view") + "\n")
 	b.WriteString("\n")
 
 	if v.loading {
@@ -984,15 +964,7 @@ func (m *model) renderViewerTable(header string) string {
 		v.table.SetWidth(v.tableWidth)
 		v.table.SetHeight(tableH)
 		b.WriteString(v.table.View() + "\n")
-		parts := make([]string, 0, 3)
-		if s := ui.TableScrollIndicator(&v.table); s != "" {
-			parts = append(parts, s)
-		}
-		if v.hiddenFields > 0 {
-			// A capped field set must never read as "all fields".
-			parts = append(parts, ui.MutedStyle().Render(fmt.Sprintf("+%d more json fields in raw event", v.hiddenFields)))
-		}
-		b.WriteString(" " + strings.Join(parts, "  "))
+		b.WriteString(" " + ui.TableScrollIndicator(&v.table))
 	}
 
 	box := lipgloss.NewStyle().

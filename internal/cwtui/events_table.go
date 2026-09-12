@@ -117,7 +117,13 @@ const minMessageWidth = 24
 // maxWrapLines caps how many lines one event's message may occupy. A 40 KB
 // JSON blob would otherwise fill the page by itself; past the cap the last
 // line says how much was left, and v / Enter show the value in full.
-const maxWrapLines = 8
+// maxWrapLinesJSON is the more generous cap that applies while J has expanded
+// the JSON: the reader asked to see the document, so it gets more room — but
+// still a bound, still labelled when it bites.
+const (
+	maxWrapLines     = 8
+	maxWrapLinesJSON = 40
+)
 
 // fittedWidth returns the width the shared table will give a column: the wider
 // of its header and its widest cell. Mirrors table.fitColumns so the builder
@@ -223,31 +229,15 @@ func wrapWords(line string, width int) []string {
 	return out
 }
 
-// flattenEventText puts a log message on one line for a table cell.
-func flattenEventText(s string) string {
-	return strings.NewReplacer("\r\n", " ", "\n", " ", "\r", " ", "\t", " ").Replace(s)
-}
-
-// clipEventCell flattens a value and truncates it for a table cell, marking
-// the cut with an ellipsis. Used for the cells that do NOT wrap — stream names
-// and JSON field values — where one line per event is the point.
-func clipEventCell(s string) string {
-	r := []rune(flattenEventText(s))
-	if len(r) <= maxEventCell {
-		return string(r)
+// eventTableColumns returns the table's column set: Time and Message. The
+// stream is deliberately absent even in a whole-group search — it would cost
+// most of the width the message needs, and the record view (v) names it for
+// the selected event.
+func eventTableColumns() []table.Column {
+	return []table.Column{
+		{Title: "Time", Width: 4},
+		{Title: "Message", Width: 4},
 	}
-	return string(r[:maxEventCell-1]) + "…"
-}
-
-// eventTableColumns returns the column set for the events table. The stream
-// column only appears in group-level search, where events interleave from many
-// streams and the origin matters.
-func eventTableColumns(withStream bool) []table.Column {
-	cols := []table.Column{{Title: "Time", Width: 4}}
-	if withStream {
-		cols = append(cols, table.Column{Title: "Stream", Width: 4})
-	}
-	return append(cols, table.Column{Title: "Message", Width: 4})
 }
 
 // eventTimestamp renders an event's timestamp for the table; the date is
@@ -275,16 +265,23 @@ func wrappedRows(fixed []string, msgLines []string) []table.Row {
 }
 
 // eventTableRows maps events onto rows matching eventTableColumns, wrapping
-// each message to msgWidth. The second return value is the row→event mapping.
-func eventTableRows(events []types.FilteredLogEvent, withStream bool, msgWidth int) ([]table.Row, []int) {
+// each message to msgWidth. With formatJSON on, an embedded JSON payload is
+// expanded first, so the cell shows the indented document. The second return
+// value is the row→event mapping.
+func eventTableRows(events []types.FilteredLogEvent, formatJSON bool, msgWidth int) ([]table.Row, []int) {
 	rows := make([]table.Row, 0, len(events))
 	groups := make([]int, 0, len(events))
 	for i, ev := range events {
 		fixed := []string{eventTimestamp(ev)}
-		if withStream {
-			fixed = append(fixed, clipEventCell(aws.ToString(ev.LogStreamName)))
+		msg := aws.ToString(ev.Message)
+		lineCap := maxWrapLines
+		if formatJSON {
+			// Expanding is an explicit request to see the document, so it gets
+			// more room than a message that merely happens to be long.
+			msg = prettifyJSON(msg)
+			lineCap = maxWrapLinesJSON
 		}
-		evRows := wrappedRows(fixed, wrapEventMessage(aws.ToString(ev.Message), msgWidth, maxWrapLines))
+		evRows := wrappedRows(fixed, wrapEventMessage(msg, msgWidth, lineCap))
 		for range evRows {
 			groups = append(groups, i)
 		}
@@ -306,33 +303,20 @@ func (m *model) eventsTableWidth() int {
 
 // buildEventsTable (re)creates the shared-widget table from the current
 // events, preserving the selection. Called when table mode turns on, when the
-// JSON-split toggle flips, and when a fresh event batch lands while it is on.
+// J (format JSON) toggle flips, on resize, and when a fresh event batch lands
+// while it is on.
 func (m *model) buildEventsTable() {
-	data := buildEventTableData(m.events, m.groupLevelSearch, m.jsonSplit, m.eventsTableWidth())
-	m.hiddenFields = data.hiddenFields
-	m.eventsSplit = data.split
+	data := buildEventTableData(m.events, m.eventsJSON, m.eventsTableWidth())
 	m.eventsTable = table.New(
 		table.WithColumns(data.cols),
 		table.WithRows(data.rows),
 		table.WithFocused(true),
 		table.WithStyles(ui.TableStylesZebra()),
-		table.WithFrozenColumns(1),       // pin the time column while panning/scrolling
-		table.WithColNumbers(data.split), // number the field columns for orientation
+		table.WithFrozenColumns(1),       // pin the time column while scrolling
 		table.WithRowGroups(data.groups), // a wrapped message stays one event
 	)
 	m.eventsTable.SetWidth(m.eventsTableWidth())
 	m.eventsTable.SetCursorGroup(m.selectedEventIdx)
-}
-
-// panEventsTable handles ←/→ in table mode: it scrolls the column window when
-// the split-JSON layout is wider than the panel. The message itself never
-// needs panning — it wraps into the column instead of running off the edge.
-func (m *model) panEventsTable(right bool) {
-	if right {
-		m.eventsTable.ScrollRight()
-		return
-	}
-	m.eventsTable.ScrollLeft()
 }
 
 // syncEventsTableCursor moves the table cursor to selectedEventIdx using the

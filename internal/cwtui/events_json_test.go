@@ -1,7 +1,6 @@
 package cwtui
 
 import (
-	"fmt"
 	"strings"
 	"testing"
 
@@ -64,80 +63,96 @@ func TestSplitEventJSON(t *testing.T) {
 	}
 }
 
-func TestBuildEventTableDataSplitsJSON(t *testing.T) {
+// The table is Time and Message, whatever the message contains: JSON is not
+// broken out into columns any more (the record view shows the fields).
+func TestBuildEventTableDataIsTimeAndMessageOnly(t *testing.T) {
 	events := []types.FilteredLogEvent{
-		{Timestamp: aws.Int64(1700000000000), Message: aws.String(`{"level":"info","msg":"started"}`)},
-		{Timestamp: aws.Int64(1700000001000), Message: aws.String(`{"level":"error","msg":"boom","requestId":"r-1"}`)},
-		{Timestamp: aws.Int64(1700000002000), Message: aws.String("START RequestId: r-1")}, // plain text
+		{
+			Timestamp:     aws.Int64(1),
+			LogStreamName: aws.String("stream-a"),
+			Message:       aws.String(`{"level":"error","msg":"boom"}`),
+		},
+		{
+			Timestamp:     aws.Int64(2),
+			LogStreamName: aws.String("stream-b"),
+			Message:       aws.String("plain text"),
+		},
 	}
 
-	d := buildEventTableData(events, false, true, 200)
-	if !d.split {
-		t.Fatal("split should engage when JSON events are present")
+	d := buildEventTableData(events, false, 200)
+
+	if len(d.cols) != 2 {
+		t.Fatalf("columns = %d, want 2", len(d.cols))
 	}
-	titles := make([]string, len(d.cols))
-	for i, c := range d.cols {
-		titles[i] = c.Title
-	}
-	want := "Time,level,msg,requestId,Message"
-	if got := strings.Join(titles, ","); got != want {
-		t.Fatalf("columns = %s, want %s", got, want)
+	if d.cols[0].Title != "Time" || d.cols[1].Title != "Message" {
+		t.Errorf("columns = %q/%q, want Time/Message", d.cols[0].Title, d.cols[1].Title)
 	}
 
-	// JSON rows: fields filled, absent field blank, Message column empty.
-	if d.rows[0][1] != "info" || d.rows[0][2] != "started" {
-		t.Errorf("row 0 fields = %v", d.rows[0])
-	}
-	if d.rows[0][3] != "" {
-		t.Errorf("absent requestId should be blank, got %q", d.rows[0][3])
-	}
-	if d.rows[0][4] != "" {
-		t.Errorf("fully-JSON event should leave Message blank, got %q", d.rows[0][4])
-	}
-	// Plain-text row: fields blank, message in the raw column.
-	if d.rows[2][1] != "" || d.rows[2][4] != "START RequestId: r-1" {
-		t.Errorf("plain row = %v", d.rows[2])
-	}
-
-	// The J toggle (split=false) falls back to the plain layout.
-	d = buildEventTableData(events, false, false, 200)
-	if d.split || len(d.cols) != 2 {
-		t.Errorf("split off: cols = %v", d.cols)
-	}
-}
-
-func TestBuildEventTableDataFieldCap(t *testing.T) {
-	var b strings.Builder
-	b.WriteString("{")
-	for i := 0; i < maxFieldCols+5; i++ {
-		if i > 0 {
-			b.WriteString(",")
+	// Even for a whole-group view the stream is absent from the table; it is
+	// in the record view instead.
+	for _, c := range d.cols {
+		if c.Title == "Stream" {
+			t.Errorf("stream column present, want it dropped")
 		}
-		fmt.Fprintf(&b, `"k%02d":%d`, i, i)
 	}
-	b.WriteString("}")
-	events := []types.FilteredLogEvent{{Timestamp: aws.Int64(1700000000000), Message: aws.String(b.String())}}
 
-	d := buildEventTableData(events, false, true, 200)
-	if d.hiddenFields != 5 {
-		t.Errorf("hiddenFields = %d, want 5", d.hiddenFields)
+	// The JSON message stays intact in the Message cell rather than being
+	// spread across field columns.
+	if got := d.rows[0][1]; !strings.Contains(got, `"level"`) || !strings.Contains(got, "boom") {
+		t.Errorf("json message cell = %q, want the raw message", got)
 	}
-	// Time + capped fields (no Message column: nothing raw remained).
-	if len(d.cols) != 1+maxFieldCols {
-		t.Errorf("cols = %d, want %d", len(d.cols), 1+maxFieldCols)
+	if len(d.rows) != len(d.groups) {
+		t.Errorf("rows = %d, groups = %d", len(d.rows), len(d.groups))
 	}
 }
 
-func TestBuildEventTableDataNoJSONFallsBack(t *testing.T) {
+// J in table view expands embedded JSON into indented lines inside the Message
+// cell — the same thing J does to the viewer's log lines, rather than a
+// different meaning per view.
+func TestBuildEventTableDataFormatJSONExpandsInMessageCell(t *testing.T) {
 	events := []types.FilteredLogEvent{
-		{Timestamp: aws.Int64(1700000000000), Message: aws.String("plain one")},
-		{Timestamp: aws.Int64(1700000001000), Message: aws.String("plain two")},
+		{
+			Timestamp: aws.Int64(1),
+			Message:   aws.String(`{"level":"error","msg":"boom","id":7}`),
+		},
 	}
-	d := buildEventTableData(events, false, true, 200)
-	if d.split {
-		t.Error("split must not engage without any JSON event")
+
+	raw := buildEventTableData(events, false, 200)
+	if len(raw.rows) != 1 {
+		t.Fatalf("collapsed rows = %d, want the message on one row", len(raw.rows))
 	}
-	if len(d.cols) != 2 || d.cols[1].Title != "Message" {
-		t.Errorf("fallback cols = %v", d.cols)
+
+	pretty := buildEventTableData(events, true, 200)
+	if len(pretty.rows) <= len(raw.rows) {
+		t.Fatalf("expanded rows = %d, want more than the %d collapsed", len(pretty.rows), len(raw.rows))
+	}
+
+	// Still two columns, still one event: only the cell's shape changed.
+	if len(pretty.cols) != 2 {
+		t.Errorf("columns = %d, want 2 — J must not add columns", len(pretty.cols))
+	}
+	for i, g := range pretty.groups {
+		if g != 0 {
+			t.Errorf("row %d maps to event %d, want every row on event 0", i, g)
+		}
+	}
+
+	// The document is indented, and continuation rows leave Time blank so the
+	// JSON lines up under the Message column.
+	var indented bool
+	for i, r := range pretty.rows {
+		if i > 0 && r[0] != "" {
+			t.Errorf("expanded row %d repeated the time cell %q", i, r[0])
+		}
+		if strings.HasPrefix(r[1], "  ") {
+			indented = true
+		}
+	}
+	if !indented {
+		var got []string
+		for _, r := range pretty.rows {
+			got = append(got, r[1])
+		}
+		t.Errorf("no indented line in the expanded cell: %q", got)
 	}
 }

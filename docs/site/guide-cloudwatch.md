@@ -26,7 +26,8 @@ See the [`cw` command reference](cw.md) for every flag.
 | `/` | Filter the current list |
 | `F` | On the streams panel: find **which streams contain a string** — one group-wide query tallied per stream (matches, first/last), then `Enter` opens that stream with the pattern applied |
 | `G` | Search the **entire group** (across streams) |
-| `t` | Table view of the events: the Message column fills the width left on screen and wraps long messages onto aligned continuation rows |
+| `t` | Table view of the events: Time and Message only, the Message column filling the width left on screen and wrapping long messages onto aligned continuation rows (`v` shows the stream and every JSON field) |
+| `J` | Expand JSON embedded in messages — indented inside the table's Message column, or across the viewer's log lines; one shared preference |
 | `W` | Tail-watch the event list |
 | `o` | Open the selected log group in the CloudWatch console |
 | `y` / `s` | Copy / export events |

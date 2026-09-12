@@ -291,7 +291,7 @@ func viewerModel(stream string, events ...types.FilteredLogEvent) *model {
 			key:        viewerKey{region: "us-east-1", group: "g", stream: stream},
 			seen:       map[string]bool{},
 			wrapW:      100,
-			tableSplit: true,
+			tableWidth: 116,
 		},
 	}
 	m.viewer.append(events)
@@ -357,9 +357,10 @@ func TestViewerTableFollowsNewEvents(t *testing.T) {
 	}
 }
 
-func TestViewerTableStreamColumnOnlyForGroup(t *testing.T) {
+// The viewer's table is Time and Message in both scopes — a whole-group view
+// no longer spends the width on a Stream column; v names the stream instead.
+func TestViewerTableIsTimeAndMessageInBothScopes(t *testing.T) {
 	ev := testEvent("e1", 1000, "hello")
-	ev.LogStreamName = aws.String("stream-a")
 
 	group := viewerModel("", ev) // whole-group viewer
 	group.viewer.tableMode = true
@@ -368,19 +369,11 @@ func TestViewerTableStreamColumnOnlyForGroup(t *testing.T) {
 	single.viewer.tableMode = true
 	single.viewer.rebuildTable()
 
-	hasStream := func(m *model) bool {
-		for _, c := range m.viewer.table.Columns() {
-			if c.Title == "Stream" {
-				return true
-			}
+	for name, m := range map[string]*model{"whole-group": group, "single-stream": single} {
+		cols := m.viewer.table.Columns()
+		if len(cols) != 2 || cols[0].Title != "Time" || cols[1].Title != "Message" {
+			t.Errorf("%s table columns = %+v, want exactly Time and Message", name, cols)
 		}
-		return false
-	}
-	if !hasStream(group) {
-		t.Error("whole-group table should include the Stream column")
-	}
-	if hasStream(single) {
-		t.Error("single-stream table should not include the Stream column")
 	}
 }
 
