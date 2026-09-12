@@ -229,11 +229,6 @@ func wrapWords(line string, width int) []string {
 	return out
 }
 
-// flattenEventText puts a log message on one line for a table cell.
-func flattenEventText(s string) string {
-	return strings.NewReplacer("\r\n", " ", "\n", " ", "\r", " ", "\t", " ").Replace(s)
-}
-
 // eventTableColumns returns the table's column set: Time and Message. The
 // stream is deliberately absent even in a whole-group search — it would cost
 // most of the width the message needs, and the record view (v) names it for
