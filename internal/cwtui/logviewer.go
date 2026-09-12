@@ -220,14 +220,6 @@ func (v *logViewer) rebuildTable() {
 	}
 }
 
-// refreshTableRows re-renders the rows for a new pan offset without recreating
-// the table, so the cursor and scroll position stay put.
-func (v *logViewer) refreshTableRows() {
-	data := buildEventTableData(v.events, v.key.stream == "", v.tableSplit, v.tableWidth)
-	v.table.SetRows(data.rows)
-	v.table.SetRowGroups(data.groups)
-}
-
 // panTable handles ←/→ in table mode: it scrolls the column window when the
 // split-JSON layout is wider than the page. The message wraps into its column,
 // so there is nothing hidden off the right edge to pan to.

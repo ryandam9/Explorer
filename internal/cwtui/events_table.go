@@ -324,15 +324,6 @@ func (m *model) buildEventsTable() {
 	m.eventsTable.SetCursorGroup(m.selectedEventIdx)
 }
 
-// refreshEventsTableRows re-renders the rows for a new pan offset without
-// recreating the table, so the cursor and scroll position stay put. The
-// events are unchanged, so the derived columns are identical by construction.
-func (m *model) refreshEventsTableRows() {
-	data := buildEventTableData(m.events, m.groupLevelSearch, m.jsonSplit, m.eventsTableWidth())
-	m.eventsTable.SetRows(data.rows)
-	m.eventsTable.SetRowGroups(data.groups)
-}
-
 // panEventsTable handles ←/→ in table mode: it scrolls the column window when
 // the split-JSON layout is wider than the panel. The message itself never
 // needs panning — it wraps into the column instead of running off the edge.
