@@ -177,27 +177,47 @@ func clipFieldCell(s string) string {
 type eventTableData struct {
 	cols         []table.Column
 	rows         []table.Row
-	split        bool // JSON field columns in use
-	hiddenFields int  // field keys beyond maxFieldCols
-	maxMsgLen    int  // pan bound for the message/raw column
-	shift        int  // msgShift after clamping against maxMsgLen
+	groups       []int // row → event index; one event can span wrapped rows
+	split        bool  // JSON field columns in use
+	hiddenFields int   // field keys beyond maxFieldCols
 }
 
 // buildEventTableData assembles the table content. With split enabled and at
 // least one JSON event, each top-level JSON field becomes its own column
 // (capped at maxFieldCols, first-appearance order) and the Message column
 // carries only what wasn't JSON; otherwise the plain Time/[Stream]/Message
-// layout is used. msgShift pans the Message column in both layouts.
-func buildEventTableData(events []types.FilteredLogEvent, withStream, split bool, msgShift int) eventTableData {
+// layout is used.
+//
+// avail is the table's usable width: the Message column takes whatever the
+// other columns leave, so the table fills a wide terminal instead of stopping
+// at a fixed cap, and a message too long for that width wraps onto extra rows
+// (d.groups maps them back to their event) rather than being cut off.
+func buildEventTableData(events []types.FilteredLogEvent, withStream, split bool, avail int) eventTableData {
 	views, keys, anyJSON, anyRaw := analyzeEvents(events)
 
 	if !split || !anyJSON {
-		d := eventTableData{
-			cols:      eventTableColumns(withStream),
-			maxMsgLen: maxEventMsgLen(events),
+		d := eventTableData{cols: eventTableColumns(withStream)}
+
+		// Size the fixed columns from their own content, then give the message
+		// everything that is left.
+		times := make([]string, 0, len(events))
+		streams := make([]string, 0, len(events))
+		for _, ev := range events {
+			times = append(times, eventTimestamp(ev))
+			if withStream {
+				streams = append(streams, clipEventCell(aws.ToString(ev.LogStreamName)))
+			}
 		}
-		d.shift = clampMsgShift(msgShift, d.maxMsgLen)
-		d.rows = eventTableRows(events, withStream, d.shift)
+		fixedW := []int{fittedWidth("Time", times)}
+		if withStream {
+			fixedW = append(fixedW, fittedWidth("Stream", streams))
+		}
+		msgW := messageColumnWidth(avail, fixedW)
+		d.rows, d.groups = eventTableRows(events, withStream, msgW)
+		// Pin the Message column to the remaining width: the widget only grows
+		// a column to its widest cell, so without this floor a table of short
+		// messages would leave the right-hand side of the panel empty.
+		d.cols[len(d.cols)-1].Width = msgW
 		return d
 	}
 
@@ -206,13 +226,6 @@ func buildEventTableData(events []types.FilteredLogEvent, withStream, split bool
 		d.hiddenFields = len(keys) - maxFieldCols
 		keys = keys[:maxFieldCols]
 	}
-	for _, v := range views {
-		if n := len([]rune(flattenEventText(v.raw))); n > d.maxMsgLen {
-			d.maxMsgLen = n
-		}
-	}
-	d.shift = clampMsgShift(msgShift, d.maxMsgLen)
-
 	// Fixed columns are excluded from the "(1) (2) …" numbering so the field
 	// numbers survive column-scrolling landmarks.
 	d.cols = []table.Column{{Title: "Time", Width: 4, NoNumber: true}}
@@ -226,20 +239,51 @@ func buildEventTableData(events []types.FilteredLogEvent, withStream, split bool
 		d.cols = append(d.cols, table.Column{Title: "Message", Width: 4, NoNumber: true})
 	}
 
-	d.rows = make([]table.Row, 0, len(events))
+	// Build the fixed cells first so the field columns' fitted widths are known
+	// before the Message column claims the remainder.
+	fixedRows := make([][]string, 0, len(events))
 	for i, ev := range events {
-		t := eventTimestamp(ev)
-		row := table.Row{t}
+		row := []string{eventTimestamp(ev)}
 		if withStream {
 			row = append(row, clipEventCell(aws.ToString(ev.LogStreamName)))
 		}
 		for _, k := range keys {
 			row = append(row, clipFieldCell(views[i].fields[k])) // "" when absent
 		}
-		if anyRaw {
-			row = append(row, eventMessageCell(views[i].raw, d.shift))
+		fixedRows = append(fixedRows, row)
+	}
+
+	d.rows = make([]table.Row, 0, len(events))
+	d.groups = make([]int, 0, len(events))
+	if !anyRaw {
+		for i, row := range fixedRows {
+			d.rows = append(d.rows, table.Row(row))
+			d.groups = append(d.groups, i)
 		}
-		d.rows = append(d.rows, row)
+		return d
+	}
+
+	if len(fixedRows) == 0 {
+		return d // no events: nothing to size the message column against
+	}
+
+	fixedW := make([]int, len(fixedRows[0]))
+	for c := range fixedW {
+		cells := make([]string, 0, len(fixedRows))
+		for _, row := range fixedRows {
+			cells = append(cells, row[c])
+		}
+		fixedW[c] = fittedWidth(d.cols[c].Title, cells)
+	}
+	msgW := messageColumnWidth(avail, fixedW)
+	d.cols[len(d.cols)-1].Width = msgW
+
+	for i, row := range fixedRows {
+		evRows := wrappedRows(row, wrapEventMessage(views[i].raw, msgW, maxWrapLines))
+		for range evRows {
+			d.groups = append(d.groups, i)
+		}
+		d.rows = append(d.rows, evRows...)
 	}
 	return d
 }

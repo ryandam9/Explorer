@@ -66,9 +66,102 @@ type Model struct {
 	altCellStyle lipgloss.Style
 	zebra        bool
 
+	// rowGroups maps each rendered row to the logical row it belongs to, so a
+	// value too tall for one line can span several rows while still reading and
+	// behaving as ONE row: zebra stripes band per group, the selection
+	// highlights the whole group, and cursor movement steps group by group.
+	// nil (the default) means one row per line — every existing table.
+	rowGroups []int
+
 	viewport viewport.Model
 	start    int
 	end      int
+}
+
+// groupOf returns the logical row index of rendered row r. Without row groups
+// every row is its own group, which is the pre-existing behavior.
+func (m Model) groupOf(r int) int {
+	if r < 0 || r >= len(m.rowGroups) {
+		return r
+	}
+	return m.rowGroups[r]
+}
+
+// sameGroup reports whether two rendered rows belong to the same logical row.
+func (m Model) sameGroup(a, b int) bool {
+	if a < 0 || b < 0 {
+		return false
+	}
+	return m.groupOf(a) == m.groupOf(b)
+}
+
+// groupStart returns the first rendered row of the group containing r, which is
+// where the cursor rests so a wrapped value is entered from its top line.
+func (m Model) groupStart(r int) int {
+	if len(m.rowGroups) == 0 {
+		return r
+	}
+	r = clamp(r, 0, len(m.rows)-1)
+	g := m.groupOf(r)
+	for r > 0 && m.groupOf(r-1) == g {
+		r--
+	}
+	return r
+}
+
+// stepGroups returns the row n logical rows away from the cursor: the first row
+// of that group. Used so ↑/↓ move by event, not by wrapped line.
+func (m Model) stepGroups(from, n int) int {
+	if len(m.rowGroups) == 0 || n == 0 {
+		return clamp(from+n, 0, len(m.rows)-1)
+	}
+	r := m.groupStart(from)
+	step := 1
+	if n < 0 {
+		step, n = -1, -n
+	}
+	for ; n > 0; n-- {
+		g := m.groupOf(r)
+		next := r
+		for next+step >= 0 && next+step < len(m.rows) && m.groupOf(next+step) == g {
+			next += step
+		}
+		next += step
+		if next < 0 || next >= len(m.rows) {
+			break
+		}
+		r = m.groupStart(next)
+	}
+	return r
+}
+
+// CursorGroup returns the logical row the cursor is on — the index the caller's
+// own data is keyed by when rows wrap. Equals Cursor() without row groups.
+func (m Model) CursorGroup() int {
+	return m.groupOf(m.cursor)
+}
+
+// SetCursorGroup puts the cursor on the first rendered row of logical row g.
+func (m *Model) SetCursorGroup(g int) {
+	if len(m.rowGroups) == 0 {
+		m.SetCursor(g)
+		return
+	}
+	for r, rg := range m.rowGroups {
+		if rg == g {
+			m.SetCursor(r)
+			return
+		}
+	}
+	m.SetCursor(g)
+}
+
+// SetRowGroups sets the row→logical-row mapping (nil clears it). It must be
+// set together with the rows it describes; a mapping shorter than the row set
+// leaves the trailing rows as their own groups.
+func (m *Model) SetRowGroups(g []int) {
+	m.rowGroups = g
+	m.UpdateViewport()
 }
 
 // Row represents one line in the table.
@@ -400,6 +493,15 @@ func WithFocused(f bool) Option {
 func WithColNumbers(on bool) Option {
 	return func(m *Model) {
 		m.colNumbers = on
+	}
+}
+
+// WithRowGroups maps each row to the logical row it belongs to, so one value
+// can span several rows (a wrapped message) while selecting, striping and
+// navigating as one. Omit it for the usual one-line-per-row table.
+func WithRowGroups(g []int) Option {
+	return func(m *Model) {
+		m.rowGroups = g
 	}
 }
 
@@ -825,14 +927,14 @@ func (m Model) Cursor() int {
 
 // SetCursor sets the cursor position in the table.
 func (m *Model) SetCursor(n int) {
-	m.cursor = clamp(n, 0, len(m.rows)-1)
+	m.cursor = m.groupStart(clamp(n, 0, len(m.rows)-1))
 	m.UpdateViewport()
 }
 
 // MoveUp moves the selection up by any number of rows.
 // It can not go above the first row.
 func (m *Model) MoveUp(n int) {
-	m.cursor = clamp(m.cursor-n, 0, len(m.rows)-1)
+	m.cursor = clamp(m.stepGroups(m.cursor, -n), 0, len(m.rows)-1)
 	switch {
 	case m.start == 0:
 		m.viewport.SetYOffset(clamp(m.viewport.YOffset, 0, m.cursor))
@@ -847,7 +949,7 @@ func (m *Model) MoveUp(n int) {
 // MoveDown moves the selection down by any number of rows.
 // It can not go below the last row.
 func (m *Model) MoveDown(n int) {
-	m.cursor = clamp(m.cursor+n, 0, len(m.rows)-1)
+	m.cursor = clamp(m.stepGroups(m.cursor, n), 0, len(m.rows)-1)
 	m.UpdateViewport()
 
 	switch {
@@ -975,11 +1077,13 @@ func (m *Model) renderRow(r int, vis []int) string {
 
 		var renderedCell string
 		switch {
-		case r == m.cursor:
+		case m.sameGroup(r, m.cursor):
 			// Cached Cell-padding + Selected-colors style; see refreshSelStyle.
+			// The whole group highlights, so a wrapped value selects as one row.
 			renderedCell = m.selCellStyle.Render(truncated)
-		case m.zebra && r%2 == 1:
-			// Zebra band on odd data rows (see refreshSelStyle).
+		case m.zebra && m.groupOf(r)%2 == 1:
+			// Zebra band on odd data rows — banded per group so a wrapped value
+			// keeps one background instead of striping mid-value.
 			renderedCell = m.altCellStyle.Render(truncated)
 		default:
 			renderedCell = m.styles.Cell.Render(truncated)

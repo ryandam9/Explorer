@@ -7,6 +7,7 @@ import (
 
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/service/cloudwatchlogs/types"
+	"github.com/mattn/go-runewidth"
 
 	"github.com/ryandam9/aws_explorer/internal/table"
 	"github.com/ryandam9/aws_explorer/internal/ui"
@@ -92,14 +93,135 @@ func ParseLookback(s string) (time.Duration, error) {
 	return d, nil
 }
 
-// maxEventCell caps how many runes of a log message go into a table cell. The
-// shared table sizes each column to its widest cell, so an unclipped megabyte
-// message would blow up layout; ←/→ pan the window across the full text, which
-// also stays reachable via Enter (full log viewer) and y (copy).
+// maxEventCell caps how many runes of a value go into a NON-wrapping table
+// cell (stream names, JSON field values). The shared table sizes each column
+// to its widest cell, so an unclipped megabyte value would blow up layout. The
+// Message column is not subject to this: it is sized to the space actually
+// left on screen and wraps (see messageColumnWidth / wrapEventMessage).
 const maxEventCell = 160
 
-// msgShiftStep is how many runes one ←/→ press pans the message window by.
-const msgShiftStep = 40
+// tableCellPadding is the left+right padding the shared table adds to every
+// cell, and tableScrollGutter the width of its vertical scrollbar column.
+// Layout math uses these instead of assuming — the widget owns the real
+// numbers, and guessing them is how the message column ends up the wrong size.
+const (
+	tableCellPadding  = 2
+	tableScrollGutter = 2
+)
+
+// minMessageWidth is the narrowest the Message column is allowed to get before
+// the terminal is simply too narrow; below this the column stops shrinking and
+// the table scrolls horizontally instead.
+const minMessageWidth = 24
+
+// maxWrapLines caps how many lines one event's message may occupy. A 40 KB
+// JSON blob would otherwise fill the page by itself; past the cap the last
+// line says how much was left, and v / Enter show the value in full.
+const maxWrapLines = 8
+
+// fittedWidth returns the width the shared table will give a column: the wider
+// of its header and its widest cell. Mirrors table.fitColumns so the builder
+// can work out what room is left for the Message column before handing the
+// table anything.
+func fittedWidth(header string, cells []string) int {
+	w := runewidth.StringWidth(header)
+	for _, c := range cells {
+		if cw := runewidth.StringWidth(c); cw > w {
+			w = cw
+		}
+	}
+	return w
+}
+
+// messageColumnWidth returns how wide the Message column should be so the
+// table fills its panel exactly: everything left over after the other columns,
+// their padding and the scrollbar gutter. avail <= 0 means the caller doesn't
+// know the width yet (a build before the first WindowSizeMsg), in which case
+// the column falls back to the legacy cap rather than collapsing.
+func messageColumnWidth(avail int, otherWidths []int) int {
+	if avail <= 0 {
+		return maxEventCell
+	}
+	used := tableScrollGutter
+	for _, w := range otherWidths {
+		used += w + tableCellPadding
+	}
+	return max(minMessageWidth, avail-used-tableCellPadding)
+}
+
+// wrapEventMessage lays a log message out across the Message column: newlines
+// in the message start new lines, and any line too wide is wrapped at word
+// boundaries, hard-breaking a token (an ARN, a JSON blob) that has no spaces
+// to break at. The result is capped at maxWrapLines, and the cap is never
+// silent — the final line reports how many lines were dropped.
+func wrapEventMessage(msg string, width, maxLines int) []string {
+	if width < 1 {
+		width = 1
+	}
+	var out []string
+	for _, para := range strings.Split(strings.TrimRight(msg, "\n"), "\n") {
+		para = sanitizeLogLine(strings.ReplaceAll(strings.ReplaceAll(para, "\r", ""), "\t", "    "))
+		if para == "" {
+			out = append(out, "")
+			continue
+		}
+		out = append(out, wrapWords(para, width)...)
+	}
+	if len(out) == 0 {
+		return []string{""}
+	}
+	if maxLines > 0 && len(out) > maxLines {
+		dropped := len(out) - maxLines
+		out = out[:maxLines]
+		note := fmt.Sprintf("… +%d more line(s) — v for the full record", dropped)
+		out[maxLines-1] = runewidth.Truncate(note, width, "…")
+	}
+	return out
+}
+
+// wrapWords breaks one line at the last space that fits and mid-token when a
+// token (an ARN, a JSON blob) has no space to break at. Spacing inside the
+// line is preserved exactly — log output is often column-aligned or indented,
+// and collapsing runs of spaces would quietly rewrite the message.
+func wrapWords(line string, width int) []string {
+	if width < 1 {
+		width = 1
+	}
+	runes := []rune(line)
+	var out []string
+	for start := 0; start < len(runes); {
+		if runewidth.StringWidth(string(runes[start:])) <= width {
+			out = append(out, string(runes[start:]))
+			break
+		}
+		// Walk forward while the line still fits, remembering the last point
+		// we could break at without splitting a word.
+		cut, lastSpace, w := start, -1, 0
+		for i := start; i < len(runes); i++ {
+			rw := runewidth.RuneWidth(runes[i])
+			if w+rw > width {
+				break
+			}
+			w += rw
+			cut = i + 1
+			if runes[i] == ' ' {
+				lastSpace = i + 1
+			}
+		}
+		if lastSpace > start {
+			cut = lastSpace // prefer the word boundary
+		}
+		if cut == start {
+			cut = start + 1 // a single rune wider than the column
+		}
+		out = append(out, strings.TrimRight(string(runes[start:cut]), " "))
+		start = cut
+	}
+	if len(out) == 0 {
+		return []string{""}
+	}
+	return out
+}
 
 // flattenEventText puts a log message on one line for a table cell.
 func flattenEventText(s string) string {
@@ -107,56 +229,14 @@ func flattenEventText(s string) string {
 }
 
 // clipEventCell flattens a value and truncates it for a table cell, marking
-// the cut with an ellipsis. Used for cells that don't pan (stream names).
+// the cut with an ellipsis. Used for the cells that do NOT wrap — stream names
+// and JSON field values — where one line per event is the point.
 func clipEventCell(s string) string {
-	return eventMessageCell(s, 0)
-}
-
-// eventMessageCell renders the visible window of a message cell: the text is
-// flattened, shifted left by `shift` runes and capped at maxEventCell. Leading
-// and trailing ellipses mark text panned off either edge, so a truncated cell
-// is never mistaken for the whole message.
-func eventMessageCell(s string, shift int) string {
 	r := []rune(flattenEventText(s))
-	if shift <= 0 {
-		if len(r) <= maxEventCell {
-			return string(r)
-		}
-		return string(r[:maxEventCell-1]) + "…"
+	if len(r) <= maxEventCell {
+		return string(r)
 	}
-	if shift >= len(r) {
-		return "…" // fully panned past this (shorter) message
-	}
-	w := r[shift:]
-	if len(w) <= maxEventCell-1 {
-		return "…" + string(w)
-	}
-	return "…" + string(w[:maxEventCell-2]) + "…"
-}
-
-// maxEventMsgLen returns the longest flattened message length, the bound for
-// how far the message window can pan.
-func maxEventMsgLen(events []types.FilteredLogEvent) int {
-	longest := 0
-	for _, ev := range events {
-		if n := len([]rune(flattenEventText(aws.ToString(ev.Message)))); n > longest {
-			longest = n
-		}
-	}
-	return longest
-}
-
-// clampMsgShift keeps the pan offset useful after events change: never
-// negative, and never so far right that even the longest message has panned
-// out of view (at least the last msgShiftStep runes stay visible).
-func clampMsgShift(shift, maxLen int) int {
-	if maxShift := maxLen - msgShiftStep; shift > maxShift {
-		shift = maxShift
-	}
-	if shift < 0 {
-		return 0
-	}
-	return shift
+	return string(r[:maxEventCell-1]) + "…"
 }
 
 // eventTableColumns returns the column set for the events table. The stream
@@ -177,27 +257,58 @@ func eventTimestamp(ev types.FilteredLogEvent) string {
 	return t.Format("2006-01-02 15:04:05.000")
 }
 
-// eventTableRows maps events onto rows matching eventTableColumns, with the
-// message column panned msgShift runes to the left.
-func eventTableRows(events []types.FilteredLogEvent, withStream bool, msgShift int) []table.Row {
-	rows := make([]table.Row, 0, len(events))
-	for _, ev := range events {
-		row := table.Row{eventTimestamp(ev)}
-		if withStream {
-			row = append(row, clipEventCell(aws.ToString(ev.LogStreamName)))
+// wrappedRows lays out one event as one or more table rows: the first carries
+// the fixed cells (time, stream, any JSON fields) plus the message's first
+// line, and each continuation row leaves those cells blank so the wrapped text
+// lines up underneath the message column. groups maps every row back to its
+// event so the table selects, stripes and navigates by event, not by line.
+func wrappedRows(fixed []string, msgLines []string) []table.Row {
+	rows := make([]table.Row, 0, len(msgLines))
+	for i, line := range msgLines {
+		row := make(table.Row, len(fixed), len(fixed)+1)
+		if i == 0 {
+			copy(row, fixed)
 		}
-		rows = append(rows, append(row, eventMessageCell(aws.ToString(ev.Message), msgShift)))
+		rows = append(rows, append(row, line))
 	}
 	return rows
+}
+
+// eventTableRows maps events onto rows matching eventTableColumns, wrapping
+// each message to msgWidth. The second return value is the row→event mapping.
+func eventTableRows(events []types.FilteredLogEvent, withStream bool, msgWidth int) ([]table.Row, []int) {
+	rows := make([]table.Row, 0, len(events))
+	groups := make([]int, 0, len(events))
+	for i, ev := range events {
+		fixed := []string{eventTimestamp(ev)}
+		if withStream {
+			fixed = append(fixed, clipEventCell(aws.ToString(ev.LogStreamName)))
+		}
+		evRows := wrappedRows(fixed, wrapEventMessage(aws.ToString(ev.Message), msgWidth, maxWrapLines))
+		for range evRows {
+			groups = append(groups, i)
+		}
+		rows = append(rows, evRows...)
+	}
+	return rows, groups
+}
+
+// eventsTableWidth is the width the events-panel table is rendered at — the
+// right-hand panel minus the border padding renderEventsPanel applies. The
+// builder needs it up front so the Message column can claim the leftover
+// width; 0 before the first WindowSizeMsg, which the builder handles.
+func (m *model) eventsTableWidth() int {
+	if m.width <= 0 {
+		return 0
+	}
+	return m.streamsPanelWidth() - 2
 }
 
 // buildEventsTable (re)creates the shared-widget table from the current
 // events, preserving the selection. Called when table mode turns on, when the
 // JSON-split toggle flips, and when a fresh event batch lands while it is on.
 func (m *model) buildEventsTable() {
-	data := buildEventTableData(m.events, m.groupLevelSearch, m.jsonSplit, m.msgShift)
-	m.msgShift = data.shift
-	m.maxMsgLen = data.maxMsgLen
+	data := buildEventTableData(m.events, m.groupLevelSearch, m.jsonSplit, m.eventsTableWidth())
 	m.hiddenFields = data.hiddenFields
 	m.eventsSplit = data.split
 	m.eventsTable = table.New(
@@ -207,38 +318,27 @@ func (m *model) buildEventsTable() {
 		table.WithStyles(ui.TableStylesZebra()),
 		table.WithFrozenColumns(1),       // pin the time column while panning/scrolling
 		table.WithColNumbers(data.split), // number the field columns for orientation
+		table.WithRowGroups(data.groups), // a wrapped message stays one event
 	)
-	m.eventsTable.SetCursor(m.selectedEventIdx)
+	m.eventsTable.SetWidth(m.eventsTableWidth())
+	m.eventsTable.SetCursorGroup(m.selectedEventIdx)
 }
 
 // refreshEventsTableRows re-renders the rows for a new pan offset without
 // recreating the table, so the cursor and scroll position stay put. The
 // events are unchanged, so the derived columns are identical by construction.
 func (m *model) refreshEventsTableRows() {
-	data := buildEventTableData(m.events, m.groupLevelSearch, m.jsonSplit, m.msgShift)
-	m.msgShift = data.shift
+	data := buildEventTableData(m.events, m.groupLevelSearch, m.jsonSplit, m.eventsTableWidth())
 	m.eventsTable.SetRows(data.rows)
+	m.eventsTable.SetRowGroups(data.groups)
 }
 
-// panEventsTable handles ←/→ in table mode. Right first reveals hidden
-// columns (group search can push the message column off), then pans the
-// message window; left pans back before un-scrolling columns, so the two
-// directions retrace each other.
+// panEventsTable handles ←/→ in table mode: it scrolls the column window when
+// the split-JSON layout is wider than the panel. The message itself never
+// needs panning — it wraps into the column instead of running off the edge.
 func (m *model) panEventsTable(right bool) {
 	if right {
-		if _, hiddenRight := m.eventsTable.ColScrollInfo(); hiddenRight > 0 {
-			m.eventsTable.ScrollRight()
-			return
-		}
-		if shifted := clampMsgShift(m.msgShift+msgShiftStep, m.maxMsgLen); shifted != m.msgShift {
-			m.msgShift = shifted
-			m.refreshEventsTableRows()
-		}
-		return
-	}
-	if m.msgShift > 0 {
-		m.msgShift = clampMsgShift(m.msgShift-msgShiftStep, m.maxMsgLen)
-		m.refreshEventsTableRows()
+		m.eventsTable.ScrollRight()
 		return
 	}
 	m.eventsTable.ScrollLeft()
@@ -248,7 +348,9 @@ func (m *model) panEventsTable(right bool) {
 // table's own movement functions so the viewport follows the selection (a bare
 // SetCursor does not scroll).
 func (m *model) syncEventsTableCursor() {
-	cur := m.eventsTable.Cursor()
+	// Compare in events, not rendered rows: a wrapped message spans several
+	// rows, so row arithmetic would drift from the selected event.
+	cur := m.eventsTable.CursorGroup()
 	want := m.selectedEventIdx
 	switch {
 	case want == cur:

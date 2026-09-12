@@ -90,15 +90,14 @@ type model struct {
 	streamMatch streamMatchState
 
 	// Table rendering of the events panel ("t"): the shared table widget with
-	// zebra striping, like every other data grid in the app. msgShift pans the
-	// message column left by that many runes (←/→) so long messages can be
-	// read without leaving the table; maxMsgLen bounds the pan. jsonSplit
+	// zebra striping, like every other data grid in the app. A message too
+	// long for its column wraps onto continuation rows rather than being cut
+	// off, and ←/→ scroll the column window when the split layout is wider
+	// than the panel. jsonSplit
 	// ("J") breaks structured JSON messages into one column per top-level
 	// field; eventsSplit/hiddenFields report what the current build did.
 	eventsTableMode bool
 	eventsTable     table.Model
-	msgShift        int
-	maxMsgLen       int
 	jsonSplit       bool
 	eventsSplit     bool
 	hiddenFields    int
@@ -268,8 +267,18 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.WindowSizeMsg:
 		m.width = msg.Width
 		m.height = msg.Height
+		// Both table layouts size their Message column from the width, and the
+		// message wraps into it — so a resize has to rebuild them, not just
+		// re-render, or the text stays wrapped for the old width.
 		if m.viewer.active {
 			m.viewer.rebuild(m.viewerWrapWidth())
+			if m.viewer.tableMode {
+				m.viewer.tableWidth = m.viewerTableWidth()
+				m.viewer.rebuildTable()
+			}
+		}
+		if m.eventsTableMode {
+			m.buildEventsTable()
 		}
 
 	case spinner.TickMsg:
@@ -1471,9 +1480,6 @@ func (m *model) renderEventsPanel(width int) string {
 		if m.hiddenFields > 0 {
 			// A capped field set must never read as "all fields" (§ no silent caps).
 			parts = append(parts, ui.MutedStyle().Render(fmt.Sprintf("+%d more json fields in raw event", m.hiddenFields)))
-		}
-		if m.msgShift > 0 {
-			parts = append(parts, ui.MutedStyle().Render(fmt.Sprintf("msg panned +%d chars ◀ ←", m.msgShift)))
 		}
 		b.WriteString(" " + strings.Join(parts, "  "))
 	} else {

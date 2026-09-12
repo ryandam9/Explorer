@@ -71,7 +71,7 @@ func TestBuildEventTableDataSplitsJSON(t *testing.T) {
 		{Timestamp: aws.Int64(1700000002000), Message: aws.String("START RequestId: r-1")}, // plain text
 	}
 
-	d := buildEventTableData(events, false, true, 0)
+	d := buildEventTableData(events, false, true, 200)
 	if !d.split {
 		t.Fatal("split should engage when JSON events are present")
 	}
@@ -100,7 +100,7 @@ func TestBuildEventTableDataSplitsJSON(t *testing.T) {
 	}
 
 	// The J toggle (split=false) falls back to the plain layout.
-	d = buildEventTableData(events, false, false, 0)
+	d = buildEventTableData(events, false, false, 200)
 	if d.split || len(d.cols) != 2 {
 		t.Errorf("split off: cols = %v", d.cols)
 	}
@@ -118,7 +118,7 @@ func TestBuildEventTableDataFieldCap(t *testing.T) {
 	b.WriteString("}")
 	events := []types.FilteredLogEvent{{Timestamp: aws.Int64(1700000000000), Message: aws.String(b.String())}}
 
-	d := buildEventTableData(events, false, true, 0)
+	d := buildEventTableData(events, false, true, 200)
 	if d.hiddenFields != 5 {
 		t.Errorf("hiddenFields = %d, want 5", d.hiddenFields)
 	}
@@ -133,7 +133,7 @@ func TestBuildEventTableDataNoJSONFallsBack(t *testing.T) {
 		{Timestamp: aws.Int64(1700000000000), Message: aws.String("plain one")},
 		{Timestamp: aws.Int64(1700000001000), Message: aws.String("plain two")},
 	}
-	d := buildEventTableData(events, false, true, 0)
+	d := buildEventTableData(events, false, true, 200)
 	if d.split {
 		t.Error("split must not engage without any JSON event")
 	}
