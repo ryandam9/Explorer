@@ -175,8 +175,11 @@ func TestBucketRowUsesListingRegion(t *testing.T) {
 	if region != "ap-southeast-2" {
 		t.Errorf("region = %q, want ap-southeast-2", region)
 	}
-	if date != "2026-06-15 01:02:03" {
-		t.Errorf("date = %q", date)
+	// Computed, not hardcoded: the browser renders timestamps in the viewer's
+	// zone, so a literal string here would only hold in UTC — and would pass
+	// in CI while failing on every developer machine east or west of it.
+	if want := created.Local().Format("2006-01-02 15:04:05"); date != want {
+		t.Errorf("date = %q, want the local rendering %q", date, want)
 	}
 }
 
