@@ -435,7 +435,7 @@ func (c *S3Client) GetObjectDetails(bucket, key string) (*ObjectDetails, error) 
 			mode := string(retOut.Retention.Mode)
 			until := ""
 			if retOut.Retention.RetainUntilDate != nil {
-				until = retOut.Retention.RetainUntilDate.Format("2006-01-02")
+				until = retOut.Retention.RetainUntilDate.Local().Format("2006-01-02")
 			}
 			retention = fmt.Sprintf("Mode: %s, Until: %s", mode, until)
 		} else {

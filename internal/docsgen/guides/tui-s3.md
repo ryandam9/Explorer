@@ -42,6 +42,7 @@ See the [`s3` command reference](s3.md) for every flag.
 | `/` | Go to a prefix |
 | `D` | Download the selected object (to `app.downloaddir`) |
 | `L` | Load more (next page of a large listing) |
+| `M` | Filter the listing by last modified — an age (`30m`, `12h`, `7d`, `2w`) or a local date (`2026-09-01`, `2026-09-01 14:30`); empty clears it. Client-side: S3's list API has no date filter and returns keys in name order, so this narrows what `L` has loaded, not what is fetched |
 | `y` | Copy the object's S3 URI |
 | `o` | Open the selection in the AWS console |
 | `g` | Generate a presigned URL |
