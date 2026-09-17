@@ -209,9 +209,26 @@ type Model struct {
 	err     error
 	loading bool
 
-	sortCol    int
-	sortAsc    bool
-	objectMaps []map[string]string
+	sortCol int
+	sortAsc bool
+
+	// objectMapsAll is every row loaded so far; objectMaps is the subset on
+	// screen after the "modified since" filter (M). They are the same slice
+	// contents while no filter is set — everything downstream keeps reading
+	// objectMaps, so the filter is invisible to the rest of the view.
+	objectMapsAll []map[string]string
+	objectMaps    []map[string]string
+
+	// Modified-since filter: modSince is the cutoff (zero = off) and
+	// modSinceLabel is what the user typed, shown so the header describes the
+	// filter in their own words. It is CLIENT-side — S3's list API has no date
+	// parameter and returns keys in name order, not date order — so it narrows
+	// what has been loaded, never what was fetched, and the header says so.
+	modSince       time.Time
+	modSinceLabel  string
+	modSinceInput  textinput.Model
+	modSinceActive bool
+	modSinceErr    string
 
 	bucketTable table.Model
 	objectTable table.Model
@@ -507,6 +524,15 @@ func NewModel(ctx context.Context, awsCfg *config.AWSConfig, region, bucket, pre
 	m.bucketSearch.PlaceholderStyle = lipgloss.NewStyle().Foreground(lipgloss.Color(ui.ColorMuted()))
 	m.bucketSearch.Cursor.Style = lipgloss.NewStyle().Foreground(lipgloss.Color(ui.ColorAccent()))
 
+	m.modSinceInput = textinput.New()
+	m.modSinceInput.Placeholder = "30m, 12h, 7d, 2w, or 2026-09-01 [14:30] — empty clears"
+	m.modSinceInput.CharLimit = 32
+	m.modSinceInput.Width = 44
+	m.modSinceInput.PromptStyle = lipgloss.NewStyle().Foreground(lipgloss.Color(ui.ColorAccent())).Bold(true)
+	m.modSinceInput.TextStyle = lipgloss.NewStyle().Foreground(lipgloss.Color(ui.ColorText()))
+	m.modSinceInput.PlaceholderStyle = lipgloss.NewStyle().Foreground(lipgloss.Color(ui.ColorMuted()))
+	m.modSinceInput.Cursor.Style = lipgloss.NewStyle().Foreground(lipgloss.Color(ui.ColorAccent()))
+
 	m.findInput = textinput.New()
 	m.findInput.Placeholder = "type to jump to a match…"
 	m.findInput.CharLimit = 128
@@ -643,7 +669,7 @@ func applyObjectSortHeader(cols []table.Column, sortCol int, asc bool) {
 func (m *Model) restyleForTheme() {
 	m.applyTableStyle(&m.bucketTable)
 	m.applyTableStyle(&m.objectTable)
-	for _, in := range []*textinput.Model{&m.prefixInput, &m.bucketSearch, &m.findInput, &m.previewSearchInput, &m.previewGrepInput, &m.deleteConfirm} {
+	for _, in := range []*textinput.Model{&m.prefixInput, &m.bucketSearch, &m.findInput, &m.modSinceInput, &m.previewSearchInput, &m.previewGrepInput, &m.deleteConfirm} {
 		in.PromptStyle = lipgloss.NewStyle().Foreground(lipgloss.Color(ui.ColorAccent())).Bold(true)
 		in.TextStyle = lipgloss.NewStyle().Foreground(lipgloss.Color(ui.ColorText()))
 		in.PlaceholderStyle = lipgloss.NewStyle().Foreground(lipgloss.Color(ui.ColorMuted()))
@@ -1142,7 +1168,7 @@ func bucketRow(b s3types.Bucket) (name, region, created string) {
 		region = regionPending
 	}
 	if b.CreationDate != nil {
-		created = b.CreationDate.Format("2006-01-02 15:04:05")
+		created = formatLocalTime(b.CreationDate)
 	}
 	return name, region, created
 }
@@ -1281,10 +1307,7 @@ func buildObjectMaps(res *ListObjectsResult, prefix string, flat, includeUp bool
 		count++
 		sizeBytes := aws.ToInt64(o.Size)
 		totalSize += sizeBytes
-		date := ""
-		if o.LastModified != nil {
-			date = o.LastModified.Format("2006-01-02 15:04:05")
-		}
+		date := formatLocalTime(o.LastModified)
 		class := string(o.StorageClass)
 		if class == "" {
 			class = "STANDARD"
@@ -1295,8 +1318,12 @@ func buildObjectMaps(res *ListObjectsResult, prefix string, flat, includeUp bool
 			"type":          "FILE",
 			"size":          formatSize(sizeBytes),
 			"last_modified": date,
-			"storage_class": class,
-			"etag":          etag,
+			// The same instant, unambiguous: what the CSV carries and what the
+			// M filter compares against, so neither has to re-parse the
+			// display string.
+			"last_modified_iso": formatLocalISO(o.LastModified),
+			"storage_class":     class,
+			"etag":              etag,
 		})
 	}
 
@@ -1318,7 +1345,14 @@ func (m *Model) exportObjectsCSV() (string, error) {
 		}
 		row := make([]string, 0, len(fields))
 		for _, f := range fields {
-			row = append(row, r[f.Key])
+			v := r[f.Key]
+			if f.Key == "last_modified" && r["last_modified_iso"] != "" {
+				// Machine output gets the offset-qualified form: a spreadsheet
+				// or script reading this shouldn't have to know which zone the
+				// person who exported it was in.
+				v = r["last_modified_iso"]
+			}
+			row = append(row, v)
 		}
 		rows = append(rows, row)
 	}
@@ -1505,6 +1539,57 @@ func (m *Model) findNames() []string {
 		return names
 	}
 	return nil
+}
+
+// applyObjectFilter re-derives the visible listing from everything loaded:
+// the modified-since cutoff, then the active sort, then the table rows. Every
+// path that changes either the loaded rows or the filter goes through here, so
+// the two can't drift apart.
+func (m *Model) applyObjectFilter() {
+	m.objectMaps = filterObjectMaps(m.objectMapsAll, m.modSince)
+	m.sortObjects(m.objectMaps)
+	m.updateObjectColumns()
+	m.objectTable.SetRows(m.buildObjectRows())
+	if m.objectTable.Cursor() >= len(m.objectMaps) {
+		m.objectTable.SetCursor(max(0, len(m.objectMaps)-1))
+	}
+}
+
+// startModSince opens the "modified since" prompt ("M"), seeded with the
+// active filter so re-pressing it edits rather than retypes.
+func (m *Model) startModSince() {
+	m.modSinceActive = true
+	m.modSinceErr = ""
+	m.modSinceInput.SetValue(m.modSinceLabel)
+	m.modSinceInput.CursorEnd()
+	m.modSinceInput.Focus()
+}
+
+// closeModSince dismisses the prompt, leaving the filter as it was.
+func (m *Model) closeModSince() {
+	m.modSinceActive = false
+	m.modSinceErr = ""
+	m.modSinceInput.Blur()
+}
+
+// commitModSince applies the typed cutoff. A malformed value keeps the prompt
+// open with the reason rather than silently filtering by nothing.
+func (m *Model) commitModSince() {
+	cutoff, label, err := parseModSince(m.modSinceInput.Value(), time.Now())
+	if err != nil {
+		m.modSinceErr = err.Error()
+		return
+	}
+	m.modSince, m.modSinceLabel = cutoff, label
+	m.closeModSince()
+	m.applyObjectFilter()
+	switch {
+	case cutoff.IsZero():
+		m.statusMsg = "Modified-since filter cleared"
+	default:
+		m.statusMsg = fmt.Sprintf("Showing %d of %d loaded objects modified since %s",
+			countObjectRows(m.objectMaps), countObjectRows(m.objectMapsAll), label)
+	}
 }
 
 // startFind opens the type-ahead jump prompt for the current list.
@@ -1917,6 +2002,22 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, tea.Batch(cmds...)
 		}
 
+		// Modified-since prompt ("M"): Enter applies the cutoff, Esc backs out
+		// leaving the current filter alone.
+		if m.modSinceActive {
+			switch msg.String() {
+			case "esc":
+				m.closeModSince()
+			case "enter":
+				m.commitModSince()
+			default:
+				m.modSinceInput, cmd = m.modSinceInput.Update(msg)
+				cmds = append(cmds, cmd)
+				m.modSinceErr = ""
+			}
+			return m, tea.Batch(cmds...)
+		}
+
 		// Type-ahead jump prompt (":"). Typing moves the cursor to the first
 		// matching row; ↑/↓ step through matches; Enter accepts (keeps the
 		// cursor); Esc cancels. The listing is never filtered.
@@ -2236,6 +2337,14 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				cmds = append(cmds, m.loadObjects())
 			}
 
+		case "M":
+			// Filter the loaded listing by last-modified. Client-side by
+			// necessity: ListObjectsV2 has no date parameter and returns keys
+			// in name order, so there is no server-side "recent objects".
+			if m.state == stateObjectList {
+				m.startModSince()
+			}
+
 		case "L":
 			// Continue a listing the page window cut off.
 			if m.state == stateObjectList && m.objectsNextToken != nil && !m.loading {
@@ -2441,18 +2550,14 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			// "Load more": extend the current view, keep the selection.
 			m.objCount += msg.count
 			m.totalSize += msg.size
-			m.objectMaps = append(m.objectMaps, msg.maps...)
-			m.sortObjects(m.objectMaps)
-			m.updateObjectColumns()
-			m.objectTable.SetRows(m.buildObjectRows())
+			m.objectMapsAll = append(m.objectMapsAll, msg.maps...)
+			m.applyObjectFilter()
 			break
 		}
 		m.objCount = msg.count
 		m.totalSize = msg.size
-		m.objectMaps = msg.maps
-		m.sortObjects(m.objectMaps)
-		m.updateObjectColumns()
-		m.objectTable.SetRows(m.buildObjectRows())
+		m.objectMapsAll = msg.maps
+		m.applyObjectFilter()
 
 		// A "/"-jump path without a trailing slash was loaded as a folder. An
 		// empty result means it wasn't one — retry it as a full object key:
@@ -2948,6 +3053,11 @@ func (m *Model) statusHints() []ui.KeyHint {
 		if m.allowDelete {
 			hints = append(hints, ui.H("x", "delete"))
 		}
+		modHint := "modified since"
+		if !m.modSince.IsZero() {
+			modHint = "since " + m.modSinceLabel
+		}
+		hints = append(hints, ui.H("M", modHint))
 		if m.objectsNextToken != nil {
 			hints = append(hints, ui.H("L", "load more"))
 		}
@@ -3065,6 +3175,28 @@ func (m *Model) bucketListView() string {
 	)
 }
 
+// modSinceLine renders the modified-since prompt or the active filter. The
+// active form always reports what it filtered (the loaded rows) rather than a
+// bare count, so a narrow result never reads as "this is all the bucket has".
+func (m *Model) modSinceLine() string {
+	accent := lipgloss.NewStyle().Foreground(lipgloss.Color(ui.ColorAccent())).Bold(true)
+
+	if m.modSinceActive {
+		line := accent.Render("Modified since: ") + m.modSinceInput.View()
+		if m.modSinceErr != "" {
+			line += "  " + lipgloss.NewStyle().Foreground(lipgloss.Color(ui.ColorWarning())).Render(m.modSinceErr)
+		}
+		return line
+	}
+	if m.modSince.IsZero() {
+		return ""
+	}
+	return accent.Render("Modified since: ") +
+		lipgloss.NewStyle().Foreground(lipgloss.Color(ui.ColorAccent())).Render(m.modSinceLabel) +
+		ui.MutedStyle().Render(fmt.Sprintf("  (%d of %d loaded · M edits · client-side, of what L has loaded)",
+			countObjectRows(m.objectMaps), countObjectRows(m.objectMapsAll)))
+}
+
 func (m *Model) objectListView() string {
 	sizeStr := formatSize(m.totalSize)
 
@@ -3084,6 +3216,9 @@ func (m *Model) objectListView() string {
 		lipgloss.NewStyle().Foreground(lipgloss.Color(ui.ColorAccent())).Bold(true).Render("Prefix: "),
 		m.prefixInput.View(),
 	)
+	if line := m.modSinceLine(); line != "" {
+		prefixSection = lipgloss.JoinVertical(lipgloss.Left, prefixSection, line)
+	}
 
 	tableSection := tablePanel(&m.objectTable, m.focus == focusObjects)
 	if len(m.objectMaps) == 0 {
@@ -3095,9 +3230,17 @@ func (m *Model) objectListView() string {
 		}
 		tableSection = ui.TablePanelStyle(m.focus == focusObjects).Render(body)
 	} else if m.objectsNextToken != nil {
+		note := "More objects available · press L"
+		if !m.modSince.IsZero() {
+			// The filter only sees what has been listed, and S3 lists by key
+			// name, not by date — so unlisted pages can hold newer objects
+			// than anything on screen. Say it here rather than let the filter
+			// imply the bucket has nothing newer.
+			note = "More objects available · press L — unlisted pages may hold newer objects"
+		}
 		tableSection = lipgloss.JoinVertical(lipgloss.Left,
 			tableSection,
-			ui.MutedStyle().Render("More objects available · press L"),
+			ui.MutedStyle().Render(note),
 		)
 	}
 
