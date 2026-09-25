@@ -296,12 +296,12 @@ func (c *CWLogsClient) GetLogEventsSinceMulti(ctx context.Context, region, logGr
 const downloadMaxEvents = 50000
 
 // DownloadLogEvents downloads every event matching ANY of the patterns
-// across the whole lookback window, merged into one deduplicated timeline.
+// from startMillis onward (the whole query window), merged into one deduplicated timeline.
 // Unlike the panel/viewer fetches, a download must be complete or explicitly
 // failed — one failed pattern fails the whole download rather than writing a
 // silently partial file. truncated reports that downloadMaxEvents cut the
 // result short.
-func (c *CWLogsClient) DownloadLogEvents(ctx context.Context, region, logGroupName, logStreamName string, patterns []string, lookback time.Duration) ([]types.FilteredLogEvent, bool, error) {
+func (c *CWLogsClient) DownloadLogEvents(ctx context.Context, region, logGroupName, logStreamName string, patterns []string, startMillis int64) ([]types.FilteredLogEvent, bool, error) {
 	if len(patterns) == 0 {
 		patterns = []string{""}
 	}
@@ -313,7 +313,7 @@ func (c *CWLogsClient) DownloadLogEvents(ctx context.Context, region, logGroupNa
 		wg.Add(1)
 		go func(i int, pattern string) {
 			defer wg.Done()
-			events, truncated, err := c.downloadPattern(ctx, region, logGroupName, logStreamName, pattern, lookback)
+			events, truncated, err := c.downloadPattern(ctx, region, logGroupName, logStreamName, pattern, startMillis)
 			batches[i], truncs[i] = events, truncated
 			if err != nil {
 				errs[i] = fmt.Errorf("pattern %q: %w", pattern, err)
@@ -337,15 +337,15 @@ func (c *CWLogsClient) DownloadLogEvents(ctx context.Context, region, logGroupNa
 	return merged, truncated, nil
 }
 
-// downloadPattern pages FilterLogEvents for one pattern across the whole
-// lookback window, returning every matching event oldest-first — unlike
+// downloadPattern pages FilterLogEvents for one pattern from startMillis to
+// the end of the stream/group, returning every matching event oldest-first — unlike
 // GetLogEventsSince, which keeps only the most recent `limit`. truncated
 // reports that downloadMaxEvents ended the download before the window was
 // exhausted.
-func (c *CWLogsClient) downloadPattern(ctx context.Context, region, logGroupName, logStreamName, filterPattern string, lookback time.Duration) ([]types.FilteredLogEvent, bool, error) {
+func (c *CWLogsClient) downloadPattern(ctx context.Context, region, logGroupName, logStreamName, filterPattern string, startMillis int64) ([]types.FilteredLogEvent, bool, error) {
 	input := &cloudwatchlogs.FilterLogEventsInput{
 		LogGroupName: aws.String(logGroupName),
-		StartTime:    aws.Int64(time.Now().Add(-lookback).UnixMilli()),
+		StartTime:    aws.Int64(startMillis),
 	}
 	if logStreamName != "" {
 		input.LogStreamNames = []string{logStreamName}
