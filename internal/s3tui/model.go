@@ -231,6 +231,10 @@ type Model struct {
 
 	bucketTable table.Model
 	objectTable table.Model
+	// bucketTableH / objectTableH are the heights layoutTables last gave the
+	// tables, so it only resizes them when the layout actually changes.
+	bucketTableH, objectTableH int
+
 	prefixInput textinput.Model
 	spinner     spinner.Model
 
@@ -1641,6 +1645,15 @@ func (m *Model) activeTableForFind() *table.Model {
 // ---------------------------------------------------------------------------
 
 func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+	model, cmd := m.update(msg)
+	// Refit the tables to the screen after every message: a resize, the
+	// modified-since filter or the "more objects" note can each change how
+	// many rows they may use.
+	m.layoutTables()
+	return model, cmd
+}
+
+func (m *Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	var cmd tea.Cmd
 	var cmds []tea.Cmd
 	spinnerTickScheduled := false
@@ -1701,11 +1714,6 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.layoutArchiveTable()
 		}
 
-		bucketTableHeight := m.height - 18
-		if bucketTableHeight < 5 {
-			bucketTableHeight = 5
-		}
-		m.bucketTable.SetHeight(bucketTableHeight)
 		// Fixed columns (4+16+22) plus 2 cells of padding per column; the
 		// name column stretches to fill the rest of the panel exactly.
 		m.bucketTable.SetColumns([]table.Column{
@@ -1715,11 +1723,6 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			{Title: "Creation Date", Width: 22},
 		})
 
-		tableHeight := (m.height / 2) - 4
-		if tableHeight < 5 {
-			tableHeight = 5
-		}
-		m.objectTable.SetHeight(tableHeight)
 		m.updateObjectColumns()
 
 		// Constrain both tables to the visible width: columns that do not fit
@@ -2750,7 +2753,7 @@ func (m *Model) viewString() string {
 		if m.showBucketJSON {
 			view = m.bucketJSONView()
 		}
-		out := ui.AppStyle().Render(view)
+		out := m.pinStatusBar(view, m.renderStatusBar())
 		return m.debug.Overlay(out, m.width, m.height)
 	}
 
@@ -2768,26 +2771,7 @@ func (m *Model) viewString() string {
 	}
 
 	var content string
-
-	headerText := "S3 TUI " + Version
-	if info := authDisplayInfo(m.awsCfg); info != "" {
-		headerText += "   " + info
-	}
-	if m.region == "" && m.state == stateBucketList {
-		headerText += "   Regions: all"
-	}
-	if m.flatMode {
-		headerText += "   [FLAT]"
-	}
-	if m.showVersions {
-		headerText += "   [VERSIONS:ON]"
-	}
-	header := ui.HeaderStyle().Render(headerText)
-	// A pinned region gets a distinctive badge (joined after the styled header
-	// so its colors don't bleed into the rest of the title).
-	if badge := ui.RegionBadge([]string{m.region}, false); badge != "" {
-		header = lipgloss.JoinHorizontal(lipgloss.Top, header, " ", badge)
-	}
+	header := m.headerView()
 
 	if m.err != nil {
 		maxErrW := m.width - 20
@@ -2877,17 +2861,12 @@ func (m *Model) viewString() string {
 		content = lipgloss.Place(m.width-4, max(8, m.height-8), lipgloss.Center, lipgloss.Bottom, jumpBox)
 	}
 
-	out := ui.AppStyle().Render(lipgloss.JoinVertical(lipgloss.Left,
+	out := m.pinStatusBar(lipgloss.JoinVertical(lipgloss.Left,
 		header,
 		ui.FeatherRail(max(12, m.width-4)),
 		"",
 		content,
-		"",
-		m.renderStatusBar(),
-	))
-	if m.width > 0 && m.height > 0 {
-		out = ui.ClipToSize(out, m.width, m.height)
-	}
+	), m.renderStatusBar())
 	if m.showSettings {
 		// HUD-style: float the fixed-size console over the live app.
 		out = ui.OverlayCenter(out, m.settings.View(), m.width, m.height)
@@ -2908,6 +2887,105 @@ func (m *Model) viewString() string {
 // ---------------------------------------------------------------------------
 // Sub-views
 // ---------------------------------------------------------------------------
+
+// headerView renders the S3 title line with its region badge.
+func (m *Model) headerView() string {
+	headerText := "S3 TUI " + Version
+	if info := authDisplayInfo(m.awsCfg); info != "" {
+		headerText += "   " + info
+	}
+	if m.region == "" && m.state == stateBucketList {
+		headerText += "   Regions: all"
+	}
+	if m.flatMode {
+		headerText += "   [FLAT]"
+	}
+	if m.showVersions {
+		headerText += "   [VERSIONS:ON]"
+	}
+	header := ui.HeaderStyle().Render(headerText)
+	// A pinned region gets a distinctive badge (joined after the styled header
+	// so its colors don't bleed into the rest of the title).
+	if badge := ui.RegionBadge([]string{m.region}, false); badge != "" {
+		header = lipgloss.JoinHorizontal(lipgloss.Top, header, " ", badge)
+	}
+	return header
+}
+
+// s3DetailsHeight is the inner height of the fixed details panels under the
+// bucket and object tables; each panel is two rows taller with its border.
+const s3DetailsHeight = 10
+
+// bodyHeight is the number of rows the current screen's content can use:
+// the terminal height minus the top margin, the header and rail (with the
+// blank row under them), and the blank row plus status bar pinned at the
+// bottom (see pinStatusBar). Measured from the rendered header, not assumed.
+func (m *Model) bodyHeight() int {
+	const topMargin, rail, blank, gap, status = 1, 1, 1, 1, 1
+	return m.height - topMargin - lipgloss.Height(m.headerView()) - rail - blank - gap - status
+}
+
+// layoutTables sizes the bucket and object tables so their screens fill the
+// terminal exactly, with the status bar on the last row. It re-measures the
+// optional lines (the modified-since filter, the "more objects" note) so
+// toggling them never pushes the details panels off screen, and only resizes
+// a table when its height actually changes.
+func (m *Model) layoutTables() {
+	if m.height <= 0 {
+		return
+	}
+	avail := m.bodyHeight()
+	const panelBorder = 2 // a table panel's top and bottom border rows
+	detailsPanel := s3DetailsHeight + panelBorder
+
+	// Bucket list: the table panel, then the details panel.
+	if h := max(3, avail-panelBorder-detailsPanel); h != m.bucketTableH {
+		m.bucketTableH = h
+		m.bucketTable.SetHeight(h)
+	}
+
+	// Object list: breadcrumb, blank, prefix line (plus the modified-since
+	// line when set), blank, the table panel (plus the "more objects" note),
+	// blank, then the two details panels side by side.
+	chrome := 1 + 1 + 1 + 1 + panelBorder + 1 + detailsPanel
+	if m.modSinceLine() != "" {
+		chrome++
+	}
+	if len(m.objectMaps) > 0 && m.objectsNextToken != nil {
+		chrome++
+	}
+	if h := max(3, avail-chrome); h != m.objectTableH {
+		m.objectTableH = h
+		m.objectTable.SetHeight(h)
+	}
+}
+
+// pinStatusBar lays out a full screen: body at the top and the status bar on
+// the terminal's last row, with the blank rows in between, so a short screen
+// never leaves unused rows under the status bar. Heights are measured, not
+// assumed; a body too tall for the screen loses its bottom rows rather than
+// pushing the status bar off. The result is clipped to the terminal size.
+func (m *Model) pinStatusBar(body, status string) string {
+	// The app margin: one row on top and two columns each side. No bottom
+	// margin, so the status bar sits on the last row.
+	app := ui.AppStyle().MarginBottom(0)
+	innerH := m.height - app.GetMarginTop()
+	statusH := lipgloss.Height(status)
+	if m.height > 0 {
+		if maxBody := innerH - statusH - 1; maxBody > 0 && lipgloss.Height(body) > maxBody {
+			body = strings.Join(strings.Split(body, "\n")[:maxBody], "\n")
+		}
+	}
+	gap := 1 // one blank row between the body and the status bar, at least
+	if m.height > 0 {
+		gap = max(gap, innerH-lipgloss.Height(body)-statusH)
+	}
+	out := app.Render(body + strings.Repeat("\n", gap+1) + status)
+	if m.width > 0 && m.height > 0 {
+		out = ui.ClipToSize(out, m.width, m.height)
+	}
+	return out
+}
 
 func (m *Model) renderStatusBar() string {
 	barWidth := max(12, m.width-4)
@@ -3078,7 +3156,7 @@ func (m *Model) bucketListView() string {
 		tableSection = ui.TablePanelStyle(m.focus == focusBuckets).Render(body)
 	}
 
-	const detailsHeight = 10
+	const detailsHeight = s3DetailsHeight
 	detailsWidth := max(20, m.width-4)
 
 	title := "BUCKET DETAILS"
@@ -3216,7 +3294,7 @@ func (m *Model) objectListView() string {
 	}
 
 	// Details Panel — always render two fixed-size boxes so nothing below shifts.
-	const detailsHeight = 10
+	const detailsHeight = s3DetailsHeight
 	boxWidth := max(20, m.width/2-4)
 
 	detailsContent := ui.MutedStyle().Render("Select an object to view details.")
@@ -3371,7 +3449,8 @@ func (m *Model) objectListView() string {
 	)
 }
 
-// bucketDetailView renders the full-screen bucket detail view.
+// bucketDetailView renders the full-screen bucket detail view (viewString
+// pins the status bar under it).
 func (m *Model) bucketDetailView() string {
 	bucket := m.detailBucket
 
@@ -3458,8 +3537,7 @@ func (m *Model) bucketDetailView() string {
 		}
 	}
 
-	width := max(60, m.width-8)
-	height := max(20, m.height-10)
+	width, height := m.bucketDetailPanelSize()
 
 	// Flag a partial load so the defaults below aren't mistaken for fact.
 	parts := []string{title, "", tabBar, strings.Repeat("─", min(width-6, 60)), ""}
@@ -3484,8 +3562,6 @@ func (m *Model) bucketDetailView() string {
 			Foreground(lipgloss.Color(ui.ColorText())).
 			Padding(1, 2).
 			Render(lipgloss.JoinVertical(lipgloss.Left, parts...)),
-		"",
-		m.renderStatusBar(),
 	)
 }
 
