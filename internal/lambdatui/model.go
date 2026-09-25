@@ -8,12 +8,12 @@ import (
 	"os/exec"
 	"time"
 
+	"charm.land/bubbles/v2/spinner"
+	"charm.land/bubbles/v2/textinput"
+	"charm.land/bubbles/v2/viewport"
+	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
 	"github.com/atotto/clipboard"
-	"github.com/charmbracelet/bubbles/spinner"
-	"github.com/charmbracelet/bubbles/textinput"
-	"github.com/charmbracelet/bubbles/viewport"
-	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/lipgloss"
 
 	"github.com/ryandam9/aws_explorer/internal/config"
 	"github.com/ryandam9/aws_explorer/internal/consolelink"
@@ -184,7 +184,7 @@ func NewModel(ctx context.Context, awsCfg *config.AWSConfig, regions []string, a
 
 	f := textinput.New()
 	f.Placeholder = "Filter…"
-	f.Width = 30
+	f.SetWidth(30)
 
 	activeRegions := client.Regions()
 	return &m{
@@ -436,7 +436,7 @@ func (mm *m) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case invocationMsg:
 		mm.handleInvocationMsg(msg)
 
-	case tea.KeyMsg:
+	case tea.KeyPressMsg:
 		cmds = append(cmds, mm.handleKey(msg)...)
 
 	default:
@@ -452,7 +452,7 @@ func (mm *m) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	return mm, tea.Batch(cmds...)
 }
 
-func (mm *m) handleKey(msg tea.KeyMsg) []tea.Cmd {
+func (mm *m) handleKey(msg tea.KeyPressMsg) []tea.Cmd {
 	var cmds []tea.Cmd
 
 	// Error screen: Enter/Esc retries, q quits.
@@ -519,7 +519,7 @@ func (mm *m) handleKey(msg tea.KeyMsg) []tea.Cmd {
 			mm.scrollDetail(1)
 		case "pgup":
 			mm.scrollDetail(-(mm.detailPageHeight() - 2))
-		case "pgdown", "pgdn", " ":
+		case "pgdown", "pgdn", "space":
 			mm.scrollDetail(mm.detailPageHeight() - 2)
 		case "g", "home":
 			mm.detailOffset, mm.detailFocus = 0, 0

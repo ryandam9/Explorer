@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/charmbracelet/bubbles/viewport"
+	"charm.land/bubbles/v2/viewport"
 	"github.com/charmbracelet/x/ansi"
 )
 
@@ -60,7 +60,7 @@ func TestXrefSupportedCategories(t *testing.T) {
 func TestViewXrefOverlay(t *testing.T) {
 	groups, _ := crossReference(xrefSnap(), "subnet-priv")
 	m := &Model{width: 100, height: 30, xrefTitle: "subnet-priv", xrefGroups: groups}
-	m.xrefViewport = viewport.New(80, 20)
+	m.xrefViewport = viewport.New(viewport.WithWidth(80), viewport.WithHeight(20))
 	m.xrefViewport.SetContent(m.renderXref())
 	out := ansi.Strip(m.viewXrefOverlay("bg"))
 	if !strings.Contains(out, "Where used: subnet-priv") {

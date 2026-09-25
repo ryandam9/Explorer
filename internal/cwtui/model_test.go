@@ -5,10 +5,10 @@ import (
 	"testing"
 	"time"
 
+	"charm.land/bubbles/v2/textinput"
+	tea "charm.land/bubbletea/v2"
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/service/cloudwatchlogs/types"
-	"github.com/charmbracelet/bubbles/textinput"
-	tea "github.com/charmbracelet/bubbletea"
 )
 
 func TestMax(t *testing.T) {
@@ -207,7 +207,7 @@ func TestModelUpdateKeys(t *testing.T) {
 	}
 
 	// Test basic key handlers
-	newModel, cmd := m.Update(tea.KeyMsg{Type: tea.KeyTab})
+	newModel, cmd := m.Update(tea.KeyPressMsg{Code: tea.KeyTab})
 	m2 := newModel.(*model)
 	if m2.focus != focusStreams {
 		t.Errorf("expected focus to change to focusStreams, got %v", m2.focus)
@@ -215,7 +215,7 @@ func TestModelUpdateKeys(t *testing.T) {
 
 	// Escape with watchMode active should deactivate it
 	m2.watchMode = true
-	newModel, cmd = m2.Update(tea.KeyMsg{Type: tea.KeyEsc})
+	newModel, cmd = m2.Update(tea.KeyPressMsg{Code: tea.KeyEsc})
 	m3 := newModel.(*model)
 	if m3.watchMode {
 		t.Error("expected watchMode to be deactivated on Escape key")
@@ -288,7 +288,7 @@ func TestGroupSearchPromptsWhenNoPattern(t *testing.T) {
 	}
 
 	// Enter on the (still empty) prompt explicitly browses everything.
-	newModel, cmd := m2.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	newModel, cmd := m2.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
 	m3 := newModel.(*model)
 	if m3.eventSearchActive || !m3.eventsLoading || cmd == nil {
 		t.Error("Enter on the prompt should run the query")
@@ -313,7 +313,7 @@ func TestGroupSearchPromptEscBacksOut(t *testing.T) {
 	m := groupSearchModel()
 
 	newModel, _ := m.Update(keyMsg("G"))
-	newModel, _ = newModel.(*model).Update(tea.KeyMsg{Type: tea.KeyEsc})
+	newModel, _ = newModel.(*model).Update(tea.KeyPressMsg{Code: tea.KeyEsc})
 	m2 := newModel.(*model)
 	if m2.view != viewStreams || m2.groupLevelSearch {
 		t.Errorf("Esc on the unanswered prompt should back out of group search, got view=%v groupLevel=%v",
@@ -561,7 +561,7 @@ func TestDownloadKeyStartsAndGuards(t *testing.T) {
 		lookback:    defaultLookback,
 	}
 
-	keyD := tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'D'}}
+	keyD := tea.KeyPressMsg{Code: 'D', Text: string('D')}
 	newModel, cmd := m.Update(keyD)
 	m2 := newModel.(*model)
 	if !m2.downloading {
@@ -581,7 +581,7 @@ func TestDownloadKeyStartsAndGuards(t *testing.T) {
 
 func TestDownloadKeyNoGroupSelected(t *testing.T) {
 	m := &model{focus: focusGroups, eventSearch: textinput.New(), lookback: defaultLookback}
-	newModel, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'D'}})
+	newModel, _ := m.Update(tea.KeyPressMsg{Code: 'D', Text: string('D')})
 	if newModel.(*model).downloading {
 		t.Error("D with no group selected must not start a download")
 	}

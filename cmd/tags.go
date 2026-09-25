@@ -6,7 +6,7 @@ import (
 	"os"
 	"strings"
 
-	tea "github.com/charmbracelet/bubbletea"
+	tea "charm.land/bubbletea/v2"
 	"github.com/spf13/cobra"
 
 	"github.com/ryandam9/aws_explorer/internal/model"
@@ -60,7 +60,7 @@ used (defaulting to us-east-1).`,
 		}
 
 		model := tagstui.NewModel(ctx, client, scanAll)
-		p := tea.NewProgram(ui.WithWindowTitle(model), tea.WithAltScreen(), tea.WithContext(ctx))
+		p := tea.NewProgram(ui.WithWindowTitle(model), tea.WithContext(ctx))
 		if _, err := p.Run(); err != nil {
 			return fmt.Errorf("running tags dashboard: %w", err)
 		}

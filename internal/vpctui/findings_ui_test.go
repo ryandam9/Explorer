@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/charmbracelet/bubbles/viewport"
+	"charm.land/bubbles/v2/viewport"
 	"github.com/charmbracelet/x/ansi"
 )
 
@@ -44,7 +44,7 @@ func TestRenderFindingsEmpty(t *testing.T) {
 
 func TestViewFindingsOverlayCounts(t *testing.T) {
 	m := &Model{width: 120, height: 40, findings: sampleFindings()}
-	m.findingsViewport = viewport.New(80, 20)
+	m.findingsViewport = viewport.New(viewport.WithWidth(80), viewport.WithHeight(20))
 	m.findingsViewport.SetContent(m.renderFindings())
 
 	out := ansi.Strip(m.viewFindingsOverlay("bg"))
@@ -58,7 +58,7 @@ func TestViewFindingsOverlayCounts(t *testing.T) {
 
 func TestViewFindingsOverlayError(t *testing.T) {
 	m := &Model{width: 120, height: 40, findingsErr: errSentinel{}}
-	m.findingsViewport = viewport.New(80, 20)
+	m.findingsViewport = viewport.New(viewport.WithWidth(80), viewport.WithHeight(20))
 	out := ansi.Strip(m.viewFindingsOverlay("bg"))
 	if !strings.Contains(out, "Error: boom") {
 		t.Errorf("overlay should surface the error, got:\n%s", out)

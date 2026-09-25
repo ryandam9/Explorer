@@ -5,9 +5,9 @@ import (
 	"strings"
 	"testing"
 
+	tea "charm.land/bubbletea/v2"
 	"github.com/aws/aws-sdk-go-v2/aws"
 	gluetypes "github.com/aws/aws-sdk-go-v2/service/glue/types"
-	tea "github.com/charmbracelet/bubbletea"
 )
 
 func TestDetailTitleFor(t *testing.T) {
@@ -80,7 +80,7 @@ func TestGlueEnterOpensDetailOnNonJobTab(t *testing.T) {
 	mm.tab = tabCrawlers
 	mm.rebuild()
 
-	cmds := mm.handleKey(tea.KeyMsg{Type: tea.KeyEnter})
+	cmds := mm.handleKey(tea.KeyPressMsg{Code: tea.KeyEnter})
 	if !mm.detailActive {
 		t.Fatal("Enter on a crawler should open the detail overlay")
 	}
@@ -95,7 +95,7 @@ func TestGlueEnterOpensDetailOnNonJobTab(t *testing.T) {
 	}
 
 	// Any key closes the overlay (q still quits, tested by the guard order).
-	mm.handleKey(tea.KeyMsg{Type: tea.KeyEsc})
+	mm.handleKey(tea.KeyPressMsg{Code: tea.KeyEsc})
 	if mm.detailActive {
 		t.Error("a key should close the detail overlay")
 	}
@@ -107,7 +107,7 @@ func TestGlueEnterOnJobsTabKeepsRuns(t *testing.T) {
 	mm := newGlueTestModel(120, 24)
 	mm.tab = tabJobs
 	mm.rebuild()
-	mm.handleKey(tea.KeyMsg{Type: tea.KeyEnter})
+	mm.handleKey(tea.KeyPressMsg{Code: tea.KeyEnter})
 	if mm.detailActive {
 		t.Error("Enter on the Jobs tab must not open the resource-detail overlay")
 	}
@@ -127,19 +127,19 @@ func TestGlueDefOverlayScrolls(t *testing.T) {
 	mm.defActive = true
 	mm.def = JobDef{Name: "big-job", Role: "role/glue", DefaultArguments: args}
 
-	out := mm.View() // sizes and fills the shared viewport
+	out := mm.View().Content // sizes and fills the shared viewport
 	if !strings.Contains(out, "Job — big-job") {
 		t.Errorf("definition overlay missing title:\n%s", out)
 	}
-	if mm.overlayVP.TotalLineCount() <= mm.overlayVP.Height {
+	if mm.overlayVP.TotalLineCount() <= mm.overlayVP.Height() {
 		t.Fatalf("test needs content taller than the viewport (lines=%d height=%d)",
-			mm.overlayVP.TotalLineCount(), mm.overlayVP.Height)
+			mm.overlayVP.TotalLineCount(), mm.overlayVP.Height())
 	}
-	mm.handleKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("j")})
-	if mm.overlayVP.YOffset == 0 {
+	mm.handleKey(tea.KeyPressMsg{Code: 'j', Text: "j"})
+	if mm.overlayVP.YOffset() == 0 {
 		t.Error("j should scroll the definition viewport down")
 	}
-	mm.handleKey(tea.KeyMsg{Type: tea.KeyEsc})
+	mm.handleKey(tea.KeyPressMsg{Code: tea.KeyEsc})
 	if mm.defActive {
 		t.Error("Esc should close the definition overlay")
 	}
@@ -154,7 +154,7 @@ func TestGlueDetailOverlayRenders(t *testing.T) {
 	mm.detailActive = true
 	mm.detailTitle = "Connection — db"
 	mm.detail = ResourceDetail{Rows: []DetailRow{{Label: "Type", Value: "JDBC"}}}
-	out := mm.View()
+	out := mm.View().Content
 	if !strings.Contains(out, "Connection — db") || !strings.Contains(out, "JDBC") {
 		t.Errorf("detail overlay not rendered:\n%s", out)
 	}

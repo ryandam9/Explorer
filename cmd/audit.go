@@ -7,7 +7,7 @@ import (
 	"strings"
 	"time"
 
-	tea "github.com/charmbracelet/bubbletea"
+	tea "charm.land/bubbletea/v2"
 	"github.com/spf13/cobra"
 
 	"github.com/ryandam9/aws_explorer/internal/audit"
@@ -182,7 +182,7 @@ cloudwatch:GetMetricData and are skipped without it.`,
 			ch := make(chan audit.CostChunk, 8)
 			go audit.Stream(ctx, eng.AWSConfig, regions, categories, AppConfig.App.MaxConcurrency, timeout, ch)
 			m := audittui.New(regions, AppConfig.AWS.AllRegions, dropIgnored(ch, ignore))
-			p := tea.NewProgram(ui.WithWindowTitle(m), tea.WithAltScreen(), tea.WithContext(ctx))
+			p := tea.NewProgram(ui.WithWindowTitle(m), tea.WithContext(ctx))
 			if _, err := p.Run(); err != nil {
 				return fmt.Errorf("running audit TUI: %w", err)
 			}

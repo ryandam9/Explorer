@@ -4,13 +4,13 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/charmbracelet/bubbles/textinput"
-	tea "github.com/charmbracelet/bubbletea"
+	"charm.land/bubbles/v2/textinput"
+	tea "charm.land/bubbletea/v2"
 	"github.com/charmbracelet/x/ansi"
 )
 
-func keyRunes(s string) tea.KeyMsg {
-	return tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune(s)}
+func keyRunes(s string) tea.KeyPressMsg {
+	return tea.KeyPressMsg{Code: []rune(s)[0], Text: s}
 }
 
 // previewModel builds a Model showing content in the text preview overlay, the
@@ -104,11 +104,11 @@ func TestPreviewSearchKeyFlow(t *testing.T) {
 	if len(m.previewMatches) != 2 {
 		t.Fatalf("live matches = %d, want 2", len(m.previewMatches))
 	}
-	if m.previewViewport.YOffset != 0 {
+	if m.previewViewport.YOffset() != 0 {
 		t.Error("typing must not scroll the preview")
 	}
 
-	m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	m.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
 	if m.previewSearching || m.previewSearchTerm != "beta" {
 		t.Fatalf("enter should accept the term: searching=%v term=%q", m.previewSearching, m.previewSearchTerm)
 	}
@@ -131,7 +131,7 @@ func TestPreviewSearchKeyFlow(t *testing.T) {
 
 	// Esc with an accepted term closes the preview (the term is cleared only
 	// via / then Esc, as in the log viewer).
-	m.Update(tea.KeyMsg{Type: tea.KeyEsc})
+	m.Update(tea.KeyPressMsg{Code: tea.KeyEsc})
 	if m.showPreview {
 		t.Fatal("esc should close the preview")
 	}
@@ -145,7 +145,7 @@ func TestPreviewSearchEscInInputClears(t *testing.T) {
 	for _, r := range "beta" {
 		m.Update(keyRunes(string(r)))
 	}
-	m.Update(tea.KeyMsg{Type: tea.KeyEsc})
+	m.Update(tea.KeyPressMsg{Code: tea.KeyEsc})
 	if m.previewSearching || m.previewSearchTerm != "" || m.previewMatches != nil {
 		t.Errorf("esc in the input should clear the search: searching=%v term=%q matches=%v",
 			m.previewSearching, m.previewSearchTerm, m.previewMatches)
@@ -189,7 +189,7 @@ func TestPreviewSearchEnterJumpsFromCurrentOffset(t *testing.T) {
 	for _, r := range "needle" {
 		m.Update(keyRunes(string(r)))
 	}
-	m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	m.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
 
 	if len(m.previewMatches) != 2 {
 		t.Fatalf("matches = %d, want 2", len(m.previewMatches))
@@ -197,8 +197,8 @@ func TestPreviewSearchEnterJumpsFromCurrentOffset(t *testing.T) {
 	if m.previewMatchIdx != 1 {
 		t.Errorf("enter should pick the match after the scroll position, idx=%d", m.previewMatchIdx)
 	}
-	if m.previewViewport.YOffset <= 30 {
-		t.Errorf("viewport should centre the bottom match, YOffset=%d", m.previewViewport.YOffset)
+	if m.previewViewport.YOffset() <= 30 {
+		t.Errorf("viewport should centre the bottom match, YOffset=%d", m.previewViewport.YOffset())
 	}
 }
 
@@ -236,7 +236,7 @@ func TestPreviewSearchResetOnNewPreview(t *testing.T) {
 	for _, r := range "beta" {
 		m.Update(keyRunes(string(r)))
 	}
-	m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	m.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
 
 	m.initPreviewViewport("other content", nil)
 	if m.previewSearchTerm != "" || m.previewMatches != nil || m.previewSearching {

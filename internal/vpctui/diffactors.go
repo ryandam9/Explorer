@@ -4,7 +4,7 @@ import (
 	"context"
 	"time"
 
-	tea "github.com/charmbracelet/bubbletea"
+	tea "charm.land/bubbletea/v2"
 
 	"github.com/ryandam9/aws_explorer/internal/awserr"
 	"github.com/ryandam9/aws_explorer/internal/trail"

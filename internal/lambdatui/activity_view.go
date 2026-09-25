@@ -11,10 +11,10 @@ import (
 	"strings"
 	"time"
 
+	"charm.land/bubbles/v2/textinput"
+	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
 	"github.com/atotto/clipboard"
-	"github.com/charmbracelet/bubbles/textinput"
-	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/lipgloss"
 	"github.com/charmbracelet/x/ansi"
 
 	"github.com/ryandam9/aws_explorer/internal/downloads"
@@ -106,7 +106,7 @@ func newActivityInputs() [actFieldCount]textinput.Model {
 		t := textinput.New()
 		t.Placeholder = placeholders[i]
 		t.CharLimit = 512
-		t.Width = 56
+		t.SetWidth(56)
 		t.Prompt = ""
 		in[i] = t
 	}
@@ -138,7 +138,7 @@ func (mm *m) focusActivityField(i int) {
 	}
 }
 
-func (mm *m) handleActivityFormKey(msg tea.KeyMsg, cmds *[]tea.Cmd) {
+func (mm *m) handleActivityFormKey(msg tea.KeyPressMsg, cmds *[]tea.Cmd) {
 	switch msg.String() {
 	case "ctrl+c":
 		*cmds = append(*cmds, tea.Quit)
@@ -431,7 +431,7 @@ func (mm *m) selectedMatch() (Match, bool) {
 	return a.scan.Matches[i], true
 }
 
-func (mm *m) handleActivityKey(msg tea.KeyMsg, cmds *[]tea.Cmd) {
+func (mm *m) handleActivityKey(msg tea.KeyPressMsg, cmds *[]tea.Cmd) {
 	a := &mm.act
 	if a.inv.active {
 		mm.handleInvocationKey(msg, cmds)
@@ -452,7 +452,7 @@ func (mm *m) handleActivityKey(msg tea.KeyMsg, cmds *[]tea.Cmd) {
 		a.tbl.MoveDown(1)
 	case "pgup":
 		a.tbl.MoveUp(max(a.tbl.Height()-1, 1))
-	case "pgdown", "pgdn", " ":
+	case "pgdown", "pgdn", "space":
 		a.tbl.MoveDown(max(a.tbl.Height()-1, 1))
 	case "g", "home":
 		a.tbl.GotoTop()
@@ -587,7 +587,7 @@ func (mm *m) renderActivityForm() string {
 	}
 	return lipgloss.NewStyle().Border(lipgloss.RoundedBorder()).
 		BorderForeground(lipgloss.Color(ui.ColorBorderFocus())).
-		Padding(1, 2).Width(w).Render(b.String())
+		Padding(1, 2).Width(w + 2).Render(b.String())
 }
 
 // renderActivity draws the report: header lines, the match table and the

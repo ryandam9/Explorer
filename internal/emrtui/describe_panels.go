@@ -4,8 +4,8 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/charmbracelet/bubbles/viewport"
-	"github.com/charmbracelet/lipgloss"
+	"charm.land/bubbles/v2/viewport"
+	"charm.land/lipgloss/v2"
 
 	"github.com/ryandam9/aws_explorer/internal/ui"
 )
@@ -88,9 +88,9 @@ func (mm *m) scrollPanel(delta int) {
 		return
 	}
 	if delta < 0 {
-		p.LineUp(-delta)
+		p.ScrollUp(-delta)
 	} else {
-		p.LineDown(delta)
+		p.ScrollDown(delta)
 	}
 }
 
@@ -169,19 +169,19 @@ func (mm *m) renderSinglePane(gridH, width int) string {
 	if vpH < 1 {
 		vpH = 1
 	}
-	off := mm.descPanels[0].YOffset
-	vp := viewport.New(vpW, vpH)
+	off := mm.descPanels[0].YOffset()
+	vp := viewport.New(viewport.WithWidth(vpW), viewport.WithHeight(vpH))
 	vp.SetContent(lipgloss.NewStyle().Width(vpW).Render(strings.TrimRight(b.String(), "\n")))
 	vp.SetYOffset(off)
 	mm.descPanels[0] = vp
 
-	bar := ui.VScrollbar(vp.Height, vp.TotalLineCount(), vp.VisibleLineCount(), vp.YOffset)
+	bar := ui.VScrollbar(vp.Height(), vp.TotalLineCount(), vp.VisibleLineCount(), vp.YOffset())
 	content := lipgloss.JoinHorizontal(lipgloss.Top, vp.View(), " ", bar)
 	return lipgloss.NewStyle().
 		Border(lipgloss.RoundedBorder()).
 		BorderForeground(lipgloss.Color(ui.ColorBorderFocus())).
-		Width(width-2).
-		Height(gridH-2).
+		Width(width).
+		Height(gridH).
 		Padding(0, 1).
 		Render(content)
 }
@@ -207,13 +207,13 @@ func (mm *m) renderPanel(si, w, h int) string {
 
 	// Re-size and re-fill the viewport, preserving its scroll offset across
 	// renders/resizes; wrap the body to vpW so long values (ARNs) fold.
-	off := mm.descPanels[si].YOffset
-	vp := viewport.New(vpW, vpH)
+	off := mm.descPanels[si].YOffset()
+	vp := viewport.New(viewport.WithWidth(vpW), viewport.WithHeight(vpH))
 	vp.SetContent(lipgloss.NewStyle().Width(vpW).Render(mm.descSections[si].Body))
 	vp.SetYOffset(off)
 	mm.descPanels[si] = vp
 
-	bar := ui.VScrollbar(vp.Height, vp.TotalLineCount(), vp.VisibleLineCount(), vp.YOffset)
+	bar := ui.VScrollbar(vp.Height(), vp.TotalLineCount(), vp.VisibleLineCount(), vp.YOffset())
 	content := lipgloss.JoinHorizontal(lipgloss.Top, vp.View(), " ", bar)
 
 	focused := si == mm.descFocus
@@ -231,8 +231,8 @@ func (mm *m) renderPanel(si, w, h int) string {
 	return lipgloss.NewStyle().
 		Border(lipgloss.RoundedBorder()).
 		BorderForeground(lipgloss.Color(borderColor)).
-		Width(w-2).
-		Height(h-2).
+		Width(w).
+		Height(h).
 		Padding(0, 1).
 		Render(lipgloss.JoinVertical(lipgloss.Left, titleLine, content))
 }

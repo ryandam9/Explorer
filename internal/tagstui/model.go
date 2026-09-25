@@ -7,12 +7,12 @@ import (
 	"strings"
 	"time"
 
+	"charm.land/bubbles/v2/spinner"
+	"charm.land/bubbles/v2/textinput"
+	"charm.land/bubbles/v2/viewport"
+	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
 	"github.com/atotto/clipboard"
-	"github.com/charmbracelet/bubbles/spinner"
-	"github.com/charmbracelet/bubbles/textinput"
-	"github.com/charmbracelet/bubbles/viewport"
-	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/lipgloss"
 
 	"github.com/ryandam9/aws_explorer/internal/consolelink"
 	"github.com/ryandam9/aws_explorer/internal/model"
@@ -118,7 +118,7 @@ func NewModel(ctx context.Context, client *Client, allRegions bool) tea.Model {
 	f := textinput.New()
 	f.Placeholder = "Key=Value, K2=V2   ·   || to OR groups   ·   type:ec2:instance"
 	f.CharLimit = 512
-	f.Width = 48
+	f.SetWidth(48)
 
 	return &m{
 		ctx:         ctx,
@@ -259,14 +259,14 @@ func (mm *m) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case countsDoneMsg:
 		// nothing to do; the pass drained.
 
-	case tea.KeyMsg:
+	case tea.KeyPressMsg:
 		cmds = append(cmds, mm.handleKey(msg)...)
 	}
 
 	return mm, tea.Batch(cmds...)
 }
 
-func (mm *m) handleKey(msg tea.KeyMsg) []tea.Cmd {
+func (mm *m) handleKey(msg tea.KeyPressMsg) []tea.Cmd {
 	var cmds []tea.Cmd
 
 	// While the help overlay is open, keys scroll it or close it.
@@ -277,13 +277,13 @@ func (mm *m) handleKey(msg tea.KeyMsg) []tea.Cmd {
 		case "i", "?", "esc", "enter":
 			mm.showAbout = false
 		case "up", "k":
-			mm.overlayVP.LineUp(1)
+			mm.overlayVP.ScrollUp(1)
 		case "down", "j":
-			mm.overlayVP.LineDown(1)
+			mm.overlayVP.ScrollDown(1)
 		case "pgup":
-			mm.overlayVP.ViewUp()
-		case "pgdown", "pgdn", " ":
-			mm.overlayVP.ViewDown()
+			mm.overlayVP.PageUp()
+		case "pgdown", "pgdn", "space":
+			mm.overlayVP.PageDown()
 		case "g", "home":
 			mm.overlayVP.GotoTop()
 		case "G", "end":
@@ -300,13 +300,13 @@ func (mm *m) handleKey(msg tea.KeyMsg) []tea.Cmd {
 		case "enter", "esc", "backspace", "left", "h":
 			mm.showTags = false
 		case "up", "k":
-			mm.tagsVP.LineUp(1)
+			mm.tagsVP.ScrollUp(1)
 		case "down", "j":
-			mm.tagsVP.LineDown(1)
+			mm.tagsVP.ScrollDown(1)
 		case "pgup":
-			mm.tagsVP.ViewUp()
-		case "pgdown", "pgdn", " ":
-			mm.tagsVP.ViewDown()
+			mm.tagsVP.PageUp()
+		case "pgdown", "pgdn", "space":
+			mm.tagsVP.PageDown()
 		case "g", "home":
 			mm.tagsVP.GotoTop()
 		case "G", "end":
@@ -387,7 +387,7 @@ func (mm *m) handleKey(msg tea.KeyMsg) []tea.Cmd {
 }
 
 // moveList handles vertical navigation within a focused list column.
-func (mm *m) moveList(tbl *table.Model, msg tea.KeyMsg) {
+func (mm *m) moveList(tbl *table.Model, msg tea.KeyPressMsg) {
 	switch msg.String() {
 	case "up", "k":
 		tbl.MoveUp(1)
@@ -400,7 +400,7 @@ func (mm *m) moveList(tbl *table.Model, msg tea.KeyMsg) {
 	}
 }
 
-func (mm *m) handleResourceKey(msg tea.KeyMsg, cmds *[]tea.Cmd) {
+func (mm *m) handleResourceKey(msg tea.KeyPressMsg, cmds *[]tea.Cmd) {
 	switch msg.String() {
 	case "up", "k":
 		mm.resTbl.MoveUp(1)

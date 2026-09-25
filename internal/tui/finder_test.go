@@ -4,18 +4,18 @@ import (
 	"strings"
 	"testing"
 
-	tea "github.com/charmbracelet/bubbletea"
+	tea "charm.land/bubbletea/v2"
 	"github.com/charmbracelet/x/ansi"
 
 	"github.com/ryandam9/aws_explorer/internal/model"
 )
 
-func ctrlP() tea.KeyMsg { return tea.KeyMsg{Type: tea.KeyCtrlP} }
+func ctrlP() tea.KeyPressMsg { return tea.KeyPressMsg{Code: 'p', Mod: tea.ModCtrl} }
 
 func typeRunes(t *testing.T, m tuiModel, s string) tuiModel {
 	t.Helper()
 	for _, r := range s {
-		m = update(m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{r}})
+		m = update(m, tea.KeyPressMsg{Code: r, Text: string(r)})
 	}
 	return m
 }
@@ -30,7 +30,7 @@ func TestFinderOpensAndLists(t *testing.T) {
 	if len(m.finderHits) != len(m.sorted) {
 		t.Errorf("empty query hits = %d, want %d", len(m.finderHits), len(m.sorted))
 	}
-	plain := ansi.Strip(m.View())
+	plain := ansi.Strip(m.View().Content)
 	for _, want := range []string{"Jump to resource", "Enter jump", "web-1"} {
 		if !strings.Contains(plain, want) {
 			t.Errorf("finder view missing %q", want)
@@ -52,15 +52,15 @@ func TestFinderFiltersAndNavigates(t *testing.T) {
 	if m.finderSel != 0 {
 		t.Errorf("selection should start at 0, got %d", m.finderSel)
 	}
-	m = update(m, tea.KeyMsg{Type: tea.KeyDown})
+	m = update(m, tea.KeyPressMsg{Code: tea.KeyDown})
 	if m.finderSel != 1 {
 		t.Errorf("down should move selection to 1, got %d", m.finderSel)
 	}
-	m = update(m, tea.KeyMsg{Type: tea.KeyDown})
+	m = update(m, tea.KeyPressMsg{Code: tea.KeyDown})
 	if m.finderSel != 1 {
 		t.Errorf("selection should clamp at the last hit, got %d", m.finderSel)
 	}
-	m = update(m, tea.KeyMsg{Type: tea.KeyUp})
+	m = update(m, tea.KeyPressMsg{Code: tea.KeyUp})
 	if m.finderSel != 0 {
 		t.Errorf("up should move selection back to 0, got %d", m.finderSel)
 	}
@@ -135,7 +135,7 @@ func TestFinderNoMatches(t *testing.T) {
 	if len(m.finderHits) != 0 {
 		t.Fatalf("hits = %d, want 0", len(m.finderHits))
 	}
-	if !strings.Contains(ansi.Strip(m.View()), "no resources match") {
+	if !strings.Contains(ansi.Strip(m.View().Content), "no resources match") {
 		t.Error("view should say nothing matches")
 	}
 	// Enter with no hits just closes.

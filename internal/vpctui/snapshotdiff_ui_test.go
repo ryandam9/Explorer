@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/charmbracelet/bubbles/viewport"
+	"charm.land/bubbles/v2/viewport"
 	"github.com/charmbracelet/x/ansi"
 )
 
@@ -41,7 +41,7 @@ func TestRenderDiffNoChanges(t *testing.T) {
 
 func TestViewDiffOverlayCounts(t *testing.T) {
 	m := &Model{width: 100, height: 30, snapDiff: diffChanges()}
-	m.diffVP = viewport.New(80, 20)
+	m.diffVP = viewport.New(viewport.WithWidth(80), viewport.WithHeight(20))
 	m.diffVP.SetContent(m.renderDiff())
 	out := ansi.Strip(m.viewDiffOverlay("bg"))
 	if !strings.Contains(out, "1 added, 1 removed, 1 modified") {

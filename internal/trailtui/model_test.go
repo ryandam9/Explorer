@@ -7,8 +7,8 @@ import (
 	"testing"
 	"time"
 
+	tea "charm.land/bubbletea/v2"
 	"github.com/aws/aws-sdk-go-v2/aws"
-	tea "github.com/charmbracelet/bubbletea"
 
 	"github.com/ryandam9/aws_explorer/internal/trail"
 )
@@ -51,14 +51,14 @@ func streamRegion(m Model, region string, events []trail.Event) Model {
 	return update(m, streamDoneMsg{})
 }
 
-func key(s string) tea.KeyMsg {
+func key(s string) tea.KeyPressMsg {
 	switch s {
 	case "enter":
-		return tea.KeyMsg{Type: tea.KeyEnter}
+		return tea.KeyPressMsg{Code: tea.KeyEnter}
 	case "esc":
-		return tea.KeyMsg{Type: tea.KeyEsc}
+		return tea.KeyPressMsg{Code: tea.KeyEsc}
 	}
-	return tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune(s)}
+	return tea.KeyPressMsg{Code: []rune(s)[0], Text: s}
 }
 
 func TestLoadPopulatesTable(t *testing.T) {
@@ -69,7 +69,7 @@ func TestLoadPopulatesTable(t *testing.T) {
 	if len(m.all) != 3 || len(m.visible) != 3 {
 		t.Fatalf("all=%d visible=%d, want 3/3", len(m.all), len(m.visible))
 	}
-	out := m.View()
+	out := m.View().Content
 	for _, want := range []string{"RunInstances", "DeleteBucket", "user/alice"} {
 		if !strings.Contains(out, want) {
 			t.Errorf("view missing %q", want)
@@ -127,8 +127,8 @@ func TestLoadErrorShownInBody(t *testing.T) {
 	if m.loadErr == nil {
 		t.Fatal("an all-regions-failed stream should set loadErr")
 	}
-	if !strings.Contains(m.View(), "not authorized") {
-		t.Errorf("load error should surface in the body:\n%s", m.View())
+	if !strings.Contains(m.View().Content, "not authorized") {
+		t.Errorf("load error should surface in the body:\n%s", m.View().Content)
 	}
 }
 
@@ -168,8 +168,8 @@ func TestPartialRegionFailureKeepsResults(t *testing.T) {
 	if len(m.visible) != 3 {
 		t.Errorf("the surviving region's events should remain, got %d", len(m.visible))
 	}
-	if !strings.Contains(m.View(), "1 region(s) failed") {
-		t.Errorf("a partial failure should be noted in the header:\n%s", m.View())
+	if !strings.Contains(m.View().Content, "1 region(s) failed") {
+		t.Errorf("a partial failure should be noted in the header:\n%s", m.View().Content)
 	}
 }
 
@@ -198,8 +198,8 @@ func TestDetailOverlayOpens(t *testing.T) {
 	if m.overlay != overlayDetail {
 		t.Fatal("enter should open the detail overlay")
 	}
-	if !strings.Contains(m.View(), "Source IP") {
-		t.Errorf("detail overlay should show event fields:\n%s", m.View())
+	if !strings.Contains(m.View().Content, "Source IP") {
+		t.Errorf("detail overlay should show event fields:\n%s", m.View().Content)
 	}
 	m = update(m, key("esc"))
 	if m.overlay != overlayNone {
@@ -208,7 +208,7 @@ func TestDetailOverlayOpens(t *testing.T) {
 }
 
 func TestServiceAndRegionColumns(t *testing.T) {
-	out := newTestModel(t).View()
+	out := newTestModel(t).View().Content
 	for _, want := range []string{"SERVICE", "REGION", "ec2", "us-east-1", "eu-west-1"} {
 		if !strings.Contains(out, want) {
 			t.Errorf("table view missing %q:\n%s", want, out)
@@ -219,7 +219,7 @@ func TestServiceAndRegionColumns(t *testing.T) {
 func TestDetailOverlayShowsRichFields(t *testing.T) {
 	m := newTestModel(t)
 	m = update(m, key("enter")) // newest event (RunInstances) is selected
-	out := m.View()
+	out := m.View().Content
 	// The denied RunInstances event carries the full set of attributes.
 	for _, want := range []string{
 		"User agent", "aws-cli/2.15.0", "MFA", "Access key", "AKIAEXAMPLE",

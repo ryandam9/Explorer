@@ -10,7 +10,7 @@ import (
 	"strings"
 	"time"
 
-	tea "github.com/charmbracelet/bubbletea"
+	tea "charm.land/bubbletea/v2"
 	"github.com/mattn/go-isatty"
 	"github.com/spf13/cobra"
 
@@ -62,7 +62,7 @@ config's aws.regions list is used.`,
 			return fmt.Errorf("initializing Lambda dashboard: %w", err)
 		}
 
-		p := tea.NewProgram(ui.WithWindowTitle(model), tea.WithAltScreen(), tea.WithContext(ctx))
+		p := tea.NewProgram(ui.WithWindowTitle(model), tea.WithContext(ctx))
 		if _, err := p.Run(); err != nil {
 			return fmt.Errorf("running Lambda dashboard: %w", err)
 		}

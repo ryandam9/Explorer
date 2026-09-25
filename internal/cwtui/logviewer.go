@@ -8,12 +8,12 @@ import (
 	"strings"
 	"time"
 
+	"charm.land/bubbles/v2/textinput"
+	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
 	"github.com/atotto/clipboard"
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/service/cloudwatchlogs/types"
-	"github.com/charmbracelet/bubbles/textinput"
-	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/lipgloss"
 	"github.com/mattn/go-runewidth"
 
 	"github.com/ryandam9/aws_explorer/internal/table"
@@ -573,7 +573,7 @@ func (m *model) handleViewerEvents(msg viewerEventsMsg, cmds *[]tea.Cmd) {
 }
 
 // handleViewerKeys processes all keyboard input while the viewer is open.
-func (m *model) handleViewerKeys(msg tea.KeyMsg, cmds *[]tea.Cmd) {
+func (m *model) handleViewerKeys(msg tea.KeyPressMsg, cmds *[]tea.Cmd) {
 	v := &m.viewer
 	bodyH := m.viewerBodyHeight()
 
@@ -919,8 +919,8 @@ func (m *model) renderViewer() string {
 	box := lipgloss.NewStyle().
 		Border(lipgloss.RoundedBorder()).
 		BorderForeground(lipgloss.Color(ui.ColorBorderFocus())).
-		Width(max(20, m.width-2)).
-		Height(m.height - 4).
+		Width(max(20, m.width-2) + 2).
+		Height(m.height - 2).
 		Render(b.String())
 
 	pos := "top"
@@ -970,8 +970,8 @@ func (m *model) renderViewerTable(header string) string {
 	box := lipgloss.NewStyle().
 		Border(lipgloss.RoundedBorder()).
 		BorderForeground(lipgloss.Color(ui.ColorBorderFocus())).
-		Width(max(20, m.width-2)).
-		Height(m.height - 4).
+		Width(max(20, m.width-2) + 2).
+		Height(m.height - 2).
 		Render(b.String())
 
 	pos := "no events"

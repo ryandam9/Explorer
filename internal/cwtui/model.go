@@ -9,14 +9,14 @@ import (
 	"strings"
 	"time"
 
+	"charm.land/bubbles/v2/spinner"
+	"charm.land/bubbles/v2/textinput"
+	"charm.land/bubbles/v2/viewport"
+	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
 	"github.com/atotto/clipboard"
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/service/cloudwatchlogs/types"
-	"github.com/charmbracelet/bubbles/spinner"
-	"github.com/charmbracelet/bubbles/textinput"
-	"github.com/charmbracelet/bubbles/viewport"
-	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/lipgloss"
 	"github.com/dustin/go-humanize"
 
 	"github.com/ryandam9/aws_explorer/internal/config"
@@ -180,27 +180,27 @@ func NewModel(ctx context.Context, awsCfg *config.AWSConfig, regions []string, a
 
 	gSearch := textinput.New()
 	gSearch.Placeholder = "Filter log groups…"
-	gSearch.Width = 30
+	gSearch.SetWidth(30)
 
 	sSearch := textinput.New()
 	sSearch.Placeholder = "Filter log streams…"
-	sSearch.Width = 30
+	sSearch.SetWidth(30)
 
 	eSearch := textinput.New()
 	eSearch.Placeholder = "CloudWatch pattern(s); ; = OR (e.g. ERROR; timeout)…"
-	eSearch.Width = 40
+	eSearch.SetWidth(40)
 
 	vSearch := textinput.New()
 	vSearch.Placeholder = "Find in log…"
-	vSearch.Width = 40
+	vSearch.SetWidth(40)
 
 	vGrep := textinput.New()
 	vGrep.Placeholder = "grep regex (smart case; e.g. error|timeout)…"
-	vGrep.Width = 40
+	vGrep.SetWidth(40)
 
 	mSearch := textinput.New()
 	mSearch.Placeholder = "string or pattern to find across every stream…"
-	mSearch.Width = 40
+	mSearch.SetWidth(40)
 
 	gSearch.SetValue(groupFilter)
 	sSearch.SetValue(streamFilter)
@@ -372,7 +372,7 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			cmds = append(cmds, m.viewerTickCmd())
 		}
 
-	case tea.KeyMsg:
+	case tea.KeyPressMsg:
 		// Error screen: Enter/Esc clears the error and retries, q quits.
 		if m.err != nil {
 			switch msg.String() {
@@ -1117,7 +1117,7 @@ func (m *model) streamsPanelWidth() int {
 	return max(20, m.width-sidebarSideWidth-4)
 }
 
-func (m *model) View() string {
+func (m *model) viewString() string {
 	if m.err != nil {
 		return m.debug.Overlay(m.renderErrorView(), m.width, m.height)
 	}
@@ -1315,8 +1315,8 @@ func (m *model) renderSidebar(width int) string {
 	borderStyle := lipgloss.NewStyle().
 		Border(lipgloss.RoundedBorder()).
 		BorderForeground(lipgloss.Color(m.getBorderColor(focusGroups))).
-		Width(width).
-		Height(m.height - 4)
+		Width(width + 2).
+		Height(m.height - 2)
 
 	return borderStyle.Render(b.String())
 }
@@ -1339,8 +1339,8 @@ func (m *model) renderStreamsPanel(width int) string {
 		return lipgloss.NewStyle().
 			Border(lipgloss.RoundedBorder()).
 			BorderForeground(lipgloss.Color(m.getBorderColor(focusStreams))).
-			Width(width).
-			Height(m.height - 4).
+			Width(width + 2).
+			Height(m.height - 2).
 			Render(b.String())
 	}
 
@@ -1395,8 +1395,8 @@ func (m *model) renderStreamsPanel(width int) string {
 	borderStyle := lipgloss.NewStyle().
 		Border(lipgloss.RoundedBorder()).
 		BorderForeground(lipgloss.Color(m.getBorderColor(focusStreams))).
-		Width(width).
-		Height(m.height - 4)
+		Width(width + 2).
+		Height(m.height - 2)
 
 	return borderStyle.Render(b.String())
 }
@@ -1509,8 +1509,8 @@ func (m *model) renderEventsPanel(width int) string {
 	borderStyle := lipgloss.NewStyle().
 		Border(lipgloss.RoundedBorder()).
 		BorderForeground(lipgloss.Color(m.getBorderColor(focusEvents))).
-		Width(width).
-		Height(m.height - 4)
+		Width(width + 2).
+		Height(m.height - 2)
 
 	return borderStyle.Render(b.String())
 }
@@ -1526,8 +1526,8 @@ func (m *model) renderErrorView() string {
 	borderStyle := lipgloss.NewStyle().
 		Border(lipgloss.RoundedBorder()).
 		BorderForeground(lipgloss.Color(ui.ColorError())).
-		Width(m.width - 4).
-		Height(m.height - 4)
+		Width(m.width - 2).
+		Height(m.height - 2)
 
 	return borderStyle.Render(b.String())
 }
@@ -1738,3 +1738,8 @@ func (m *model) setToast(msg string) {
 	m.toast = msg
 	m.toastExp = time.Now().Add(3 * time.Second)
 }
+
+// View renders the frame for Bubble Tea v2. The terminal modes (alt screen,
+// mouse, window title) are declared by the application shell that wraps every
+// TUI (ui.WithWindowTitle); tests read the frame via View().Content.
+func (m *model) View() tea.View { return tea.NewView(m.viewString()) }

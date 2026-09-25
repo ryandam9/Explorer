@@ -4,14 +4,15 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/charmbracelet/lipgloss"
+	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/x/ansi"
 
 	"github.com/ryandam9/aws_explorer/internal/findings"
 	"github.com/ryandam9/aws_explorer/internal/ui"
 )
 
-func (mm *m) View() string {
+func (mm *m) viewString() string {
 	if mm.err != nil {
 		return mm.renderError()
 	}
@@ -202,8 +203,8 @@ func boxStyle(width, height int) lipgloss.Style {
 	return lipgloss.NewStyle().
 		Border(lipgloss.RoundedBorder()).
 		BorderForeground(lipgloss.Color(ui.ColorBorder())).
-		Width(width - 4).
-		Height(height)
+		Width(width - 2).
+		Height(height + 2)
 }
 
 func (mm *m) statusLeft() string {
@@ -312,3 +313,8 @@ func (mm *m) applyToast(rendered string) string {
 	}
 	return strings.Join(lines, "\n")
 }
+
+// View renders the frame for Bubble Tea v2. The terminal modes (alt screen,
+// mouse, window title) are declared by the application shell that wraps every
+// TUI (ui.WithWindowTitle); tests read the frame via View().Content.
+func (mm *m) View() tea.View { return tea.NewView(mm.viewString()) }

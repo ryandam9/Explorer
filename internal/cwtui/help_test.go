@@ -1,15 +1,16 @@
 package cwtui
 
 import (
+	"github.com/charmbracelet/x/ansi"
 	"strings"
 	"testing"
 
-	"github.com/charmbracelet/bubbles/textinput"
-	tea "github.com/charmbracelet/bubbletea"
+	"charm.land/bubbles/v2/textinput"
+	tea "charm.land/bubbletea/v2"
 )
 
-func keyMsg(s string) tea.KeyMsg {
-	return tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune(s)}
+func keyMsg(s string) tea.KeyPressMsg {
+	return tea.KeyPressMsg{Code: []rune(s)[0], Text: s}
 }
 
 func TestHelpOverlayToggle(t *testing.T) {
@@ -78,6 +79,7 @@ func TestHelpOverlayContent(t *testing.T) {
 	// against a layout-normalized rendering: box-drawing characters removed
 	// and all whitespace collapsed.
 	normalize := func(s string) string {
+		s = ansi.Strip(s) // Lip Gloss v2 always emits colour; compare the text
 		s = strings.NewReplacer("│", " ", "╭", " ", "╮", " ", "╰", " ", "╯", " ", "─", " ").Replace(s)
 		return strings.Join(strings.Fields(s), " ")
 	}

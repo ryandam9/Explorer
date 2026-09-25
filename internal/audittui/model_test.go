@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	tea "github.com/charmbracelet/bubbletea"
+	tea "charm.land/bubbletea/v2"
 
 	"github.com/ryandam9/aws_explorer/internal/audit"
 	"github.com/ryandam9/aws_explorer/internal/findings"
@@ -46,17 +46,17 @@ func newTestModel(t *testing.T) Model {
 	return mm.(Model)
 }
 
-func key(s string) tea.KeyMsg {
+func key(s string) tea.KeyPressMsg {
 	if len(s) == 1 {
-		return tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune(s)}
+		return tea.KeyPressMsg{Code: []rune(s)[0], Text: s}
 	}
 	switch s {
 	case "enter":
-		return tea.KeyMsg{Type: tea.KeyEnter}
+		return tea.KeyPressMsg{Code: tea.KeyEnter}
 	case "esc":
-		return tea.KeyMsg{Type: tea.KeyEsc}
+		return tea.KeyPressMsg{Code: tea.KeyEsc}
 	}
-	t := tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune(s)}
+	t := tea.KeyPressMsg{Code: []rune(s)[0], Text: s}
 	return t
 }
 
@@ -82,7 +82,7 @@ func TestChunksAccumulateAndScanEnds(t *testing.T) {
 
 func TestViewRenders(t *testing.T) {
 	m := newTestModel(t)
-	v := m.View()
+	v := m.View().Content
 	for _, want := range []string{
 		"Cost audit",
 		"3 finding(s)",
@@ -103,7 +103,7 @@ func TestViewEmptyState(t *testing.T) {
 	m = mm.(Model)
 	mm, _ = m.Update(chunkMsg{ok: false})
 	m = mm.(Model)
-	if v := m.View(); !strings.Contains(v, "No cost waste found") {
+	if v := m.View().Content; !strings.Contains(v, "No cost waste found") {
 		t.Error("empty state should celebrate a clean account")
 	}
 }
@@ -116,7 +116,7 @@ func TestQuickFilter(t *testing.T) {
 		t.Fatal("/ should enter filter mode")
 	}
 	for _, r := range "elastic" {
-		mm, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{r}})
+		mm, _ = m.Update(tea.KeyPressMsg{Code: r, Text: string(r)})
 		m = mm.(Model)
 	}
 	if len(m.visible) != 1 || m.visible[0].Resource != "eipalloc-1" {
@@ -188,7 +188,7 @@ func TestDetailOverlay(t *testing.T) {
 	if m.overlay != overlayDetail {
 		t.Fatal("enter should open the detail overlay")
 	}
-	v := m.View()
+	v := m.View().Content
 	for _, want := range []string{"COST-EBS-001", "Why", "Fix", "delete it", "$102.40"} {
 		if !strings.Contains(v, want) {
 			t.Errorf("detail overlay missing %q", want)
@@ -259,7 +259,7 @@ func TestErrorsOverlay(t *testing.T) {
 	if m.overlay != overlayErrors {
 		t.Fatal("e should open the errors overlay when errors exist")
 	}
-	if v := m.View(); !strings.Contains(v, "cloudwatch@us-east-1") {
+	if v := m.View().Content; !strings.Contains(v, "cloudwatch@us-east-1") {
 		t.Error("errors overlay should list service@region")
 	}
 
@@ -279,7 +279,7 @@ func TestHelpOverlay(t *testing.T) {
 	if m.overlay != overlayHelp {
 		t.Fatal("? should open help")
 	}
-	if v := m.View(); !strings.Contains(v, "Quick filter") {
+	if v := m.View().Content; !strings.Contains(v, "Quick filter") {
 		t.Error("help overlay should list the keys")
 	}
 }
@@ -331,7 +331,7 @@ func TestSelectedFollowsCursorAndFilter(t *testing.T) {
 	mm, _ := m.Update(key("/"))
 	m = mm.(Model)
 	for _, r := range "elastic" {
-		mm, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{r}})
+		mm, _ = m.Update(tea.KeyPressMsg{Code: r, Text: string(r)})
 		m = mm.(Model)
 	}
 	if f := m.selected(); f == nil || f.Resource != "eipalloc-1" {

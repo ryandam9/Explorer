@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	tea "github.com/charmbracelet/bubbletea"
+	tea "charm.land/bubbletea/v2"
 	"github.com/charmbracelet/x/ansi"
 
 	"github.com/ryandam9/aws_explorer/internal/table"
@@ -14,7 +14,7 @@ import (
 // status bar with its shortcuts is present.
 func assertNoWrap(t *testing.T, mm *m, w int, label string) {
 	t.Helper()
-	out := mm.View()
+	out := mm.View().Content
 	for i, line := range strings.Split(out, "\n") {
 		if lw := ansi.StringWidth(line); lw > w {
 			t.Errorf("%s width %d: line %d overflows (%d > %d): %q", label, w, i, lw, w, line)
@@ -85,7 +85,7 @@ func TestSubViewNavigation(t *testing.T) {
 	if tbl, ok := mm.selectedHbaseTable(); !ok || tbl.Name != "a" {
 		t.Fatalf("initial hbase selection = %+v ok=%v", tbl, ok)
 	}
-	mm.handleKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("j")})
+	mm.handleKey(tea.KeyPressMsg{Code: 'j', Text: "j"})
 	if tbl, _ := mm.selectedHbaseTable(); tbl.Name != "b" {
 		t.Errorf("after j, selected = %q want b", tbl.Name)
 	}

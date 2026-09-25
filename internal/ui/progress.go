@@ -1,7 +1,8 @@
 package ui
 
 import (
-	"github.com/charmbracelet/bubbles/progress"
+	"charm.land/bubbles/v2/progress"
+	"charm.land/lipgloss/v2"
 )
 
 // ProgressBar renders a determinate progress bar, frac in [0, 1], width
@@ -20,12 +21,12 @@ func ProgressBar(frac float64, width int) string {
 		frac = 1
 	}
 	p := progress.New(
-		progress.WithGradient(ColorHeading(), ColorAccent()),
+		progress.WithColors(lipgloss.Color(ColorHeading()), lipgloss.Color(ColorAccent())),
 		progress.WithWidth(width),
 		progress.WithoutPercentage(),
 	)
 	if c := ColorBorder(); c != "" {
-		p.EmptyColor = c
+		p.EmptyColor = lipgloss.Color(c)
 	}
 	return p.ViewAs(frac)
 }

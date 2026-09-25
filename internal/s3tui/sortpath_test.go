@@ -4,10 +4,10 @@ import (
 	"fmt"
 	"testing"
 
+	"charm.land/bubbles/v2/textinput"
+	tea "charm.land/bubbletea/v2"
 	"github.com/aws/aws-sdk-go-v2/aws"
 	s3types "github.com/aws/aws-sdk-go-v2/service/s3/types"
-	"github.com/charmbracelet/bubbles/textinput"
-	tea "github.com/charmbracelet/bubbletea"
 )
 
 func newTestPrefixInput(value string) textinput.Model {
@@ -35,7 +35,7 @@ func TestSortReversesDirectories(t *testing.T) {
 	m.sortObjects(m.objectMaps)
 	m.objectTable.SetRows(m.buildObjectRows())
 
-	m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("R")})
+	m.Update(tea.KeyPressMsg{Code: 'R', Text: "R"})
 
 	wantNames := []string{"..", "charlie/", "bravo/", "alpha/", "a.txt"}
 	for i, want := range wantNames {
@@ -45,7 +45,7 @@ func TestSortReversesDirectories(t *testing.T) {
 	}
 
 	// And R again restores ascending, ".." still pinned first.
-	m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("R")})
+	m.Update(tea.KeyPressMsg{Code: 'R', Text: "R"})
 	wantNames = []string{"..", "alpha/", "bravo/", "charlie/", "a.txt"}
 	for i, want := range wantNames {
 		if got := m.objectMaps[i]["name"]; got != want {
@@ -70,7 +70,7 @@ func TestSortReversesEntireLargeListing(t *testing.T) {
 	m.sortObjects(m.objectMaps)
 	m.objectTable.SetRows(m.buildObjectRows())
 
-	m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("R")})
+	m.Update(tea.KeyPressMsg{Code: 'R', Text: "R"})
 
 	rows := m.objectTable.Rows()
 	if len(rows) != n {
@@ -93,7 +93,7 @@ func TestPrefixInputFullObjectPath(t *testing.T) {
 	m.initObjectTable()
 	m.prefixInput = newTestPrefixInput("logs/2026/report.csv")
 
-	m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	m.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
 	if m.prefix != "logs/2026/report.csv/" {
 		t.Fatalf("enter should first try the path as a folder, prefix = %q", m.prefix)
 	}
@@ -135,7 +135,7 @@ func TestPrefixInputPathNotFound(t *testing.T) {
 	m.initObjectTable()
 	m.prefixInput = newTestPrefixInput("logs/nope.txt")
 
-	m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	m.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
 	m.Update(objectsLoadedMsg{maps: nil}) // folder try: empty
 	m.Update(objectsLoadedMsg{maps: []map[string]string{
 		dirRow(".."),
@@ -158,7 +158,7 @@ func TestPrefixInputFolderWithoutSlashUnchanged(t *testing.T) {
 	m.initObjectTable()
 	m.prefixInput = newTestPrefixInput("logs/2026")
 
-	m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	m.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
 	if m.prefix != "logs/2026/" {
 		t.Fatalf("prefix = %q, want logs/2026/", m.prefix)
 	}
@@ -184,7 +184,7 @@ func TestPrefixInputFlatModeKeepsExactPath(t *testing.T) {
 	m.initObjectTable()
 	m.prefixInput = newTestPrefixInput("logs/2026/report.csv")
 
-	m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	m.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
 	if m.prefix != "logs/2026/report.csv" {
 		t.Fatalf("flat mode must not append a slash, prefix = %q", m.prefix)
 	}

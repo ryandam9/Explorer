@@ -11,14 +11,14 @@ import (
 	"strings"
 	"time"
 
+	"charm.land/bubbles/v2/spinner"
+	"charm.land/bubbles/v2/textinput"
+	"charm.land/bubbles/v2/viewport"
+	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
 	"github.com/atotto/clipboard"
 	"github.com/aws/aws-sdk-go-v2/aws"
 	s3types "github.com/aws/aws-sdk-go-v2/service/s3/types"
-	"github.com/charmbracelet/bubbles/spinner"
-	"github.com/charmbracelet/bubbles/textinput"
-	"github.com/charmbracelet/bubbles/viewport"
-	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/lipgloss"
 	"github.com/charmbracelet/x/ansi"
 	"github.com/ryandam9/aws_explorer/internal/config"
 	"github.com/ryandam9/aws_explorer/internal/consolelink"
@@ -507,60 +507,43 @@ func NewModel(ctx context.Context, awsCfg *config.AWSConfig, region, bucket, pre
 	m.prefixInput = textinput.New()
 	m.prefixInput.Placeholder = "Enter prefix or object path (e.g. photos/2024/ or photos/2024/cat.jpg)"
 	m.prefixInput.CharLimit = 256
-	m.prefixInput.Width = 50
-	m.prefixInput.PromptStyle = lipgloss.NewStyle().Foreground(lipgloss.Color(ui.ColorAccent())).Bold(true)
-	m.prefixInput.TextStyle = lipgloss.NewStyle().Foreground(lipgloss.Color(ui.ColorText()))
-	m.prefixInput.PlaceholderStyle = lipgloss.NewStyle().Foreground(lipgloss.Color(ui.ColorMuted()))
-	m.prefixInput.Cursor.Style = lipgloss.NewStyle().Foreground(lipgloss.Color(ui.ColorAccent()))
+	m.prefixInput.SetWidth(50)
+	ui.StyleTextInput(&m.prefixInput)
 
 	m.bucketSearch = textinput.New()
 	m.bucketSearch.Placeholder = "Filter buckets…"
 	m.bucketSearch.CharLimit = 128
-	m.bucketSearch.Width = 40
-	m.bucketSearch.PromptStyle = lipgloss.NewStyle().Foreground(lipgloss.Color(ui.ColorAccent())).Bold(true)
-	m.bucketSearch.TextStyle = lipgloss.NewStyle().Foreground(lipgloss.Color(ui.ColorText()))
-	m.bucketSearch.PlaceholderStyle = lipgloss.NewStyle().Foreground(lipgloss.Color(ui.ColorMuted()))
-	m.bucketSearch.Cursor.Style = lipgloss.NewStyle().Foreground(lipgloss.Color(ui.ColorAccent()))
+	m.bucketSearch.SetWidth(40)
+	ui.StyleTextInput(&m.bucketSearch)
 
 	m.modSinceInput = textinput.New()
 	m.modSinceInput.Placeholder = "30m, 12h, 7d, 2w, or 2026-09-01 [14:30] — empty clears"
 	m.modSinceInput.CharLimit = 32
-	m.modSinceInput.Width = 44
-	m.modSinceInput.PromptStyle = lipgloss.NewStyle().Foreground(lipgloss.Color(ui.ColorAccent())).Bold(true)
-	m.modSinceInput.TextStyle = lipgloss.NewStyle().Foreground(lipgloss.Color(ui.ColorText()))
-	m.modSinceInput.PlaceholderStyle = lipgloss.NewStyle().Foreground(lipgloss.Color(ui.ColorMuted()))
-	m.modSinceInput.Cursor.Style = lipgloss.NewStyle().Foreground(lipgloss.Color(ui.ColorAccent()))
+	m.modSinceInput.SetWidth(44)
+	ui.StyleTextInput(&m.modSinceInput)
 
 	m.findInput = textinput.New()
 	m.findInput.Placeholder = "type to jump to a match…"
 	m.findInput.CharLimit = 128
-	m.findInput.Width = 40
-	m.findInput.PromptStyle = lipgloss.NewStyle().Foreground(lipgloss.Color(ui.ColorAccent())).Bold(true)
-	m.findInput.TextStyle = lipgloss.NewStyle().Foreground(lipgloss.Color(ui.ColorText()))
-	m.findInput.PlaceholderStyle = lipgloss.NewStyle().Foreground(lipgloss.Color(ui.ColorMuted()))
-	m.findInput.Cursor.Style = lipgloss.NewStyle().Foreground(lipgloss.Color(ui.ColorAccent()))
+	m.findInput.SetWidth(40)
+	ui.StyleTextInput(&m.findInput)
 
 	m.previewSearchInput = textinput.New()
 	m.previewSearchInput.Placeholder = "Find in preview…"
 	m.previewSearchInput.CharLimit = 128
-	m.previewSearchInput.Width = 40
+	m.previewSearchInput.SetWidth(40)
 
 	m.previewGrepInput = textinput.New()
 	m.previewGrepInput.Placeholder = "grep regex (smart case; e.g. error|timeout)…"
 	m.previewGrepInput.CharLimit = 256
-	m.previewGrepInput.Width = 40
-	m.previewSearchInput.PromptStyle = lipgloss.NewStyle().Foreground(lipgloss.Color(ui.ColorAccent())).Bold(true)
-	m.previewSearchInput.TextStyle = lipgloss.NewStyle().Foreground(lipgloss.Color(ui.ColorText()))
-	m.previewSearchInput.PlaceholderStyle = lipgloss.NewStyle().Foreground(lipgloss.Color(ui.ColorMuted()))
-	m.previewSearchInput.Cursor.Style = lipgloss.NewStyle().Foreground(lipgloss.Color(ui.ColorAccent()))
+	m.previewGrepInput.SetWidth(40)
+	ui.StyleTextInput(&m.previewSearchInput)
 
 	m.deleteConfirm = textinput.New()
 	m.deleteConfirm.Placeholder = "Type 'delete' to confirm"
 	m.deleteConfirm.CharLimit = 32
-	m.deleteConfirm.Width = 30
-	m.deleteConfirm.PromptStyle = lipgloss.NewStyle().Foreground(lipgloss.Color(ui.ColorError())).Bold(true)
-	m.deleteConfirm.TextStyle = lipgloss.NewStyle().Foreground(lipgloss.Color(ui.ColorText()))
-	m.deleteConfirm.Cursor.Style = lipgloss.NewStyle().Foreground(lipgloss.Color(ui.ColorAccent()))
+	m.deleteConfirm.SetWidth(30)
+	ui.StyleTextInputPrompt(&m.deleteConfirm, ui.ColorError())
 
 	m.spinner = spinner.New(
 		spinner.WithSpinner(spinner.MiniDot),
@@ -663,10 +646,7 @@ func (m *Model) restyleForTheme() {
 	m.applyTableStyle(&m.bucketTable)
 	m.applyTableStyle(&m.objectTable)
 	for _, in := range []*textinput.Model{&m.prefixInput, &m.bucketSearch, &m.findInput, &m.modSinceInput, &m.previewSearchInput, &m.previewGrepInput, &m.deleteConfirm} {
-		in.PromptStyle = lipgloss.NewStyle().Foreground(lipgloss.Color(ui.ColorAccent())).Bold(true)
-		in.TextStyle = lipgloss.NewStyle().Foreground(lipgloss.Color(ui.ColorText()))
-		in.PlaceholderStyle = lipgloss.NewStyle().Foreground(lipgloss.Color(ui.ColorMuted()))
-		in.Cursor.Style = lipgloss.NewStyle().Foreground(lipgloss.Color(ui.ColorAccent()))
+		ui.StyleTextInput(in)
 	}
 }
 
@@ -1072,7 +1052,7 @@ func (m *Model) initPreviewViewport(content string, err error) {
 	m.previewSrc = nil
 	m.previewSrcPlain = nil
 	vpW, vpH := m.previewViewportSize()
-	m.previewViewport = viewport.New(vpW, vpH)
+	m.previewViewport = verticalViewport(vpW, vpH)
 	if err == nil && content != "" {
 		// Keep the formatted logical lines and their ANSI-stripped forms: the
 		// "&" grep filters plain text, and the "/" search matches on the
@@ -1668,7 +1648,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	// Route all events to the shared settings panel while it is open.
 	if m.showSettings {
 		switch msg := msg.(type) {
-		case tea.KeyMsg:
+		case tea.KeyPressMsg:
 			if msg.String() == "esc" && !m.settings.EditMode() {
 				m.showSettings = false
 				return m, nil
@@ -1747,7 +1727,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.bucketTable.SetWidth(m.tableViewWidth())
 		m.objectTable.SetWidth(m.tableViewWidth())
 
-	case tea.KeyMsg:
+	case tea.KeyPressMsg:
 		// Handle modals / overlays first
 		if m.confirmingDelete {
 			switch msg.String() {
@@ -2759,7 +2739,7 @@ func (m *Model) PageTitle() string {
 // View
 // ---------------------------------------------------------------------------
 
-func (m *Model) View() string {
+func (m *Model) viewString() string {
 	if m.width == 0 {
 		return "Initializing…"
 	}
@@ -2819,7 +2799,7 @@ func (m *Model) View() string {
 			BorderForeground(lipgloss.Color(ui.ColorError())).
 			Foreground(lipgloss.Color(ui.ColorText())).
 			Padding(1, 2).
-			Width(maxErrW).
+			Width(maxErrW + 2).
 			Align(lipgloss.Center).
 			Render(fmt.Sprintf("Failed to access bucket: %s\n\n%s\n\nPress [Esc] to return to the bucket list.", m.bucket, ui.ErrorStyle().Render(m.err.Error())))
 
@@ -3496,7 +3476,7 @@ func (m *Model) bucketDetailView() string {
 		"",
 		lipgloss.NewStyle().
 			Width(width).
-			Height(height).
+			Height(height+2).
 			MaxWidth(width+2).
 			MaxHeight(height+2).
 			BorderStyle(lipgloss.RoundedBorder()).
@@ -3684,10 +3664,10 @@ func (m *Model) previewView() string {
 		body = "Object is empty."
 	} else {
 		bar := ui.VScrollbar(
-			m.previewViewport.Height,
+			m.previewViewport.Height(),
 			m.previewViewport.TotalLineCount(),
 			m.previewViewport.VisibleLineCount(),
-			m.previewViewport.YOffset,
+			m.previewViewport.YOffset(),
 		)
 		body = lipgloss.JoinHorizontal(lipgloss.Top, m.previewViewport.View(), " ", bar)
 	}
@@ -3711,7 +3691,7 @@ func (m *Model) previewView() string {
 	rows = append(rows, "", body, "", ui.MutedStyle().Render(hint))
 	return lipgloss.NewStyle().
 		Width(width).
-		Height(height).
+		Height(height+2).
 		MaxWidth(width+2).
 		MaxHeight(height+2).
 		BorderStyle(lipgloss.RoundedBorder()).
@@ -3719,4 +3699,24 @@ func (m *Model) previewView() string {
 		Foreground(lipgloss.Color(ui.ColorText())).
 		Padding(1, 2).
 		Render(lipgloss.JoinVertical(lipgloss.Left, rows...))
+}
+
+// View renders the frame for Bubble Tea v2. The terminal modes (alt screen,
+// mouse, window title) are declared by the application shell that wraps every
+// TUI (ui.WithWindowTitle); tests read the frame via View().Content.
+func (m *Model) View() tea.View { return tea.NewView(m.viewString()) }
+
+// verticalViewport is a viewport for the S3 previews, which receive the
+// screen's keys: Bubbles v2 viewports scroll sideways on ←/→ and h/l by
+// default (v1 did not), and the previews wrap their text to fit, so those
+// keys are switched off to keep them meaning what they always have here.
+func verticalViewport(w, h int) viewport.Model {
+	vp := viewport.New(viewport.WithWidth(w), viewport.WithHeight(h))
+	disableHorizontalKeys(&vp)
+	return vp
+}
+
+func disableHorizontalKeys(vp *viewport.Model) {
+	vp.KeyMap.Left.SetEnabled(false)
+	vp.KeyMap.Right.SetEnabled(false)
 }

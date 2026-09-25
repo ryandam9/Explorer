@@ -5,7 +5,7 @@ import (
 	"strings"
 	"sync/atomic"
 
-	"github.com/charmbracelet/lipgloss"
+	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/x/ansi"
 )
 
@@ -14,7 +14,7 @@ import (
 // is filled with the theme's canvas colour, the look of superfile and btop.
 //
 // Painting is one pass over the finished frame rather than a Background() on
-// every style: in lipgloss v1 each styled segment ends with a full SGR reset,
+// every style: Lip Gloss ends each styled segment with a full SGR reset,
 // which would punch a hole of terminal background through any style that did
 // not set its own. Paint re-applies the canvas after every reset (and every
 // "default background" code), starts each line on it and pads each line to the
@@ -37,8 +37,7 @@ var sgrResets = regexp.MustCompile(`\x1b\[(?:0?|49)m`)
 // Paint fills frame with the active theme's canvas colour when painting is on
 // (otherwise it returns frame unchanged). width and height are the terminal
 // size; short lines are padded to width and a short frame gets blank painted
-// lines up to height. It is a no-op when the terminal has no colour support or
-// the theme has no canvas.
+// lines up to height. It is a no-op when the theme has no canvas.
 func Paint(frame string, width, height int) string {
 	if !paintBG.Load() {
 		return frame
@@ -47,11 +46,13 @@ func Paint(frame string, width, height int) string {
 	if canvas == "" {
 		return frame
 	}
-	seq := lipgloss.ColorProfile().Color(canvas).Sequence(true)
-	if seq == "" {
-		return frame // monochrome terminal: nothing to paint with
+	c := lipgloss.Color(canvas)
+	if _, none := c.(lipgloss.NoColor); none {
+		return frame // not a colour we can paint with
 	}
-	on := "\x1b[" + seq + "m"
+	// Full-fidelity SGR; Bubble Tea v2's renderer downsamples every frame to
+	// the terminal's colour profile (and drops it on a monochrome one).
+	on := ansi.Style{}.BackgroundColor(c).String()
 	return paintWith(frame, on, width, height)
 }
 

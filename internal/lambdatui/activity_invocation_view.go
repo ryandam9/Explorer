@@ -7,9 +7,9 @@ import (
 	"strings"
 	"time"
 
+	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
 	"github.com/atotto/clipboard"
-	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/lipgloss"
 	"github.com/charmbracelet/x/ansi"
 
 	"github.com/ryandam9/aws_explorer/internal/table"
@@ -132,7 +132,7 @@ func (mm *m) nextFailedMatch(cmds *[]tea.Cmd) {
 	*cmds = append(*cmds, toastCmd(4*time.Second))
 }
 
-func (mm *m) handleInvocationKey(msg tea.KeyMsg, cmds *[]tea.Cmd) {
+func (mm *m) handleInvocationKey(msg tea.KeyPressMsg, cmds *[]tea.Cmd) {
 	v := &mm.act.inv
 	switch msg.String() {
 	case "q", "ctrl+c":
@@ -146,7 +146,7 @@ func (mm *m) handleInvocationKey(msg tea.KeyMsg, cmds *[]tea.Cmd) {
 		v.tbl.MoveDown(1)
 	case "pgup":
 		v.tbl.MoveUp(max(v.tbl.Height()-1, 1))
-	case "pgdown", "pgdn", " ":
+	case "pgdown", "pgdn", "space":
 		v.tbl.MoveDown(max(v.tbl.Height()-1, 1))
 	case "g", "home":
 		v.tbl.GotoTop()

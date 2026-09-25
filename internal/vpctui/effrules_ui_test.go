@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/charmbracelet/bubbles/viewport"
+	"charm.land/bubbles/v2/viewport"
 	"github.com/charmbracelet/x/ansi"
 )
 
@@ -35,7 +35,7 @@ func TestRenderEffRulesNotFound(t *testing.T) {
 
 func TestViewEffRulesOverlay(t *testing.T) {
 	m := &Model{width: 100, height: 30, effRules: computeEffectiveRules(effSnap(), "eni-app")}
-	m.effRulesVP = viewport.New(80, 20)
+	m.effRulesVP = viewport.New(viewport.WithWidth(80), viewport.WithHeight(20))
 	m.effRulesVP.SetContent(m.renderEffRules())
 	out := ansi.Strip(m.viewEffRulesOverlay("bg"))
 	if !strings.Contains(out, "Effective rules: eni-app") {

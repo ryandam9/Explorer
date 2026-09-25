@@ -10,14 +10,14 @@ import (
 	"strings"
 	"time"
 
+	"charm.land/bubbles/v2/spinner"
+	"charm.land/bubbles/v2/textinput"
+	"charm.land/bubbles/v2/viewport"
+	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
 	"github.com/atotto/clipboard"
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/service/sqs/types"
-	"github.com/charmbracelet/bubbles/spinner"
-	"github.com/charmbracelet/bubbles/textinput"
-	"github.com/charmbracelet/bubbles/viewport"
-	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/lipgloss"
 
 	"github.com/ryandam9/aws_explorer/internal/awsutil"
 	"github.com/ryandam9/aws_explorer/internal/config"
@@ -158,7 +158,7 @@ func NewModel(ctx context.Context, awsCfg *config.AWSConfig, regions []string, a
 
 	search := textinput.New()
 	search.Placeholder = "Filter queues…"
-	search.Width = 30
+	search.SetWidth(30)
 	search.SetValue(queueFilter)
 
 	return &model{
@@ -289,7 +289,7 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			cmds = append(cmds, toastCmd(4*time.Second))
 		}
 
-	case tea.KeyMsg:
+	case tea.KeyPressMsg:
 		// Error screen: Enter/Esc clears the error and retries, q quits.
 		if m.err != nil {
 			switch msg.String() {
@@ -371,7 +371,7 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 // handleOverviewKeys processes input while the queue browser/overview is
 // active.
-func (m *model) handleOverviewKeys(msg tea.KeyMsg, cmds *[]tea.Cmd) {
+func (m *model) handleOverviewKeys(msg tea.KeyPressMsg, cmds *[]tea.Cmd) {
 	switch msg.String() {
 	case "q", "ctrl+c":
 		*cmds = append(*cmds, tea.Quit)
@@ -446,7 +446,7 @@ func (m *model) handleOverviewKeys(msg tea.KeyMsg, cmds *[]tea.Cmd) {
 }
 
 // handleMessagesKeys processes input while the peeked-messages view is open.
-func (m *model) handleMessagesKeys(msg tea.KeyMsg, cmds *[]tea.Cmd) {
+func (m *model) handleMessagesKeys(msg tea.KeyPressMsg, cmds *[]tea.Cmd) {
 	switch msg.String() {
 	case "q", "ctrl+c":
 		*cmds = append(*cmds, tea.Quit)
@@ -489,7 +489,7 @@ func (m *model) handleMessagesKeys(msg tea.KeyMsg, cmds *[]tea.Cmd) {
 }
 
 // handleRecordKeys processes keys while the message record view is open.
-func (m *model) handleRecordKeys(msg tea.KeyMsg, cmds *[]tea.Cmd) {
+func (m *model) handleRecordKeys(msg tea.KeyPressMsg, cmds *[]tea.Cmd) {
 	switch msg.String() {
 	case "esc", "q", "v", "enter":
 		m.recordActive = false
@@ -498,9 +498,9 @@ func (m *model) handleRecordKeys(msg tea.KeyMsg, cmds *[]tea.Cmd) {
 	case "down", "j":
 		m.recordVP.ScrollDown(1)
 	case "pgup", "ctrl+u":
-		m.recordVP.ScrollUp(m.recordVP.Height)
+		m.recordVP.ScrollUp(m.recordVP.Height())
 	case "pgdown", "ctrl+d":
-		m.recordVP.ScrollDown(m.recordVP.Height)
+		m.recordVP.ScrollDown(m.recordVP.Height())
 	case "y":
 		_ = clipboard.WriteAll(m.recordText)
 		m.setToast("Copied message record to clipboard")
@@ -736,7 +736,7 @@ func (m *model) openMessageRecord(msg types.Message) {
 	for _, line := range strings.Split(m.recordText, "\n") {
 		lines = append(lines, wrapLine(sanitizeLine(line), w, indent)...)
 	}
-	m.recordVP = viewport.New(w, h)
+	m.recordVP = viewport.New(viewport.WithWidth(w), viewport.WithHeight(h))
 	m.recordVP.SetContent(strings.Join(lines, "\n"))
 	m.recordActive = true
 }

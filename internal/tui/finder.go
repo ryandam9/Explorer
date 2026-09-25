@@ -10,7 +10,7 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/charmbracelet/lipgloss"
+	"charm.land/lipgloss/v2"
 
 	"github.com/ryandam9/aws_explorer/internal/fuzzy"
 	"github.com/ryandam9/aws_explorer/internal/model"

@@ -242,8 +242,9 @@ selected run's logs (AXE-028) · `o` open in the console (AXE-032) · `/` filter
 - Data comes from the AXE-025 collector at `DetailLevelSummary`, loaded
   asynchronously per region; rows stream in as they arrive (the engine already
   supports this), with a `cached N · refreshing…` style status while loading.
-- `SilenceScanLogs()` so the TUI owns the screen; `tea.WithAltScreen()` and
-  `ui.WithWindowTitle` as the other TUIs do.
+- `SilenceScanLogs()` so the TUI owns the screen; `ui.WithWindowTitle` as the
+  other TUIs do (it declares the alternate screen — Bubble Tea v2 sets terminal
+  modes from the View, not program options).
 
 **Acceptance criteria.**
 - Launch with zero args renders the Jobs pane from the configured regions;

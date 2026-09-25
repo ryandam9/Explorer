@@ -101,10 +101,11 @@ aws_explorer/
 | [aws-sdk-go-v2](https://github.com/aws/aws-sdk-go-v2) | AWS SDK for Go v2 (per-service modules + STS/SSO) |
 | [cobra](https://github.com/spf13/cobra) | CLI framework |
 | [viper](https://github.com/spf13/viper) | Configuration loading |
-| [bubbletea](https://github.com/charmbracelet/bubbletea) | TUI framework |
-| [bubbles](https://github.com/charmbracelet/bubbles) | TUI components (spinner, list, viewport) |
-| [huh](https://github.com/charmbracelet/huh) | TUI forms |
-| [lipgloss](https://github.com/charmbracelet/lipgloss) | Terminal styling |
-| [bubble-table](https://github.com/evertras/bubble-table) | TUI table component |
+| [Bubble Tea v2](https://github.com/charmbracelet/bubbletea) (`charm.land/bubbletea/v2`) | TUI framework |
+| [Bubbles v2](https://github.com/charmbracelet/bubbles) (`charm.land/bubbles/v2`) | TUI components (spinner, text input, viewport, progress) |
+| [Huh v2](https://github.com/charmbracelet/huh) (`charm.land/huh/v2`) | TUI forms |
+| [Lip Gloss v2](https://github.com/charmbracelet/lipgloss) (`charm.land/lipgloss/v2`) | Terminal styling |
+| [bubblezone v2](https://github.com/lrstanley/bubblezone) | Mouse hit-zones (dashboard sidebar and rows) |
+| `internal/table` (in-house) | Shared TUI table widget (built on the Bubbles viewport) |
 | [clipboard](https://github.com/atotto/clipboard) | Copy resource IDs to clipboard |
 | [golang.org/x/sync](https://pkg.go.dev/golang.org/x/sync) | Bounded goroutine pool (errgroup) |

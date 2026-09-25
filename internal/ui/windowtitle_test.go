@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	tea "github.com/charmbracelet/bubbletea"
+	tea "charm.land/bubbletea/v2"
 
 	"github.com/ryandam9/aws_explorer/internal/config"
 )
@@ -18,58 +18,41 @@ func (f fakeTitled) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	}
 	return f, nil
 }
-func (f fakeTitled) View() string      { return "" }
+func (f fakeTitled) View() tea.View    { return tea.NewView("") }
 func (f fakeTitled) PageTitle() string { return f.title }
 
 type untitled struct{}
 
 func (u untitled) Init() tea.Cmd                       { return nil }
 func (u untitled) Update(tea.Msg) (tea.Model, tea.Cmd) { return u, nil }
-func (u untitled) View() string                        { return "" }
+func (u untitled) View() tea.View                      { return tea.NewView("frame") }
 
-func TestWithWindowTitleSyncsOnChange(t *testing.T) {
+// Bubble Tea v2 takes the window title and terminal modes from the View: the
+// shell declares the page title, the alternate screen, and mouse reporting
+// only for programs that asked for it.
+func TestShellDeclaresTitleAndModes(t *testing.T) {
 	m := WithWindowTitle(fakeTitled{title: "App › Home"})
-	w, ok := m.(*shellModel)
-	if !ok {
-		t.Fatal("expected a titled wrapper for a Titled model")
+	v := m.View()
+	if v.WindowTitle != "App › Home" || !v.AltScreen || v.MouseMode != tea.MouseModeNone {
+		t.Fatalf("view = title %q alt %v mouse %v", v.WindowTitle, v.AltScreen, v.MouseMode)
 	}
-	if cmd := w.Init(); cmd == nil {
-		t.Fatal("Init must set the initial window title")
-	}
-	if w.last != "App › Home" {
-		t.Fatalf("initial title = %q", w.last)
+	mm, _ := m.Update("App › Detail")
+	if got := mm.View().WindowTitle; got != "App › Detail" {
+		t.Fatalf("title should follow the page, got %q", got)
 	}
 
-	// A message that changes the page must emit a title command.
-	mm, cmd := w.Update("App › Detail")
-	if cmd == nil {
-		t.Fatal("expected a SetWindowTitle command on page change")
-	}
-	w = mm.(*shellModel)
-	if w.last != "App › Detail" {
-		t.Fatalf("title not tracked, got %q", w.last)
-	}
-
-	// No page change → no extra command.
-	if _, cmd := w.Update(struct{}{}); cmd != nil {
-		t.Fatal("expected no command when the title is unchanged")
+	if v := WithWindowTitle(untitled{}, WithMouse()).View(); v.MouseMode != tea.MouseModeCellMotion {
+		t.Error("WithMouse should turn on cell-motion mouse reporting")
 	}
 }
 
-// An untitled model gets no title syncing — and, with painting off, its frame
+// An untitled model gets no window title — and, with painting off, its frame
 // is exactly what it rendered.
 func TestWithWindowTitleUntitled(t *testing.T) {
 	SetPaintBackground(false)
-	m := untitled{}
-	got := WithWindowTitle(m)
-	if got.View() != m.View() {
-		t.Error("with painting off the frame must be unchanged")
-	}
-	if cmd := got.Init(); cmd != nil {
-		t.Error("an untitled model must not get window-title commands")
-	}
-	if _, cmd := got.Update(struct{}{}); cmd != nil {
-		t.Error("an untitled model must not get window-title commands")
+	got := WithWindowTitle(untitled{}).View()
+	if got.Content != "frame" || got.WindowTitle != "" {
+		t.Errorf("untitled view = %+v", got)
 	}
 }
 
@@ -80,16 +63,16 @@ type recorder struct {
 
 func (r *recorder) Init() tea.Cmd { return nil }
 func (r *recorder) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
-	if _, ok := msg.(tea.KeyMsg); ok {
+	if _, ok := msg.(tea.KeyPressMsg); ok {
 		r.keys++
 	} else {
 		r.other++
 	}
 	return r, nil
 }
-func (r *recorder) View() string { return "screen" }
+func (r *recorder) View() tea.View { return tea.NewView("screen") }
 
-func ctrlT() tea.KeyMsg { return tea.KeyMsg{Type: tea.KeyCtrlT} }
+func ctrlT() tea.KeyPressMsg { return tea.KeyPressMsg{Code: 't', Mod: tea.ModCtrl} }
 
 // ctrl+t opens the Appearance panel over any TUI once configured. While it is
 // open it owns the keyboard, but every other message still reaches the TUI
@@ -111,11 +94,11 @@ func TestShellAppearancePanel(t *testing.T) {
 	if !sh.settingsOpen {
 		t.Fatal("ctrl+t should open the Appearance panel")
 	}
-	if !strings.Contains(sh.View(), "Appearance") {
+	if !strings.Contains(sh.View().Content, "Appearance") {
 		t.Error("the panel should float over the screen")
 	}
 	keys, other := r.keys, r.other
-	sh.Update(tea.KeyMsg{Type: tea.KeyDown})
+	sh.Update(tea.KeyPressMsg{Code: tea.KeyDown})
 	sh.Update(struct{}{})
 	if r.keys != keys {
 		t.Error("keys must go to the panel while it is open")
@@ -123,7 +106,7 @@ func TestShellAppearancePanel(t *testing.T) {
 	if r.other != other+1 {
 		t.Error("non-key messages must still reach the TUI while the panel is open")
 	}
-	sh.Update(tea.KeyMsg{Type: tea.KeyEsc})
+	sh.Update(tea.KeyPressMsg{Code: tea.KeyEsc})
 	if sh.settingsOpen {
 		t.Error("Esc should close the panel")
 	}

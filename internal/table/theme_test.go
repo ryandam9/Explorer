@@ -3,7 +3,7 @@ package table
 import (
 	"testing"
 
-	"github.com/charmbracelet/lipgloss"
+	"charm.land/lipgloss/v2"
 )
 
 // With a theme source registered, a table re-reads its styles when the theme

@@ -1,6 +1,6 @@
 package ui
 
-import "github.com/charmbracelet/lipgloss"
+import "charm.land/lipgloss/v2"
 
 // ConfirmButtons renders the pair of buttons at the foot of a confirmation
 // modal — a filled confirm button and a quieter cancel one, the way

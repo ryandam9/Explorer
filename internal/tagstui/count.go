@@ -4,7 +4,7 @@ import (
 	"context"
 	"sync"
 
-	tea "github.com/charmbracelet/bubbletea"
+	tea "charm.land/bubbletea/v2"
 )
 
 // countWorkers bounds how many resource counts run at once (each is itself a

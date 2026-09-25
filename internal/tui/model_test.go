@@ -6,7 +6,7 @@ import (
 	"strings"
 	"testing"
 
-	tea "github.com/charmbracelet/bubbletea"
+	tea "charm.land/bubbletea/v2"
 	"github.com/charmbracelet/x/ansi"
 
 	"github.com/ryandam9/aws_explorer/internal/config"
@@ -36,20 +36,20 @@ func update(m tuiModel, msg tea.Msg) tuiModel {
 	return next.(tuiModel)
 }
 
-func key(s string) tea.KeyMsg {
+func key(s string) tea.KeyPressMsg {
 	switch s {
 	case "enter":
-		return tea.KeyMsg{Type: tea.KeyEnter}
+		return tea.KeyPressMsg{Code: tea.KeyEnter}
 	case "esc":
-		return tea.KeyMsg{Type: tea.KeyEscape}
+		return tea.KeyPressMsg{Code: tea.KeyEscape}
 	default:
-		return tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune(s)}
+		return tea.KeyPressMsg{Code: []rune(s)[0], Text: s}
 	}
 }
 
 func TestViewShowsResourcesAndContextHints(t *testing.T) {
 	m := newTestModel(t, 140, 40)
-	plain := ansi.Strip(m.View())
+	plain := ansi.Strip(m.View().Content)
 
 	for _, want := range []string{"i-abc123", "web-1", "Services", "ec2", "s3"} {
 		if !strings.Contains(plain, want) {
@@ -70,7 +70,7 @@ func TestDetailOverlayChangesHints(t *testing.T) {
 	if !m.showDetail {
 		t.Fatal("enter on table should open the detail panel")
 	}
-	plain := ansi.Strip(m.View())
+	plain := ansi.Strip(m.View().Content)
 	if !strings.Contains(plain, "close") {
 		t.Errorf("detail-focus status bar should offer Esc close, got %q", lastLine(plain))
 	}
@@ -86,7 +86,7 @@ func TestQuickTextFilter(t *testing.T) {
 	if !m.filtering {
 		t.Fatal("/ should enter filter mode")
 	}
-	plain := ansi.Strip(m.View())
+	plain := ansi.Strip(m.View().Content)
 	if !strings.Contains(plain, "Enter keep filter") {
 		t.Errorf("filter-mode hints not shown: %q", lastLine(plain))
 	}
@@ -114,7 +114,7 @@ func TestNarrowTerminalScrollsColumns(t *testing.T) {
 	if l+r == 0 {
 		t.Fatal("narrow terminal should hide columns and enable scrolling")
 	}
-	plain := ansi.Strip(m.View())
+	plain := ansi.Strip(m.View().Content)
 	if !strings.Contains(plain, "more cols") {
 		t.Error("scroll indicator missing from narrow view")
 	}
@@ -164,7 +164,7 @@ func TestErrorsOverlay(t *testing.T) {
 	if !m.showErrors {
 		t.Fatal("'e' should open the errors overlay when errors exist")
 	}
-	plain := ansi.Strip(m.View())
+	plain := ansi.Strip(m.View().Content)
 	for _, want := range []string{"INSUFFICIENT PRIVILEGES", "RDS", "rds:DescribeDBInstances"} {
 		if !strings.Contains(plain, want) {
 			t.Errorf("errors overlay missing %q", want)
@@ -333,7 +333,7 @@ func TestFilterShowsMatchCount(t *testing.T) {
 	m := newTestModel(t, 120, 40)
 	m = update(m, key("/"))
 	for _, r := range "web" {
-		m = update(m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{r}})
+		m = update(m, tea.KeyPressMsg{Code: r, Text: string(r)})
 	}
 	panel := ansi.Strip(m.renderTablePanel())
 	if !strings.Contains(panel, "2/3 match") {

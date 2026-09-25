@@ -7,7 +7,7 @@ import (
 	"sync"
 	"sync/atomic"
 
-	"github.com/charmbracelet/lipgloss"
+	"charm.land/lipgloss/v2"
 	"go.yaml.in/yaml/v3"
 
 	"github.com/ryandam9/aws_explorer/internal/config"
@@ -455,9 +455,11 @@ func BoldStyle() lipgloss.Style {
 }
 
 func ModalStyle(width, height int) lipgloss.Style {
+	// Lip Gloss v2 counts the border inside Width/Height (v1 did not), so the
+	// border's two cells are added back to keep the inner size callers asked for.
 	return lipgloss.NewStyle().
-		Width(width).
-		Height(height).
+		Width(width+2).
+		Height(height+2).
 		MaxWidth(width+2).
 		MaxHeight(height+2).
 		BorderStyle(lipgloss.RoundedBorder()).
@@ -487,9 +489,11 @@ func FixedPanelStyle(width, height int) lipgloss.Style {
 	if height < 1 {
 		height = 1
 	}
+	// Lip Gloss v2 counts the border inside Width/Height (v1 did not), so the
+	// border's two cells are added back to keep the inner size callers asked for.
 	return lipgloss.NewStyle().
-		Width(width).
-		Height(height).
+		Width(width+2).
+		Height(height+2).
 		MaxWidth(width+2).
 		MaxHeight(height+2).
 		BorderStyle(lipgloss.RoundedBorder()).

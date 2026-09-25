@@ -4,8 +4,8 @@ import (
 	"strings"
 	"time"
 
-	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/lipgloss"
+	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
 
 	"github.com/ryandam9/aws_explorer/internal/config"
 )
@@ -41,14 +41,28 @@ func settingsConfigured() bool { return settingsTarget.cfg != nil }
 //     any TUI — theme, icons and painted background, applied live, Ctrl+S to
 //     save — without each TUI having to integrate it;
 //   - paints the finished frame's background when ui.paintBackground is on
-//     (see Paint).
-func WithWindowTitle(m tea.Model) tea.Model {
-	return &shellModel{inner: m}
+//     (see Paint);
+//   - declares the terminal modes every TUI runs in (Bubble Tea v2 sets them
+//     from the View, not from program options): the alternate screen always,
+//     and mouse reporting for programs that asked for it (WithMouse).
+func WithWindowTitle(m tea.Model, opts ...ShellOption) tea.Model {
+	s := &shellModel{inner: m}
+	for _, o := range opts {
+		o(s)
+	}
+	return s
 }
+
+// ShellOption configures the application shell (see WithWindowTitle).
+type ShellOption func(*shellModel)
+
+// WithMouse turns on cell-motion mouse reporting (clicks and the wheel) for a
+// TUI that handles mouse messages.
+func WithMouse() ShellOption { return func(s *shellModel) { s.mouse = true } }
 
 type shellModel struct {
 	inner tea.Model
-	last  string // last window title sent
+	mouse bool
 	size  tea.WindowSizeMsg
 
 	settingsOpen bool
@@ -59,14 +73,7 @@ type shellModel struct {
 
 type shellToastDoneMsg struct{}
 
-func (s *shellModel) Init() tea.Cmd {
-	cmd := s.inner.Init()
-	if t, ok := s.inner.(Titled); ok {
-		s.last = t.PageTitle()
-		cmd = tea.Batch(cmd, tea.SetWindowTitle(s.last))
-	}
-	return cmd
-}
+func (s *shellModel) Init() tea.Cmd { return s.inner.Init() }
 
 func (s *shellModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch m := msg.(type) {
@@ -75,7 +82,7 @@ func (s *shellModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if s.settingsOpen {
 			s.settings, _ = s.settings.Update(m)
 		}
-	case tea.KeyMsg:
+	case tea.KeyPressMsg:
 		// While the panel is open it owns the keyboard; every other message
 		// still reaches the TUI below, so scans and streams keep running (§10).
 		if s.settingsOpen {
@@ -116,12 +123,6 @@ func (s *shellModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	mm, cmd := s.inner.Update(msg)
 	s.inner = mm
-	if t, ok := mm.(Titled); ok {
-		if title := t.PageTitle(); title != s.last {
-			s.last = title
-			cmd = tea.Batch(cmd, tea.SetWindowTitle(title))
-		}
-	}
 	return s, cmd
 }
 
@@ -130,8 +131,22 @@ func (s *shellModel) showToast(text string) tea.Cmd {
 	return tea.Tick(4*time.Second, func(time.Time) tea.Msg { return shellToastDoneMsg{} })
 }
 
-func (s *shellModel) View() string {
-	frame := s.inner.View()
+func (s *shellModel) View() tea.View {
+	v := s.inner.View()
+	v.AltScreen = true
+	if s.mouse {
+		v.MouseMode = tea.MouseModeCellMotion
+	}
+	if t, ok := s.inner.(Titled); ok {
+		v.WindowTitle = t.PageTitle()
+	}
+	v.Content = s.frame(v.Content)
+	return v
+}
+
+// frame composes the shell's layers over the TUI's frame: the Appearance
+// panel, the toast, then the painted background.
+func (s *shellModel) frame(frame string) string {
 	w, h := s.size.Width, s.size.Height
 	if s.settingsOpen && w > 0 && h > 0 {
 		// The panel floats over the live screen, so theme changes show on the

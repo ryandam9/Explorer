@@ -6,7 +6,8 @@ import (
 	"os"
 	"strings"
 
-	tea "github.com/charmbracelet/bubbletea"
+	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
 	"github.com/spf13/cobra"
 
 	"github.com/ryandam9/aws_explorer/internal/acctsnap"
@@ -87,7 +88,7 @@ unchanged account diffs clean.`,
 			}
 			m := tui.NewModelWithSeed(ctx, eng, configFilePath(), AppConfig, seed,
 				tui.WithCoverageAdvisory(!summaryTypedOnly))
-			p := tea.NewProgram(ui.WithWindowTitle(m), tea.WithAltScreen(), tea.WithMouseCellMotion(), tea.WithContext(ctx))
+			p := tea.NewProgram(ui.WithWindowTitle(m, ui.WithMouse()), tea.WithContext(ctx))
 			if _, err := p.Run(); err != nil {
 				return fmt.Errorf("running summary TUI: %w", err)
 			}
@@ -142,7 +143,7 @@ unchanged account diffs clean.`,
 			cov := summary.Coverage(resources, eng.TypedServices(),
 				AppConfig.Summary.CommonServices, AppConfig.Summary.HideServices)
 			if note := summary.CoverageNote(cov, !summaryTypedOnly); note != "" {
-				fmt.Fprintln(os.Stdout, "\n"+note)
+				lipgloss.Println("\n" + note) // downsampled: plain when piped
 			}
 		}
 		return nil

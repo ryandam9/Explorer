@@ -11,7 +11,8 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/charmbracelet/lipgloss"
+	"charm.land/lipgloss/v2"
+	"github.com/charmbracelet/colorprofile"
 	"github.com/mattn/go-isatty"
 
 	"github.com/ryandam9/aws_explorer/internal/csvexport"
@@ -46,10 +47,11 @@ type Options struct {
 	TotalTasks int
 }
 
-// stderrRenderer renders ANSI for the error summary and progress meter on
-// stderr; lipgloss's default renderer probes stdout, which may be piped
-// while stderr is still a terminal.
-var stderrRenderer = lipgloss.NewRenderer(os.Stderr)
+// profiled wraps w so the full-colour ANSI lipgloss renders is downsampled
+// to what w supports — stripped entirely when w is not a terminal (piped
+// stdout, a redirected stderr, a test buffer). Each stream is detected on its
+// own, so a piped stdout doesn't strip colour from a terminal stderr.
+func profiled(w io.Writer) io.Writer { return colorprofile.NewWriter(w, os.Environ()) }
 
 // StreamOutput reads chunks from the channel and prints results incrementally.
 // Collection errors are gathered and summarized on stderr after the run, so
@@ -80,7 +82,7 @@ type meter struct {
 }
 
 func newMeter(total int) *meter {
-	m := &meter{out: os.Stderr, total: total}
+	m := &meter{out: profiled(os.Stderr), total: total}
 	m.enabled = total > 0 && isatty.IsTerminal(os.Stderr.Fd())
 	m.render()
 	return m
@@ -90,7 +92,7 @@ func (m *meter) render() {
 	if !m.enabled {
 		return
 	}
-	line := stderrRenderer.NewStyle().Faint(true).
+	line := lipgloss.NewStyle().Faint(true).
 		Render(fmt.Sprintf("⠿ scanning %d/%d tasks · %d resources", m.done, m.total, m.resources))
 	fmt.Fprintf(m.out, "\r\x1b[2K%s", line)
 }
@@ -147,6 +149,7 @@ func stateStyle(state string) string {
 }
 
 func streamTable(w io.Writer, chunks <-chan model.ResultChunk, opts Options) {
+	w = profiled(w)
 	m := newMeter(opts.TotalTasks)
 	if !opts.NoHeader {
 		// The whole line is styled after formatting so the fixed column
@@ -313,7 +316,7 @@ func regionList(regions []string) string {
 // up with the leveled status lines the CLI prints elsewhere. Width 7 fits the
 // longest label ("WARNING"). Color degrades to plain text off a terminal.
 func levelTag(label, color string) string {
-	return stderrRenderer.NewStyle().Bold(true).Foreground(lipgloss.Color(color)).
+	return lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color(color)).
 		Render(fmt.Sprintf("%-7s", label))
 }
 
@@ -324,10 +327,11 @@ func PrintErrors(w io.Writer, errs []model.ExploreError) {
 	if len(errs) == 0 {
 		return
 	}
+	w = profiled(w)
 
-	headingErr := stderrRenderer.NewStyle().Bold(true).Foreground(lipgloss.Color("1"))
-	headingWarn := stderrRenderer.NewStyle().Bold(true).Foreground(lipgloss.Color("3"))
-	dim := stderrRenderer.NewStyle().Faint(true)
+	headingErr := lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("1"))
+	headingWarn := lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("3"))
+	dim := lipgloss.NewStyle().Faint(true)
 
 	var authErrs, otherErrs []model.ExploreError
 	for _, e := range errs {

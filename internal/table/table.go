@@ -8,14 +8,14 @@ import (
 	"fmt"
 	"strings"
 
-	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/lipgloss"
+	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/x/ansi"
 	"github.com/mattn/go-runewidth"
 
-	"github.com/charmbracelet/bubbles/help"
-	"github.com/charmbracelet/bubbles/key"
-	"github.com/charmbracelet/bubbles/viewport"
+	"charm.land/bubbles/v2/help"
+	"charm.land/bubbles/v2/key"
+	"charm.land/bubbles/v2/viewport"
 )
 
 // Model defines a state for the table widget.
@@ -225,7 +225,7 @@ func (km KeyMap) FullHelp() [][]key.Binding {
 
 // DefaultKeyMap returns a default set of keybindings.
 func DefaultKeyMap() KeyMap {
-	const spacebar = " "
+	const spacebar = "space" // Bubble Tea v2 names the space bar "space" (v1: " ")
 	return KeyMap{
 		LineUp: key.NewBinding(
 			key.WithKeys("up", "k"),
@@ -363,7 +363,7 @@ type Option func(*Model)
 func New(opts ...Option) Model {
 	m := Model{
 		cursor:   0,
-		viewport: viewport.New(0, 20), //nolint:mnd
+		viewport: viewport.New(viewport.WithWidth(0), viewport.WithHeight(20)), //nolint:mnd
 
 		frozenCols: 1, // pin the leading column (e.g. the row-number "#") by default
 
@@ -497,14 +497,14 @@ func WithRows(rows []Row) Option {
 // WithHeight sets the height of the table.
 func WithHeight(h int) Option {
 	return func(m *Model) {
-		m.viewport.Height = h - lipgloss.Height(m.headersView())
+		m.viewport.SetHeight(h - lipgloss.Height(m.headersView()))
 	}
 }
 
 // WithWidth sets the width of the table.
 func WithWidth(w int) Option {
 	return func(m *Model) {
-		m.viewport.Width = w
+		m.viewport.SetWidth(w)
 	}
 }
 
@@ -566,20 +566,20 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 	}
 
 	switch msg := msg.(type) {
-	case tea.KeyMsg:
+	case tea.KeyPressMsg:
 		switch {
 		case key.Matches(msg, m.KeyMap.LineUp):
 			m.MoveUp(1)
 		case key.Matches(msg, m.KeyMap.LineDown):
 			m.MoveDown(1)
 		case key.Matches(msg, m.KeyMap.PageUp):
-			m.MoveUp(m.viewport.Height)
+			m.MoveUp(m.viewport.Height())
 		case key.Matches(msg, m.KeyMap.PageDown):
-			m.MoveDown(m.viewport.Height)
+			m.MoveDown(m.viewport.Height())
 		case key.Matches(msg, m.KeyMap.HalfPageUp):
-			m.MoveUp(m.viewport.Height / 2) //nolint:mnd
+			m.MoveUp(m.viewport.Height() / 2) //nolint:mnd
 		case key.Matches(msg, m.KeyMap.HalfPageDown):
-			m.MoveDown(m.viewport.Height / 2) //nolint:mnd
+			m.MoveDown(m.viewport.Height() / 2) //nolint:mnd
 		case key.Matches(msg, m.KeyMap.GotoTop):
 			m.GotoTop()
 		case key.Matches(msg, m.KeyMap.GotoBottom):
@@ -615,7 +615,7 @@ const vScrollGutter = 2
 // vScrollActive reports whether a vertical scrollbar is shown: the table has a
 // constrained width and more rows than the row viewport can display at once.
 func (m Model) vScrollActive() bool {
-	return m.width > 0 && m.viewport.Height > 0 && len(m.rows) > m.viewport.Height
+	return m.width > 0 && m.viewport.Height() > 0 && len(m.rows) > m.viewport.Height()
 }
 
 // contentWidth is the width available to columns: the render width minus the
@@ -646,8 +646,8 @@ func (m Model) View() string {
 	// the fact that there are more rows above/below (issue #155). The bar tracks
 	// the topmost visible row within the full row set.
 	cw := m.contentWidth()
-	top := m.start + m.viewport.YOffset
-	bar := RenderVScrollbar(m.viewport.Height, len(m.rows), m.viewport.Height, top,
+	top := m.start + m.viewport.YOffset()
+	bar := RenderVScrollbar(m.viewport.Height(), len(m.rows), m.viewport.Height(), top,
 		m.styles.ScrollTrack, m.styles.ScrollThumb)
 	barLines := strings.Split(bar, "\n")
 
@@ -733,15 +733,15 @@ func (m *Model) UpdateViewport() {
 	m.syncTheme()
 	renderedRows := make([]string, 0, len(m.rows))
 
-	// Render only rows from: m.cursor-m.viewport.Height to: m.cursor+m.viewport.Height
+	// Render only rows from: m.cursor-m.viewport.Height() to: m.cursor+m.viewport.Height()
 	// Constant runtime, independent of number of rows in a table.
-	// Limits the number of renderedRows to a maximum of 2*m.viewport.Height
+	// Limits the number of renderedRows to a maximum of 2*m.viewport.Height()
 	if m.cursor >= 0 {
-		m.start = clamp(m.cursor-m.viewport.Height, 0, m.cursor)
+		m.start = clamp(m.cursor-m.viewport.Height(), 0, m.cursor)
 	} else {
 		m.start = 0
 	}
-	m.end = clamp(m.cursor+m.viewport.Height, m.cursor, len(m.rows))
+	m.end = clamp(m.cursor+m.viewport.Height(), m.cursor, len(m.rows))
 	vis := m.visibleCols() // resolved once per refresh, not once per row
 	for i := m.start; i < m.end; i++ {
 		row := m.renderRow(i, vis)
@@ -751,9 +751,13 @@ func (m *Model) UpdateViewport() {
 		renderedRows = append(renderedRows, row)
 	}
 
-	m.viewport.SetContent(
-		lipgloss.JoinVertical(lipgloss.Left, renderedRows...),
-	)
+	content := lipgloss.JoinVertical(lipgloss.Left, renderedRows...)
+	if m.width <= 0 {
+		// Unconstrained table (no SetWidth yet): the v2 viewport renders nothing
+		// at width 0, where v1 treated 0 as "no limit" — size it to the rows.
+		m.viewport.SetWidth(max(lipgloss.Width(content), 1))
+	}
+	m.viewport.SetContent(content)
 }
 
 // VisibleRange returns the half-open [start, end) row index range currently
@@ -815,7 +819,7 @@ func (m *Model) SetColumns(c []Column) {
 // fit are scrolled rather than truncated; see ScrollLeft / ScrollRight.
 func (m *Model) SetWidth(w int) {
 	m.width = w
-	m.viewport.Width = w
+	m.viewport.SetWidth(w)
 	if max := m.maxColOffset(); m.colOffset > max {
 		m.colOffset = max
 	}
@@ -953,18 +957,18 @@ func (m Model) maxColOffset() int {
 
 // SetHeight sets the height of the viewport of the table.
 func (m *Model) SetHeight(h int) {
-	m.viewport.Height = h - lipgloss.Height(m.headersView())
+	m.viewport.SetHeight(h - lipgloss.Height(m.headersView()))
 	m.UpdateViewport()
 }
 
 // Height returns the viewport height of the table.
 func (m Model) Height() int {
-	return m.viewport.Height
+	return m.viewport.Height()
 }
 
 // Width returns the viewport width of the table.
 func (m Model) Width() int {
-	return m.viewport.Width
+	return m.viewport.Width()
 }
 
 // Cursor returns the index of the selected row.
@@ -984,11 +988,11 @@ func (m *Model) MoveUp(n int) {
 	m.cursor = clamp(m.stepGroups(m.cursor, -n), 0, len(m.rows)-1)
 	switch {
 	case m.start == 0:
-		m.viewport.SetYOffset(clamp(m.viewport.YOffset, 0, m.cursor))
-	case m.start < m.viewport.Height:
-		m.viewport.YOffset = (clamp(clamp(m.viewport.YOffset+n, 0, m.cursor), 0, m.viewport.Height))
-	case m.viewport.YOffset >= 1:
-		m.viewport.YOffset = clamp(m.viewport.YOffset+n, 1, m.viewport.Height)
+		m.viewport.SetYOffset(clamp(m.viewport.YOffset(), 0, m.cursor))
+	case m.start < m.viewport.Height():
+		m.viewport.SetYOffset((clamp(clamp(m.viewport.YOffset()+n, 0, m.cursor), 0, m.viewport.Height())))
+	case m.viewport.YOffset() >= 1:
+		m.viewport.SetYOffset(clamp(m.viewport.YOffset()+n, 1, m.viewport.Height()))
 	}
 	m.UpdateViewport()
 }
@@ -1000,13 +1004,13 @@ func (m *Model) MoveDown(n int) {
 	m.UpdateViewport()
 
 	switch {
-	case m.end == len(m.rows) && m.viewport.YOffset > 0:
-		m.viewport.SetYOffset(clamp(m.viewport.YOffset-n, 1, m.viewport.Height))
-	case m.cursor > (m.end-m.start)/2 && m.viewport.YOffset > 0:
-		m.viewport.SetYOffset(clamp(m.viewport.YOffset-n, 1, m.cursor))
-	case m.viewport.YOffset > 1:
-	case m.cursor > m.viewport.YOffset+m.viewport.Height-1:
-		m.viewport.SetYOffset(clamp(m.viewport.YOffset+1, 0, 1))
+	case m.end == len(m.rows) && m.viewport.YOffset() > 0:
+		m.viewport.SetYOffset(clamp(m.viewport.YOffset()-n, 1, m.viewport.Height()))
+	case m.cursor > (m.end-m.start)/2 && m.viewport.YOffset() > 0:
+		m.viewport.SetYOffset(clamp(m.viewport.YOffset()-n, 1, m.cursor))
+	case m.viewport.YOffset() > 1:
+	case m.cursor > m.viewport.YOffset()+m.viewport.Height()-1:
+		m.viewport.SetYOffset(clamp(m.viewport.YOffset()+1, 0, 1))
 	}
 }
 

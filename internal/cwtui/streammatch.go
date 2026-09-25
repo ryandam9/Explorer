@@ -7,11 +7,11 @@ import (
 	"strings"
 	"time"
 
+	"charm.land/bubbles/v2/textinput"
+	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/service/cloudwatchlogs/types"
-	"github.com/charmbracelet/bubbles/textinput"
-	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/lipgloss"
 
 	"github.com/ryandam9/aws_explorer/internal/table"
 	"github.com/ryandam9/aws_explorer/internal/ui"
@@ -228,7 +228,7 @@ func (m *model) handleStreamMatchResult(msg streamMatchMsg, cmds *[]tea.Cmd) {
 
 // handleStreamMatchKeys owns the keys while the mode is showing. Everything it
 // does not own falls through to the panel underneath.
-func (m *model) handleStreamMatchKeys(msg tea.KeyMsg, cmds *[]tea.Cmd) (handled bool) {
+func (m *model) handleStreamMatchKeys(msg tea.KeyPressMsg, cmds *[]tea.Cmd) (handled bool) {
 	s := &m.streamMatch
 
 	if s.prompting {

@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/charmbracelet/bubbles/viewport"
+	"charm.land/bubbles/v2/viewport"
 	"github.com/charmbracelet/x/ansi"
 )
 
@@ -51,7 +51,7 @@ func TestRenderTraceResultBlocked(t *testing.T) {
 
 func TestViewTraceResultOverlayLoading(t *testing.T) {
 	m := &Model{width: 100, height: 30, traceLoading: true}
-	m.traceViewport = viewport.New(80, 20)
+	m.traceViewport = viewport.New(viewport.WithWidth(80), viewport.WithHeight(20))
 	out := ansi.Strip(m.viewTraceResultOverlay("bg"))
 	if !strings.Contains(out, "Connectivity trace") {
 		t.Errorf("overlay should show its title while loading:\n%s", out)
