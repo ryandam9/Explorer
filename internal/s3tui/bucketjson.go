@@ -27,7 +27,8 @@ func prettyJSON(s string) string {
 // bucketDetailPanelSize is the panel size shared by the bucket detail view and
 // the JSON viewer overlaid on it, so the two line up.
 func (m *Model) bucketDetailPanelSize() (width, height int) {
-	return max(60, m.width-8), max(20, m.height-10)
+	// The panel (height plus its two border rows) fills the screen's body.
+	return max(60, m.width-8), max(6, m.bodyHeight()-2)
 }
 
 // openBucketJSON sets up the full-screen JSON viewer with pretty-printed,
@@ -116,7 +117,7 @@ func (m *Model) copyBucketJSON() {
 }
 
 // bucketJSONView renders the full-screen JSON viewer overlaid on the bucket
-// detail view.
+// detail view (viewString pins the status bar under it).
 func (m *Model) bucketJSONView() string {
 	width, height := m.bucketDetailPanelSize()
 	title := ui.PanelTitleStyle().Render(m.bucketJSONTitle)
@@ -150,7 +151,5 @@ func (m *Model) bucketJSONView() string {
 		ui.FeatherRail(max(12, m.width-4)),
 		"",
 		panel,
-		"",
-		m.renderStatusBar(),
 	)
 }
