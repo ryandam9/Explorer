@@ -11,6 +11,7 @@ import (
 	cwltypes "github.com/aws/aws-sdk-go-v2/service/cloudwatchlogs/types"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
+	"github.com/charmbracelet/x/ansi"
 )
 
 func newActivityTestModel(logs *stubLogs) *m {
@@ -178,5 +179,46 @@ func TestActivityKeyOnlyOnFunctions(t *testing.T) {
 	mm.Update(key("a"))
 	if mm.act.formActive {
 		t.Error("a is a function action; it must not open on the Layers tab")
+	}
+}
+
+// The MESSAGE column fills whatever width the panel has left: a long log line
+// isn't cut at a fixed cap on a wide terminal, the row never overruns the
+// panel, and a narrow terminal keeps a readable minimum (the table scrolls).
+func TestActivityMessageFillsWidth(t *testing.T) {
+	long := "REPORT RequestId: e96b3ee9-d986-4b29-b79d-742d17451c69 " + strings.Repeat("Duration: 1981.13 ms ", 20)
+	logs := &stubLogs{pages: []*cloudwatchlogs.FilterLogEventsOutput{
+		{Events: []cwltypes.FilteredLogEvent{logEvt(1790000000000, "s", long)}},
+	}}
+	mm := newActivityTestModel(logs)
+	mm.width = 240
+	mm.Update(key("a"))
+	mm.Update(key("tab"))
+	mm.Update(key("Duration"))
+	_, cmd := mm.Update(key("enter"))
+	runCmd(mm, cmd)
+
+	msgCell := func() string { r := mm.act.tbl.Rows()[0]; return r[len(r)-1] }
+	wide := ansi.StringWidth(msgCell())
+	if wide <= matchCellMax || !strings.HasSuffix(msgCell(), "…") {
+		t.Fatalf("on a 240-col terminal the message should use the spare width, got %d cols: %q", wide, msgCell())
+	}
+	for _, line := range strings.Split(mm.View(), "\n") {
+		if w := ansi.StringWidth(line); w > mm.width {
+			t.Fatalf("line overruns the %d-col terminal (%d): %q", mm.width, w, line)
+		}
+	}
+	if !strings.Contains(mm.View(), "MESSAGE") {
+		t.Error("MESSAGE column should stay on screen, not be scrolled off")
+	}
+
+	// A resize re-fits the column: narrower terminal, narrower message.
+	mm.Update(tea.WindowSizeMsg{Width: 160, Height: mm.height})
+	if got := ansi.StringWidth(msgCell()); got >= wide {
+		t.Errorf("resize to 160 cols should shrink the message: %d -> %d", wide, got)
+	}
+	mm.Update(tea.WindowSizeMsg{Width: 60, Height: mm.height})
+	if got := ansi.StringWidth(msgCell()); got != activityMessageMin {
+		t.Errorf("narrow terminal: message width = %d, want the %d-col minimum", got, activityMessageMin)
 	}
 }

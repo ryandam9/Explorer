@@ -330,6 +330,9 @@ func (mm *m) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.WindowSizeMsg:
 		mm.width = msg.Width
 		mm.height = msg.Height
+		if mm.act.active {
+			mm.refreshActivityRows() // the MESSAGE column fills the new width
+		}
 
 	case spinner.TickMsg:
 		mm.debug.Refresh()

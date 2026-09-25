@@ -35,9 +35,15 @@ const (
 
 var actFieldLabels = [actFieldCount]string{"Date", "Regex", "Server filter"}
 
-// matchCellMax bounds a table cell so one long log line can't make its column
-// the width of the terminal several times over; the footer shows the full text.
+// matchCellMax bounds a capture-group cell so one long match can't make its
+// column the width of the terminal several times over; the footer shows the
+// full text.
 const matchCellMax = 120
+
+// activityMessageMin is the narrowest the MESSAGE column is squeezed to. On a
+// terminal too narrow for that, the column keeps this width and the table
+// scrolls horizontally (< >) rather than cutting the message to a sliver.
+const activityMessageMin = 40
 
 type activityState struct {
 	// Form.
@@ -287,7 +293,7 @@ func activityColumns(scan *LogScan) []table.Column {
 
 // activityRow renders one match as a table row. The request ID is shortened to
 // its first block (enough to tell invocations apart; the footer shows it in
-// full).
+// full). The message is left whole; refreshActivityRows fits it to the panel.
 func activityRow(m Match, loc *time.Location, groups int) table.Row {
 	id := "—"
 	if m.RequestID != "" {
@@ -306,7 +312,32 @@ func activityRow(m Match, loc *time.Location, groups int) table.Row {
 	if groups == 0 {
 		row = append(row, dashEm(truncate(oneLine(m.Matched), matchCellMax)))
 	}
-	return append(row, truncate(oneLine(m.Body), matchCellMax))
+	return append(row, oneLine(m.Body))
+}
+
+// activityMessageWidth is the width left for the MESSAGE (last) column once the
+// other columns are sized to their widest cell, so a long log line fills the
+// panel on a wide terminal instead of stopping at a fixed cap. The table's
+// width (the panel's inner width, as fitTable sets it) and the vertical
+// scrollbar gutter are reserved unconditionally, so the column doesn't reflow
+// when the match count crosses a page. Never below activityMessageMin.
+func activityMessageWidth(termWidth int, cols []table.Column, rows []table.Row) int {
+	if termWidth <= 0 || len(cols) == 0 {
+		return matchCellMax
+	}
+	pad := ui.TableStyles().Cell.GetHorizontalPadding()
+	avail := termWidth - 4 - 2 // fitTable's panel inset, the scrollbar gutter
+	last := len(cols) - 1
+	for i, c := range cols[:last] {
+		w := max(c.Width, ansi.StringWidth(c.Title))
+		for _, r := range rows {
+			if i < len(r) {
+				w = max(w, ansi.StringWidth(r[i]))
+			}
+		}
+		avail -= w + pad
+	}
+	return max(avail-pad, activityMessageMin)
 }
 
 func dashEm(s string) string {
@@ -327,6 +358,12 @@ func (mm *m) refreshActivityRows() {
 	rows := make([]table.Row, 0, len(a.scan.Matches))
 	for _, m := range a.scan.Matches {
 		rows = append(rows, activityRow(m, loc, len(a.scan.GroupNames)))
+	}
+	if msgW := activityMessageWidth(mm.width, activityColumns(a.scan), rows); len(rows) > 0 {
+		last := len(rows[0]) - 1
+		for _, r := range rows {
+			r[last] = ansi.Truncate(r[last], msgW, "…")
+		}
 	}
 	a.tbl.SetRows(rows)
 	if cur >= len(rows) {
