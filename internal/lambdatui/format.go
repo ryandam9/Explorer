@@ -52,7 +52,7 @@ func stateLabel(state string) string {
 // event-source-mapping State vocabulary (Enabled/Disabled/Creating/…).
 func stateGlyph(state string) string {
 	switch strings.ToLower(state) {
-	case "active", "enabled":
+	case "active", "enabled", "successful":
 		return "✓"
 	case "pending", "creating", "enabling", "disabling", "updating", "inprogress":
 		return "●"

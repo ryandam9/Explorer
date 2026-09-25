@@ -9,15 +9,19 @@ import (
 
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/service/lambda"
+	"github.com/charmbracelet/lipgloss"
 
 	"github.com/ryandam9/aws_explorer/internal/ui"
 )
 
-// section is one titled block of a detail view. Body is already-assembled plain
-// text (no styling) so the layout is shared; the grid only colours the Title.
+// section is one titled block of a detail view. Body is the panel's text
+// (label/value lines styled by dkv). Empty, when set, is the one-line reason the
+// section has nothing to show ("not attached to a VPC"): such sections collapse
+// into a single "Not configured" card instead of each taking a panel.
 type section struct {
 	Title string
 	Body  string
+	Empty string
 }
 
 // FunctionDetail is the flattened GetFunction response (configuration + code +
@@ -158,77 +162,97 @@ func flattenFunction(region, name string, out *lambda.GetFunctionOutput) Functio
 	return d
 }
 
-// dkv renders a "label value" line with a stable label column. An empty value
-// reads as a muted em dash.
+// dkv renders a "label value" line with a stable label column: the label
+// muted, the value in the text colour. An empty value reads as a muted em dash.
 func dkv(label, value string) string {
-	if strings.TrimSpace(value) == "" {
-		value = "—"
-	}
-	return fmt.Sprintf("  %-18s %s", label, value)
+	return dkvStyled(label, value, ui.ColorText())
 }
 
-// sections builds the function detail's per-panel report: overview, resources,
-// state, VPC, environment, layers, code and tags, each its own scrollable tile.
-// Pure over the FunctionDetail so it is fixture-tested.
+// dkvWarn is dkv with the value in the warning colour — a setting worth a
+// second look (throttled to zero, a URL anyone can call).
+func dkvWarn(label, value string) string {
+	return dkvStyled(label, value, ui.ColorWarning())
+}
+
+func dkvStyled(label, value, color string) string {
+	muted := lipgloss.NewStyle().Foreground(lipgloss.Color(ui.ColorMuted()))
+	v := lipgloss.NewStyle().Foreground(lipgloss.Color(color)).Render(value)
+	if strings.TrimSpace(value) == "" {
+		v = muted.Render("—")
+	}
+	return "  " + muted.Render(fmt.Sprintf("%-18s", label)) + " " + v
+}
+
+// sections builds the function's detail panels, most-used first:
+// configuration, what invokes it (triggers, versions & aliases, URL, async),
+// permissions, networking, environment, layers, code and tags. State and
+// usage live in the page's summary cards above them. Pure over the
+// FunctionDetail so it is fixture-tested.
 func (d FunctionDetail) sections() []section {
 	var out []section
 
-	// Overview.
-	var ov strings.Builder
-	ov.WriteString(dkv("Name", d.Name) + "\n")
-	ov.WriteString(dkv("Runtime", runtimeLabel(d.Runtime, d.PackageType)) + "\n")
-	ov.WriteString(dkv("Package type", d.PackageType) + "\n")
-	ov.WriteString(dkv("Handler", d.Handler) + "\n")
-	ov.WriteString(dkv("Version", d.Version) + "\n")
-	ov.WriteString(dkv("Description", d.Description) + "\n")
-	ov.WriteString(dkv("Last modified", shortTime(d.LastModified)) + "\n")
-	ov.WriteString(dkv("Role", d.Role) + "\n")
-	ov.WriteString(dkv("ARN", d.ARN))
-	out = append(out, section{Title: "Overview", Body: ov.String()})
+	// Configuration.
+	var cf strings.Builder
+	cf.WriteString(dkv("Handler", d.Handler) + "\n")
+	cf.WriteString(dkv("Runtime", runtimeLabel(d.Runtime, d.PackageType)) + "\n")
+	cf.WriteString(dkv("Architecture", joinOrDash(d.Architectures)) + "\n")
+	cf.WriteString(dkv("Memory", formatMemory(d.MemoryMB)) + "\n")
+	cf.WriteString(dkv("Timeout", formatTimeout(d.TimeoutSec)) + "\n")
+	cf.WriteString(dkv("Ephemeral /tmp", formatMemory(d.EphemeralMB)) + "\n")
+	if d.ReservedConcurrency != nil && *d.ReservedConcurrency == 0 {
+		cf.WriteString(dkvWarn("Reserved conc.", reservedConcurrencyLabel(d.ReservedConcurrency)) + "\n")
+	} else {
+		cf.WriteString(dkv("Reserved conc.", reservedConcurrencyLabel(d.ReservedConcurrency)) + "\n")
+	}
+	cf.WriteString(dkv("Tracing", emptyDash(d.TracingMode)) + "\n")
+	cf.WriteString(dkv("Version", d.Version) + "\n")
+	cf.WriteString(dkv("Last modified", shortTime(d.LastModified)))
+	out = append(out, section{Title: "Configuration", Body: cf.String()})
 
-	// Resources & limits.
-	var rs strings.Builder
-	rs.WriteString(dkv("Memory", formatMemory(d.MemoryMB)) + "\n")
-	rs.WriteString(dkv("Timeout", formatTimeout(d.TimeoutSec)) + "\n")
-	rs.WriteString(dkv("Ephemeral /tmp", formatMemory(d.EphemeralMB)) + "\n")
-	rs.WriteString(dkv("Code size", formatCodeSize(d.CodeSize)) + "\n")
-	rs.WriteString(dkv("Architectures", joinOrDash(d.Architectures)) + "\n")
-	rs.WriteString(dkv("Reserved conc.", reservedConcurrencyLabel(d.ReservedConcurrency)) + "\n")
-	rs.WriteString(dkv("Tracing", emptyDash(d.TracingMode)))
-	out = append(out, section{Title: "Resources & limits", Body: rs.String()})
-
-	// State & health.
-	var st strings.Builder
-	st.WriteString(dkv("State", stateLabel(d.State)) + "\n")
-	st.WriteString(dkv("State reason", d.StateReason) + "\n")
-	st.WriteString(dkv("Last update", emptyDash(d.LastUpdateStatus)) + "\n")
-	st.WriteString(dkv("Update reason", d.LastUpdateStatusReason))
-	out = append(out, section{Title: "State & health", Body: st.String()})
-
-	// VPC networking.
-	out = append(out, section{Title: "VPC networking", Body: vpcBody(d)})
-
-	// Environment variables (keys only).
-	out = append(out, section{Title: envTitle(d), Body: envBody(d)})
-
-	// Layers.
-	out = append(out, section{Title: "Layers", Body: layersBody(d.Layers)})
-
-	// Code package / repository.
-	out = append(out, section{Title: "Code package", Body: codeBody(d)})
-
-	// Resource-based policy (who may invoke the function).
-	out = append(out, section{Title: "Resource policy", Body: resourcePolicyBody(d)})
-
-	// What invokes it, and how: triggers, versions/aliases, URLs, async.
+	// What invokes it, and how.
 	out = append(out, section{Title: "Triggers", Body: triggersBody(d)})
-	out = append(out, section{Title: "Versions & aliases", Body: versionsBody(d)})
-	out = append(out, section{Title: "Function URL", Body: urlBody(d)})
+	vs := section{Title: "Versions & aliases", Body: versionsBody(d)}
+	if len(d.Aliases) == 0 && len(d.Versions) == 0 && len(d.Provisioned) == 0 &&
+		d.AliasesErr == "" && d.VersionsErr == "" && d.ProvisionedErr == "" {
+		vs.Empty = "only $LATEST — no published versions or aliases"
+	}
+	out = append(out, vs)
+	url := section{Title: "Function URL", Body: urlBody(d)}
+	if len(d.URLs) == 0 && d.URLsErr == "" {
+		url.Empty = "no function URL"
+	}
+	out = append(out, url)
 	out = append(out, section{Title: "Async invocation", Body: asyncBody(d)})
 
-	// Tags.
-	out = append(out, section{Title: tagsTitle(d.Tags), Body: tagsBody(d.Tags)})
+	// Permissions: the role it runs as, and who may invoke it.
+	out = append(out, section{Title: "Permissions", Body: dkv("Execution role", d.Role) + "\n\n" +
+		lipgloss.NewStyle().Foreground(lipgloss.Color(ui.ColorMuted())).Render("  Resource policy — who may invoke it:") + "\n" + resourcePolicyBody(d)})
 
+	net := section{Title: "Networking", Body: vpcBody(d)}
+	if d.VpcID == "" && len(d.SubnetIDs) == 0 && len(d.SecurityGroupIDs) == 0 {
+		net.Empty = "not attached to a VPC (Lambda-managed network)"
+	}
+	out = append(out, net)
+
+	env := section{Title: envTitle(d), Body: envBody(d)}
+	if len(d.EnvKeys) == 0 && d.EnvError == "" {
+		env.Empty = "no environment variables"
+	}
+	out = append(out, env)
+
+	layers := section{Title: fmt.Sprintf("Layers (%d)", len(d.Layers)), Body: layersBody(d.Layers)}
+	if len(d.Layers) == 0 {
+		layers.Empty = "no layers"
+	}
+	out = append(out, layers)
+
+	out = append(out, section{Title: "Code package", Body: codeBody(d)})
+
+	tags := section{Title: tagsTitle(d.Tags), Body: tagsBody(d.Tags)}
+	if len(d.Tags) == 0 {
+		tags.Empty = "no tags"
+	}
+	out = append(out, tags)
 	return out
 }
 

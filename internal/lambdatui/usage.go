@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"math"
 	"sort"
 	"strings"
 	"sync"
@@ -34,6 +35,7 @@ type FunctionUsage struct {
 	UsageKnown     bool
 	Invocations30d float64
 	LastInvoked    time.Time // start of the last UTC day with an invocation (zero = none in 30 days)
+	Daily          []float64 // invocations per UTC day, oldest first (NaN = no datapoint), for the sparkline
 
 	LogKnown      bool
 	LogExists     bool
@@ -173,6 +175,13 @@ func usageMetrics(ctx context.Context, api metricsAPI, fns []Function, now time.
 		}
 		sums := make([]float64, len(chunk))
 		last := make([]time.Time, len(chunk))
+		daily := make([][]float64, len(chunk))
+		for i := range daily {
+			daily[i] = make([]float64, usageDays)
+			for d := range daily[i] {
+				daily[i][d] = math.NaN()
+			}
+		}
 		failed := map[int]bool{}
 		cctx, cancel := context.WithTimeout(ctx, activityMetricsTimeout)
 		p := cloudwatch.NewGetMetricDataPaginator(api, &cloudwatch.GetMetricDataInput{
@@ -195,7 +204,16 @@ func usageMetrics(ctx context.Context, api metricsAPI, fns []Function, now time.
 				}
 				for k, v := range r.Values {
 					sums[i] += v
-					if v > 0 && k < len(r.Timestamps) && r.Timestamps[k].After(last[i]) {
+					if k >= len(r.Timestamps) {
+						continue
+					}
+					if d := int(r.Timestamps[k].Sub(start).Hours() / 24); d >= 0 && d < usageDays {
+						if math.IsNaN(daily[i][d]) {
+							daily[i][d] = 0
+						}
+						daily[i][d] += v
+					}
+					if v > 0 && r.Timestamps[k].After(last[i]) {
 						last[i] = r.Timestamps[k]
 					}
 				}
@@ -212,7 +230,7 @@ func usageMetrics(ctx context.Context, api metricsAPI, fns []Function, now time.
 				continue
 			}
 			u := out[usageKey(f.Region, f.Name)]
-			u.UsageKnown, u.Invocations30d, u.LastInvoked = true, sums[i], last[i]
+			u.UsageKnown, u.Invocations30d, u.LastInvoked, u.Daily = true, sums[i], last[i], daily[i]
 		}
 	}
 }

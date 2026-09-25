@@ -7,13 +7,27 @@ version and compatible runtimes, an event-source mapping's source, state and
 batch size. Once the list is on screen, each function's **invocations over the
 last 30 days** and the **day it was last invoked** fill in (a background load —
 see [Usage and access](#usage-and-access)). Press **Enter** on a function to
-open its full configuration as a **grid of panels** (btop-style, like `emr`
-describe) — Overview, Resources & limits, State, **VPC networking**,
-**Environment** (variable keys only — values are never shown), **Layers**,
-**Code package**, **Resource policy**, **Triggers**, **Versions & aliases**,
-**Function URL**, **Async invocation** and **Tags** — each a separately
-scrollable tile, fetched on demand. `Tab`/arrows move focus between tiles.
-**Enter** on a layer or event source opens its panels from the loaded data.
+open its **detail page**, fetched on demand:
+
+- a **header band** — the name, its state (coloured), runtime · architecture ·
+  memory · timeout, the description, when it was last modified ("25 days
+  ago") and its ARN;
+- three **summary cards** — **Health** (state, last update, concurrency, code
+  size), **Usage · 30 days** (invocation count, a daily sparkline, last
+  invoked, log retention and size) and **Findings** (this function's findings,
+  coloured by severity);
+- the **sections** — **Configuration**, **Triggers**, **Versions & aliases**,
+  **Function URL**, **Async invocation**, **Permissions** (execution role and
+  resource policy), **Networking**, **Environment** (variable keys only —
+  values are never shown), **Layers**, **Code package** and **Tags** — each a
+  titled panel at its natural height, packed into one to three columns by
+  width. Sections with nothing to show (no VPC, no layers, no URL…) fold into
+  one **Not configured** card instead of each taking a panel.
+
+The page scrolls as a whole (`↑/↓`, `PgUp/PgDn`, `g/G`); `Tab`/`Shift+Tab`
+move focus between panels and scroll the focused one into view; `y` copies
+the focused panel's text (e.g. the resource policy). **Enter** on a layer or
+event source opens the same page from the loaded data.
 
 ```bash
 ./bin/aws_explorer lambda [--region us-east-1 | --all-regions] [--theme <name>]
@@ -31,9 +45,9 @@ scrollable tile, fetched on demand. `Tab`/arrows move focus between tiles.
 
 | Key | Action |
 |-----|--------|
-| `Tab` / `Shift+Tab` | Switch pane (or, in the detail view, move focus between panels) |
-| `↑/↓` (`j/k`) | Move selection (or scroll the focused detail panel) |
-| `Enter` | Open the selected resource's **detail grid** — a full-screen set of per-section panels (functions fetch their configuration on demand; layers and event sources render from loaded data). `Tab`/arrows move between tiles; the focused tile scrolls |
+| `Tab` / `Shift+Tab` | Switch pane (or, on the detail page, move focus between panels) |
+| `↑/↓` (`j/k`) | Move selection (or scroll the detail page) |
+| `Enter` | Open the selected resource's **detail page** — header, summary cards and sections (functions fetch their configuration on demand; layers and event sources render from loaded data). `y` there copies the focused panel |
 | `f` | **Findings** — deterministic checks (deprecated runtimes, missing dead-letter queues, failed state, idle functions, log groups that never expire, public function URLs/policies, arm64 candidates) over the loaded functions; `y` copies the suggested fix |
 | `a` | (Functions) **Activity** for a day or a range — invocation counts, performance and a regex search of the logs ([below](#activity-invocations-and-log-search-for-a-day)) |
 | `L` | (Functions) open the function's CloudWatch logs (`/aws/lambda/<name>`) |

@@ -3,6 +3,7 @@ package lambdatui
 import (
 	"context"
 	"log/slog"
+	"math"
 	"os"
 	"os/exec"
 	"time"
@@ -70,18 +71,18 @@ type m struct {
 	filter       textinput.Model
 	filterActive bool
 
-	// Resource-detail view (Enter on a row): a full-screen, btop-style grid of
-	// per-section panels (overview, resources, VPC, environment, layers, code,
-	// tags…), one independently-scrollable tile each. Functions fetch GetFunction
-	// on demand (detailLoading until the detailMsg lands); layers and event
-	// sources build their sections synchronously from the loaded inventory.
-	// detailFocus is the focused tile; detailPanels holds one viewport per section.
+	// Resource-detail view (Enter on a row): one scrolling page of titled
+	// panels (detail_panels.go) — for a function a header band, summary cards
+	// and the sections. Functions fetch GetFunction on demand (detailLoading
+	// until the detailMsg lands); layers and event sources build their sections
+	// synchronously from the loaded inventory. detailFocus is the focused panel,
+	// detailOffset the page's scroll position.
 	detailActive   bool
 	detailTitle    string
 	detailKey      string         // region/name of the function being described (stale-adopt guard)
 	detailFunc     FunctionDetail // the loaded detail (for the code browser's CodeLocation)
 	detailSections []section
-	detailPanels   []viewport.Model
+	detailOffset   int
 	detailFocus    int
 	detailLoading  bool
 	detailErr      error
@@ -509,24 +510,26 @@ func (mm *m) handleKey(msg tea.KeyMsg) []tea.Cmd {
 		case "esc", "enter", "backspace":
 			mm.detailActive = false
 		case "tab", "right", "l", "n":
-			mm.focusPanel(mm.detailFocus + 1)
+			mm.focusDetailPanel(1)
 		case "shift+tab", "left", "h", "p":
-			mm.focusPanel(mm.detailFocus - 1)
+			mm.focusDetailPanel(-1)
 		case "up", "k":
-			mm.scrollPanel(-1)
+			mm.scrollDetail(-1)
 		case "down", "j":
-			mm.scrollPanel(1)
+			mm.scrollDetail(1)
 		case "pgup":
-			mm.scrollPanel(-panelPageStep)
+			mm.scrollDetail(-(mm.detailPageHeight() - 2))
 		case "pgdown", "pgdn", " ":
-			mm.scrollPanel(panelPageStep)
+			mm.scrollDetail(mm.detailPageHeight() - 2)
 		case "g", "home":
-			if p := mm.focusedPanel(); p != nil {
-				p.GotoTop()
-			}
+			mm.detailOffset, mm.detailFocus = 0, 0
 		case "G", "end":
-			if p := mm.focusedPanel(); p != nil {
-				p.GotoBottom()
+			mm.scrollDetail(math.MaxInt32)
+		case "y":
+			if txt := mm.focusedPanelText(); txt != "" {
+				_ = clipboard.WriteAll(txt)
+				mm.setToast("Copied the panel's text")
+				cmds = append(cmds, toastCmd(3*time.Second))
 			}
 		case "v":
 			mm.requestCode(&cmds)
@@ -652,7 +655,7 @@ func (mm *m) openDetail(cmds *[]tea.Cmd) {
 	mm.detailErr = nil
 	mm.detailFocus = 0
 	mm.detailSections = nil
-	mm.detailPanels = nil
+	mm.detailOffset = 0
 	mm.detailFunc = FunctionDetail{} // repopulated only when a function's detail loads
 	switch r.typ {
 	case "function":
@@ -679,12 +682,11 @@ func (mm *m) openDetail(cmds *[]tea.Cmd) {
 	}
 }
 
-// setDetailSections adopts a fresh set of sections and allocates one viewport per
-// section (sized lazily on the first render), resetting focus to the first tile.
+// setDetailSections adopts a fresh set of sections, back at the top of the
+// page with the first panel focused.
 func (mm *m) setDetailSections(sections []section) {
 	mm.detailSections = sections
-	mm.detailPanels = make([]viewport.Model, len(sections))
-	mm.detailFocus = 0
+	mm.detailOffset, mm.detailFocus = 0, 0
 }
 
 // startReload kicks off an inventory reload unless one is already running, so a

@@ -31,8 +31,8 @@ func TestFunctionSections(t *testing.T) {
 	secs := d.sections()
 
 	// Each requested concept is its own panel.
-	for _, want := range []string{"Overview", "Resources & limits", "State & health", "VPC networking", "Layers", "Code package",
-		"Resource policy", "Triggers", "Versions & aliases", "Function URL", "Async invocation"} {
+	for _, want := range []string{"Configuration", "Triggers", "Versions & aliases", "Function URL", "Async invocation",
+		"Permissions", "Networking", "Layers (1)", "Code package"} {
 		if _, ok := sectionTitled(secs, want); !ok {
 			t.Errorf("missing section %q (got %d sections)", want, len(secs))
 		}
@@ -61,7 +61,7 @@ func TestFunctionSections(t *testing.T) {
 	}
 
 	// VPC panel shows the attachment.
-	vpc, _ := sectionTitled(secs, "VPC networking")
+	vpc, _ := sectionTitled(secs, "Networking")
 	if !strings.Contains(vpc.Body, "vpc-1") || !strings.Contains(vpc.Body, "sg-1") {
 		t.Errorf("vpc body = %q", vpc.Body)
 	}
@@ -147,21 +147,10 @@ func TestEventSourceSections(t *testing.T) {
 	}
 }
 
-func TestDistribute(t *testing.T) {
-	got := distribute(7, 2)
-	if len(got) != 2 || got[0] != 4 || got[1] != 3 {
-		t.Errorf("distribute(7,2) = %v", got)
-	}
-	if distribute(5, 0) != nil {
-		t.Error("distribute with n=0 should be nil")
-	}
-}
-
-func TestSplitColumns(t *testing.T) {
-	cols := splitColumns(5, 2)
-	// Reading order preserved: [0,1,2] then [3,4].
-	if len(cols) != 2 || len(cols[0]) != 3 || cols[0][0] != 0 || cols[1][0] != 3 {
-		t.Errorf("splitColumns(5,2) = %v", cols)
+func TestSplitWidth(t *testing.T) {
+	w := splitWidth(100, 3)
+	if len(w) != 3 || w[0] != 32 || w[0]+w[1]+w[2]+2*panelGap != 100 {
+		t.Errorf("splitWidth(100,3) = %v", w)
 	}
 }
 
@@ -190,6 +179,14 @@ func TestEnvKeysAreSortedKeysOnly(t *testing.T) {
 	for _, k := range keys {
 		if k == "shh" || k == "x" {
 			t.Errorf("a value leaked into the keys: %v", keys)
+		}
+	}
+}
+
+func TestCardColCount(t *testing.T) {
+	for _, c := range []struct{ w, want int }{{190, 3}, {120, 2}, {98, 2}, {80, 1}} {
+		if got := cardColCount(3, c.w); got != c.want {
+			t.Errorf("cardColCount(3, %d) = %d, want %d", c.w, got, c.want)
 		}
 	}
 }

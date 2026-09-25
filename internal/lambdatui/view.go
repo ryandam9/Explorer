@@ -66,12 +66,13 @@ const lambdaAboutText = "This is the AWS Lambda dashboard. Tab across Functions,
 	"sources; each row shows health at a glance — a function's runtime, memory, " +
 	"timeout and state, a layer's latest version and compatible runtimes, an event-" +
 	"source mapping's source, state and batch size.\n\n" +
-	"Press Enter on a function to open its full configuration as a grid of panels — " +
-	"overview, resources & limits, state, VPC networking, environment-variable keys " +
-	"(values are never shown), layers, code package, resource policy and tags — each a " +
-	"separately scrollable tile (fetched on demand), plus what invokes it: triggers (event-" +
-	"source mappings and the resource policy's callers), versions & aliases, the function " +
-	"URL and the async-invocation settings. Tab/arrows move between tiles. On a " +
+	"Press Enter on a function to open its detail page (fetched on demand): a header with " +
+	"its state and key settings; Health, Usage (30 days) and Findings cards; then " +
+	"configuration, triggers (event-source mappings and the resource policy's callers), " +
+	"versions & aliases, function URL, async invocation, permissions, networking, " +
+	"environment-variable keys (values are never shown), layers, code and tags — empty " +
+	"ones folded into one Not configured card. The page scrolls; Tab moves between " +
+	"panels and y copies the focused one. On a " +
 	"Zip function, v downloads the deployment package (opt-in, after a confirmation) and " +
 	"lets you browse and read its syntax-highlighted source files. Enter on a layer or " +
 	"event source opens its panels from the loaded data.\n\n" +
@@ -227,7 +228,8 @@ func (mm *m) statusLeft() string {
 		if mm.detailLoading {
 			return mm.detailTitle + "  ·  loading…"
 		}
-		return fmt.Sprintf("%s  ·  panel %d/%d", mm.detailTitle, mm.detailFocus+1, len(mm.detailSections))
+		cards, secs := mm.panelSet()
+		return fmt.Sprintf("%s  ·  panel %d/%d", mm.detailTitle, mm.detailFocus+1, len(cards)+len(secs))
 	}
 	if mm.findingsActive {
 		return "Findings: " + findings.Summary(mm.findingList)
@@ -254,8 +256,9 @@ func (mm *m) helpHints() []ui.KeyHint {
 	}
 	if mm.detailActive {
 		return []ui.KeyHint{
-			ui.H("Tab", "panel"),
+			ui.H("Tab", "next panel"),
 			ui.H("↑/↓", "scroll"),
+			ui.H("y", "copy panel"),
 			ui.H("v", "view code"),
 			ui.H("Esc", "back"),
 			ui.H("i", "about"),
