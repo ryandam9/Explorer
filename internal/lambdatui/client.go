@@ -16,6 +16,8 @@ import (
 	"time"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
+	"github.com/aws/aws-sdk-go-v2/service/cloudwatch"
+	"github.com/aws/aws-sdk-go-v2/service/cloudwatchlogs"
 	awsec2 "github.com/aws/aws-sdk-go-v2/service/ec2"
 	"github.com/aws/aws-sdk-go-v2/service/lambda"
 	lambdatypes "github.com/aws/aws-sdk-go-v2/service/lambda/types"
@@ -95,6 +97,8 @@ type Inventory struct {
 // console-link ARN fallback when a list response omits an ARN).
 type Client struct {
 	clients   map[string]*lambda.Client
+	metrics   map[string]metricsAPI // CloudWatch, for the activity view's invocation counts
+	logs      map[string]logsAPI    // CloudWatch Logs, for the activity view's log scan
 	regions   []string
 	accountID string
 }
@@ -121,12 +125,16 @@ func NewClient(ctx context.Context, awsCfg *config.AWSConfig, regions []string, 
 	sort.Strings(regions)
 
 	clients := make(map[string]*lambda.Client, len(regions))
+	metrics := make(map[string]metricsAPI, len(regions))
+	logs := make(map[string]logsAPI, len(regions))
 	for _, r := range regions {
 		rCfg := base.Copy()
 		rCfg.Region = r
 		clients[r] = lambda.NewFromConfig(rCfg)
+		metrics[r] = cloudwatch.NewFromConfig(rCfg)
+		logs[r] = cloudwatchlogs.NewFromConfig(rCfg)
 	}
-	return &Client{clients: clients, regions: regions, accountID: resolveAccountID(ctx, base)}, nil
+	return &Client{clients: clients, metrics: metrics, logs: logs, regions: regions, accountID: resolveAccountID(ctx, base)}, nil
 }
 
 // resolveAccountID looks up the caller's account ID; an empty string (when

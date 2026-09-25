@@ -111,6 +111,10 @@ type m struct {
 	findingList    []findings.Finding
 	findingsTbl    table.Model
 
+	// Activity view (a on a function): invocation counts for a day plus a regex
+	// scan of that day's logs. See activity_view.go.
+	act activityState
+
 	// loadGen tags each load so a refresh's stragglers can't patch a newer load.
 	loadGen int
 
@@ -178,6 +182,7 @@ func NewModel(ctx context.Context, awsCfg *config.AWSConfig, regions []string, a
 		spinner:     s,
 		tbl:         newLambdaTable(tabColumns(tabFunctions, len(activeRegions) > 1)),
 		findingsTbl: newLambdaTable(findingsColumns(len(activeRegions) > 1)),
+		act:         activityState{inputs: newActivityInputs()},
 		loading:     true,
 		sortCol:     -1,
 	}, nil
@@ -375,8 +380,23 @@ func (mm *m) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 		}
 
+	case activityMetricsMsg:
+		mm.handleActivityMetrics(msg)
+
+	case activityPageMsg:
+		mm.handleActivityPage(msg, &cmds)
+
 	case tea.KeyMsg:
 		cmds = append(cmds, mm.handleKey(msg)...)
+
+	default:
+		// The activity form's text inputs blink their cursor via their own
+		// messages; route those to the focused field.
+		if mm.act.formActive {
+			var cmd tea.Cmd
+			mm.act.inputs[mm.act.focus], cmd = mm.act.inputs[mm.act.focus].Update(msg)
+			cmds = append(cmds, cmd)
+		}
 	}
 
 	return mm, tea.Batch(cmds...)
@@ -399,6 +419,17 @@ func (mm *m) handleKey(msg tea.KeyMsg) []tea.Cmd {
 
 	if mm.showAbout {
 		mm.showAbout = false
+		return cmds
+	}
+
+	// The activity form floats over whichever screen opened it, and the activity
+	// report owns the whole screen, so both claim keys first.
+	if mm.act.formActive {
+		mm.handleActivityFormKey(msg, &cmds)
+		return cmds
+	}
+	if mm.act.active {
+		mm.handleActivityKey(msg, &cmds)
 		return cmds
 	}
 
@@ -543,6 +574,8 @@ func (mm *m) handleKey(msg tea.KeyMsg) []tea.Cmd {
 			mm.tbl.SetCursor(0)
 			mm.rebuild()
 		}
+	case "a":
+		mm.openActivityForm()
 	case "L":
 		if fn, ok := mm.selectedFunction(); ok {
 			cmds = append(cmds, mm.jumpToLogsCmd(fn.LogGroup, fn.Region))
@@ -655,6 +688,9 @@ func max(a, b int) int {
 
 func (mm *m) PageTitle() string {
 	base := "AWS Lambda"
+	if mm.act.active {
+		return base + " › Activity — " + mm.act.query.Function
+	}
 	if mm.codeActive {
 		return base + " › " + mm.codeTitle
 	}

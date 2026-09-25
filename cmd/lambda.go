@@ -4,9 +4,13 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"os/signal"
+	"regexp"
 	"strings"
+	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/mattn/go-isatty"
 	"github.com/spf13/cobra"
 
 	"github.com/ryandam9/aws_explorer/internal/lambdatui"
@@ -150,11 +154,136 @@ var lambdaEventSourcesCmd = &cobra.Command{
 	},
 }
 
+var (
+	lambdaActivityDate     string
+	lambdaActivityPattern  string
+	lambdaActivityFilter   string
+	lambdaActivityLimit    int
+	lambdaActivityUTC      bool
+	lambdaActivityLogGroup string
+)
+
+var lambdaActivityCmd = &cobra.Command{
+	Use:   "activity <function>",
+	Short: "Count a function's invocations on a day and grep that day's logs with a regex",
+	Long: `Answer "what did this function do on this day?".
+
+Invocations: the day's AWS/Lambda Invocations, Errors and Throttles (Sum per
+hour) from CloudWatch metrics — one batched GetMetricData call. The count is
+every invocation, including retries of failed async (e.g. S3-triggered) events.
+
+Log scan (with --pattern): reads the day's events from the function's log group
+(its LoggingConfig group, else /aws/lambda/<name>) and keeps those matching the
+Go regular expression, pulling the request ID and level out of each line and
+each capture group into its own column. It also counts START lines — the
+invocations the logs saw — as a cross-check on the metric. The scan is bounded
+(--limit matches, and a page budget); when a bound ends it early the output says
+so. --filter adds a server-side CloudWatch Logs filter pattern to read less
+data (START lines are then not counted).
+
+The day is a calendar day in your local time zone (--utc for UTC): --date takes
+YYYY-MM-DD, today (the default) or yesterday.
+
+Output: table prints the summary, the hourly breakdown and the matches; json the
+whole report; ndjson and csv one row per match (per hour without --pattern).`,
+	Example: `  # How many times did it run yesterday?
+  aws_explorer lambda activity copy-object --date yesterday
+
+  # Which objects did it copy on the 24th? (capture groups become columns)
+  aws_explorer lambda activity copy-object --date 2026-09-24 \
+      --pattern 'Copied s3://(?P<src>\S+) to s3://(?P<dst>\S+)'
+
+  # Errors only, case-insensitive, as CSV
+  aws_explorer lambda activity copy-object -p '(?i)error|exception' -o csv`,
+	Args: cobra.ExactArgs(1),
+	RunE: func(cmd *cobra.Command, args []string) error {
+		if err := output.ValidateFormat(outputFormat); err != nil {
+			return err
+		}
+		loc := time.Local
+		if lambdaActivityUTC {
+			loc = time.UTC
+		}
+		now := time.Now()
+		day, err := lambdatui.ParseDay(lambdaActivityDate, now, loc)
+		if err != nil {
+			return err
+		}
+		var re *regexp.Regexp
+		if lambdaActivityPattern != "" {
+			if re, err = regexp.Compile(lambdaActivityPattern); err != nil {
+				return fmt.Errorf("invalid --pattern: %w", err)
+			}
+		} else if lambdaActivityFilter != "" {
+			return fmt.Errorf("--filter narrows the log scan, which needs --pattern (use --pattern . to keep every filtered event)")
+		}
+
+		ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
+		defer stop()
+		SilenceScanLogs()
+		client, err := newLambdaClient(ctx)
+		if err != nil {
+			return err
+		}
+		fn, warning, err := client.ResolveFunction(ctx, args[0])
+		if err != nil {
+			return err
+		}
+		if warning != "" {
+			fmt.Fprintf(os.Stderr, "warning: %s\n", warning)
+		}
+		if lambdaActivityLogGroup != "" {
+			fn.LogGroup = lambdaActivityLogGroup
+		}
+
+		q := lambdatui.ActivityQuery{
+			Region: fn.Region, Function: fn.Name, LogGroup: fn.LogGroup,
+			Day: day, Pattern: re, Filter: lambdaActivityFilter, MaxMatches: lambdaActivityLimit,
+		}
+		report := lambdatui.ActivityReport{Query: q, Now: now}
+		report.Stats, report.StatsErr = client.InvocationStats(ctx, fn.Region, fn.Name, day)
+		if report.StatsErr != nil {
+			fmt.Fprintf(os.Stderr, "warning: invocation metrics unavailable: %v\n", report.StatsErr)
+		}
+		if re != nil {
+			var progress func(*lambdatui.LogScan)
+			if isatty.IsTerminal(os.Stderr.Fd()) {
+				progress = func(s *lambdatui.LogScan) {
+					fmt.Fprintf(os.Stderr, "\rscanning %s … %d events, %d matches", fn.LogGroup, s.Events, len(s.Matches))
+				}
+			}
+			report.Scan = client.ScanLogs(ctx, q, progress)
+			if progress != nil {
+				fmt.Fprint(os.Stderr, "\r\033[K")
+			}
+			if note := report.Scan.ScanNote(); note != "" {
+				fmt.Fprintf(os.Stderr, "warning: %s\n", note)
+			}
+		}
+		if err := lambdatui.RenderActivity(os.Stdout, report, outputFormat, noHeader); err != nil {
+			return err
+		}
+		if report.StatsErr != nil && (report.Scan == nil || report.Scan.Err != nil) {
+			return fmt.Errorf("no activity data could be read for %s", fn.Name)
+		}
+		return nil
+	},
+}
+
+func init() {
+	lambdaActivityCmd.Flags().StringVar(&lambdaActivityDate, "date", "today", "day to report: YYYY-MM-DD, today or yesterday (local time; see --utc)")
+	lambdaActivityCmd.Flags().StringVarP(&lambdaActivityPattern, "pattern", "p", "", "Go regular expression to scan the day's log events for; capture groups become columns")
+	lambdaActivityCmd.Flags().StringVar(&lambdaActivityFilter, "filter", "", "server-side CloudWatch Logs filter pattern applied before --pattern (reads less data)")
+	lambdaActivityCmd.Flags().IntVar(&lambdaActivityLimit, "limit", lambdatui.DefaultMaxMatches, "stop the log scan after this many matches")
+	lambdaActivityCmd.Flags().BoolVar(&lambdaActivityUTC, "utc", false, "interpret --date as a UTC day and print times in UTC")
+	lambdaActivityCmd.Flags().StringVar(&lambdaActivityLogGroup, "log-group", "", "log group to scan (default: the function's configured group, else /aws/lambda/<name>)")
+}
+
 func init() {
 	lambdaCmd.Flags().StringVar(&lambdaTheme, "theme", defaultThemeName, "Color theme ("+strings.Join(ui.ThemeNames(), ", ")+")")
 	registerAlwaysTUIFlag(lambdaCmd)
 	registerThemeCompletion(lambdaCmd, ui.ThemeNames())
 
-	lambdaCmd.AddCommand(lambdaFunctionsCmd, lambdaLayersCmd, lambdaEventSourcesCmd)
+	lambdaCmd.AddCommand(lambdaFunctionsCmd, lambdaLayersCmd, lambdaEventSourcesCmd, lambdaActivityCmd)
 	rootCmd.AddCommand(lambdaCmd)
 }

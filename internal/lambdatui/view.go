@@ -21,7 +21,9 @@ func (mm *m) View() string {
 		sb.WriteString(badge + "\n")
 	}
 
-	if mm.codeActive {
+	if mm.act.active {
+		sb.WriteString(mm.renderActivity())
+	} else if mm.codeActive {
 		sb.WriteString(mm.renderCode())
 	} else if mm.detailActive {
 		sb.WriteString(mm.renderDetail())
@@ -48,6 +50,9 @@ func (mm *m) View() string {
 	if mm.codeConfirm {
 		frame = ui.OverlayCenterBlank(mm.renderCodeConfirm(), mm.width, mm.height)
 	}
+	if mm.act.formActive {
+		frame = ui.OverlayCenterBlank(mm.renderActivityForm(), mm.width, mm.height)
+	}
 	if mm.showAbout {
 		frame = ui.OverlayCenterBlank(ui.AboutView("About — AWS Lambda", lambdaAboutText, ui.AboutWidth(mm.width)), mm.width, mm.height)
 	}
@@ -71,6 +76,10 @@ const lambdaAboutText = "This is the AWS Lambda dashboard. Tab across Functions,
 	"Press f for the findings panel — deterministic runtime/health checks (deprecated " +
 	"or soon-deprecating runtimes, missing dead-letter queues, failed-state functions) " +
 	"over the loaded functions; y copies the suggested fix.\n\n" +
+	"On a function, a opens its activity for a day: the invocation count (CloudWatch " +
+	"Invocations/Errors/Throttles, per hour) and, given a regex, a table of that day's " +
+	"matching log events with the request ID, level and each capture group in its own " +
+	"column; [ and ] step a day, e re-edits the query.\n\n" +
 	"On a function, L opens its CloudWatch logs (/aws/lambda/<name>). Press S to cycle " +
 	"the column the active tab is sorted by (R reverses the direction), o on any row to " +
 	"open it in the AWS console, / to filter, r to refresh, and ~ for the live debug pane."
@@ -178,6 +187,12 @@ func boxStyle(width, height int) lipgloss.Style {
 }
 
 func (mm *m) statusLeft() string {
+	if mm.act.formActive {
+		return "Activity: " + mm.act.fn.Name + "  ·  enter a day and a regex"
+	}
+	if mm.act.active {
+		return mm.activityStatusLeft()
+	}
 	if mm.codeActive {
 		if mm.codeLoading {
 			return mm.codeTitle + "  ·  downloading…"
@@ -204,6 +219,12 @@ func (mm *m) statusLeft() string {
 }
 
 func (mm *m) helpHints() []ui.KeyHint {
+	if mm.act.formActive {
+		return []ui.KeyHint{ui.H("Tab", "field"), ui.H("Enter", "run"), ui.H("Esc", "cancel")}
+	}
+	if mm.act.active {
+		return mm.activityHints()
+	}
 	if mm.codeActive {
 		if mm.codeViewing {
 			return []ui.KeyHint{ui.H("↑/↓", "scroll"), ui.H("y", "copy"), ui.H("Esc", "back"), ui.H("q", "quit")}
@@ -235,7 +256,7 @@ func (mm *m) helpHints() []ui.KeyHint {
 		ui.H("Enter", "detail"),
 	}
 	if mm.tab == tabFunctions {
-		hints = append(hints, ui.H("L", "logs"))
+		hints = append(hints, ui.H("a", "activity"), ui.H("L", "logs"))
 	}
 	hints = append(hints, ui.H("f", "findings"), ui.H("S", "sort"))
 	if mm.sortCol >= 0 {
