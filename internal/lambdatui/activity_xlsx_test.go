@@ -62,14 +62,16 @@ func TestWriteActivityWorkbook(t *testing.T) {
 	sheet := "Matches 2026-09-24"
 
 	rows, _ := f.GetRows(sheet)
-	wantHeader := []string{"Time (AEST)", "Request ID", "Request ID from START", "Level", "db", "size", "Message", "Log stream"}
+	// The traceback line (no ID: inherits the START's) logged an ERROR, so its
+	// invocation is marked failed and the column appears.
+	wantHeader := []string{"Time (AEST)", "Request ID", "Request ID from START", "Invocation failed", "Level", "db", "size", "Message", "Log stream"}
 	if strings.Join(rows[0], "|") != strings.Join(wantHeader, "|") {
 		t.Errorf("header = %q, want %q", rows[0], wantHeader)
 	}
 	if len(rows) != 4 {
 		t.Fatalf("rows = %d, want header + 3", len(rows))
 	}
-	if rows[1][1] != "3f772d5c-ddd1-4e9f-96e2-661d2ac65c6c" || rows[1][4] != "asx" || rows[1][5] != "2.33 MB" {
+	if rows[1][1] != "3f772d5c-ddd1-4e9f-96e2-661d2ac65c6c" || rows[1][3] != "logged an error" || rows[1][5] != "asx" || rows[1][6] != "2.33 MB" {
 		t.Errorf("first match row = %q", rows[1])
 	}
 	if rows[2][2] != "yes" {
@@ -85,14 +87,14 @@ func TestWriteActivityWorkbook(t *testing.T) {
 	}
 
 	// A log line that looks like a formula stays text.
-	if formula, _ := f.GetCellFormula(sheet, "G3"); formula != "" {
+	if formula, _ := f.GetCellFormula(sheet, "H3"); formula != "" {
 		t.Errorf("log text became a formula: %q", formula)
 	}
-	if v, _ := f.GetCellValue(sheet, "G3"); !strings.HasPrefix(v, "=HYPERLINK") {
+	if v, _ := f.GetCellValue(sheet, "H3"); !strings.HasPrefix(v, "=HYPERLINK") {
 		t.Errorf("formula-looking text should be kept as text: %q", v)
 	}
 	// Traceback lines (bare \r) become real line breaks in a wrapping cell.
-	if v, _ := f.GetCellValue(sheet, "G4"); !strings.Contains(v, "boom\nTraceback") {
+	if v, _ := f.GetCellValue(sheet, "H4"); !strings.Contains(v, "boom\nTraceback") {
 		t.Errorf("\\r should become a line break: %q", v)
 	}
 
@@ -104,14 +106,14 @@ func TestWriteActivityWorkbook(t *testing.T) {
 	if len(hs.Fill.Color) == 0 || !strings.EqualFold("#"+strings.TrimPrefix(hs.Fill.Color[0], "#"), xlsxHeaderFill) || hs.Font == nil || !hs.Font.Bold {
 		t.Errorf("header style = fill %v font %+v", hs.Fill, hs.Font)
 	}
-	if ds := cellStyle(t, f, sheet, "G4"); len(ds.Border) != 4 || ds.Alignment == nil || !ds.Alignment.WrapText {
+	if ds := cellStyle(t, f, sheet, "H4"); len(ds.Border) != 4 || ds.Alignment == nil || !ds.Alignment.WrapText {
 		t.Errorf("message cells should be bordered and wrapped: %+v", ds)
 	}
 	if es := cellStyle(t, f, sheet, "J10"); len(es.Border) != 0 || len(es.Fill.Color) == 0 || !strings.EqualFold("#"+strings.TrimPrefix(es.Fill.Color[0], "#"), xlsxWhite) {
 		t.Errorf("cells outside the data should be white with no border: %+v", es)
 	}
 
-	if w, _ := f.GetColWidth(sheet, "G"); w != xlsxMessageWidth {
+	if w, _ := f.GetColWidth(sheet, "H"); w != xlsxMessageWidth {
 		t.Errorf("message column width = %v, want %d (the white fill must not reset widths)", w, xlsxMessageWidth)
 	}
 

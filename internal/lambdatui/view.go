@@ -69,17 +69,22 @@ const lambdaAboutText = "This is the AWS Lambda dashboard. Tab across Functions,
 	"Press Enter on a function to open its full configuration as a grid of panels — " +
 	"overview, resources & limits, state, VPC networking, environment-variable keys " +
 	"(values are never shown), layers, code package, resource policy and tags — each a " +
-	"separately scrollable tile (fetched on demand). Tab/arrows move between tiles. On a " +
+	"separately scrollable tile (fetched on demand), plus what invokes it: triggers (event-" +
+	"source mappings and the resource policy's callers), versions & aliases, the function " +
+	"URL and the async-invocation settings. Tab/arrows move between tiles. On a " +
 	"Zip function, v downloads the deployment package (opt-in, after a confirmation) and " +
 	"lets you browse and read its syntax-highlighted source files. Enter on a layer or " +
 	"event source opens its panels from the loaded data.\n\n" +
-	"Press f for the findings panel — deterministic runtime/health checks (deprecated " +
-	"or soon-deprecating runtimes, missing dead-letter queues, failed-state functions) " +
-	"over the loaded functions; y copies the suggested fix.\n\n" +
-	"On a function, a opens its activity for a day: the invocation count (CloudWatch " +
-	"Invocations/Errors/Throttles, per hour) and a table of that day's log events — " +
-	"those a regex matches, or every event when it is left empty — with the request ID, " +
-	"level and each capture group in its own column; [ and ] step a day, e re-edits the " +
+	"The INVOKES 30D and LAST INVOKED columns fill in after the list loads (one batched " +
+	"CloudWatch read per region; ? means it couldn't be read). Press f for the findings " +
+	"panel — deprecated runtimes, missing dead-letter queues, failed state, idle functions, " +
+	"log groups that never expire, public function URLs and policies, arm64 candidates; " +
+	"y copies the suggested fix.\n\n" +
+	"On a function, a opens its activity for a day or a range (7d, A..B): the invocation " +
+	"count (per hour, or per day for a range), duration/memory/cold-start figures and an " +
+	"estimated cost from the REPORT lines, and a table of the log events — those a regex " +
+	"matches, or every event when it is left empty. Enter opens a match's whole " +
+	"invocation, E jumps to the next failed one, [ and ] step the window, e re-edits the " +
 	"query, X exports the rows to an Excel workbook.\n\n" +
 	"On a function, L opens its CloudWatch logs (/aws/lambda/<name>). Press S to cycle " +
 	"the column the active tab is sorted by (R reverses the direction), o on any row to " +
@@ -136,10 +141,20 @@ func (mm *m) renderTable() string {
 // renderFindings draws the deterministic runtime/health panel over the loaded
 // functions. The selected finding's detail and suggested fix sit in the footer.
 func (mm *m) renderFindings() string {
+	muted := lipgloss.NewStyle().Foreground(lipgloss.Color(ui.ColorMuted()))
 	head := lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color(ui.ColorHeading())).
-		Render(" Findings — runtime & health checks") + "\n" +
-		lipgloss.NewStyle().Foreground(lipgloss.Color(ui.ColorMuted())).
-			Render("  deterministic checks over the loaded functions · y copies the fix")
+		Render(" Findings — runtime, health, usage & access checks") + "\n" +
+		muted.Render("  deterministic checks over the loaded functions · y copies the fix")
+	w := max(mm.width-4, 20)
+	switch {
+	case mm.usageLoading:
+		head += "\n" + muted.Render("  "+mm.spinner.View()+" still reading usage, log groups and policies — those checks will appear when it lands")
+	case len(mm.usageNotes) > 0:
+		warn := lipgloss.NewStyle().Foreground(lipgloss.Color(ui.ColorWarning()))
+		for _, n := range mm.usageNotes {
+			head += "\n" + warn.Render(ansi.Truncate("  ⚠ "+n+" — the checks that need it stay silent", w, "…"))
+		}
+	}
 
 	if len(mm.findingList) == 0 {
 		return head + "\n\n  " + lipgloss.NewStyle().Foreground(lipgloss.Color(ui.ColorSuccess())).
@@ -159,7 +174,12 @@ func (mm *m) findingsFooter() string {
 		return ""
 	}
 	w := mm.width - 6
-	out := lipgloss.NewStyle().Foreground(lipgloss.Color(ui.ColorText())).Render("  " + truncate(f.Detail, w))
+	detail := strings.Split(ansi.Wrap(f.Detail, max(w, 20), ""), "\n")
+	if len(detail) > 3 {
+		detail = detail[:3]
+		detail[2] = ansi.Truncate(detail[2], max(w-1, 19), "") + "…"
+	}
+	out := lipgloss.NewStyle().Foreground(lipgloss.Color(ui.ColorText())).Render("  " + strings.Join(detail, "\n  "))
 	if f.Fix != "" {
 		out += "\n" + lipgloss.NewStyle().Foreground(lipgloss.Color(ui.ColorMuted())).
 			Render("    fix: "+truncate(f.Fix, w-6))

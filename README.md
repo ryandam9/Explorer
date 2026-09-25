@@ -97,7 +97,7 @@ Each command and TUI has a focused guide under [`docs/`](docs/):
 | [ECS triage](docs/ecs.md) | Recently stopped ECS tasks |
 | [Quotas](docs/quotas.md) | Service-quota utilization dashboard |
 | [Glue](docs/glue.md) · [EMR](docs/emr.md) | Data-platform dashboards |
-| [Lambda](docs/lambda.md) | Functions, layers & event-source mappings dashboard; per-day invocation counts & regex log search |
+| [Lambda](docs/lambda.md) | Functions, layers & event-source mappings dashboard with 30-day usage; triggers, versions & URLs per function; invocation counts, performance & regex log search over a day or range, with per-invocation drill-down; usage & access findings |
 | [Bill](docs/bill.md) | Cost Explorer summary (paid API) |
 | [IAM tools](docs/iam.md) | `iam decode`, `iam can` |
 | [Trail](docs/trail.md) | CloudTrail event feed and Lake queries |

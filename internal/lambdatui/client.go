@@ -99,6 +99,7 @@ type Client struct {
 	clients   map[string]*lambda.Client
 	metrics   map[string]metricsAPI // CloudWatch, for the activity view's invocation counts
 	logs      map[string]logsAPI    // CloudWatch Logs, for the activity view's log scan
+	logGroups map[string]logGroupsAPI
 	regions   []string
 	accountID string
 }
@@ -127,14 +128,16 @@ func NewClient(ctx context.Context, awsCfg *config.AWSConfig, regions []string, 
 	clients := make(map[string]*lambda.Client, len(regions))
 	metrics := make(map[string]metricsAPI, len(regions))
 	logs := make(map[string]logsAPI, len(regions))
+	logGroups := make(map[string]logGroupsAPI, len(regions))
 	for _, r := range regions {
 		rCfg := base.Copy()
 		rCfg.Region = r
 		clients[r] = lambda.NewFromConfig(rCfg)
 		metrics[r] = cloudwatch.NewFromConfig(rCfg)
-		logs[r] = cloudwatchlogs.NewFromConfig(rCfg)
+		lc := cloudwatchlogs.NewFromConfig(rCfg)
+		logs[r], logGroups[r] = lc, lc
 	}
-	return &Client{clients: clients, metrics: metrics, logs: logs, regions: regions, accountID: resolveAccountID(ctx, base)}, nil
+	return &Client{clients: clients, metrics: metrics, logs: logs, logGroups: logGroups, regions: regions, accountID: resolveAccountID(ctx, base)}, nil
 }
 
 // resolveAccountID looks up the caller's account ID; an empty string (when
@@ -332,6 +335,7 @@ func (c *Client) FunctionDetail(ctx context.Context, region, name string) (Funct
 			slog.Warn("Lambda GetPolicy failed", "region", region, "function", name, "error", perr.Error())
 		}
 	}
+	loadInvokeDetail(ctx, cl, region, name, &d)
 	return d, nil
 }
 

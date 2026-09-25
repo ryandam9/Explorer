@@ -6,6 +6,7 @@ import (
 	"math"
 	"regexp"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -18,72 +19,155 @@ import (
 // Everything in this file is pure (no AWS calls) so it is table-tested with
 // fixture log lines; activity_client.go does the fetching.
 
-// Day is one calendar day in a time zone, as the half-open window
-// [Start, End). End is the next local midnight, so a DST-transition day is 23
-// or 25 hours long rather than a fixed 24.
+// Day is a run of one or more calendar days in a time zone, as the half-open
+// window [Start, End). End is the local midnight after the last day, so a
+// window over a DST transition is an hour shorter or longer than 24h × days.
+// Most runs are one day ("2026-09-24"); a range ("2026-09-20..2026-09-24", or
+// "7d" for the last seven days) is read and reported the same way, with
+// per-day totals.
 type Day struct {
-	Date  string // YYYY-MM-DD
-	Start time.Time
-	End   time.Time
+	Date     string // YYYY-MM-DD of the first day
+	LastDate string // YYYY-MM-DD of the last day ("" for a one-day window)
+	Start    time.Time
+	End      time.Time
 }
 
-// Hours is the number of hour buckets in the day (23, 24 or 25).
+// MaxDays bounds a range: the log scan's bounds hold either way, but a month is
+// already far past what a per-hour table or a scan's 1,000 rows can describe.
+const MaxDays = 31
+
+// Days is the number of calendar days in the window.
+func (d Day) Days() int {
+	if d.LastDate == "" {
+		return 1
+	}
+	n := 0
+	for t := d.Start; t.Before(d.End); t = t.AddDate(0, 0, 1) {
+		n++
+	}
+	return n
+}
+
+// Hours is the number of hour buckets in the window (23, 24 or 25 per day).
 func (d Day) Hours() int {
 	return int(math.Ceil(d.End.Sub(d.Start).Hours()))
 }
 
-// InProgress reports whether now falls inside the day, i.e. the counts are
-// for a day that hasn't finished yet.
+// InProgress reports whether now falls inside the window, i.e. the counts are
+// for a window that hasn't finished yet.
 func (d Day) InProgress(now time.Time) bool {
 	return !now.Before(d.Start) && now.Before(d.End)
 }
 
-// Shift returns the day n days later (earlier for negative n) in the same zone.
+// Shift returns the window n lengths later (earlier for negative n): a day
+// steps a day, a 7-day range steps a week.
 func (d Day) Shift(n int) Day {
-	start := d.Start.AddDate(0, 0, n)
-	return dayAt(start)
+	return dayRange(d.Start.AddDate(0, 0, n*d.Days()), d.Days())
 }
 
-// Label renders the day for headers: "Thu 2026-09-24 (AEST, UTC+10:00)".
+// Spec is the window as it is typed: "2026-09-24" or "2026-09-20..2026-09-24".
+func (d Day) Spec() string {
+	if d.LastDate == "" {
+		return d.Date
+	}
+	return d.Date + ".." + d.LastDate
+}
+
+// Label renders the window for headers: "Thu 2026-09-24 (AEST, UTC+10:00)",
+// or "Sun 2026-09-20 → Thu 2026-09-24 (5 days, AEST, UTC+10:00)".
 func (d Day) Label() string {
 	zone, _ := d.Start.Zone()
-	return fmt.Sprintf("%s %s (%s, UTC%s)", d.Start.Format("Mon"), d.Date, zone, d.Start.Format("-07:00"))
+	if d.LastDate == "" {
+		return fmt.Sprintf("%s %s (%s, UTC%s)", d.Start.Format("Mon"), d.Date, zone, d.Start.Format("-07:00"))
+	}
+	last := d.End.AddDate(0, 0, -1)
+	return fmt.Sprintf("%s %s → %s %s (%d days, %s, UTC%s)", d.Start.Format("Mon"), d.Date,
+		last.Format("Mon"), d.LastDate, d.Days(), zone, d.Start.Format("-07:00"))
 }
 
 func dayAt(t time.Time) Day {
-	start := time.Date(t.Year(), t.Month(), t.Day(), 0, 0, 0, 0, t.Location())
-	return Day{
-		Date:  start.Format("2006-01-02"),
-		Start: start,
-		End:   start.AddDate(0, 0, 1),
-	}
+	return dayRange(t, 1)
 }
 
-// ParseDay resolves a day spec — "" or "today", "yesterday", or a
-// YYYY-MM-DD date — in loc. A day that starts after now is rejected: it can
-// have no invocations yet, and an empty answer would read as "never ran".
+// dayRange is the window of n calendar days starting on t's date.
+func dayRange(t time.Time, n int) Day {
+	start := time.Date(t.Year(), t.Month(), t.Day(), 0, 0, 0, 0, t.Location())
+	d := Day{Date: start.Format("2006-01-02"), Start: start, End: start.AddDate(0, 0, max(n, 1))}
+	if n > 1 {
+		d.LastDate = d.End.AddDate(0, 0, -1).Format("2006-01-02")
+	}
+	return d
+}
+
+var lastNDaysRe = regexp.MustCompile(`^(\d+)d$`)
+
+// ParseDay resolves a window spec in loc: "" or "today", "yesterday", a
+// YYYY-MM-DD date, a range "A..B" of any two of those (inclusive), or "Nd"
+// for the last N days including today. A window that starts after now is
+// rejected — it can have no invocations yet, and an empty answer would read as
+// "never ran" — as is one that ends after today or spans more than MaxDays.
 func ParseDay(spec string, now time.Time, loc *time.Location) (Day, error) {
 	if loc == nil {
 		loc = time.Local
 	}
 	now = now.In(loc)
+	s := strings.ToLower(strings.TrimSpace(spec))
 	var d Day
-	switch s := strings.ToLower(strings.TrimSpace(spec)); s {
-	case "", "today":
-		d = dayAt(now)
-	case "yesterday":
-		d = dayAt(now).Shift(-1)
-	default:
-		t, err := time.ParseInLocation("2006-01-02", s, loc)
-		if err != nil {
-			return Day{}, fmt.Errorf("invalid date %q: use YYYY-MM-DD, today or yesterday", spec)
+	switch {
+	case lastNDaysRe.MatchString(s):
+		n, _ := strconv.Atoi(lastNDaysRe.FindStringSubmatch(s)[1])
+		if n < 1 || n > MaxDays {
+			return Day{}, fmt.Errorf("%q: the last N days must be 1–%d", spec, MaxDays)
 		}
-		d = dayAt(t)
+		d = dayRange(dayAt(now).Start.AddDate(0, 0, 1-n), n)
+	case strings.Contains(s, ".."):
+		parts := strings.SplitN(s, "..", 2)
+		from, err := parseOneDay(parts[0], now, loc)
+		if err != nil {
+			return Day{}, err
+		}
+		to, err := parseOneDay(parts[1], now, loc)
+		if err != nil {
+			return Day{}, err
+		}
+		if to.Start.Before(from.Start) {
+			return Day{}, fmt.Errorf("range %q ends before it starts", spec)
+		}
+		n := dayRange(from.Start, 1).Days()
+		for t := from.Start; t.Before(to.Start); t = t.AddDate(0, 0, 1) {
+			n++
+		}
+		if n > MaxDays {
+			return Day{}, fmt.Errorf("range %q spans %d days; the most is %d", spec, n, MaxDays)
+		}
+		d = dayRange(from.Start, n)
+	default:
+		var err error
+		if d, err = parseOneDay(s, now, loc); err != nil {
+			return Day{}, err
+		}
 	}
 	if d.Start.After(now) {
 		return Day{}, fmt.Errorf("date %s is in the future", d.Date)
 	}
+	if d.LastDate != "" && d.End.AddDate(0, 0, -1).After(now) {
+		return Day{}, fmt.Errorf("range ends on %s, which is in the future", d.LastDate)
+	}
 	return d, nil
+}
+
+func parseOneDay(s string, now time.Time, loc *time.Location) (Day, error) {
+	switch s = strings.TrimSpace(s); s {
+	case "", "today":
+		return dayAt(now), nil
+	case "yesterday":
+		return dayAt(now).Shift(-1), nil
+	}
+	t, err := time.ParseInLocation("2006-01-02", s, loc)
+	if err != nil {
+		return Day{}, fmt.Errorf("invalid date %q: use YYYY-MM-DD, today, yesterday, a range A..B, or Nd for the last N days", s)
+	}
+	return dayAt(t), nil
 }
 
 // ---------------------------------------------------------------------------
@@ -198,6 +282,66 @@ func (s InvocationStats) Peak() (HourStat, bool) {
 	return best, found
 }
 
+// DayStat is one calendar day's totals in a multi-day window. A NaN field
+// means no hour of that day had a datapoint.
+type DayStat struct {
+	Date        string
+	Invocations float64
+	Errors      float64
+	Throttles   float64
+}
+
+// Daily folds the hours into calendar days (in the window's zone), for the
+// per-day breakdown of a multi-day window.
+func (s InvocationStats) Daily() []DayStat {
+	var out []DayStat
+	add := func(dst *float64, v float64) {
+		if math.IsNaN(v) {
+			return
+		}
+		if math.IsNaN(*dst) {
+			*dst = 0
+		}
+		*dst += v
+	}
+	for _, h := range s.Hours {
+		date := h.Start.Format("2006-01-02")
+		if len(out) == 0 || out[len(out)-1].Date != date {
+			out = append(out, DayStat{Date: date, Invocations: math.NaN(), Errors: math.NaN(), Throttles: math.NaN()})
+		}
+		d := &out[len(out)-1]
+		add(&d.Invocations, h.Invocations)
+		add(&d.Errors, h.Errors)
+		add(&d.Throttles, h.Throttles)
+	}
+	return out
+}
+
+// PeakDay returns the busiest day (ok=false when there is no data).
+func (s InvocationStats) PeakDay() (DayStat, bool) {
+	var best DayStat
+	found := false
+	for _, d := range s.Daily() {
+		if math.IsNaN(d.Invocations) {
+			continue
+		}
+		if !found || d.Invocations > best.Invocations {
+			best, found = d, true
+		}
+	}
+	return best, found
+}
+
+// DailyInvocations returns the per-day invocation series for the sparkline.
+func (s InvocationStats) DailyInvocations() []float64 {
+	days := s.Daily()
+	out := make([]float64, len(days))
+	for i, d := range days {
+		out[i] = d.Invocations
+	}
+	return out
+}
+
 // HourlyInvocations returns the per-hour invocation series (NaN = no data) for
 // the sparkline.
 func (s InvocationStats) HourlyInvocations() []float64 {
@@ -260,12 +404,14 @@ type LogScan struct {
 	Starts  int // START lines seen (one per invocation that logged)
 	Pages   int
 	Matches []Match
+	Perf    PerfStats // every REPORT line read (see activity_perf.go)
 
 	Done       bool   // the scan finished (window exhausted or a bound reached)
 	StopReason string // why it ended early ("" when the whole day was read)
 	Err        error
 
 	streamReq map[string]string // stream → request ID of its latest START
+	failed    map[string]string // request ID → why that invocation failed (see failureOf)
 }
 
 // NewLogScan prepares a scan. maxMatches <= 0 uses DefaultMaxMatches.
@@ -279,12 +425,16 @@ func NewLogScan(pattern *regexp.Regexp, filter string, maxMatches int) *LogScan 
 		Filter:     filter,
 		MaxMatches: maxMatches,
 		streamReq:  map[string]string{},
+		failed:     map[string]string{},
 	}
 }
 
 // matchAll is the pattern an empty regex stands for in the TUI: every event of
 // the day becomes a row.
 var matchAll = regexp.MustCompile(``)
+
+// MatchAll is the pattern that keeps every event (the CLI's --all-events).
+func MatchAll() *regexp.Regexp { return matchAll }
 
 // matchesAll reports whether re keeps every event (the empty regex), so the
 // scan is a plain listing of the day's events rather than a search.
@@ -328,6 +478,18 @@ func (s *LogScan) Ingest(events []LogEvent) bool {
 				s.streamReq[ev.Stream] = line.requestID
 			}
 		}
+		// A line without its own request ID belongs to the stream's latest START
+		// (an execution environment runs one invocation at a time).
+		id, inferred := line.requestID, false
+		if id == "" {
+			id, inferred = s.streamReq[ev.Stream], true
+		}
+		s.noteFailure(id, line)
+		if line.kind == lineReport {
+			if r, ok := parseReport(line.body); ok {
+				s.Perf.add(r)
+			}
+		}
 		if s.Pattern == nil {
 			continue
 		}
@@ -336,18 +498,14 @@ func (s *LogScan) Ingest(events []LogEvent) bool {
 			continue
 		}
 		m := Match{
-			Time:      ev.Time,
-			Stream:    ev.Stream,
-			RequestID: line.requestID,
-			Level:     line.level,
-			Body:      line.body,
-			Message:   msg,
-			Matched:   msg[loc[0]:loc[1]],
-		}
-		if m.RequestID == "" {
-			if id, ok := s.streamReq[ev.Stream]; ok {
-				m.RequestID, m.RequestIDInferred = id, true
-			}
+			Time:              ev.Time,
+			Stream:            ev.Stream,
+			RequestID:         id,
+			RequestIDInferred: inferred && id != "",
+			Level:             line.level,
+			Body:              line.body,
+			Message:           msg,
+			Matched:           msg[loc[0]:loc[1]],
 		}
 		for g := 1; 2*g+1 < len(loc); g++ {
 			var v string
@@ -468,7 +626,9 @@ func parseLambdaLine(msg string) lambdaLine {
 	}
 	fields := strings.Split(msg, "\t")
 	if len(fields) < 2 {
-		return lambdaLine{body: msg}
+		// No tab prefix: a bare print(), or the Python runtime's unhandled-error
+		// line "[ERROR] RuntimeError: …" whose level is only in the brackets.
+		return lambdaLine{level: bracketLevel(msg), body: msg}
 	}
 	var l lambdaLine
 	consumed := 0
@@ -493,6 +653,17 @@ func parseLambdaLine(msg string) lambdaLine {
 	}
 	l.body = strings.Join(fields[consumed:], "\t")
 	return l
+}
+
+// bracketLevelRe matches a leading "[LEVEL] " (Python's unhandled-exception
+// line has no tab-separated prefix, only this).
+var bracketLevelRe = regexp.MustCompile(`^\[([A-Za-z]+)\] `)
+
+func bracketLevel(msg string) string {
+	if m := bracketLevelRe.FindStringSubmatch(msg); m != nil && logLevels[strings.ToUpper(m[1])] {
+		return strings.ToUpper(m[1])
+	}
+	return ""
 }
 
 func looksLikeTimestamp(s string) bool {

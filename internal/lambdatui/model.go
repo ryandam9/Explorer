@@ -115,6 +115,13 @@ type m struct {
 	// scan of that day's logs. See activity_view.go.
 	act activityState
 
+	// Usage and posture (usage.go), loaded in the background after each
+	// inventory load: 30-day invocations, log retention, policy and URLs.
+	// usage is nil until the load lands; usageNotes lists reads that failed.
+	usage        map[string]*FunctionUsage
+	usageLoading bool
+	usageNotes   []string
+
 	// loadGen tags each load so a refresh's stragglers can't patch a newer load.
 	loadGen int
 
@@ -133,6 +140,14 @@ type invMsg struct {
 	inv Inventory
 	err error
 }
+
+type usageMsg struct {
+	gen    int
+	report UsageReport
+}
+
+// usageTimeout bounds the background usage/posture load.
+const usageTimeout = 3 * time.Minute
 
 type detailMsg struct {
 	key    string // region/name of the function this describes (guards stale adopts)
@@ -261,6 +276,15 @@ func (mm *m) loadInventoryCmd(gen int) tea.Cmd {
 	}
 }
 
+func (mm *m) loadUsageCmd(gen int, fns []Function) tea.Cmd {
+	return func() tea.Msg {
+		slog.Info("Loading Lambda usage and posture", "functions", len(fns))
+		ctx, cancel := context.WithTimeout(mm.ctx, usageTimeout)
+		defer cancel()
+		return usageMsg{gen: gen, report: mm.client.LoadUsage(ctx, fns, time.Now())}
+	}
+}
+
 func (mm *m) loadDetailCmd(region, name string) tea.Cmd {
 	key := region + "/" + name
 	return func() tea.Msg {
@@ -332,6 +356,9 @@ func (mm *m) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		mm.height = msg.Height
 		if mm.act.active {
 			mm.refreshActivityRows() // the MESSAGE column fills the new width
+			if mm.act.inv.active && !mm.act.inv.loading {
+				mm.refreshInvocationRows()
+			}
 		}
 
 	case spinner.TickMsg:
@@ -358,7 +385,22 @@ func (mm *m) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			mm.err = msg.err
 		} else {
 			mm.inv = msg.inv
+			mm.usage, mm.usageNotes, mm.usageLoading = nil, nil, len(msg.inv.Functions) > 0
 			mm.rebuild()
+			if mm.usageLoading {
+				cmds = append(cmds, mm.loadUsageCmd(msg.gen, msg.inv.Functions))
+			}
+		}
+
+	case usageMsg:
+		if msg.gen != mm.loadGen {
+			break // a newer load superseded this one
+		}
+		mm.usageLoading = false
+		mm.usage, mm.usageNotes = msg.report.ByKey, msg.report.Notes
+		mm.rebuild()
+		if mm.findingsActive {
+			mm.openFindings() // the new checks now have their inputs
 		}
 
 	case detailMsg:
@@ -368,6 +410,7 @@ func (mm *m) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			mm.detailLoading = false
 			mm.detailErr = msg.err
 			if msg.err == nil {
+				msg.detail.Triggers = triggersFor(mm.inv, msg.detail.Region, msg.detail.Name)
 				mm.detailFunc = msg.detail
 				mm.setDetailSections(msg.detail.sections())
 			}
@@ -388,6 +431,9 @@ func (mm *m) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case activityPageMsg:
 		mm.handleActivityPage(msg, &cmds)
+
+	case invocationMsg:
+		mm.handleInvocationMsg(msg)
 
 	case tea.KeyMsg:
 		cmds = append(cmds, mm.handleKey(msg)...)

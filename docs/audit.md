@@ -233,6 +233,11 @@ Lambda-category notes:
 - Everything comes from one paginated `lambda:ListFunctions` call — no
   per-function fan-out. The same checks back the `lambda` dashboard's `f`
   findings panel.
+- The dashboard's panel also runs usage and access checks (`LAM-USE-001` idle,
+  `LAM-LOG-001` log group never expires, `LAM-SEC-001`/`LAM-SEC-002` public
+  URL/policy, `LAM-COST-001` arm64 candidate) from reads the dashboard makes in
+  the background. `audit` doesn't make those reads, so here their inputs are
+  unknown and they stay silent — see [the Lambda dashboard](lambda.md#findings).
 
 † Traffic-based checks use CloudWatch metrics over a 14-day window and need
 `cloudwatch:GetMetricData`; without it they are skipped (with a note) while

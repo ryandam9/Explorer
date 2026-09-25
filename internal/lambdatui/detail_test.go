@@ -31,10 +31,15 @@ func TestFunctionSections(t *testing.T) {
 	secs := d.sections()
 
 	// Each requested concept is its own panel.
-	for _, want := range []string{"Overview", "Resources & limits", "State & health", "VPC networking", "Layers", "Code package", "Resource policy", "Dead-letter queue"} {
+	for _, want := range []string{"Overview", "Resources & limits", "State & health", "VPC networking", "Layers", "Code package",
+		"Resource policy", "Triggers", "Versions & aliases", "Function URL", "Async invocation"} {
 		if _, ok := sectionTitled(secs, want); !ok {
 			t.Errorf("missing section %q (got %d sections)", want, len(secs))
 		}
+	}
+	// The dead-letter queue is part of the async-invocation picture.
+	if async, _ := sectionTitled(secs, "Async invocation"); !strings.Contains(async.Body, "sqs:dl") {
+		t.Errorf("async panel should show the DLQ: %q", async.Body)
 	}
 
 	// Environment panel lists keys, with a count in the title, and never values.

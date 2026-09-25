@@ -38,6 +38,23 @@ type ActivityQuery struct {
 	Pattern    *regexp.Regexp // nil = metrics only, no log scan
 	Filter     string         // optional server-side CloudWatch Logs filter pattern
 	MaxMatches int
+
+	// The function's configuration, for the performance summary: the timeout
+	// and memory size the REPORT figures are measured against, and the
+	// architecture that sets the price (0/"" when unknown).
+	TimeoutSec int32
+	MemoryMB   int32
+	Arch       string
+}
+
+// NewActivityQuery builds a run for fn: its region, log group and the
+// configuration the performance summary is measured against.
+func NewActivityQuery(fn Function, day Day, pattern *regexp.Regexp, filter string, maxMatches int) ActivityQuery {
+	return ActivityQuery{
+		Region: fn.Region, Function: fn.Name, LogGroup: fn.LogGroup,
+		Day: day, Pattern: pattern, Filter: filter, MaxMatches: maxMatches,
+		TimeoutSec: fn.TimeoutSec, MemoryMB: fn.MemoryMB, Arch: primaryArch(fn.Architectures),
+	}
 }
 
 // Per-call deadlines: one metrics call, and one FilterLogEvents page (a scan is
@@ -53,6 +70,13 @@ func (c *Client) metricsFor(region string) (metricsAPI, error) {
 		return cl, nil
 	}
 	return nil, fmt.Errorf("no CloudWatch client for region %s", region)
+}
+
+func (c *Client) logGroupsFor(region string) (logGroupsAPI, error) {
+	if cl, ok := c.logGroups[region]; ok {
+		return cl, nil
+	}
+	return nil, fmt.Errorf("no CloudWatch Logs client for region %s", region)
 }
 
 func (c *Client) logsFor(region string) (logsAPI, error) {
@@ -221,7 +245,11 @@ func (c *Client) ResolveFunction(ctx context.Context, nameOrARN string) (fn Func
 			out, err := c.clientFor(region).GetFunctionConfiguration(ctx, &lambda.GetFunctionConfigurationInput{FunctionName: aws.String(name)})
 			switch {
 			case err == nil:
-				f := Function{Name: aws.ToString(out.FunctionName), Region: region, ARN: aws.ToString(out.FunctionArn)}
+				f := Function{Name: aws.ToString(out.FunctionName), Region: region, ARN: aws.ToString(out.FunctionArn),
+					TimeoutSec: aws.ToInt32(out.Timeout), MemoryMB: aws.ToInt32(out.MemorySize)}
+				for _, a := range out.Architectures {
+					f.Architectures = append(f.Architectures, string(a))
+				}
 				if f.Name == "" {
 					f.Name = name
 				}
@@ -268,4 +296,59 @@ func (c *Client) ResolveFunction(ctx context.Context, nameOrARN string) (fn Func
 	default:
 		return Function{}, "", fmt.Errorf("function %q not found in %s", name, strings.Join(regions, ", "))
 	}
+}
+
+// invocationMaxPages bounds the stream read behind the invocation drill-down.
+// One stream holds one execution environment's runs back to back, so a window
+// of ±timeout is at most a few thousand lines; the bound only guards a
+// pathological chatty function.
+const invocationMaxPages = 20
+
+// InvocationLines reads the invocation a log line belongs to back from its
+// stream: every event of the stream within ±timeout of the line (see
+// invocationWindow), from which extractInvocation keeps that run's lines. It
+// stops early once the run's REPORT line has been read. truncated is set when
+// the page bound ended the read before the window was exhausted.
+func (c *Client) InvocationLines(ctx context.Context, region, logGroup, stream, requestID string, at time.Time, timeout time.Duration) (inv Invocation, truncated bool, err error) {
+	cl, err := c.logsFor(region)
+	if err != nil {
+		return Invocation{}, false, err
+	}
+	start, end := invocationWindow(at, timeout)
+	var events []LogEvent
+	var token *string
+	for page := 0; ; page++ {
+		if page >= invocationMaxPages {
+			truncated = true
+			break
+		}
+		pctx, cancel := context.WithTimeout(ctx, activityPageTimeout)
+		out, err := cl.FilterLogEvents(pctx, &cloudwatchlogs.FilterLogEventsInput{
+			LogGroupName:   aws.String(logGroup),
+			LogStreamNames: []string{stream},
+			StartTime:      aws.Int64(start.UnixMilli()),
+			EndTime:        aws.Int64(end.UnixMilli()),
+			NextToken:      token,
+		})
+		cancel()
+		if err != nil {
+			return Invocation{}, false, err
+		}
+		for _, e := range out.Events {
+			events = append(events, LogEvent{
+				Time:    time.UnixMilli(aws.ToInt64(e.Timestamp)),
+				Stream:  aws.ToString(e.LogStreamName),
+				Message: aws.ToString(e.Message),
+			})
+		}
+		if out.NextToken == nil {
+			break
+		}
+		// Once this run's REPORT is in, later pages hold only later runs.
+		if extractInvocation(append([]LogEvent(nil), events...), requestID).HasEnd {
+			break
+		}
+		token = out.NextToken
+	}
+	return extractInvocation(events, requestID), truncated, nil
 }

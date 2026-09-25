@@ -72,6 +72,23 @@ type FunctionDetail struct {
 	ResourcePolicy    string
 	ResourcePolicyErr string
 
+	// How it is invoked (detail_invoke.go). Each *Err is set when that read
+	// was denied or failed, so "unknown" never reads as "none".
+	Versions       []VersionInfo
+	VersionsErr    string
+	Aliases        []AliasInfo
+	AliasesErr     string
+	URLs           []URLInfo
+	URLsErr        string
+	Provisioned    []ProvisionedInfo
+	ProvisionedErr string
+	Async          *AsyncInfo
+	AsyncErr       string
+
+	// Triggers is filled by the model from the loaded inventory: the event-
+	// source mappings that feed this function.
+	Triggers []EventSource
+
 	Tags map[string]string
 }
 
@@ -203,8 +220,11 @@ func (d FunctionDetail) sections() []section {
 	// Resource-based policy (who may invoke the function).
 	out = append(out, section{Title: "Resource policy", Body: resourcePolicyBody(d)})
 
-	// Dead-letter queue.
-	out = append(out, section{Title: "Dead-letter queue", Body: "  " + dlqLabel(d.DLQTarget)})
+	// What invokes it, and how: triggers, versions/aliases, URLs, async.
+	out = append(out, section{Title: "Triggers", Body: triggersBody(d)})
+	out = append(out, section{Title: "Versions & aliases", Body: versionsBody(d)})
+	out = append(out, section{Title: "Function URL", Body: urlBody(d)})
+	out = append(out, section{Title: "Async invocation", Body: asyncBody(d)})
 
 	// Tags.
 	out = append(out, section{Title: tagsTitle(d.Tags), Body: tagsBody(d.Tags)})

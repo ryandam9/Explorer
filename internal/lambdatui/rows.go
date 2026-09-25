@@ -3,6 +3,7 @@ package lambdatui
 import (
 	"fmt"
 	"sort"
+	"strconv"
 	"strings"
 
 	"github.com/ryandam9/aws_explorer/internal/model"
@@ -36,6 +37,8 @@ func tabColumns(t tab, multi bool) []table.Column {
 			{Title: "MEMORY", Width: 8},
 			{Title: "TIMEOUT", Width: 8},
 			{Title: "STATE", Width: 10},
+			{Title: "INVOKES 30D", Width: 11},
+			{Title: "LAST INVOKED", Width: 12},
 			{Title: "LAST MODIFIED", Width: 16},
 		}
 	case tabLayers:
@@ -74,8 +77,9 @@ func (mm *m) tabRows(t tab) []rowT {
 		for i := range mm.inv.Functions {
 			f := mm.inv.Functions[i]
 			add(rowT{
-				cells: table.Row{f.Name, runtimeLabel(f.Runtime, f.PackageType), formatMemory(f.MemoryMB), formatTimeout(f.TimeoutSec), stateLabel(f.State), shortTime(f.LastModified)},
-				name:  f.Name, region: f.Region, arn: f.ARN, typ: "function", fn: &mm.inv.Functions[i],
+				cells: table.Row{f.Name, runtimeLabel(f.Runtime, f.PackageType), formatMemory(f.MemoryMB), formatTimeout(f.TimeoutSec), stateLabel(f.State),
+					mm.usageCell(f, false), mm.usageCell(f, true), shortTime(f.LastModified)},
+				name: f.Name, region: f.Region, arn: f.ARN, typ: "function", fn: &mm.inv.Functions[i],
 			}, f.Region)
 		}
 	case tabLayers:
@@ -130,15 +134,36 @@ func (mm *m) buildView() []rowT {
 	return rows
 }
 
-// sortRows orders rows in place by the selected column's displayed text.
-// sortCol -1 leaves the natural (name, region) order untouched.
+// usageCell renders a function's 30-day invocation count (or, with last, the
+// day it was last invoked): "…" while loading, "?" when the read failed —
+// never a 0 or "none" that wasn't measured.
+func (mm *m) usageCell(f Function, last bool) string {
+	if mm.usageLoading {
+		return "…"
+	}
+	u, ok := mm.usage[usageKey(f.Region, f.Name)]
+	if !ok || !u.UsageKnown {
+		return "?"
+	}
+	if !last {
+		return formatCount(u.Invocations30d)
+	}
+	if u.LastInvoked.IsZero() {
+		return "none in 30d"
+	}
+	return u.LastInvoked.Format("2006-01-02")
+}
+
+// sortRows orders rows in place by the selected column's displayed text,
+// comparing numerically when both cells are numbers ("1,024 MB" after
+// "128 MB"). sortCol -1 leaves the natural (name, region) order untouched.
 func (mm *m) sortRows(rows []rowT) {
 	if mm.sortCol < 0 {
 		return
 	}
 	col := mm.sortCol
 	sort.SliceStable(rows, func(i, j int) bool {
-		c := strings.Compare(strings.ToLower(cellAt(rows[i], col)), strings.ToLower(cellAt(rows[j], col)))
+		c := compareCells(cellAt(rows[i], col), cellAt(rows[j], col))
 		if c == 0 {
 			c = strings.Compare(strings.ToLower(cellAt(rows[i], 0)), strings.ToLower(cellAt(rows[j], 0)))
 		}
@@ -202,4 +227,34 @@ func (mm *m) selectedResource() (model.Resource, bool) {
 	return model.Resource{
 		Service: "lambda", Type: r.typ, Region: r.region, ID: r.name, ARN: r.arn,
 	}, true
+}
+
+// compareCells orders two cells numerically when both lead with a number
+// (grouping commas and a unit suffix allowed), else case-insensitively.
+func compareCells(a, b string) int {
+	if x, ok := leadingNumber(a); ok {
+		if y, ok := leadingNumber(b); ok {
+			switch {
+			case x < y:
+				return -1
+			case x > y:
+				return 1
+			}
+			return 0
+		}
+	}
+	return strings.Compare(strings.ToLower(a), strings.ToLower(b))
+}
+
+func leadingNumber(s string) (float64, bool) {
+	s = strings.ReplaceAll(strings.TrimSpace(s), ",", "")
+	end := 0
+	for end < len(s) && (s[end] >= '0' && s[end] <= '9' || s[end] == '.') {
+		end++
+	}
+	if end == 0 {
+		return 0, false
+	}
+	v, err := strconv.ParseFloat(s[:end], 64)
+	return v, err == nil
 }

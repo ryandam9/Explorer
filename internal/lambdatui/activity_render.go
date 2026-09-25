@@ -53,9 +53,13 @@ func countOrDash(v float64) string {
 	return formatCount(v)
 }
 
-// matchTime renders a match's timestamp in the day's zone to the millisecond.
-func matchTime(t time.Time, loc *time.Location) string {
-	return t.In(loc).Format("15:04:05.000")
+// matchTime renders a match's timestamp in the window's zone to the
+// millisecond, with the date when the window spans several days.
+func matchTime(t time.Time, d Day) string {
+	if d.LastDate != "" {
+		return t.In(d.Start.Location()).Format("01-02 15:04:05.000")
+	}
+	return t.In(d.Start.Location()).Format("15:04:05.000")
 }
 
 // InvocationSummary is the one-line invocation answer shared by the CLI and
@@ -155,7 +159,11 @@ func renderActivityTable(w io.Writer, r ActivityReport, noHeader bool) error {
 	}
 	if r.Scan != nil {
 		fmt.Fprintf(w, "Log group:    %s\n", q.LogGroup)
-		fmt.Fprintf(w, "Pattern:      /%s/", q.Pattern.String())
+		if matchesAll(q.Pattern) {
+			fmt.Fprint(w, "Pattern:      (none — every event)")
+		} else {
+			fmt.Fprintf(w, "Pattern:      /%s/", q.Pattern.String())
+		}
 		if q.Filter != "" {
 			fmt.Fprintf(w, "  (server-side filter %q)", q.Filter)
 		}
@@ -164,9 +172,36 @@ func renderActivityTable(w io.Writer, r ActivityReport, noHeader bool) error {
 		if note := r.Scan.ScanNote(); note != "" {
 			fmt.Fprintf(w, "              %s\n", note)
 		}
+		for i, l := range perfLines(r.Scan, q.TimeoutSec, q.Arch) {
+			label := "Performance:  "
+			if i > 0 {
+				label = "              "
+			}
+			fmt.Fprintln(w, label+l)
+		}
+		if n := r.Scan.FailedCount(); n > 0 {
+			fmt.Fprintf(w, "Failed:       %d invocation(s) showed a failure (error logged, runtime exit or timeout)\n", n)
+		}
 	}
 
-	if r.StatsErr == nil && r.Stats.HasData {
+	if r.StatsErr == nil && r.Stats.HasData && q.Day.LastDate != "" {
+		// A multi-day window: one row per day (the hourly series is in the
+		// json/csv/ndjson output).
+		fmt.Fprintln(w)
+		tw := tabwriter.NewWriter(w, 0, 0, 2, ' ', 0)
+		if !noHeader {
+			fmt.Fprintln(tw, "DAY\tINVOCATIONS\tERRORS\tTHROTTLES")
+		}
+		for _, d := range r.Stats.Daily() {
+			t, _ := time.ParseInLocation("2006-01-02", d.Date, loc)
+			fmt.Fprintf(tw, "%s %s\t%s\t%s\t%s\n", t.Format("Mon"), d.Date,
+				countOrDash(d.Invocations), countOrDash(d.Errors), countOrDash(d.Throttles))
+		}
+		if err := tw.Flush(); err != nil {
+			return err
+		}
+		fmt.Fprintln(w, "(- = no datapoint: not invoked that day)")
+	} else if r.StatsErr == nil && r.Stats.HasData {
 		fmt.Fprintln(w)
 		tw := tabwriter.NewWriter(w, 0, 0, 2, ' ', 0)
 		if !noHeader {
@@ -196,18 +231,18 @@ func renderActivityTable(w io.Writer, r ActivityReport, noHeader bool) error {
 		for _, g := range r.Scan.GroupNames {
 			hdr = append(hdr, strings.ToUpper(groupHeader(g)))
 		}
-		if len(r.Scan.GroupNames) == 0 {
+		if r.Scan.MatchColumn() {
 			hdr = append(hdr, "MATCH")
 		}
 		hdr = append(hdr, "MESSAGE")
 		fmt.Fprintln(tw, strings.Join(hdr, "\t"))
 	}
 	for _, m := range r.Scan.Matches {
-		row := []string{matchTime(m.Time, loc), dash(m.RequestID), dash(m.Level)}
+		row := []string{matchTime(m.Time, q.Day), dash(m.RequestID), dash(m.Level)}
 		for _, g := range m.Groups {
 			row = append(row, dash(oneLine(g)))
 		}
-		if len(r.Scan.GroupNames) == 0 {
+		if r.Scan.MatchColumn() {
 			row = append(row, dash(oneLine(m.Matched)))
 		}
 		row = append(row, oneLine(m.Body))
@@ -279,6 +314,31 @@ type matchJSON struct {
 	Groups            map[string]string `json:"groups,omitempty"`
 	Message           string            `json:"message"`
 	LogStream         string            `json:"logStream"`
+	// InvocationFailure is why the match's invocation failed ("" = no failure
+	// seen in the lines read).
+	InvocationFailure string `json:"invocationFailure,omitempty"`
+}
+
+// perfJSON is the REPORT-line summary. Measured is false when a server filter
+// hid the REPORT lines; the figures are then null, not 0.
+type perfJSON struct {
+	Measured         bool      `json:"measured"`
+	Partial          bool      `json:"partial"`
+	Runs             int       `json:"runs"`
+	DurationP50Ms    *float64  `json:"durationP50Ms"`
+	DurationP95Ms    *float64  `json:"durationP95Ms"`
+	DurationMaxMs    *float64  `json:"durationMaxMs"`
+	TimeoutSec       int32     `json:"timeoutSec,omitempty"`
+	MaxMemoryUsedMB  *float64  `json:"maxMemoryUsedMB"`
+	MemorySizesMB    []float64 `json:"memorySizesMB,omitempty"`
+	ColdStarts       int       `json:"coldStarts"`
+	InitAvgMs        *float64  `json:"initAvgMs"`
+	InitMaxMs        *float64  `json:"initMaxMs"`
+	Timeouts         int       `json:"timeouts"`
+	GBSeconds        float64   `json:"gbSeconds"`
+	EstimatedCostUSD float64   `json:"estimatedCostUsd"`
+	Architecture     string    `json:"architecture"`
+	PricingNote      string    `json:"pricingNote"`
 }
 
 type scanJSON struct {
@@ -291,13 +351,16 @@ type scanJSON struct {
 	Complete          bool        `json:"complete"`
 	StopReason        string      `json:"stopReason,omitempty"`
 	Error             string      `json:"error,omitempty"`
+	FailedInvocations int         `json:"failedInvocations"`
+	Performance       perfJSON    `json:"performance"`
 	Matches           []matchJSON `json:"matches"`
 }
 
 type activityJSON struct {
 	Function      string     `json:"function"`
 	Region        string     `json:"region"`
-	Date          string     `json:"date"`
+	Date          string     `json:"date"` // "2026-09-24", or "2026-09-20..2026-09-24" for a range
+	Days          int        `json:"days"`
 	Start         string     `json:"start"`
 	End           string     `json:"end"`
 	DayInProgress bool       `json:"dayInProgress"`
@@ -341,6 +404,7 @@ func matchesToJSON(s *LogScan, loc *time.Location) []matchJSON {
 			Matched:           m.Matched,
 			Message:           m.Message,
 			LogStream:         m.Stream,
+			InvocationFailure: s.Failure(m.RequestID),
 		}
 		if len(m.Groups) > 0 {
 			mj.Groups = make(map[string]string, len(m.Groups))
@@ -360,7 +424,8 @@ func activityToJSON(r ActivityReport) activityJSON {
 	out := activityJSON{
 		Function:      q.Function,
 		Region:        q.Region,
-		Date:          q.Day.Date,
+		Date:          q.Day.Spec(),
+		Days:          q.Day.Days(),
 		Start:         q.Day.Start.Format(time.RFC3339),
 		End:           q.Day.End.Format(time.RFC3339),
 		DayInProgress: q.Day.InProgress(r.Now),
@@ -383,12 +448,36 @@ func activityToJSON(r ActivityReport) activityJSON {
 			StartLinesPartial: !s.StartsKnown(),
 			Complete:          s.Done && s.StopReason == "" && s.Err == nil,
 			StopReason:        s.StopReason,
+			FailedInvocations: s.FailedCount(),
+			Performance:       perfToJSON(s, q),
 			Matches:           matchesToJSON(s, q.Day.Start.Location()),
 		}
 		if s.Err != nil {
 			sj.Error = s.Err.Error()
 		}
 		out.LogScan = sj
+	}
+	return out
+}
+
+func perfToJSON(s *LogScan, q ActivityQuery) perfJSON {
+	p := &s.Perf
+	out := perfJSON{
+		Measured: s.PerfKnown(), Partial: s.PerfPartial(), Runs: p.Count,
+		TimeoutSec: q.TimeoutSec, MemorySizesMB: p.MemorySizes(), ColdStarts: p.ColdStarts,
+		Timeouts: p.Timeouts, GBSeconds: p.GBSeconds, Architecture: q.Arch,
+		EstimatedCostUSD: p.EstimatedCost(q.Arch),
+		PricingNote:      "on-demand list price (us-east-1 rates; some regions differ), before the free tier",
+	}
+	if p.Count > 0 {
+		out.DurationP50Ms = ptrUnlessNaN(p.DurationP(50))
+		out.DurationP95Ms = ptrUnlessNaN(p.DurationP(95))
+		out.DurationMaxMs = ptrUnlessNaN(p.MaxDurationMs())
+		out.MaxMemoryUsedMB = ptrUnlessNaN(p.MaxMemoryMB())
+		out.InitAvgMs = ptrUnlessNaN(p.InitAvgMs())
+		if p.ColdStarts > 0 {
+			out.InitMaxMs = ptrUnlessNaN(p.InitMaxMs)
+		}
 	}
 	return out
 }

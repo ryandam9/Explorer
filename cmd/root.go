@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
@@ -89,8 +90,10 @@ Run "aws_explorer config init" to write a starter file.`,
   aws_explorer --all-regions`,
 	PersistentPreRunE: func(cmd *cobra.Command, args []string) error {
 		applyOutputFormatDefault(cmd)
-		if err := output.ValidateFormat(outputFormat); err != nil {
-			return err
+		if !acceptsExtraFormat(cmd, outputFormat) {
+			if err := output.ValidateFormat(outputFormat); err != nil {
+				return err
+			}
 		}
 		return preflightAuth(cmd)
 	},
@@ -255,4 +258,18 @@ func initConfig() {
 	// to the shared downloads directory; app.downloadDir overrides the
 	// ~/.aws_explorer/downloads default.
 	downloads.Init(AppConfig.App.DownloadDir)
+}
+
+// extraFormatsAnnotation lets one command accept -o values beyond the global
+// set (e.g. "xlsx" for `lambda activity`), as a comma-separated list. The
+// command then validates -o itself; every other command stays strict.
+const extraFormatsAnnotation = "aws_explorer/extra-output-formats"
+
+func acceptsExtraFormat(cmd *cobra.Command, format string) bool {
+	for _, f := range strings.Split(cmd.Annotations[extraFormatsAnnotation], ",") {
+		if f != "" && strings.EqualFold(strings.TrimSpace(f), format) {
+			return true
+		}
+	}
+	return false
 }

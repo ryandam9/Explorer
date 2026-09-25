@@ -39,6 +39,9 @@ const (
 
 var unsafeFileChars = regexp.MustCompile(`[^A-Za-z0-9._-]+`)
 
+// ActivityWorkbookName is the default file name for a run's workbook.
+func ActivityWorkbookName(q ActivityQuery, now time.Time) string { return activityWorkbookName(q, now) }
+
 // activityWorkbookName names the export after what it holds: the function, the
 // day and whether it is a search or a full listing, plus the export time so a
 // re-export never overwrites an earlier file.
@@ -48,16 +51,16 @@ func activityWorkbookName(q ActivityQuery, now time.Time) string {
 		kind = "events"
 	}
 	fn := strings.Trim(unsafeFileChars.ReplaceAllString(q.Function, "-"), "-")
-	return fmt.Sprintf("lambda-%s-%s-%s-%s.xlsx", fn, q.Day.Date, kind, now.Format("20060102-150405"))
+	return fmt.Sprintf("lambda-%s-%s-%s-%s.xlsx", fn, strings.ReplaceAll(q.Day.Spec(), "..", "_to_"), kind, now.Format("20060102-150405"))
 }
 
 // activitySheetName is the data sheet's name, e.g. "Matches 2026-09-24" (well
 // inside Excel's 31-character limit, and free of the characters it forbids).
 func activitySheetName(q ActivityQuery) string {
 	if matchesAll(q.Pattern) {
-		return "Events " + q.Day.Date
+		return "Events " + q.Day.Spec()
 	}
-	return "Matches " + q.Day.Date
+	return "Matches " + q.Day.Spec()
 }
 
 // xlsxStyles holds the workbook's style IDs.
@@ -210,6 +213,10 @@ func writeMatchesSheet(f *excelize.File, sheet string, st xlsxStyles, q Activity
 				return ""
 			}})
 	}
+	if scan.FailedCount() > 0 {
+		cols = append(cols, column{title: "Invocation failed", style: st.cell,
+			value: func(m Match) any { return scan.Failure(m.RequestID) }})
+	}
 	cols = append(cols, column{title: "Level", style: st.cell, value: func(m Match) any { return m.Level }})
 	for i, g := range scan.GroupNames {
 		cols = append(cols, column{title: groupHeader(g), style: st.wrap,
@@ -343,6 +350,8 @@ func writeQuerySheet(f *excelize.File, st xlsxStyles, q ActivityQuery, stats Inv
 		{"Server filter", filter},
 		{"Invocations", invocations},
 		{"Log scan", scan.ScanSummary()},
+		{"Performance", strings.Join(perfLines(scan, q.TimeoutSec, q.Arch), "\n")},
+		{"Failed invocations", fmt.Sprintf("%d (error logged, runtime exit or timeout, in the lines read)", scan.FailedCount())},
 		{"Rows exported", fmt.Sprintf("%d", len(scan.Matches))},
 		{"Scan status", status},
 		{"Exported at", now.Format("2006-01-02 15:04:05 MST")},

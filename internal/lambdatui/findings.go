@@ -7,16 +7,16 @@ import (
 	"github.com/ryandam9/aws_explorer/internal/table"
 )
 
-// computeFindings runs the deterministic Lambda runtime/health checks over the
-// currently loaded functions, grouped per region. No AWS calls — pure over the
-// data already on screen, so the panel is instant and matches what is shown.
-// Every check AnalyzeLambda runs is evaluable from the list view (runtime, DLQ,
-// state), so nothing is suppressed: the panel is the full set.
+// computeFindings runs the deterministic Lambda checks over the currently
+// loaded functions, grouped per region. No AWS calls — pure over the data
+// already on screen (the list, plus the background usage/posture load), so the
+// panel is instant and matches what is shown. A fact the usage load couldn't
+// read stays "unknown" and silences the checks that need it.
 func (mm *m) computeFindings() []findings.Finding {
 	now := time.Now()
 	byRegion := map[string][]findings.LambdaFunction{}
 	for _, f := range mm.inv.Functions {
-		byRegion[f.Region] = append(byRegion[f.Region], findings.LambdaFunction{
+		lf := findings.LambdaFunction{
 			Name:             f.Name,
 			ARN:              f.ARN,
 			Runtime:          f.Runtime,
@@ -25,7 +25,18 @@ func (mm *m) computeFindings() []findings.Finding {
 			StateKnown:       f.State != "",
 			State:            f.State,
 			LastUpdateStatus: f.LastUpdateStatus,
-		})
+			Architectures:    f.Architectures,
+			HasLayers:        len(f.Layers) > 0,
+			LastModified:     f.LastModified,
+			LogGroup:         f.LogGroup,
+		}
+		if u, ok := mm.usage[usageKey(f.Region, f.Name)]; ok {
+			lf.UsageKnown, lf.Invocations30d = u.UsageKnown, u.Invocations30d
+			lf.LogGroupKnown, lf.LogGroupExists, lf.RetentionDays, lf.StoredBytes = u.LogKnown, u.LogExists, u.RetentionDays, u.StoredBytes
+			lf.PolicyKnown, lf.Policy = u.PolicyKnown, u.Policy
+			lf.URLKnown, lf.URLAuthTypes = u.URLKnown, u.URLAuthTypes
+		}
+		byRegion[f.Region] = append(byRegion[f.Region], lf)
 	}
 
 	var out []findings.Finding

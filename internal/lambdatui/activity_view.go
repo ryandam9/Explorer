@@ -36,7 +36,7 @@ const (
 	actFieldCount
 )
 
-var actFieldLabels = [actFieldCount]string{"Date", "Regex", "Server filter"}
+var actFieldLabels = [actFieldCount]string{"Date / range", "Regex", "Server filter"}
 
 // matchCellMax bounds a capture-group cell so one long match can't make its
 // column the width of the terminal several times over; the footer shows the
@@ -76,6 +76,10 @@ type activityState struct {
 	scanning bool
 
 	tbl table.Model
+
+	// inv is the invocation drill-down (Enter on a match), layered over the
+	// report.
+	inv invocationView
 }
 
 type activityMetricsMsg struct {
@@ -94,7 +98,7 @@ type activityPageMsg struct {
 func newActivityInputs() [actFieldCount]textinput.Model {
 	var in [actFieldCount]textinput.Model
 	placeholders := [actFieldCount]string{
-		"YYYY-MM-DD, today or yesterday",
+		"YYYY-MM-DD, today, yesterday, 7d or A..B",
 		`Go regex, e.g. Copied (\S+) · empty = every event`,
 		`optional CloudWatch filter, e.g. "Copied"`,
 	}
@@ -175,11 +179,7 @@ func (mm *m) activityQueryFromForm(now time.Time) (ActivityQuery, error) {
 		}
 	}
 	filter := strings.TrimSpace(mm.act.inputs[actFieldFilter].Value())
-	fn := mm.act.fn
-	return ActivityQuery{
-		Region: fn.Region, Function: fn.Name, LogGroup: fn.LogGroup,
-		Day: day, Pattern: re, Filter: filter, MaxMatches: DefaultMaxMatches,
-	}, nil
+	return NewActivityQuery(mm.act.fn, day, re, filter, DefaultMaxMatches), nil
 }
 
 // startActivity cancels any run in flight and starts a new one: the metrics
@@ -199,7 +199,7 @@ func (mm *m) startActivity(q ActivityQuery, cmds *[]tea.Cmd) {
 
 	gen := a.gen
 	*cmds = append(*cmds, mm.spinner.Tick, func() tea.Msg {
-		slog.Info("Loading Lambda invocation metrics", "function", q.Function, "region", q.Region, "date", q.Day.Date)
+		slog.Info("Loading Lambda invocation metrics", "function", q.Function, "region", q.Region, "date", q.Day.Spec())
 		st, err := mm.client.InvocationStats(ctx, q.Region, q.Function, q.Day)
 		return activityMetricsMsg{gen: gen, stats: st, err: err}
 	})
@@ -236,6 +236,7 @@ func (mm *m) closeActivity() {
 	mm.stopActivity()
 	mm.act.gen++
 	mm.act.active = false
+	mm.act.inv = invocationView{gen: mm.act.inv.gen + 1}
 }
 
 func (mm *m) handleActivityMetrics(msg activityMetricsMsg) {
@@ -300,9 +301,10 @@ func activityColumns(scan *LogScan) []table.Column {
 
 // activityRow renders one match as a table row. The request ID is shortened to
 // its first block (enough to tell invocations apart; the footer shows it in
-// full). The message is left whole (last cell); refreshActivityRows wraps it to
-// the panel.
-func activityRow(m Match, loc *time.Location, matchCol bool) table.Row {
+// full). A request ID whose invocation failed is marked ✗ (E jumps between
+// them). The message is left whole (last cell); refreshActivityRows wraps it
+// to the panel.
+func activityRow(m Match, day Day, matchCol bool, failure string) table.Row {
 	id := "—"
 	if m.RequestID != "" {
 		id = m.RequestID
@@ -312,8 +314,11 @@ func activityRow(m Match, loc *time.Location, matchCol bool) table.Row {
 		if m.RequestIDInferred {
 			id += "~"
 		}
+		if failure != "" {
+			id = "✗ " + id
+		}
 	}
-	row := table.Row{matchTime(m.Time, loc), id, dashEm(m.Level)}
+	row := table.Row{matchTime(m.Time, day), id, dashEm(m.Level)}
 	for _, g := range m.Groups {
 		row = append(row, dashEm(truncate(oneLine(g), matchCellMax)))
 	}
@@ -380,18 +385,24 @@ func (mm *m) refreshActivityRows() {
 		a.tbl.SetRows(nil)
 		return
 	}
-	cur := a.tbl.CursorGroup()
-	loc := a.query.Day.Start.Location()
 	matchRows := make([]table.Row, 0, len(a.scan.Matches))
 	for _, m := range a.scan.Matches {
-		matchRows = append(matchRows, activityRow(m, loc, a.scan.MatchColumn()))
+		matchRows = append(matchRows, activityRow(m, a.query.Day, a.scan.MatchColumn(), a.scan.Failure(m.RequestID)))
 	}
-	// A long message wraps onto continuation rows whose other cells are blank;
-	// the row groups keep each match one selectable, striped unit.
-	msgW := activityMessageWidth(mm.width, activityColumns(a.scan), matchRows)
-	rows := make([]table.Row, 0, len(matchRows))
-	groups := make([]int, 0, len(matchRows))
-	for i, r := range matchRows {
+	setWrappedRows(&a.tbl, mm.width, activityColumns(a.scan), matchRows)
+}
+
+// setWrappedRows fills a table whose last column is a message: the message
+// column takes the width the others leave, a long message wraps onto
+// continuation rows whose other cells are blank, and row groups keep each
+// logical row one selectable, striped unit. The cursor stays on its logical
+// row across refreshes.
+func setWrappedRows(tbl *table.Model, termWidth int, cols []table.Column, logical []table.Row) {
+	cur := tbl.CursorGroup()
+	msgW := activityMessageWidth(termWidth, cols, logical)
+	rows := make([]table.Row, 0, len(logical))
+	groups := make([]int, 0, len(logical))
+	for i, r := range logical {
 		last := len(r) - 1
 		for j, line := range wrapActivityMessage(r[last], msgW) {
 			row := make(table.Row, len(r))
@@ -403,9 +414,9 @@ func (mm *m) refreshActivityRows() {
 			groups = append(groups, i)
 		}
 	}
-	a.tbl.SetRows(rows)
-	a.tbl.SetRowGroups(groups)
-	a.tbl.SetCursorGroup(max(min(cur, len(matchRows)-1), 0))
+	tbl.SetRows(rows)
+	tbl.SetRowGroups(groups)
+	tbl.SetCursorGroup(max(min(cur, len(logical)-1), 0))
 }
 
 func (mm *m) selectedMatch() (Match, bool) {
@@ -422,6 +433,10 @@ func (mm *m) selectedMatch() (Match, bool) {
 
 func (mm *m) handleActivityKey(msg tea.KeyMsg, cmds *[]tea.Cmd) {
 	a := &mm.act
+	if a.inv.active {
+		mm.handleInvocationKey(msg, cmds)
+		return
+	}
 	switch msg.String() {
 	case "q", "ctrl+c":
 		*cmds = append(*cmds, tea.Quit)
@@ -455,17 +470,17 @@ func (mm *m) handleActivityKey(msg tea.KeyMsg, cmds *[]tea.Cmd) {
 		q := a.query
 		q.Day = q.Day.Shift(n)
 		if q.Day.Start.After(time.Now()) {
-			mm.setToast("That day hasn't started yet")
+			mm.setToast("That window hasn't started yet")
 			*cmds = append(*cmds, toastCmd(3*time.Second))
 			return
 		}
-		a.inputs[actFieldDate].SetValue(q.Day.Date)
+		a.inputs[actFieldDate].SetValue(q.Day.Spec())
 		mm.startActivity(q, cmds)
 	case "r":
 		mm.startActivity(a.query, cmds)
 	case "e":
 		mm.stopActivity()
-		a.inputs[actFieldDate].SetValue(a.query.Day.Date)
+		a.inputs[actFieldDate].SetValue(a.query.Day.Spec())
 		a.formActive = true
 		a.formErr = ""
 		mm.focusActivityField(actFieldPattern)
@@ -478,6 +493,10 @@ func (mm *m) handleActivityKey(msg tea.KeyMsg, cmds *[]tea.Cmd) {
 	case "X":
 		mm.exportActivity(time.Now())
 		*cmds = append(*cmds, toastCmd(activityExportToast))
+	case "enter":
+		mm.openInvocation(cmds)
+	case "E":
+		mm.nextFailedMatch(cmds)
 	case ui.KeyDebug:
 		mm.debug.Open(mm.width, mm.height)
 	case ui.KeyAbout:
@@ -575,6 +594,9 @@ func (mm *m) renderActivityForm() string {
 // selected match's footer. Heights are measured, not assumed, so the table
 // fills exactly the space left.
 func (mm *m) renderActivity() string {
+	if mm.act.inv.active {
+		return mm.renderInvocation()
+	}
 	head := mm.activityHeader()
 	a := &mm.act
 	if a.scan == nil {
@@ -631,14 +653,25 @@ func (mm *m) activityHeader() string {
 			formatCount(st.Errors) + " errors  ·  " + formatCount(st.Throttles) + " throttles" +
 			muted.Render("   (CloudWatch AWS/Lambda, Sum)")
 		lines = append(lines, line)
-		spark := sparkline.Render(st.HourlyInvocations())
-		hourLine := "  per hour " + muted.Render(st.Hours[0].Start.Format("15h")) + " " +
-			lipgloss.NewStyle().Foreground(lipgloss.Color(ui.ColorAccent())).Render(spark) + " " +
-			muted.Render(st.Hours[len(st.Hours)-1].Start.Format("15h"))
-		if p, ok := st.Peak(); ok {
-			hourLine += muted.Render(fmt.Sprintf("  ·  peak %s at %s", formatCount(p.Invocations), p.Start.Format("15:04")))
+		accentS := lipgloss.NewStyle().Foreground(lipgloss.Color(ui.ColorAccent()))
+		if q.Day.LastDate != "" {
+			days := st.Daily()
+			dayLine := "  per day  " + muted.Render(days[0].Date[5:]) + " " + accentS.Render(sparkline.Render(st.DailyInvocations())) +
+				" " + muted.Render(days[len(days)-1].Date[5:])
+			if p, ok := st.PeakDay(); ok {
+				t, _ := time.ParseInLocation("2006-01-02", p.Date, q.Day.Start.Location())
+				dayLine += muted.Render(fmt.Sprintf("  ·  peak %s on %s", formatCount(p.Invocations), t.Format("Mon 01-02")))
+			}
+			lines = append(lines, ansi.Truncate(dayLine, w, "…"))
+		} else {
+			hourLine := "  per hour " + muted.Render(st.Hours[0].Start.Format("15h")) + " " +
+				accentS.Render(sparkline.Render(st.HourlyInvocations())) + " " +
+				muted.Render(st.Hours[len(st.Hours)-1].Start.Format("15h"))
+			if p, ok := st.Peak(); ok {
+				hourLine += muted.Render(fmt.Sprintf("  ·  peak %s at %s", formatCount(p.Invocations), p.Start.Format("15:04")))
+			}
+			lines = append(lines, hourLine)
 		}
-		lines = append(lines, hourLine)
 		if st.Realigned {
 			lines = append(lines, warn.Render("  CloudWatch returned UTC-hour buckets for this date — the day's edges are approximate"))
 		}
@@ -658,6 +691,12 @@ func (mm *m) activityHeader() string {
 			prefix = "  " + mm.spinner.View() + " "
 		}
 		lines = append(lines, ansi.Truncate(prefix+"Log scan "+accent.Render(re)+"  "+a.scan.ScanSummary(), w, "…"))
+		for _, l := range perfLines(a.scan, q.TimeoutSec, q.Arch) {
+			lines = append(lines, muted.Render(ansi.Truncate("  "+l, w, "…")))
+		}
+		if n := a.scan.FailedCount(); n > 0 {
+			lines = append(lines, errS.Render(ansi.Truncate(fmt.Sprintf("  ✗ %d failed invocation(s) in the lines read — E jumps to the next, Enter opens one", n), w, "…")))
+		}
 		if note := a.scan.ScanNote(); note != "" {
 			style := warn
 			if a.scan.Err != nil {
@@ -686,6 +725,10 @@ func (mm *m) activityFooter() string {
 		id += " (from the stream's last START)"
 	}
 	meta := muted.Render(ansi.Truncate("  request "+id+" · "+m.Stream, w+2, "…"))
+	if f := mm.act.scan.Failure(m.RequestID); f != "" {
+		meta += "\n" + lipgloss.NewStyle().Foreground(lipgloss.Color(ui.ColorError())).
+			Render("  ✗ this invocation "+f+" — Enter shows all its lines")
+	}
 	wrapped := strings.Split(ansi.Wrap(oneLine(m.Message), w, ""), "\n")
 	if len(wrapped) > 3 {
 		wrapped = wrapped[:3]
@@ -699,7 +742,10 @@ func (mm *m) activityFooter() string {
 
 func (mm *m) activityStatusLeft() string {
 	a := &mm.act
-	s := fmt.Sprintf("Activity: %s · %s", a.query.Function, a.query.Day.Date)
+	if a.inv.active {
+		return mm.invocationStatusLeft()
+	}
+	s := fmt.Sprintf("Activity: %s · %s", a.query.Function, a.query.Day.Spec())
 	if a.scan != nil {
 		noun := "matches"
 		if matchesAll(a.scan.Pattern) {
@@ -715,7 +761,13 @@ func (mm *m) activityStatusLeft() string {
 
 func (mm *m) activityHints() []ui.KeyHint {
 	a := &mm.act
-	hints := []ui.KeyHint{ui.H("↑/↓", "matches"), ui.H("[/]", "prev/next day"), ui.H("e", "edit query")}
+	if a.inv.active {
+		return mm.invocationHints()
+	}
+	hints := []ui.KeyHint{ui.H("↑/↓", "matches"), ui.H("Enter", "invocation"), ui.H("[/]", "prev/next day"), ui.H("e", "edit query")}
+	if a.scan.FailedCount() > 0 {
+		hints = append(hints, ui.H("E", "next failed"))
+	}
 	if a.scanning {
 		hints = append(hints, ui.H("Esc", "stop scan"))
 	} else {

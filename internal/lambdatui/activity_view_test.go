@@ -59,7 +59,7 @@ func runCmd(mm *m, cmd tea.Cmd) {
 		for _, c := range msg {
 			runCmd(mm, c)
 		}
-	case activityPageMsg, activityMetricsMsg:
+	case activityPageMsg, activityMetricsMsg, invocationMsg:
 		_, next := mm.Update(msg)
 		runCmd(mm, next)
 	}
