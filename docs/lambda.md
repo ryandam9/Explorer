@@ -56,6 +56,7 @@ event source opens the same page from the loaded data.
 | `o` | Open the selected resource in the AWS console |
 | `r` | Refresh |
 | `~` | Debug pane — a live view of what the tool is doing (the scan's activity log) |
+| `Ctrl+T` | Appearance panel — theme, Nerd Font icons, painted background (applies live; `Ctrl+S` saves) |
 | `i` | About this page · `q` quit |
 
 The **Findings** panel runs the deterministic checks ([below](#findings)) over

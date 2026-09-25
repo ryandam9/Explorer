@@ -47,6 +47,7 @@ Run history (Enter on a job):
 | `r` | Refresh |
 | `L` | (run history) open the selected run's CloudWatch logs (`/aws-glue/jobs/*`, stream = run ID) |
 | `y` | (run history) copy the selected run's error |
+| `Ctrl+T` | Appearance panel — theme, Nerd Font icons, painted background (applies live; `Ctrl+S` saves) |
 | `i` | About this page · `q` quit |
 
 The **Findings** panel reuses the same deterministic checks as `audit`

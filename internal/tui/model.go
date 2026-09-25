@@ -2292,7 +2292,7 @@ func (m tuiModel) helpBody() string {
 		"  P                  Switch AWS profile / region and rescan",
 		"  e                  View access / scan errors",
 		"  ~                  Debug: live view of what the tool is doing",
-		"  S                  Settings (theme & colors)",
+		"  S / Ctrl+T         Appearance (theme, icons, background)",
 		"  i                  About this page (what it does)",
 		"  ?                  Toggle this help",
 		"  q, Ctrl+C          Quit",
@@ -2581,10 +2581,9 @@ func (m tuiModel) renderBody() string {
 
 func (m tuiModel) renderSidebar() string {
 	var b strings.Builder
-	b.WriteString(ui.PanelTitleStyle().Render("Services") + "\n\n")
-
 	// rowW is the uniform width every row is padded to.
 	rowW := sidebarInner - 2
+	b.WriteString(ui.SectionHeading("Services", rowW) + "\n\n")
 
 	hiBg := lipgloss.Color(ui.ColorHighlight())
 	hiFg := lipgloss.Color(ui.ColorHighlightText())
@@ -2597,7 +2596,7 @@ func (m tuiModel) renderSidebar() string {
 	// resource count. Widths are computed in display columns so a long name
 	// can never overflow rowW — one column over and lipgloss wraps the row,
 	// shifting every entry below it.
-	const markerW = 2 // "▶ " / "  "
+	const markerW = 2 // "▶ " / "  " (the cursor glyph is one column either way)
 
 	for i, svc := range m.services {
 		zID := fmt.Sprintf("%s%d", zoneSvc, i)
@@ -2625,9 +2624,11 @@ func (m tuiModel) renderSidebar() string {
 		active := i == m.activeService
 		marker := "  "
 		if active {
-			marker = "▶ "
+			marker = ui.Glyph("cursor") + " "
 		}
-		label := svc
+		// A service icon (Nerd Font mode only; "" otherwise) prefixes the name
+		// and is counted in the name's width below.
+		label := ui.Icon(svc) + svc
 		if avail := rowW - markerW - countW - ansi.StringWidth(badge); ansi.StringWidth(label) > avail {
 			if avail < 1 {
 				avail = 1
@@ -2710,16 +2711,15 @@ func (m tuiModel) renderTablePanel() string {
 			m.filterInput.View()+
 			lipgloss.NewStyle().Foreground(lipgloss.Color(ui.ColorMuted())).Render(matches))
 	}
-	if ind := ui.TableScrollIndicator(&m.table); ind != "" {
-		parts[0] = lipgloss.JoinVertical(lipgloss.Left, parts[0], ind)
-	}
 	content := lipgloss.JoinVertical(lipgloss.Left, parts...)
 
-	return ui.TablePanelStyle(m.focus == focusTable).
-		Width(inner).
-		Height(innerH).
-		MaxHeight(innerH + 2).
-		Render(content)
+	// The hidden-column marker and row position ride in the bottom border
+	// (they used to be an extra line inside the panel, which the fixed height
+	// then clipped).
+	box := ui.TableBox(&m.table, m.focus == focusTable, fmt.Sprintf("%s (%d)", m.currentService(), len(m.rowsFor(m.currentService()))))
+	box.Width = inner + 2
+	box.Height = innerH
+	return box.Render(content)
 }
 
 func (m tuiModel) renderDetailPanel() string {

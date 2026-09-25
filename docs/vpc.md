@@ -64,7 +64,7 @@ type in `config.yaml` — see [Customizing displayed columns](configuration.md#c
 | `C` | Export the current resource table to CSV to the downloads directory (default `~/.aws_explorer/downloads`) |
 | `r` | Refresh the VPC list or the current resource list |
 | `Esc` | Go back one level (overlay → table → sidebar → VPC list) |
-| `S` | Open the settings panel (themes & colors) |
+| `S` / `Ctrl+T` | Open the Appearance panel (theme, icons, background, colors) |
 | `i` | About this page — a short overlay explaining what the VPC Explorer does |
 | `?` | Toggle the help overlay |
 | `q` / `Ctrl+C` | Quit |

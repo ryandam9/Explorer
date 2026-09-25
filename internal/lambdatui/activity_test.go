@@ -449,3 +449,20 @@ func TestFormatCount(t *testing.T) {
 		}
 	}
 }
+
+func TestDayProgress(t *testing.T) {
+	d, _ := ParseDay("2026-09-24", time.Date(2026, 9, 30, 0, 0, 0, 0, time.UTC), time.UTC)
+	s := NewLogScan(regexp.MustCompile(`x`), "", 0)
+	after := time.Date(2026, 9, 30, 0, 0, 0, 0, time.UTC)
+	if s.DayProgress(d, after) != 0 {
+		t.Error("nothing read yet should be 0")
+	}
+	s.Ingest([]LogEvent{{Time: d.Start.Add(6 * time.Hour)}, {Time: d.Start.Add(3 * time.Hour)}})
+	if got := s.DayProgress(d, after); got != 0.25 {
+		t.Errorf("read through 06:00 of a finished day = %v, want 0.25", got)
+	}
+	// Today, at noon: 06:00 is half of the day so far.
+	if got := s.DayProgress(d, d.Start.Add(12*time.Hour)); got != 0.5 {
+		t.Errorf("read through 06:00 at noon = %v, want 0.5", got)
+	}
+}

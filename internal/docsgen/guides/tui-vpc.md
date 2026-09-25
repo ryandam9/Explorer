@@ -42,7 +42,7 @@ overlay with the full attribute set.
 | `C` | Export the current resource table to CSV |
 | `r` | Refresh the VPC list or the current resource list |
 | `Esc` | Go back one level (overlay → table → sidebar → VPC list) |
-| `S` | Settings panel (themes & colors) |
+| `S` / `Ctrl+T` | Appearance panel (theme, icons, background, colors) |
 | `?` | Toggle the help overlay |
 | `q` / `Ctrl+C` | Quit |
 

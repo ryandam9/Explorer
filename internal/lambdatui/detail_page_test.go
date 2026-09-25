@@ -52,14 +52,14 @@ func TestDetailPageLayout(t *testing.T) {
 		}
 		page := ansi.Strip(mm.buildDetailPage(mm.detailPageWidth()).content)
 		for _, want := range []string{"λ orders", "✓ Active", "python3.12 · x86_64 · 256 MB · 30s timeout", "Processes orders",
-			"(26 days ago)", "╭─ Health", "╭─ Usage · 30 days", "╭─ Findings", "7 invocations",
-			"Log retention", "never expires", "could run on arm64", "╭─ Not configured", "· no layers", "· no function URL",
+			"(26 days ago)", "╭─┤ Health ├", "╭─┤ Usage · 30 days ├", "╭─┤ Findings", "7 invocations",
+			"Log retention", "never expires", "could run on arm64", "╭─┤ Not configured", "· no layers", "· no function URL",
 			"EventBridge rule — nightly"} {
 			if !strings.Contains(page, want) {
 				t.Errorf("width %d: page missing %q", w, want)
 			}
 		}
-		if strings.Contains(page, "╭─ Layers") {
+		if strings.Contains(page, "╭─┤ Layers") {
 			t.Errorf("width %d: an empty section should fold into Not configured", w)
 		}
 	}

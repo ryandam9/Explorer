@@ -42,7 +42,7 @@ services:
   # …one entry per service key; set enabled:false to skip a collector
 
 ui:
-  theme: princess-parrot    # one of the 12 built-in themes
+  theme: princess-parrot    # one of the 20 built-in themes
 ```
 
 ## Resilient scanning

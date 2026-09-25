@@ -10,7 +10,7 @@ import (
 	"github.com/ryandam9/aws_explorer/internal/ui"
 )
 
-const chromeHeight = 2 /* panel border */ + 1 /* scroll hint */ + 1 /* status bar */
+const chromeHeight = 2 /* panel border (carries the row position and hidden-column marker) */ + 1 /* status bar */
 
 func (m *Model) layoutTable() {
 	if m.width <= 0 || m.height <= 0 {
@@ -44,7 +44,7 @@ func (m Model) View() string {
 }
 
 func (m Model) headerView() string {
-	title := ui.HeaderStyle().Render("CloudTrail Lake")
+	title := ui.HeaderStyle().Render(ui.Icon("lake") + "CloudTrail Lake")
 
 	var status string
 	switch {
@@ -94,9 +94,7 @@ func (m Model) bodyView() string {
 		return lipgloss.NewStyle().Padding(1, 2).Render(
 			ui.MutedStyle().Render(m.spin.View() + " waiting for CloudTrail Lake…"))
 	}
-	panel := ui.TablePanelStyle(true).Render(m.tbl.View())
-	hint := ui.TableScrollIndicator(&m.tbl)
-	return panel + "\n" + hint
+	return ui.TablePanel(&m.tbl, true, "Results")
 }
 
 func (m Model) statusBarView() string {

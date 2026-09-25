@@ -66,6 +66,10 @@ type Model struct {
 	altCellStyle lipgloss.Style
 	zebra        bool
 
+	// themeGen is the theme generation the styles were last taken from (see
+	// SetThemeSource).
+	themeGen uint64
+
 	// rowGroups maps each rendered row to the logical row it belongs to, so a
 	// value too tall for one line can span several rows while still reading and
 	// behaving as ONE row: zebra stripes band per group, the selection
@@ -289,8 +293,44 @@ func DefaultStyles() Styles {
 // SetStyles sets the table styles.
 func (m *Model) SetStyles(s Styles) {
 	m.styles = s
+	if themeSource.gen != nil {
+		m.themeGen = themeSource.gen()
+	}
 	m.refreshSelStyle()
 	m.UpdateViewport()
+}
+
+// themeSource lets the application theme re-style every table while the app
+// runs. The ui package registers it: gen is a counter bumped whenever the
+// theme or a colour role changes, styles builds the current themed styles
+// (zebra or plain). A table whose styles predate the current generation
+// re-reads them on its next render, so switching themes in the settings panel
+// recolours every table at once without each screen having to re-apply them.
+var themeSource struct {
+	gen    func() uint64
+	styles func(zebra bool) Styles
+}
+
+// SetThemeSource registers the theme hooks (see themeSource). nil disables
+// theme following.
+func SetThemeSource(gen func() uint64, styles func(zebra bool) Styles) {
+	themeSource.gen, themeSource.styles = gen, styles
+}
+
+// syncTheme re-reads the styles when the theme changed since they were set,
+// keeping the table's zebra choice. It reports whether anything changed.
+func (m *Model) syncTheme() bool {
+	if themeSource.gen == nil || themeSource.styles == nil {
+		return false
+	}
+	g := themeSource.gen()
+	if g == m.themeGen {
+		return false
+	}
+	m.themeGen = g
+	m.styles = themeSource.styles(m.zebra)
+	m.refreshSelStyle()
+	return true
 }
 
 // refreshSelStyle rebuilds the cached selected-row cell style: Cell's padding
@@ -590,6 +630,12 @@ func (m Model) contentWidth() int {
 
 // View renders the component.
 func (m Model) View() string {
+	// A theme switched since the last update: restyle this copy so the frame
+	// shows the new colours now (UpdateViewport persists it on the next
+	// pointer update).
+	if m.syncTheme() {
+		m.UpdateViewport()
+	}
 	header := m.headersView()
 	rows := m.viewport.View()
 	if !m.vScrollActive() {
@@ -684,6 +730,7 @@ func (m Model) HelpView() string {
 // UpdateViewport updates the list content based on the previously defined
 // columns and rows.
 func (m *Model) UpdateViewport() {
+	m.syncTheme()
 	renderedRows := make([]string, 0, len(m.rows))
 
 	// Render only rows from: m.cursor-m.viewport.Height to: m.cursor+m.viewport.Height

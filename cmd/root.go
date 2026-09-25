@@ -17,6 +17,7 @@ import (
 	"github.com/ryandam9/aws_explorer/internal/engine"
 	"github.com/ryandam9/aws_explorer/internal/model"
 	"github.com/ryandam9/aws_explorer/internal/output"
+	"github.com/ryandam9/aws_explorer/internal/ui"
 )
 
 // Build metadata, injected at build time via
@@ -35,6 +36,10 @@ var awsRegion string
 var outputFormat string
 var allRegions bool
 var noHeader bool
+
+// uiNerdFont and uiPaintBackground back the --nerd-font / --paint-background
+// flags (see applyUIFlags).
+var uiNerdFont, uiPaintBackground bool
 var AppConfig *config.Config
 var resolvedCfgFile string // absolute path after viper resolves it
 
@@ -90,6 +95,7 @@ Run "aws_explorer config init" to write a starter file.`,
   aws_explorer --all-regions`,
 	PersistentPreRunE: func(cmd *cobra.Command, args []string) error {
 		applyOutputFormatDefault(cmd)
+		applyUIFlags(cmd)
 		if !acceptsExtraFormat(cmd, outputFormat) {
 			if err := output.ValidateFormat(outputFormat); err != nil {
 				return err
@@ -156,6 +162,25 @@ func applyGlobalAWSOverrides() {
 	}
 }
 
+// applyUIFlags lets --nerd-font / --paint-background override ui.nerdFont /
+// ui.paintBackground for one run (each TUI applies AppConfig.UI at start-up).
+// Both can also be switched while a TUI runs, in the Appearance panel.
+//
+// It also points the Appearance panel (ctrl+t in every TUI) at the config file,
+// so theme, icon and background choices made in the app can be saved.
+func applyUIFlags(cmd *cobra.Command) {
+	if AppConfig == nil {
+		return
+	}
+	ui.ConfigureSettings(configFilePath(), AppConfig)
+	if cmd.Flags().Changed("nerd-font") {
+		AppConfig.UI.NerdFont = uiNerdFont
+	}
+	if cmd.Flags().Changed("paint-background") {
+		AppConfig.UI.PaintBackground = uiPaintBackground
+	}
+}
+
 // applyOutputFormatDefault wires the configured default output format onto the
 // --output flag when the user did not pass it explicitly. An explicit
 // --output/-o always wins; among config values output.format takes precedence
@@ -191,6 +216,8 @@ func init() {
 	rootCmd.PersistentFlags().StringVarP(&outputFormat, "output", "o", "table", "output format: "+output.FormatList())
 	rootCmd.PersistentFlags().BoolVar(&noHeader, "no-header", false, "omit the header row in table and csv output")
 	rootCmd.PersistentFlags().BoolVar(&allRegions, "all-regions", false, "scan all available AWS regions")
+	rootCmd.PersistentFlags().BoolVar(&uiNerdFont, "nerd-font", false, "TUI: use Nerd Font icons (overrides ui.nerdFont; needs a Nerd Font in your terminal)")
+	rootCmd.PersistentFlags().BoolVar(&uiPaintBackground, "paint-background", false, "TUI: fill the screen with the theme's background colour (overrides ui.paintBackground)")
 
 	// Shell completion for flag values.
 	_ = rootCmd.RegisterFlagCompletionFunc("output",

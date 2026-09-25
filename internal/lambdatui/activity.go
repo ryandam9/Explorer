@@ -400,11 +400,15 @@ type LogScan struct {
 	Filter     string   // server-side CloudWatch filter pattern ("" = none)
 	MaxMatches int
 
-	Events  int // events read
-	Starts  int // START lines seen (one per invocation that logged)
-	Pages   int
-	Matches []Match
-	Perf    PerfStats // every REPORT line read (see activity_perf.go)
+	Events int // events read
+	Starts int // START lines seen (one per invocation that logged)
+	// ReadThrough is the newest event timestamp read so far. FilterLogEvents
+	// returns the window in time order, so it is how far through the day the
+	// scan has got (the TUI's progress bar).
+	ReadThrough time.Time
+	Pages       int
+	Matches     []Match
+	Perf        PerfStats // every REPORT line read (see activity_perf.go)
 
 	Done       bool   // the scan finished (window exhausted or a bound reached)
 	StopReason string // why it ended early ("" when the whole day was read)
@@ -412,6 +416,31 @@ type LogScan struct {
 
 	streamReq map[string]string // stream → request ID of its latest START
 	failed    map[string]string // request ID → why that invocation failed (see failureOf)
+}
+
+// DayProgress is how far through the day's window the scan has read, in
+// [0, 1]: the newest event read against the day's span — up to now, for a day
+// still in progress. 0 until an event has been read.
+func (s *LogScan) DayProgress(d Day, now time.Time) float64 {
+	if s.ReadThrough.IsZero() {
+		return 0
+	}
+	end := d.End
+	if now.Before(end) {
+		end = now
+	}
+	span := end.Sub(d.Start)
+	if span <= 0 {
+		return 1
+	}
+	f := float64(s.ReadThrough.Sub(d.Start)) / float64(span)
+	switch {
+	case f < 0:
+		return 0
+	case f > 1:
+		return 1
+	}
+	return f
 }
 
 // NewLogScan prepares a scan. maxMatches <= 0 uses DefaultMaxMatches.
@@ -470,6 +499,9 @@ func (s *LogScan) Ingest(events []LogEvent) bool {
 	s.Pages++
 	for _, ev := range events {
 		s.Events++
+		if ev.Time.After(s.ReadThrough) {
+			s.ReadThrough = ev.Time
+		}
 		msg := strings.TrimRight(ev.Message, "\r\n")
 		line := parseLambdaLine(msg)
 		if line.kind == lineStart {

@@ -152,16 +152,11 @@ func (m *Model) archiveView() string {
 	}
 
 	info := ui.MutedStyle().Render(m.archiveInfoLine())
-	panel := ui.TablePanelStyle(true).Render(m.archiveTable.View())
-	scroll := ui.TableScrollIndicator(&m.archiveTable)
+	panel := ui.TablePanel(&m.archiveTable, true, "Files")
 	hints := ui.MutedStyle().Render(
 		"[↑/↓] select   [Enter] open file   [←/→] columns   [Esc] close")
 
-	parts := []string{title, info, panel}
-	if scroll != "" {
-		parts = append(parts, scroll)
-	}
-	parts = append(parts, hints)
+	parts := []string{title, info, panel, hints}
 	return lipgloss.JoinVertical(lipgloss.Left, parts...)
 }
 

@@ -13,11 +13,11 @@ import (
 )
 
 // chromeHeight is the height of everything below the header: the table panel's
-// top and bottom borders, the column-scroll hint, and the status bar. The
+// top and bottom borders and the status bar. The
 // header's height is measured separately (it varies — title, scan progress,
 // tally — and ui.HeaderStyle adds a bottom margin), because under-counting it
 // makes the frame too tall and ClipToSize trims the status bar off the bottom.
-const chromeHeight = 2 /* panel border */ + 1 /* scroll hint */ + 1 /* status bar */
+const chromeHeight = 2 /* panel border (carries the row position and hidden-column marker) */ + 1 /* status bar */
 
 // layoutTable resizes the findings table to the current terminal.
 func (m *Model) layoutTable() {
@@ -61,11 +61,12 @@ func (m Model) View() string {
 // headerView is two lines: the page name with scan progress, and the running
 // tally (findings, severities, total estimated savings, error badge).
 func (m Model) headerView() string {
-	title := ui.HeaderStyle().Render("Cost audit")
+	title := ui.HeaderStyle().Render(ui.Icon("audit") + "Cost audit")
 
 	var progress string
 	if m.scanning {
-		progress = ui.MutedStyle().Render(fmt.Sprintf("%s scanning regions %d/%d", m.spin.View(), m.scanned, m.regions))
+		progress = ui.MutedStyle().Render(m.spin.View()+" ") + ui.ProgressBar(ui.Fraction(m.scanned, m.regions), 16) +
+			ui.MutedStyle().Render(fmt.Sprintf(" scanning regions %d/%d", m.scanned, m.regions))
 	} else {
 		progress = ui.MutedStyle().Render(fmt.Sprintf("scanned %d region(s)", m.scanned))
 	}
@@ -105,9 +106,7 @@ func (m Model) bodyView() string {
 		}
 		return lipgloss.NewStyle().Padding(1, 2).Render(msg)
 	}
-	panel := ui.TablePanelStyle(true).Render(m.tbl.View())
-	hint := ui.TableScrollIndicator(&m.tbl)
-	return panel + "\n" + hint
+	return ui.TablePanel(&m.tbl, true, "Findings")
 }
 
 func (m Model) statusBarView() string {

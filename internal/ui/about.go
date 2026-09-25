@@ -27,7 +27,7 @@ func AboutView(title, body string, width int) string {
 		"",
 		bodyStyle.Render(body),
 		"",
-		hintStyle.Render("i / Esc  close"),
+		hintStyle.Render(aboutCloseHint()),
 	)
 	return lipgloss.NewStyle().
 		Width(width).
@@ -49,4 +49,13 @@ func AboutWidth(termWidth int) int {
 		w = 32
 	}
 	return w
+}
+
+// aboutCloseHint is the About box's footer. It also points at the Appearance
+// panel, which every TUI has but a busy status bar may have to elide.
+func aboutCloseHint() string {
+	if settingsConfigured() {
+		return "i / Esc  close  ·  Ctrl+T  appearance (theme, icons, background)"
+	}
+	return "i / Esc  close"
 }

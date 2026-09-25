@@ -961,14 +961,9 @@ func (m *Model) csvView() string {
 	}
 
 	info := ui.MutedStyle().Render(m.csvInfoLine())
-	panel := ui.TablePanelStyle(true).Render(m.csvTable.View())
-	scroll := ui.TableScrollIndicator(&m.csvTable)
+	panel := ui.TablePanel(&m.csvTable, true, "Rows")
 
-	parts := []string{title, info, panel}
-	if scroll != "" {
-		parts = append(parts, scroll)
-	}
-	parts = append(parts, m.csvFooter())
+	parts := []string{title, info, panel, m.csvFooter()}
 	return lipgloss.JoinVertical(lipgloss.Left, parts...)
 }
 

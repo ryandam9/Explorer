@@ -16,6 +16,11 @@ const (
 	// KeyDebug toggles the debug activity overlay, which shows the live stream
 	// of what the tool is doing (regions, services, API calls and errors).
 	KeyDebug = "~"
+	// KeyAppearance opens the Appearance panel (theme, icons, background) over
+	// any screen of any TUI. It is handled by the application shell
+	// (WithWindowTitle), not by the individual TUIs, and is a control chord so
+	// it never collides with typing in a filter or a screen's letter keys.
+	KeyAppearance = "ctrl+t"
 )
 
 // HelpView renders a bordered, themed help overlay from a title and a block of

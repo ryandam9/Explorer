@@ -2710,7 +2710,8 @@ func (m *Model) renderAnalyzerList() string {
 
 func (m *Model) viewScanStatus() string {
 	if m.loading && m.scanning {
-		s := m.spinner.View() + fmt.Sprintf("  Scanning %d/%d regions…", m.scanDone, m.scanTotal)
+		s := m.spinner.View() + "  " + ui.ProgressBar(ui.Fraction(m.scanDone, m.scanTotal), 16) +
+			fmt.Sprintf("  Scanning %d/%d regions…", m.scanDone, m.scanTotal)
 		if m.scanFailed > 0 {
 			s += lipgloss.NewStyle().Foreground(lipgloss.Color(ui.ColorWarning())).
 				Render(fmt.Sprintf("  (%d failed)", m.scanFailed))

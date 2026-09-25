@@ -12,11 +12,11 @@ import (
 )
 
 // chromeHeight is the height of everything below the header: the table panel's
-// top and bottom borders, the column-scroll hint, and the status bar. The
+// top and bottom borders and the status bar. The
 // header's height is measured separately (it varies — title, PAID badge/state,
 // totals — and ui.HeaderStyle adds a bottom margin), because under-counting it
 // makes the frame too tall and ClipToSize trims the status bar off the bottom.
-const chromeHeight = 2 /* panel border */ + 1 /* scroll hint */ + 1 /* status bar */
+const chromeHeight = 2 /* panel border (carries the row position and hidden-column marker) */ + 1 /* status bar */
 
 // layoutTable resizes the bill table to the current terminal.
 func (m *Model) layoutTable() {
@@ -60,7 +60,7 @@ func (m Model) View() string {
 // headerView is two lines: the page name with a PAID badge and refresh
 // state, and the running total with line count and refresh cadence.
 func (m Model) headerView() string {
-	title := ui.HeaderStyle().Render("Bill — " + m.label)
+	title := ui.HeaderStyle().Render(ui.Icon("bill") + "Bill — " + m.label)
 	paid := lipgloss.NewStyle().
 		Foreground(lipgloss.Color(ui.ColorStatusBarText())).
 		Background(lipgloss.Color(ui.ColorWarning())).
@@ -109,9 +109,7 @@ func (m Model) bodyView() string {
 		msg := ui.SuccessStyle().Render("✓ Nothing billed in this period.")
 		return lipgloss.NewStyle().Padding(1, 2).Render(msg)
 	}
-	panel := ui.TablePanelStyle(true).Render(m.tbl.View())
-	hint := ui.TableScrollIndicator(&m.tbl)
-	return panel + "\n" + hint
+	return ui.TablePanel(&m.tbl, true, "Costs")
 }
 
 func (m Model) statusBarView() string {

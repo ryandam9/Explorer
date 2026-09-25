@@ -14,7 +14,6 @@ import (
 	"github.com/atotto/clipboard"
 	"github.com/aws/aws-sdk-go-v2/aws"
 	s3types "github.com/aws/aws-sdk-go-v2/service/s3/types"
-	"github.com/charmbracelet/bubbles/progress"
 	"github.com/charmbracelet/bubbles/spinner"
 	"github.com/charmbracelet/bubbles/textinput"
 	"github.com/charmbracelet/bubbles/viewport"
@@ -409,12 +408,11 @@ type Model struct {
 	// Object download state. downloadDir is resolved once from config; the
 	// progress bar is driven by a ticking poll of downloadState while a
 	// download is in flight.
-	downloadDir      string
-	downloading      bool
-	downloadKey      string
-	downloadPercent  float64
-	downloadProgress progress.Model
-	downloadState    *DownloadProgress
+	downloadDir     string
+	downloading     bool
+	downloadKey     string
+	downloadPercent float64
+	downloadState   *DownloadProgress
 
 	presignedURL  string
 	showPresigned bool
@@ -570,11 +568,6 @@ func NewModel(ctx context.Context, awsCfg *config.AWSConfig, region, bucket, pre
 	)
 
 	m.downloadDir = resolveDownloadDir(cfg)
-	m.downloadProgress = progress.New(
-		progress.WithDefaultGradient(),
-		progress.WithoutPercentage(),
-	)
-	m.downloadProgress.Width = 30
 
 	if bucket != "" {
 		m.state = stateObjectList
@@ -2959,7 +2952,7 @@ func (m *Model) renderStatusBar() string {
 			if ds != nil && ds.Total() > 0 {
 				sizeInfo = fmt.Sprintf(" %s / %s", formatSize(ds.Written()), formatSize(ds.Total()))
 			}
-			left = fmt.Sprintf("Downloading %s %s%s", filepath.Base(m.downloadKey), m.downloadProgress.ViewAs(m.downloadPercent), sizeInfo)
+			left = fmt.Sprintf("Downloading %s %s%s", filepath.Base(m.downloadKey), ui.ProgressBar(m.downloadPercent, 30), sizeInfo)
 		} else if m.statusMsg != "" {
 			left = m.statusMsg
 		} else {
@@ -3085,18 +3078,16 @@ func colScrollHints(t *table.Model) []ui.KeyHint {
 	return nil
 }
 
-// tablePanel wraps a table in the shared themed panel, appending the
-// horizontal-scroll indicator when columns are hidden off-screen.
-func tablePanel(t *table.Model, focused bool) string {
-	view := t.View()
-	if ind := ui.TableScrollIndicator(t); ind != "" {
-		view = lipgloss.JoinVertical(lipgloss.Left, view, ind)
-	}
-	return ui.TablePanelStyle(focused).Render(view)
+// tablePanel wraps a table in the shared themed panel: title in the top
+// border, the hidden-column marker and row position in the bottom border. The
+// marker used to be an extra line inside the panel, which made the panel one
+// line taller whenever columns scrolled off-screen.
+func tablePanel(t *table.Model, focused bool, title string) string {
+	return ui.TablePanel(t, focused, title)
 }
 
 func (m *Model) bucketListView() string {
-	tableSection := tablePanel(&m.bucketTable, m.focus == focusBuckets)
+	tableSection := tablePanel(&m.bucketTable, m.focus == focusBuckets, ui.Icon("s3")+fmt.Sprintf("Buckets (%d)", len(m.bucketTable.Rows())))
 	if len(m.bucketTable.Rows()) == 0 {
 		// Listing still in flight (or no buckets at all): show a spinner or an
 		// empty-state line instead of a bare table grid.
@@ -3220,7 +3211,7 @@ func (m *Model) objectListView() string {
 		prefixSection = lipgloss.JoinVertical(lipgloss.Left, prefixSection, line)
 	}
 
-	tableSection := tablePanel(&m.objectTable, m.focus == focusObjects)
+	tableSection := tablePanel(&m.objectTable, m.focus == focusObjects, ui.Icon("folder")+"Objects")
 	if len(m.objectMaps) == 0 {
 		// Initial fetch in flight or a genuinely empty listing: show a spinner
 		// or an empty-state line instead of a bare table grid.
@@ -3565,7 +3556,8 @@ func (m *Model) deleteConfirmView() string {
 	if m.deleteConfirmErrMsg != "" {
 		rows = append(rows, ui.ErrorStyle().Render("  ✗ "+m.deleteConfirmErrMsg))
 	}
-	rows = append(rows, "", ui.MutedStyle().Render("Type 'delete' and press Enter to confirm. Esc to cancel."))
+	rows = append(rows, "", ui.MutedStyle().Render("Type 'delete' and press Enter to confirm."), "",
+		ui.ConfirmButtons("Enter  Delete", "Esc  Cancel", true))
 	content := lipgloss.JoinVertical(lipgloss.Left, rows...)
 	// Size the modal to the rendered content so added context lines can't clip
 	// the confirmation input off the bottom (CLAUDE.md §9).
@@ -3667,7 +3659,7 @@ func (m *Model) helpView() string {
 	sections = append(sections,
 		"",
 		"Utility",
-		"  S                  Settings (theme & colors)",
+		"  S / Ctrl+T         Appearance (theme, icons, background)",
 		"  ~                  Debug: live view of what the tool is doing",
 		"  i                  About this page (what it does)",
 		"  ?                  Toggle this help",

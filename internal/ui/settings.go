@@ -168,6 +168,14 @@ const (
 	numChans
 )
 
+// The control rows above the colour roles.
+const (
+	topTheme      = iota // ‹ theme › — switches and applies live
+	topIcons             // Nerd Font glyphs ↔ plain symbols
+	topBackground        // painted canvas ↔ terminal background
+	numTopRows
+)
+
 // SettingsModel drives the settings console overlay. The list of editable
 // color roles comes from the Roles registry in theme.go, so adding a role
 // there automatically makes it editable here.
@@ -178,7 +186,8 @@ type SettingsModel struct {
 	themeIdx int  // index into Themes
 	fieldIdx int  // selected color role (index into Roles)
 	groupIdx int  // active subsystem tab (index into settingsGroups)
-	onTheme  bool // cursor is on the ACTIVE THEME row, above the roles
+	onTheme  bool // cursor is on one of the top rows (theme, icons, background), above the roles
+	topRow   int  // which top row, when onTheme (topTheme / topIcons / topBackground)
 
 	// palette is the quick-swatch ring, snapshotted when the console opens or
 	// the theme changes. A snapshot keeps the ring stable while cycling: the
@@ -326,31 +335,42 @@ func (s SettingsModel) updateNavMode(msg tea.KeyMsg) (SettingsModel, tea.Cmd) {
 	switch msg.String() {
 	case "up", "k":
 		if s.onTheme {
+			if s.topRow > 0 {
+				s.topRow--
+			}
 			break
 		}
 		if row := s.rowInGroup(); row > 0 {
 			s.fieldIdx = s.group().roles[row-1]
 		} else {
-			s.onTheme = true
+			s.onTheme, s.topRow = true, numTopRows-1
 		}
 	case "down", "j":
 		if s.onTheme {
-			s.onTheme = false
-			s.fieldIdx = s.group().roles[0]
+			if s.topRow < numTopRows-1 {
+				s.topRow++
+			} else {
+				s.onTheme = false
+				s.fieldIdx = s.group().roles[0]
+			}
 		} else if row := s.rowInGroup(); row < len(s.group().roles)-1 {
 			s.fieldIdx = s.group().roles[row+1]
 		}
 	case "left", "h":
 		if s.onTheme {
-			s.selectTheme(s.themeIdx - 1)
+			s.stepTopRow(-1)
 		} else {
 			s.cycleSwatch(-1)
 		}
 	case "right", "l":
 		if s.onTheme {
-			s.selectTheme(s.themeIdx + 1)
+			s.stepTopRow(1)
 		} else {
 			s.cycleSwatch(1)
+		}
+	case " ":
+		if s.onTheme && s.topRow != topTheme {
+			s.stepTopRow(1)
 		}
 	case "tab":
 		s.selectGroup((s.groupIdx + 1) % len(settingsGroups))
@@ -359,10 +379,13 @@ func (s SettingsModel) updateNavMode(msg tea.KeyMsg) (SettingsModel, tea.Cmd) {
 	case "1", "2", "3", "4":
 		s.selectGroup(int(msg.String()[0] - '1'))
 	case "enter", "e":
-		if s.onTheme {
+		switch {
+		case s.onTheme && s.topRow != topTheme:
+			s.stepTopRow(1) // Enter flips a toggle row
+		case s.onTheme:
 			s.onTheme = false
 			s.fieldIdx = s.group().roles[0]
-		} else {
+		default:
 			s.startTune()
 		}
 	case "a":
@@ -374,6 +397,19 @@ func (s SettingsModel) updateNavMode(msg tea.KeyMsg) (SettingsModel, tea.Cmd) {
 		return s, s.saveCmd()
 	}
 	return s, nil
+}
+
+// stepTopRow applies ←/→ on a top row: the theme row cycles themes, the icon
+// and background rows flip their switch. All apply live.
+func (s *SettingsModel) stepTopRow(dir int) {
+	switch s.topRow {
+	case topTheme:
+		s.selectTheme(s.themeIdx + dir)
+	case topIcons:
+		SetNerdFont(!NerdFontEnabled())
+	case topBackground:
+		SetPaintBackground(!PaintBackgroundEnabled())
+	}
 }
 
 // startTune seeds the tuner from the selected role's current value — or, for
@@ -509,8 +545,10 @@ func (s SettingsModel) saveCmd() tea.Cmd {
 		// non-empty roles are written, so roles left on "auto" keep following
 		// their fallback chain.
 		uiCfg := config.UIConfig{
-			Theme:  Themes[s.themeIdx].Name,
-			Themes: make(map[string]map[string]string, len(Themes)),
+			Theme:           Themes[s.themeIdx].Name,
+			Themes:          make(map[string]map[string]string, len(Themes)),
+			PaintBackground: PaintBackgroundEnabled(),
+			NerdFont:        NerdFontEnabled(),
 		}
 		for _, t := range Themes {
 			colors := make(map[string]string, len(Roles))
@@ -693,23 +731,42 @@ func (s SettingsModel) View() string {
 			nameW = len(t.Name)
 		}
 	}
-	themeMarker := "  "
-	themeLabelSt := muted
-	if s.onTheme && !s.tuneMode {
-		themeMarker = accent.Render("❯ ")
-		themeLabelSt = heading
+	rowMark := func(row int) (string, lipgloss.Style) {
+		if s.onTheme && s.topRow == row && !s.tuneMode {
+			return accent.Render("❯ "), heading
+		}
+		return "  ", muted
 	}
+	themeMarker, themeLabelSt := rowMark(topTheme)
 	dots := s.renderThemeDots(6)
 	// Chevrons hug the name; the row is padded after them so the counter and
 	// palette dots stay put while cycling through themes.
 	themeName := accent.Render("‹ ") + text.Bold(true).Render(Themes[s.themeIdx].Name) + accent.Render(" ›")
 	add(
 		themeMarker,
-		themeLabelSt.Render(fmt.Sprintf("%-10s", "Theme")),
+		themeLabelSt.Render(fmt.Sprintf("%-12s", "Theme")),
 		padTo(themeName, nameW+4),
 		muted.Render(fmt.Sprintf("  %2d/%d", s.themeIdx+1, len(Themes))),
 		"   ", dots,
 	)
+
+	// ── Display switches (←/→, Space or Enter flips; apply live) ──
+	toggle := func(on bool, onLabel, offLabel string) string {
+		label := offLabel
+		if on {
+			label = onLabel
+		}
+		return padTo(accent.Render("‹ ")+text.Bold(true).Render(label)+accent.Render(" ›"), nameW+4)
+	}
+	iconMark, iconSt := rowMark(topIcons)
+	sample := muted.Render("  " + Glyph("lambda") + " " + Glyph("s3") + " " + Glyph("ec2") + " " + Glyph("region") + " " + Glyph("ok"))
+	if !NerdFontEnabled() {
+		sample = muted.Render("  ◉ ▶ ✓ ✗ ⚠")
+	}
+	add(iconMark, iconSt.Render(fmt.Sprintf("%-12s", "Icons")), toggle(NerdFontEnabled(), "Nerd Font", "plain"), sample)
+	bgMark, bgSt := rowMark(topBackground)
+	add(bgMark, bgSt.Render(fmt.Sprintf("%-12s", "Background")), toggle(PaintBackgroundEnabled(), "painted", "terminal"),
+		"  ", renderSwatch(ColorCanvas()))
 
 	// ── Section tabs ──
 	var tabs []string
@@ -724,7 +781,7 @@ func (s SettingsModel) View() string {
 			tabs = append(tabs, muted.Render(label))
 		}
 	}
-	add("  ", muted.Render(fmt.Sprintf("%-10s", "Section")), strings.Join(tabs, " "))
+	add("  ", muted.Render(fmt.Sprintf("%-12s", "Section")), strings.Join(tabs, " "))
 	add("")
 
 	// ── Two-column body: role list left, live preview card right ──
@@ -742,6 +799,10 @@ func (s SettingsModel) View() string {
 	switch {
 	case s.tuneMode:
 		lines = append(lines, padZone(s.renderTuner(iw), ctrlZoneRows)...)
+	case s.onTheme && s.topRow == topIcons:
+		lines = append(lines, padZone(s.renderIconsBank(iw), ctrlZoneRows)...)
+	case s.onTheme && s.topRow == topBackground:
+		lines = append(lines, padZone(s.renderBackgroundBank(iw), ctrlZoneRows)...)
 	case s.onTheme:
 		lines = append(lines, padZone(s.renderThemeBank(iw), ctrlZoneRows)...)
 	default:
@@ -757,7 +818,7 @@ func (s SettingsModel) View() string {
 		Foreground(lipgloss.Color(ColorText())).
 		Padding(0, 1).
 		Render(body)
-	hintBar := StatusBar(consoleWidth+2, "", s.settingsHints())
+	hintBar := statusBar(consoleWidth+2, "", s.settingsHints())
 	return lipgloss.JoinVertical(lipgloss.Left, panel, hintBar)
 }
 
@@ -921,8 +982,45 @@ func (s SettingsModel) renderThemeBank(iw int) []string {
 		consoleRule(iw, "Themes"),
 		nav.String(),
 		strip.String(),
-		muted.Render("  " + fmt.Sprintf("%d bird palettes — colors from the feathers project", len(Themes))),
+		muted.Render("  " + fmt.Sprintf("%d themes — bird palettes (feathers) and popular editor color schemes", len(Themes))),
 		muted.Render("  ←/→ switch theme, the whole app restyles instantly  ·  Ctrl+S saves"),
+	}
+}
+
+// renderIconsBank explains the icon switch. A terminal program cannot change
+// the terminal's font, so this says so plainly: the switch picks which glyphs
+// the app draws, and whether they render depends on the font set in the
+// terminal.
+func (s SettingsModel) renderIconsBank(iw int) []string {
+	muted := lipgloss.NewStyle().Foreground(lipgloss.Color(ColorMuted()))
+	text := lipgloss.NewStyle().Foreground(lipgloss.Color(ColorText()))
+	var nerd []string
+	for _, n := range []string{"lambda", "s3", "ec2", "rds", "vpc", "cloudwatch", "iam", "sqs", "region", "ok", "warn"} {
+		nerd = append(nerd, icons[n].nerd)
+	}
+	return []string{
+		consoleRule(iw, "Icons · font"),
+		text.Render("  Nerd Font glyphs: " + strings.Join(nerd, " ")),
+		muted.Render("  If those show as boxes, your terminal font has no Nerd Font glyphs —"),
+		muted.Render("  the font is set in the terminal (e.g. JetBrainsMono Nerd Font), not here."),
+		muted.Render("  ←/→ switch icons, applied instantly  ·  Ctrl+S saves"),
+	}
+}
+
+// renderBackgroundBank explains the painted-background switch.
+func (s SettingsModel) renderBackgroundBank(iw int) []string {
+	muted := lipgloss.NewStyle().Foreground(lipgloss.Color(ColorMuted()))
+	text := lipgloss.NewStyle().Foreground(lipgloss.Color(ColorText()))
+	canvas := ColorCanvas()
+	if canvas == "" {
+		canvas = "none"
+	}
+	return []string{
+		consoleRule(iw, "Background"),
+		text.Render("  painted: the whole screen takes this theme's canvas color ") + renderSwatch(ColorCanvas()) + text.Render(" "+canvas),
+		muted.Render("  terminal: your terminal's own background shows through (the default)."),
+		muted.Render("  The canvas is a color role too — edit it under General."),
+		muted.Render("  ←/→ switch, applied instantly  ·  Ctrl+S saves"),
 	}
 }
 

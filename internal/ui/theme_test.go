@@ -1,6 +1,7 @@
 package ui
 
 import (
+	"math"
 	"strings"
 	"testing"
 
@@ -222,5 +223,59 @@ func TestResolveRoleCacheInvalidatedOnEdits(t *testing.T) {
 	SetActiveTheme(origActive)
 	if got := ResolveRole("heading"); got == "#123456" && origActive != themeIdx {
 		t.Error("ResolveRole still returns the edited theme's color after switching themes")
+	}
+}
+
+// contrastRatio is the WCAG contrast ratio between two hex colours.
+func contrastRatio(t *testing.T, a, b string) float64 {
+	t.Helper()
+	lum := func(hex string) float64 {
+		r, g, bl, ok := parseHexColor(hex)
+		if !ok {
+			t.Fatalf("bad colour %q", hex)
+		}
+		ch := func(v int) float64 {
+			c := float64(v) / 255
+			if c <= 0.03928 {
+				return c / 12.92
+			}
+			return math.Pow((c+0.055)/1.055, 2.4)
+		}
+		return 0.2126*ch(r) + 0.7152*ch(g) + 0.0722*ch(bl)
+	}
+	la, lb := lum(a), lum(b)
+	if la < lb {
+		la, lb = lb, la
+	}
+	return (la + 0.05) / (lb + 0.05)
+}
+
+// Every theme carries a canvas (the painted full-screen background), and the
+// colour-scheme themes, which are designed around theirs, keep body text and
+// the selected row readable on it.
+func TestThemeCanvasAndContrast(t *testing.T) {
+	for _, th := range Themes {
+		c := th.Colors
+		if c.Canvas == "" {
+			t.Errorf("theme %q has no canvas", th.Name)
+			continue
+		}
+		if c.Canvas == c.TableRowAltBg {
+			t.Errorf("theme %q: zebra stripe is invisible on its canvas", th.Name)
+		}
+	}
+	for _, name := range []string{"catppuccin-mocha", "tokyo-night", "nord", "gruvbox", "dracula", "rose-pine", "one-dark", "everforest"} {
+		idx, ok := LookupTheme(name)
+		if !ok {
+			t.Errorf("colour-scheme theme %q missing", name)
+			continue
+		}
+		c := Themes[idx].Colors
+		if r := contrastRatio(t, c.Text, c.Canvas); r < 4.5 {
+			t.Errorf("%s: text on canvas %.1f:1, want ≥4.5", name, r)
+		}
+		if r := contrastRatio(t, c.HighlightText, c.Highlight); r < 4.5 {
+			t.Errorf("%s: selected-row text %.1f:1, want ≥4.5", name, r)
+		}
 	}
 }

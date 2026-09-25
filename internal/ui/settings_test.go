@@ -1,11 +1,16 @@
 package ui
 
 import (
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
+	"go.yaml.in/yaml/v3"
+
+	"github.com/ryandam9/aws_explorer/internal/config"
 )
 
 func key(s string) tea.KeyMsg {
@@ -214,9 +219,15 @@ func TestThemeRowLiveApply(t *testing.T) {
 	t.Cleanup(func() { SetActiveTheme(origActive) })
 
 	s := NewSettingsModel(100, 40, "", nil)
-	s, _ = s.Update(key("up")) // from the first role onto the ACTIVE THEME row
-	if !s.onTheme {
-		t.Fatal("up from the first role should land on the theme row")
+	// Up from the first role climbs the top rows: Background, Icons, Theme.
+	s, _ = s.Update(key("up"))
+	if !s.onTheme || s.topRow != topBackground {
+		t.Fatalf("up from the first role should land on the background row (onTheme=%v row=%d)", s.onTheme, s.topRow)
+	}
+	s, _ = s.Update(key("up"))
+	s, _ = s.Update(key("up"))
+	if s.topRow != topTheme {
+		t.Fatalf("two more ups should reach the theme row, got row %d", s.topRow)
 	}
 	start := s.themeIdx
 	dir, want := "right", start+1
@@ -230,9 +241,42 @@ func TestThemeRowLiveApply(t *testing.T) {
 	if getActiveTheme() != want {
 		t.Error("switching themes should apply live (SetActiveTheme)")
 	}
-	s, _ = s.Update(key("down"))
+	for i := 0; i < numTopRows; i++ {
+		s, _ = s.Update(key("down"))
+	}
 	if s.onTheme {
-		t.Error("down should leave the theme row")
+		t.Error("down past the last top row should reach the roles")
+	}
+}
+
+// The icon and background rows flip their switches live (←/→, Space or
+// Enter), and a save writes both into the UI config.
+func TestDisplaySwitches(t *testing.T) {
+	origNerd, origPaint := NerdFontEnabled(), PaintBackgroundEnabled()
+	t.Cleanup(func() { SetNerdFont(origNerd); SetPaintBackground(origPaint) })
+	SetNerdFont(false)
+	SetPaintBackground(false)
+
+	s := NewSettingsModel(100, 40, "", nil)
+	s, _ = s.Update(key("up")) // background row
+	s, _ = s.Update(key("right"))
+	if !PaintBackgroundEnabled() {
+		t.Error("→ on the background row should turn painting on")
+	}
+	if !strings.Contains(s.View(), "painted") {
+		t.Error("the background row should read 'painted' once on")
+	}
+	s, _ = s.Update(key("up")) // icons row
+	s, _ = s.Update(key("enter"))
+	if !NerdFontEnabled() {
+		t.Error("Enter on the icons row should switch to Nerd Font glyphs")
+	}
+	if !s.onTheme || s.topRow != topIcons {
+		t.Error("flipping a switch must not move the cursor")
+	}
+	s, _ = s.Update(key(" "))
+	if NerdFontEnabled() {
+		t.Error("Space should flip the icons back to plain")
 	}
 }
 
@@ -306,4 +350,31 @@ func TestConsoleFixedSize(t *testing.T) {
 	// And it must ignore the terminal size entirely.
 	tiny := NewSettingsModel(20, 10, "", nil)
 	check("tiny terminal", tiny)
+}
+
+// Ctrl+S writes the display switches into ui alongside the theme.
+func TestSaveWritesDisplaySwitches(t *testing.T) {
+	origNerd, origPaint, origTheme := NerdFontEnabled(), PaintBackgroundEnabled(), getActiveTheme()
+	t.Cleanup(func() { SetNerdFont(origNerd); SetPaintBackground(origPaint); SetActiveTheme(origTheme) })
+	SetNerdFont(true)
+	SetPaintBackground(true)
+
+	path := filepath.Join(t.TempDir(), "config.yaml")
+	s := NewSettingsModel(100, 40, path, &config.Config{})
+	if msg := s.saveCmd()(); msg != (SettingsSavedMsg{Theme: Themes[s.themeIdx].Name}) {
+		t.Fatalf("save returned %#v", msg)
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var doc struct {
+		UI map[string]any `yaml:"ui"`
+	}
+	if err := yaml.Unmarshal(data, &doc); err != nil {
+		t.Fatal(err)
+	}
+	if doc.UI["paintbackground"] != true || doc.UI["nerdfont"] != true {
+		t.Errorf("saved ui section = %v", doc.UI)
+	}
 }

@@ -25,6 +25,8 @@ terminal (disable with [`NO_COLOR`](https://no-color.org/) or by piping).
 | `--output` / `-o` | `table` | Output format: `table`, `json`, `ndjson`, `csv` |
 | `--no-header` | `false` | Omit the header row in `table`/`csv` output (for scripting) |
 | `--all-regions` | `false` | Scan all available AWS regions |
+| `--paint-background` | `false` | TUI: fill the screen with the theme's background color (overrides `ui.paintBackground`; see [themes](themes.md#painted-background)) |
+| `--nerd-font` | `false` | TUI: Nerd Font icons (overrides `ui.nerdFont`; needs a Nerd Font in your terminal) |
 | `--version` | — | Print version, commit and build date |
 
 ### Examples
