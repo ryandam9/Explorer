@@ -4,8 +4,9 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/charmbracelet/bubbles/viewport"
-	"github.com/charmbracelet/lipgloss"
+	"charm.land/bubbles/v2/viewport"
+	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
 
 	"github.com/ryandam9/aws_explorer/internal/table"
 	"github.com/ryandam9/aws_explorer/internal/ui"
@@ -38,7 +39,7 @@ func dash(s string) string {
 	return s
 }
 
-func (mm *m) View() string {
+func (mm *m) viewString() string {
 	if mm.width == 0 {
 		return "Initializing…"
 	}
@@ -249,7 +250,7 @@ func (mm *m) helpOverlay() string {
 	mm.layoutHelpVP()
 	hint := lipgloss.NewStyle().Foreground(lipgloss.Color(ui.ColorMuted())).Render("↑/↓ scroll · i/Esc close")
 	body := lipgloss.JoinVertical(lipgloss.Left, mm.overlayVP.View(), "", hint)
-	return ui.HelpView("Help — Related resources", body, mm.overlayVP.Width+4)
+	return ui.HelpView("Help — Related resources", body, mm.overlayVP.Width()+4)
 }
 
 func (mm *m) layoutHelpVP() {
@@ -261,8 +262,8 @@ func (mm *m) layoutHelpVP() {
 	if h < 6 {
 		h = 6
 	}
-	off := mm.overlayVP.YOffset
-	mm.overlayVP = viewport.New(w, h)
+	off := mm.overlayVP.YOffset()
+	mm.overlayVP = viewport.New(viewport.WithWidth(w), viewport.WithHeight(h))
 	mm.overlayVP.SetContent(lipgloss.NewStyle().Width(w).Render(helpContent()))
 	mm.overlayVP.SetYOffset(off)
 }
@@ -317,3 +318,8 @@ func dimNote() string {
 	return lipgloss.NewStyle().Foreground(lipgloss.Color(ui.ColorMuted())).
 		Render("Each Enter is one hop; the breadcrumb at the top shows your path.")
 }
+
+// View renders the frame for Bubble Tea v2. The terminal modes (alt screen,
+// mouse, window title) are declared by the application shell that wraps every
+// TUI (ui.WithWindowTitle); tests read the frame via View().Content.
+func (mm *m) View() tea.View { return tea.NewView(mm.viewString()) }

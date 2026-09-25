@@ -3,7 +3,7 @@ package vpctui
 import (
 	"testing"
 
-	tea "github.com/charmbracelet/bubbletea"
+	tea "charm.land/bubbletea/v2"
 )
 
 // newCategoryModel builds a resource-browser model parked on the first
@@ -37,7 +37,7 @@ func TestCategoryEnterFocusesResourceTable(t *testing.T) {
 
 	// Enter records the intent to jump but keeps control in the category pane
 	// while the (uncached) load is in flight.
-	m.handleCategoryKey(tea.KeyMsg{Type: tea.KeyEnter})
+	m.handleCategoryKey(tea.KeyPressMsg{Code: tea.KeyEnter})
 	if m.focus != focusCategory {
 		t.Errorf("focus = %v, want focusCategory while the load is in flight", m.focus)
 	}
@@ -74,7 +74,7 @@ func TestCategoryEnterFocusesResourceTable(t *testing.T) {
 func TestCategoryEnterEmptyStaysInCategory(t *testing.T) {
 	m, rt := newCategoryModel()
 
-	m.handleCategoryKey(tea.KeyMsg{Type: tea.KeyEnter})
+	m.handleCategoryKey(tea.KeyPressMsg{Code: tea.KeyEnter})
 	// The empty load completes: no resources, so control stays put.
 	m.Update(resourcesLoadedMsg{vpcID: "vpc-test", rt: rt, maps: nil})
 	if m.focus != focusCategory {
@@ -94,7 +94,7 @@ func TestCategoryEnterCachedEmptyStaysInCategory(t *testing.T) {
 	m, rt := newCategoryModel()
 	m.resourceMaps[rt] = []map[string]string{} // cached, empty
 
-	m.handleCategoryKey(tea.KeyMsg{Type: tea.KeyEnter})
+	m.handleCategoryKey(tea.KeyPressMsg{Code: tea.KeyEnter})
 	if m.focus != focusCategory {
 		t.Errorf("focus = %v, want focusCategory for a cached-empty type", m.focus)
 	}
@@ -109,7 +109,7 @@ func TestCategoryEnterCachedNonEmptyJumps(t *testing.T) {
 	m, rt := newCategoryModel()
 	m.resourceMaps[rt] = []map[string]string{{"id": "r-1"}}
 
-	m.handleCategoryKey(tea.KeyMsg{Type: tea.KeyEnter})
+	m.handleCategoryKey(tea.KeyPressMsg{Code: tea.KeyEnter})
 	if m.focus != focusResourceTable {
 		t.Errorf("focus = %v, want focusResourceTable for a cached non-empty type", m.focus)
 	}
@@ -142,7 +142,7 @@ func TestCategoryEnterOnHeaderStays(t *testing.T) {
 		width:            120,
 		height:           40,
 	}
-	m.handleCategoryKey(tea.KeyMsg{Type: tea.KeyEnter})
+	m.handleCategoryKey(tea.KeyPressMsg{Code: tea.KeyEnter})
 	if m.focus != focusCategory {
 		t.Errorf("focus = %v, want it to stay on focusCategory for a header", m.focus)
 	}

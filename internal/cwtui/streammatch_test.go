@@ -4,10 +4,10 @@ import (
 	"strings"
 	"testing"
 
+	"charm.land/bubbles/v2/textinput"
+	tea "charm.land/bubbletea/v2"
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/service/cloudwatchlogs/types"
-	"github.com/charmbracelet/bubbles/textinput"
-	tea "github.com/charmbracelet/bubbletea"
 )
 
 // streamEvent is a matched event as a group-wide FilterLogEvents returns it:
@@ -161,7 +161,7 @@ func TestHandleStreamMatchKeysOwnership(t *testing.T) {
 	m.rebuildStreamMatchTable()
 
 	var cmds []tea.Cmd
-	if !m.handleStreamMatchKeys(tea.KeyMsg{Type: tea.KeyDown}, &cmds) {
+	if !m.handleStreamMatchKeys(tea.KeyPressMsg{Code: tea.KeyDown}, &cmds) {
 		t.Errorf("down arrow not handled by the results view")
 	}
 	if m.streamMatch.idx != 1 {
@@ -169,12 +169,12 @@ func TestHandleStreamMatchKeysOwnership(t *testing.T) {
 	}
 
 	// Not the mode's key: it must fall through to the global handler.
-	if m.handleStreamMatchKeys(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'D'}}, &cmds) {
+	if m.handleStreamMatchKeys(tea.KeyPressMsg{Code: 'D', Text: string('D')}, &cmds) {
 		t.Errorf("D was swallowed by the results view")
 	}
 
 	// Esc clears the tally entirely.
-	if !m.handleStreamMatchKeys(tea.KeyMsg{Type: tea.KeyEsc}, &cmds) {
+	if !m.handleStreamMatchKeys(tea.KeyPressMsg{Code: tea.KeyEsc}, &cmds) {
 		t.Errorf("esc not handled")
 	}
 	if m.streamMatch.visible() || len(m.streamMatch.matches) != 0 {

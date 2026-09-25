@@ -10,9 +10,9 @@ package debugpane
 import (
 	"fmt"
 
-	"github.com/charmbracelet/bubbles/viewport"
-	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/lipgloss"
+	"charm.land/bubbles/v2/viewport"
+	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
 
 	"github.com/ryandam9/aws_explorer/internal/debuglog"
 	"github.com/ryandam9/aws_explorer/internal/ui"
@@ -45,7 +45,7 @@ func (m *Model) Open(width, height int) {
 	if h < 6 {
 		h = 6
 	}
-	m.vp = viewport.New(w, h)
+	m.vp = viewport.New(viewport.WithWidth(w), viewport.WithHeight(h))
 	m.vp.SetContent(body())
 	m.vp.GotoBottom()
 	m.visible = true
@@ -61,16 +61,16 @@ func (m *Model) Close() { m.visible = false }
 // handling those and the scan underneath keeps progressing.
 func (m *Model) HandleInput(msg tea.Msg) bool {
 	switch msg := msg.(type) {
-	case tea.KeyMsg:
+	case tea.KeyPressMsg:
 		switch msg.String() {
 		case "esc", ui.KeyDebug, "q":
 			m.visible = false
 		case "up", "k", "[":
 			m.vp.SetContent(body())
-			m.vp.LineUp(3)
+			m.vp.ScrollUp(3)
 		case "down", "j", "]":
 			m.vp.SetContent(body())
-			m.vp.LineDown(3)
+			m.vp.ScrollDown(3)
 		case "g":
 			m.vp.SetContent(body())
 			m.vp.GotoTop()
@@ -81,13 +81,13 @@ func (m *Model) HandleInput(msg tea.Msg) bool {
 		// Swallow every key while open so none leaks to the screen beneath.
 		return true
 	case tea.MouseMsg:
-		switch msg.Button {
-		case tea.MouseButtonWheelUp:
+		switch msg.Mouse().Button {
+		case tea.MouseWheelUp:
 			m.vp.SetContent(body())
-			m.vp.LineUp(3)
-		case tea.MouseButtonWheelDown:
+			m.vp.ScrollUp(3)
+		case tea.MouseWheelDown:
 			m.vp.SetContent(body())
-			m.vp.LineDown(3)
+			m.vp.ScrollDown(3)
 		}
 		return true
 	}
@@ -126,7 +126,7 @@ func (m Model) view() string {
 		Render(fmt.Sprintf("DEBUG · TOOL ACTIVITY (%d lines)", debuglog.Default.Len()))
 	hint := lipgloss.NewStyle().Foreground(lipgloss.Color(ui.ColorMuted())).
 		Render("↑/↓ scroll · g/G top/bottom · Esc/~ close")
-	bar := ui.VScrollbar(m.vp.Height, m.vp.TotalLineCount(), m.vp.VisibleLineCount(), m.vp.YOffset)
+	bar := ui.VScrollbar(m.vp.Height(), m.vp.TotalLineCount(), m.vp.VisibleLineCount(), m.vp.YOffset())
 	body := lipgloss.JoinHorizontal(lipgloss.Top, m.vp.View(), " ", bar)
 	inner := lipgloss.JoinVertical(lipgloss.Left, title, "", body, "", hint)
 	return lipgloss.NewStyle().

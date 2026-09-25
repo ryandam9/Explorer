@@ -6,8 +6,8 @@ import (
 	"path/filepath"
 	"strings"
 
-	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/lipgloss"
+	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
 	"go.yaml.in/yaml/v3"
 
 	"github.com/ryandam9/aws_explorer/internal/config"
@@ -262,7 +262,7 @@ func (s SettingsModel) Update(msg tea.Msg) (SettingsModel, tea.Cmd) {
 	case tea.WindowSizeMsg:
 		s.width, s.height = msg.Width, msg.Height
 		return s, nil
-	case tea.KeyMsg:
+	case tea.KeyPressMsg:
 		if s.tuneMode {
 			return s.updateTuneMode(msg)
 		}
@@ -331,7 +331,7 @@ func (s *SettingsModel) cycleSwatch(dir int) {
 	setColorForField(s.themeIdx, s.fieldIdx, pal[idx])
 }
 
-func (s SettingsModel) updateNavMode(msg tea.KeyMsg) (SettingsModel, tea.Cmd) {
+func (s SettingsModel) updateNavMode(msg tea.KeyPressMsg) (SettingsModel, tea.Cmd) {
 	switch msg.String() {
 	case "up", "k":
 		if s.onTheme {
@@ -368,7 +368,7 @@ func (s SettingsModel) updateNavMode(msg tea.KeyMsg) (SettingsModel, tea.Cmd) {
 		} else {
 			s.cycleSwatch(1)
 		}
-	case " ":
+	case "space":
 		if s.onTheme && s.topRow != topTheme {
 			s.stepTopRow(1)
 		}
@@ -464,7 +464,7 @@ func (s *SettingsModel) adjust(dir int, coarse bool) {
 	s.tuneHex = hslToHex(s.tuneH, s.tuneS, s.tuneL)
 }
 
-func (s SettingsModel) updateTuneMode(msg tea.KeyMsg) (SettingsModel, tea.Cmd) {
+func (s SettingsModel) updateTuneMode(msg tea.KeyPressMsg) (SettingsModel, tea.Cmd) {
 	switch msg.String() {
 	case "enter":
 		val := ""
@@ -501,7 +501,7 @@ func (s SettingsModel) updateTuneMode(msg tea.KeyMsg) (SettingsModel, tea.Cmd) {
 		}
 	default:
 		if s.tuneChan == chanHex {
-			for _, r := range msg.Runes {
+			for _, r := range msg.Text {
 				s.typeHex(r)
 			}
 		}
@@ -810,8 +810,10 @@ func (s SettingsModel) View() string {
 	}
 
 	body := strings.Join(lines, "\n")
+	// Lip Gloss v2 counts the border inside Width/Height (v1 did not), so the
+	// border's two cells are added back to keep the inner size callers asked for.
 	panel := lipgloss.NewStyle().
-		Width(consoleWidth).
+		Width(consoleWidth+2).
 		MaxWidth(consoleWidth+2).
 		BorderStyle(lipgloss.RoundedBorder()).
 		BorderForeground(lipgloss.Color(ColorBorderFocus())).

@@ -40,7 +40,7 @@ func detailTestModel(width, height int) *m {
 func TestDetailPageLayout(t *testing.T) {
 	for _, w := range []int{80, 130, 190} {
 		mm := detailTestModel(w, 40)
-		view := mm.View()
+		view := mm.View().Content
 		lines := strings.Split(view, "\n")
 		if len(lines) != 40 {
 			t.Errorf("width %d: frame is %d lines, want 40", w, len(lines))

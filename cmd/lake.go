@@ -12,7 +12,8 @@ import (
 	"text/tabwriter"
 	"time"
 
-	tea "github.com/charmbracelet/bubbletea"
+	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
 	"github.com/spf13/cobra"
 
 	"github.com/ryandam9/aws_explorer/internal/auth"
@@ -101,8 +102,8 @@ the trail command for the zero-setup 90-day feed.`,
 			return fmt.Errorf("listing CloudTrail Lake event data stores failed: %w", err)
 		}
 		if len(stores) == 0 {
-			fmt.Println(warnStyle().Render(fmt.Sprintf("No CloudTrail Lake event data store found in %s.", region)))
-			fmt.Println(ui.MutedStyle().Render(
+			lipgloss.Println(warnStyle().Render(fmt.Sprintf("No CloudTrail Lake event data store found in %s.", region)))
+			lipgloss.Println(ui.MutedStyle().Render(
 				"Create one (aws cloudtrail create-event-data-store …), or use `aws_explorer trail` " +
 					"for the zero-setup 90-day LookupEvents feed."))
 			return nil
@@ -137,14 +138,14 @@ the trail command for the zero-setup 90-day feed.`,
 			ui.InitFromConfig(AppConfig.UI)
 			SilenceScanLogs()
 			m := laketui.New(ctx, awscfg, sql, opts, title, store.Name, region)
-			p := tea.NewProgram(ui.WithWindowTitle(m), tea.WithAltScreen(), tea.WithContext(ctx))
+			p := tea.NewProgram(ui.WithWindowTitle(m), tea.WithContext(ctx))
 			if _, err := p.Run(); err != nil {
 				return fmt.Errorf("error running lake TUI: %w", err)
 			}
 			return nil
 		}
 
-		fmt.Fprintln(os.Stderr, ui.InfoStyle().Render(
+		lipgloss.Fprintln(os.Stderr, ui.InfoStyle().Render(
 			fmt.Sprintf("Running CloudTrail Lake query (%s) on %s in %s…", title, store.Name, region)))
 		res, err := traillake.RunQuery(ctx, awscfg, sql, opts)
 		if err != nil {
@@ -154,7 +155,7 @@ the trail command for the zero-setup 90-day feed.`,
 			return fmt.Errorf("CloudTrail Lake query failed: %w", err)
 		}
 		if len(res.Rows) == 0 && strings.EqualFold(outputFormat, "table") {
-			fmt.Println(warnStyle().Render("The query returned no rows."))
+			lipgloss.Println(warnStyle().Render("The query returned no rows."))
 			return nil
 		}
 		return renderLakeResult(os.Stdout, res, outputFormat, noHeader)

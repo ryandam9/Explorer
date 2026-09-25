@@ -9,8 +9,8 @@ import (
 	"strings"
 	"time"
 
-	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/lipgloss"
+	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
 	"github.com/spf13/cobra"
 
 	"github.com/ryandam9/aws_explorer/internal/auth"
@@ -155,14 +155,14 @@ This is the CLI twin of the summary TUI's 't' CloudTrail timeline.`,
 			}
 			SilenceScanLogs()
 			m := trailtui.New(ctx, awscfg, regions, filter, opts, scope)
-			p := tea.NewProgram(ui.WithWindowTitle(m), tea.WithAltScreen(), tea.WithContext(ctx))
+			p := tea.NewProgram(ui.WithWindowTitle(m), tea.WithContext(ctx))
 			if _, err := p.Run(); err != nil {
 				return fmt.Errorf("error running trail TUI: %w", err)
 			}
 			return nil
 		}
 
-		fmt.Fprintln(os.Stderr, ui.InfoStyle().Render(
+		lipgloss.Fprintln(os.Stderr, ui.InfoStyle().Render(
 			fmt.Sprintf("Looking up CloudTrail events for %s across %s (last 90 days max)…",
 				scope, regionScopeLabel(regions))))
 
@@ -190,7 +190,7 @@ This is the CLI twin of the summary TUI's 't' CloudTrail timeline.`,
 			return err
 		}
 		if truncated && table {
-			fmt.Fprintln(os.Stderr, warnStyle().Render(
+			lipgloss.Fprintln(os.Stderr, warnStyle().Render(
 				"Note: results truncated at the scan cap — older events exist. "+
 					"Narrow with --since, pivot with --event/--source/--by, or use `lake` for full history."))
 		}
@@ -229,14 +229,14 @@ func warnStyle() lipgloss.Style {
 // printNoTrailEvents explains an empty result and points at the levers that
 // usually surface the missing events, in color.
 func printNoTrailEvents(scope, regionScope string, truncated bool) {
-	fmt.Println(warnStyle().Render(
+	lipgloss.Println(warnStyle().Render(
 		fmt.Sprintf("No matching CloudTrail events for %s across %s in the scan window.", scope, regionScope)))
 	if truncated {
-		fmt.Println(warnStyle().Render(
+		lipgloss.Println(warnStyle().Render(
 			"The feed scans the most recent events newest-first and stopped at the scan cap — " +
 				"in a busy account these can be entirely read-only, hiding older mutations."))
 	}
-	fmt.Println(ui.MutedStyle().Render("Try one of:"))
+	lipgloss.Println(ui.MutedStyle().Render("Try one of:"))
 	for _, hint := range []string{
 		"--event <Name> / --source <svc> / --by <principal>  pivot so the API filters server-side",
 		"--read-events                                        include Describe*/List*/Get* calls",
@@ -244,7 +244,7 @@ func printNoTrailEvents(scope, regionScope string, truncated bool) {
 		"-r <region> / --all-regions                          widen or pin the region",
 		"lake --since 90d                                      query CloudTrail Lake for older history",
 	} {
-		fmt.Println(ui.MutedStyle().Render("  • " + hint))
+		lipgloss.Println(ui.MutedStyle().Render("  • " + hint))
 	}
 }
 

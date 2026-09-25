@@ -5,12 +5,12 @@ import (
 	"strings"
 	"time"
 
+	"charm.land/bubbles/v2/viewport"
+	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
 	"github.com/atotto/clipboard"
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/service/cloudwatchlogs/types"
-	"github.com/charmbracelet/bubbles/viewport"
-	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/lipgloss"
 
 	"github.com/ryandam9/aws_explorer/internal/ui"
 )
@@ -115,7 +115,7 @@ func (m *model) openEventRecordFor(ev types.FilteredLogEvent) {
 		h = 5
 	}
 	m.recordText = eventRecordText(entries)
-	m.recordVP = viewport.New(w, h)
+	m.recordVP = viewport.New(viewport.WithWidth(w), viewport.WithHeight(h))
 	m.recordVP.SetContent(strings.Join(eventRecordLines(entries, w), "\n"))
 	m.recordActive = true
 }
@@ -123,7 +123,7 @@ func (m *model) openEventRecordFor(ev types.FilteredLogEvent) {
 // handleRecordKeys processes keys while the record view is open. It owns only
 // its scrolling/copy/close keys; anything else is ignored so a stray key can't
 // mutate the browser underneath.
-func (m *model) handleRecordKeys(msg tea.KeyMsg, cmds *[]tea.Cmd) {
+func (m *model) handleRecordKeys(msg tea.KeyPressMsg, cmds *[]tea.Cmd) {
 	switch msg.String() {
 	case "esc", "q", "v", "enter":
 		m.recordActive = false
@@ -132,9 +132,9 @@ func (m *model) handleRecordKeys(msg tea.KeyMsg, cmds *[]tea.Cmd) {
 	case "down", "j":
 		m.recordVP.ScrollDown(1)
 	case "pgup", "ctrl+u":
-		m.recordVP.ScrollUp(m.recordVP.Height)
+		m.recordVP.ScrollUp(m.recordVP.Height())
 	case "pgdown", "ctrl+d":
-		m.recordVP.ScrollDown(m.recordVP.Height)
+		m.recordVP.ScrollDown(m.recordVP.Height())
 	case "y":
 		_ = clipboard.WriteAll(m.recordText)
 		m.setToast("Copied event record to clipboard")
@@ -152,7 +152,7 @@ func (m *model) renderEventRecord() string {
 		Render("Event record")
 	body := lipgloss.JoinVertical(lipgloss.Left, title, "", m.recordVP.View())
 	panel := lipgloss.NewStyle().
-		Width(m.recordOverlayWidth()+4).
+		Width(m.recordOverlayWidth()+6).
 		BorderStyle(lipgloss.RoundedBorder()).
 		BorderForeground(lipgloss.Color(ui.ColorBorderFocus())).
 		Foreground(lipgloss.Color(ui.ColorText())).

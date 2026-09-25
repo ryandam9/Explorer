@@ -177,7 +177,7 @@ func TestActivityInvocationDrillDown(t *testing.T) {
 	if i := v.tbl.CursorGroup(); v.inv.Lines[i].Body != "Copied b.csv" {
 		t.Errorf("the view should open on the matched line, got %q", v.inv.Lines[i].Body)
 	}
-	view := mm.View()
+	view := mm.View().Content
 	for _, want := range []string{"Invocation " + reqB, "retrying upload", "✗ this invocation logged an error", "duration 2.10 s", "of 60s timeout"} {
 		if !strings.Contains(view, want) {
 			t.Errorf("view missing %q:\n%s", want, view)

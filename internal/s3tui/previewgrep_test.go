@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	tea "github.com/charmbracelet/bubbletea"
+	tea "charm.land/bubbletea/v2"
 	"github.com/charmbracelet/x/ansi"
 )
 
@@ -29,7 +29,7 @@ func TestPreviewGrepFiltersLines(t *testing.T) {
 		}
 	}
 
-	m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	m.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
 	if m.previewGrepActive || m.previewGrepRe == nil {
 		t.Errorf("enter should keep the filter applied: active=%v re=%v", m.previewGrepActive, m.previewGrepRe)
 	}
@@ -48,7 +48,7 @@ func TestPreviewGrepEscClears(t *testing.T) {
 	if len(m.previewPlain) != 1 {
 		t.Fatalf("filtered lines = %d, want 1", len(m.previewPlain))
 	}
-	m.Update(tea.KeyMsg{Type: tea.KeyEsc})
+	m.Update(tea.KeyPressMsg{Code: tea.KeyEsc})
 	if m.previewGrepActive || m.previewGrepRe != nil || m.previewGrepInput.Value() != "" {
 		t.Errorf("esc should clear the filter: active=%v re=%v input=%q",
 			m.previewGrepActive, m.previewGrepRe, m.previewGrepInput.Value())
@@ -148,7 +148,7 @@ func TestPreviewSearchTracksGrepFilter(t *testing.T) {
 	for _, r := range "hello" {
 		m.Update(keyRunes(string(r)))
 	}
-	m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	m.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
 	if len(m.previewMatches) != 2 {
 		t.Fatalf("unfiltered matches = %d, want 2", len(m.previewMatches))
 	}
@@ -166,13 +166,13 @@ func TestPreviewSearchTracksGrepFilter(t *testing.T) {
 // when cleared.
 func TestPreviewGrepBarHeightAccounting(t *testing.T) {
 	m := previewModel(t, "alpha\nbeta")
-	base := m.previewViewport.Height
+	base := m.previewViewport.Height()
 	m.Update(keyRunes("&"))
-	if got := m.previewViewport.Height; got != base-1 {
+	if got := m.previewViewport.Height(); got != base-1 {
 		t.Errorf("viewport height with grep bar = %d, want %d", got, base-1)
 	}
-	m.Update(tea.KeyMsg{Type: tea.KeyEsc})
-	if got := m.previewViewport.Height; got != base {
+	m.Update(tea.KeyPressMsg{Code: tea.KeyEsc})
+	if got := m.previewViewport.Height(); got != base {
 		t.Errorf("viewport height after clearing = %d, want %d", got, base)
 	}
 }
@@ -184,7 +184,7 @@ func TestPreviewGrepResetOnNewPreview(t *testing.T) {
 	for _, r := range "beta" {
 		m.Update(keyRunes(string(r)))
 	}
-	m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	m.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
 
 	m.initPreviewViewport("other content", nil)
 	if m.previewGrepRe != nil || m.previewGrepActive || m.previewGrepInput.Value() != "" {

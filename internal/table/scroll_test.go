@@ -1,6 +1,11 @@
 package table
 
-import "testing"
+import (
+	"fmt"
+	"testing"
+
+	tea "charm.land/bubbletea/v2"
+)
 
 func colTitles(m Model) []string {
 	var out []string
@@ -73,4 +78,17 @@ func TestColumnScrolling(t *testing.T) {
 	// Unconstrained width shows every column.
 	m.SetWidth(0)
 	assertEq("unconstrained", colTitles(m), []string{"#", "A", "B", "C", "D"})
+}
+
+// Bubble Tea v2 reports the space bar as "space"; it must still page down.
+func TestSpaceBarPagesDown(t *testing.T) {
+	rows := make([]Row, 50)
+	for i := range rows {
+		rows[i] = Row{fmt.Sprint(i)}
+	}
+	m := New(WithColumns([]Column{{Title: "N", Width: 4}}), WithRows(rows), WithFocused(true), WithHeight(10))
+	m, _ = m.Update(tea.KeyPressMsg{Code: tea.KeySpace, Text: " "})
+	if m.Cursor() == 0 {
+		t.Error("space should page the cursor down")
+	}
 }

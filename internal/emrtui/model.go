@@ -6,12 +6,12 @@ import (
 	"log/slog"
 	"time"
 
+	"charm.land/bubbles/v2/spinner"
+	"charm.land/bubbles/v2/textinput"
+	"charm.land/bubbles/v2/viewport"
+	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
 	"github.com/atotto/clipboard"
-	"github.com/charmbracelet/bubbles/spinner"
-	"github.com/charmbracelet/bubbles/textinput"
-	"github.com/charmbracelet/bubbles/viewport"
-	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/lipgloss"
 
 	"github.com/ryandam9/aws_explorer/internal/config"
 	"github.com/ryandam9/aws_explorer/internal/consolelink"
@@ -269,7 +269,7 @@ func NewModel(ctx context.Context, awsCfg *config.AWSConfig, regions []string, a
 
 	f := textinput.New()
 	f.Placeholder = "Filter…"
-	f.Width = 30
+	f.SetWidth(30)
 
 	activeRegions := client.Regions()
 	tbl := table.New(
@@ -675,14 +675,14 @@ func (mm *m) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			cmds = append(cmds, toastCmd(4*time.Second))
 		}
 
-	case tea.KeyMsg:
+	case tea.KeyPressMsg:
 		cmds = append(cmds, mm.handleKey(msg)...)
 	}
 
 	return mm, tea.Batch(cmds...)
 }
 
-func (mm *m) handleKey(msg tea.KeyMsg) []tea.Cmd {
+func (mm *m) handleKey(msg tea.KeyPressMsg) []tea.Cmd {
 	var cmds []tea.Cmd
 
 	// Error screen: Enter/Esc retries, q quits.
@@ -720,7 +720,7 @@ func (mm *m) handleKey(msg tea.KeyMsg) []tea.Cmd {
 			mm.scrollPanel(1)
 		case "pgup":
 			mm.scrollPanel(-panelPageStep)
-		case "pgdown", "pgdn", " ":
+		case "pgdown", "pgdn", "space":
 			mm.scrollPanel(panelPageStep)
 		case "g", "home":
 			if p := mm.focusedPanel(); p != nil {
@@ -812,7 +812,7 @@ func (mm *m) handleKey(msg tea.KeyMsg) []tea.Cmd {
 			mm.hdfsTbl.MoveDown(1)
 		case "pgup":
 			mm.hdfsTbl.MoveUp(10)
-		case "pgdown", "pgdn", " ":
+		case "pgdown", "pgdn", "space":
 			mm.hdfsTbl.MoveDown(10)
 		case "g", "home":
 			mm.hdfsTbl.GotoTop()
@@ -845,7 +845,7 @@ func (mm *m) handleKey(msg tea.KeyMsg) []tea.Cmd {
 			mm.configTbl.MoveDown(1)
 		case "pgup":
 			mm.configTbl.MoveUp(10)
-		case "pgdown", "pgdn", " ":
+		case "pgdown", "pgdn", "space":
 			mm.configTbl.MoveDown(10)
 		case "g", "home":
 			mm.configTbl.GotoTop()

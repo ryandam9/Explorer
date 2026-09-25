@@ -8,7 +8,8 @@ import (
 	"os"
 	"strings"
 
-	"github.com/charmbracelet/lipgloss"
+	"charm.land/lipgloss/v2"
+	"github.com/charmbracelet/colorprofile"
 	"github.com/spf13/cobra"
 
 	"github.com/ryandam9/aws_explorer/internal/auth"
@@ -104,10 +105,12 @@ func bootstrapRegion(cfg *config.AWSConfig) string {
 // for expired credentials, a privileges hint for an access denial, or the raw
 // error otherwise. Styling degrades to plain text when w is not a terminal.
 func renderAuthFailure(w io.Writer, err error, profile, region string) {
-	r := lipgloss.NewRenderer(w)
-	title := r.NewStyle().Bold(true).Foreground(lipgloss.Color("1"))
-	fix := r.NewStyle().Bold(true).Foreground(lipgloss.Color("2"))
-	dim := r.NewStyle().Faint(true)
+	// Styles render full-colour ANSI; the colour-profile writer downsamples it
+	// for w, stripping it entirely when w is not a terminal.
+	w = colorprofile.NewWriter(w, os.Environ())
+	title := lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("1"))
+	fix := lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("2"))
+	dim := lipgloss.NewStyle().Faint(true)
 
 	var detail, action string
 	switch {

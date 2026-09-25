@@ -6,7 +6,7 @@ import (
 	"fmt"
 	"os"
 
-	tea "github.com/charmbracelet/bubbletea"
+	tea "charm.land/bubbletea/v2"
 	"github.com/spf13/cobra"
 
 	"github.com/ryandam9/aws_explorer/internal/awsutil"
@@ -78,7 +78,7 @@ To explore live AWS resources interactively, use 'summary --tui' instead.`,
 		// No engine: browsing saved JSON needs no credentials, STS calls or
 		// region discovery.
 		m := tui.NewModelWithSeed(ctx, nil, configFilePath(), AppConfig, seed)
-		p := tea.NewProgram(ui.WithWindowTitle(m), tea.WithAltScreen(), tea.WithMouseCellMotion(), tea.WithContext(ctx))
+		p := tea.NewProgram(ui.WithWindowTitle(m, ui.WithMouse()), tea.WithContext(ctx))
 		if _, err := p.Run(); err != nil {
 			return fmt.Errorf("running snapshot-diff TUI: %w", err)
 		}

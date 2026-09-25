@@ -3,8 +3,8 @@ package s3tui
 import (
 	"testing"
 
-	"github.com/charmbracelet/bubbles/textinput"
-	tea "github.com/charmbracelet/bubbletea"
+	"charm.land/bubbles/v2/textinput"
+	tea "charm.land/bubbletea/v2"
 
 	"github.com/ryandam9/aws_explorer/internal/table"
 )
@@ -101,18 +101,18 @@ func TestColonOpensFindAndJumps(t *testing.T) {
 	m := objectModelForFind([]string{"alpha", "beta", "gamma", "delta"})
 	m.width, m.height = 100, 30
 
-	m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune(":")})
+	m.Update(tea.KeyPressMsg{Code: ':', Text: ":"})
 	if !m.finding || m.focus != focusFind {
 		t.Fatalf("':' did not open find: finding=%v focus=%d", m.finding, m.focus)
 	}
 
-	m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("d")})
-	m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("e")})
+	m.Update(tea.KeyPressMsg{Code: 'd', Text: "d"})
+	m.Update(tea.KeyPressMsg{Code: 'e', Text: "e"})
 	if got := m.objectTable.Cursor(); got != 3 {
 		t.Errorf("after typing 'de' cursor = %d, want 3 (delta)", got)
 	}
 
-	m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	m.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
 	if m.finding {
 		t.Errorf("Enter did not close the find prompt")
 	}
@@ -128,9 +128,9 @@ func TestColonEscRestoresFocus(t *testing.T) {
 	m.width, m.height = 100, 30
 	rowsBefore := len(m.objectTable.Rows())
 
-	m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune(":")})
-	m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("b")})
-	m.Update(tea.KeyMsg{Type: tea.KeyEsc})
+	m.Update(tea.KeyPressMsg{Code: ':', Text: ":"})
+	m.Update(tea.KeyPressMsg{Code: 'b', Text: "b"})
+	m.Update(tea.KeyPressMsg{Code: tea.KeyEsc})
 
 	if m.finding || m.focus != focusObjects {
 		t.Errorf("Esc left finding=%v focus=%d", m.finding, m.focus)

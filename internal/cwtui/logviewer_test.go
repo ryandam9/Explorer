@@ -4,10 +4,10 @@ import (
 	"strings"
 	"testing"
 
+	"charm.land/bubbles/v2/textinput"
+	tea "charm.land/bubbletea/v2"
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/service/cloudwatchlogs/types"
-	"github.com/charmbracelet/bubbles/textinput"
-	tea "github.com/charmbracelet/bubbletea"
 	"github.com/mattn/go-runewidth"
 )
 
@@ -210,7 +210,7 @@ func TestModelOpensViewerOnEnter(t *testing.T) {
 		viewer:      logViewer{search: textinput.New()},
 	}
 
-	newModel, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	newModel, cmd := m.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
 	m2 := newModel.(*model)
 	if !m2.viewer.active {
 		t.Fatal("Enter on an event should open the full log viewer")
@@ -227,7 +227,7 @@ func TestModelOpensViewerOnEnter(t *testing.T) {
 	}
 
 	// Esc closes the viewer.
-	newModel, _ = m2.Update(tea.KeyMsg{Type: tea.KeyEsc})
+	newModel, _ = m2.Update(tea.KeyPressMsg{Code: tea.KeyEsc})
 	m3 := newModel.(*model)
 	if m3.viewer.active {
 		t.Error("Esc should close the viewer")
@@ -397,7 +397,7 @@ func TestViewerTableOpensRecordView(t *testing.T) {
 	}
 
 	// Esc closes the record and leaves the viewer open.
-	newModel, _ = m2.Update(tea.KeyMsg{Type: tea.KeyEsc})
+	newModel, _ = m2.Update(tea.KeyPressMsg{Code: tea.KeyEsc})
 	m3 := newModel.(*model)
 	if m3.recordActive {
 		t.Error("Esc should close the record view")

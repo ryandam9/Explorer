@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/charmbracelet/bubbles/viewport"
+	"charm.land/bubbles/v2/viewport"
 	"github.com/charmbracelet/x/ansi"
 )
 
@@ -79,7 +79,7 @@ func TestExposureReportEmpty(t *testing.T) {
 
 func TestRenderExposure(t *testing.T) {
 	m := &Model{exposureGroups: exposureReport(exposureSnap())}
-	m.exposureVP = viewport.New(80, 20)
+	m.exposureVP = viewport.New(viewport.WithWidth(80), viewport.WithHeight(20))
 	out := ansi.Strip(m.renderExposure())
 	if !strings.Contains(out, "Public subnets") || !strings.Contains(out, "eni-pub") {
 		t.Errorf("exposure render incomplete:\n%s", out)

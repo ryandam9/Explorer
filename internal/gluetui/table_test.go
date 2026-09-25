@@ -4,8 +4,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/charmbracelet/bubbles/textinput"
-	tea "github.com/charmbracelet/bubbletea"
+	"charm.land/bubbles/v2/textinput"
+	tea "charm.land/bubbletea/v2"
 	"github.com/charmbracelet/x/ansi"
 
 	"github.com/ryandam9/aws_explorer/internal/findings"
@@ -41,7 +41,7 @@ func TestGlueTableNeverWraps(t *testing.T) {
 		for tb := tab(0); tb < tabCount; tb++ {
 			mm.tab = tb
 			mm.rebuild()
-			out := mm.View()
+			out := mm.View().Content
 			for i, line := range strings.Split(out, "\n") {
 				if lw := ansi.StringWidth(line); lw > w {
 					t.Errorf("tab %s width %d: line %d overflows (%d > %d): %q", tabNames[tb], w, i, lw, w, line)
@@ -78,7 +78,7 @@ func TestGlueSelectedJob(t *testing.T) {
 	if job, ok := mm.selectedJob(); !ok || job.Name != "nightly-orders-etl-production" {
 		t.Fatalf("selected job = %+v ok=%v", job, ok)
 	}
-	mm.handleKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("j")})
+	mm.handleKey(tea.KeyPressMsg{Code: 'j', Text: "j"})
 	if job, _ := mm.selectedJob(); job.Name != "ingest" {
 		t.Errorf("after j, job = %q want ingest", job.Name)
 	}
@@ -120,7 +120,7 @@ func TestGlueFindingsPanel(t *testing.T) {
 	if sawSecurity {
 		t.Error("GLU-SEC-001 must be suppressed in the TUI panel (security config is unknown at inventory)")
 	}
-	out := mm.View()
+	out := mm.View().Content
 	for i, line := range strings.Split(out, "\n") {
 		if lw := ansi.StringWidth(line); lw > 120 {
 			t.Errorf("findings line %d overflows (%d > 120): %q", i, lw, line)
@@ -142,7 +142,7 @@ func TestGlueStatusBarPinnedToBottom(t *testing.T) {
 	mm.width, mm.height = 120, 24
 	mm.rebuild()
 
-	out := mm.View()
+	out := mm.View().Content
 	if !strings.Contains(out, "No jobs found in scope.") {
 		t.Fatalf("expected the empty-tab message:\n%s", out)
 	}
@@ -161,12 +161,12 @@ func TestGlueRefreshGuardedWhileLoading(t *testing.T) {
 	mm := newGlueTestModel(120, 24)
 
 	mm.loading = true
-	if cmds := mm.handleKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("r")}); len(cmds) != 0 {
+	if cmds := mm.handleKey(tea.KeyPressMsg{Code: 'r', Text: "r"}); len(cmds) != 0 {
 		t.Errorf("r during a load should not start another (got %d cmds)", len(cmds))
 	}
 
 	mm.loading = false
-	if cmds := mm.handleKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("r")}); len(cmds) == 0 || !mm.loading {
+	if cmds := mm.handleKey(tea.KeyPressMsg{Code: 'r', Text: "r"}); len(cmds) == 0 || !mm.loading {
 		t.Error("r when idle should start a reload")
 	}
 }
@@ -176,7 +176,7 @@ func TestGlueRefreshGuardedWhileLoading(t *testing.T) {
 func TestGlueTabSortByName(t *testing.T) {
 	mm := newGlueTestModel(120, 24) // Jobs: nightly-orders-etl-production, ingest
 
-	mm.handleKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("S")}) // → NAME ascending
+	mm.handleKey(tea.KeyPressMsg{Code: 'S', Text: "S"}) // → NAME ascending
 	if mm.sortCol != 0 || !mm.sortAsc {
 		t.Fatalf("after S: sortCol=%d asc=%v, want col 0 asc", mm.sortCol, mm.sortAsc)
 	}
@@ -187,7 +187,7 @@ func TestGlueTabSortByName(t *testing.T) {
 		t.Errorf("header missing NAME sort arrow:\n%s", mm.tbl.View())
 	}
 
-	mm.handleKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("R")}) // reverse
+	mm.handleKey(tea.KeyPressMsg{Code: 'R', Text: "R"}) // reverse
 	if mm.view[0].name != "nightly-orders-etl-production" {
 		t.Errorf("NAME desc first = %q, want nightly", mm.view[0].name)
 	}
@@ -249,7 +249,7 @@ func TestGlueRunsView(t *testing.T) {
 		rows = append(rows, runRow(r))
 	}
 	mm.runsTbl.SetRows(rows)
-	out := mm.View()
+	out := mm.View().Content
 	for i, line := range strings.Split(out, "\n") {
 		if lw := ansi.StringWidth(line); lw > 120 {
 			t.Errorf("runs line %d overflows (%d): %q", i, lw, line)

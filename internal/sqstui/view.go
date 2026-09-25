@@ -6,13 +6,14 @@ import (
 	"strings"
 	"time"
 
-	"github.com/charmbracelet/lipgloss"
+	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
 
 	"github.com/ryandam9/aws_explorer/internal/awsutil"
 	"github.com/ryandam9/aws_explorer/internal/ui"
 )
 
-func (m *model) View() string {
+func (m *model) viewString() string {
 	if m.err != nil {
 		return m.debug.Overlay(m.renderErrorView(), m.width, m.height)
 	}
@@ -160,8 +161,8 @@ func (m *model) renderSidebar(width int) string {
 	return lipgloss.NewStyle().
 		Border(lipgloss.RoundedBorder()).
 		BorderForeground(lipgloss.Color(ui.ColorBorderFocus())).
-		Width(width).
-		Height(m.height - 4).
+		Width(width + 2).
+		Height(m.height - 2).
 		Render(b.String())
 }
 
@@ -384,7 +385,7 @@ func (m *model) renderMessageRecord() string {
 		Render("Message record")
 	body := lipgloss.JoinVertical(lipgloss.Left, title, "", m.recordVP.View())
 	return lipgloss.NewStyle().
-		Width(m.recordOverlayWidth()+4).
+		Width(m.recordOverlayWidth()+6).
 		BorderStyle(lipgloss.RoundedBorder()).
 		BorderForeground(lipgloss.Color(ui.ColorBorderFocus())).
 		Foreground(lipgloss.Color(ui.ColorText())).
@@ -403,8 +404,8 @@ func (m *model) renderErrorView() string {
 	return lipgloss.NewStyle().
 		Border(lipgloss.RoundedBorder()).
 		BorderForeground(lipgloss.Color(ui.ColorError())).
-		Width(m.width - 4).
-		Height(m.height - 4).
+		Width(m.width - 2).
+		Height(m.height - 2).
 		Render(b.String())
 }
 
@@ -412,8 +413,8 @@ func (m *model) panelBox(width int, content string) string {
 	return lipgloss.NewStyle().
 		Border(lipgloss.RoundedBorder()).
 		BorderForeground(lipgloss.Color(ui.ColorBorder())).
-		Width(width).
-		Height(m.height - 4).
+		Width(width + 2).
+		Height(m.height - 2).
 		Render(content)
 }
 
@@ -503,3 +504,8 @@ func getVisibleRange(current, total, maxVisible int) (int, int) {
 	}
 	return start, end
 }
+
+// View renders the frame for Bubble Tea v2. The terminal modes (alt screen,
+// mouse, window title) are declared by the application shell that wraps every
+// TUI (ui.WithWindowTitle); tests read the frame via View().Content.
+func (m *model) View() tea.View { return tea.NewView(m.viewString()) }

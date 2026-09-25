@@ -308,8 +308,9 @@ back/quit.
 - Data comes from the AXE-033 collector at `DetailLevelSummary`, loaded
   asynchronously per region; rows stream in as they arrive, with a
   `cached N · refreshing…` style status while loading.
-- `SilenceScanLogs()` so the TUI owns the screen; `tea.WithAltScreen()` and
-  `ui.WithWindowTitle` as the other TUIs do.
+- `SilenceScanLogs()` so the TUI owns the screen; `ui.WithWindowTitle` as the
+  other TUIs do (it declares the alternate screen — Bubble Tea v2 sets terminal
+  modes from the View, not program options).
 
 **Acceptance criteria.**
 - Launch with zero args renders the cluster list from the configured regions;

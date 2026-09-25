@@ -3,8 +3,8 @@ package s3tui
 import (
 	"testing"
 
-	"github.com/charmbracelet/bubbles/textinput"
-	tea "github.com/charmbracelet/bubbletea"
+	"charm.land/bubbles/v2/textinput"
+	tea "charm.land/bubbletea/v2"
 )
 
 // Pressing / to edit the prefix should land the cursor at the end of the
@@ -14,7 +14,7 @@ func TestSlashPutsCursorAtEndOfPrefix(t *testing.T) {
 	m.initObjectTable()
 	m.prefixInput = textinput.New()
 
-	m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("/")})
+	m.Update(tea.KeyPressMsg{Code: '/', Text: "/"})
 
 	if m.focus != focusPrefixInput {
 		t.Fatalf("/ should focus the prefix input, focus=%d", m.focus)
@@ -35,7 +35,7 @@ func TestSlashBucketSearchCursorAtEnd(t *testing.T) {
 	m.bucketSearch = textinput.New()
 	m.bucketSearch.SetValue("prod")
 
-	m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("/")})
+	m.Update(tea.KeyPressMsg{Code: '/', Text: "/"})
 
 	if !m.inBucketSearch || m.focus != focusBucketSearch {
 		t.Fatalf("/ should open bucket search, inSearch=%v focus=%d", m.inBucketSearch, m.focus)

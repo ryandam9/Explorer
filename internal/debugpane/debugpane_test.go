@@ -3,7 +3,7 @@ package debugpane
 import (
 	"testing"
 
-	tea "github.com/charmbracelet/bubbletea"
+	tea "charm.land/bubbletea/v2"
 )
 
 func TestOpenAndClose(t *testing.T) {
@@ -26,7 +26,7 @@ func TestHandleInputConsumesKeysAndClosesOnEscape(t *testing.T) {
 	m.Open(120, 40)
 
 	// A scroll key is consumed but leaves the pane open.
-	if !m.HandleInput(tea.KeyMsg{Type: tea.KeyDown}) {
+	if !m.HandleInput(tea.KeyPressMsg{Code: tea.KeyDown}) {
 		t.Fatal("key input should be consumed while visible")
 	}
 	if !m.Visible() {
@@ -34,7 +34,7 @@ func TestHandleInputConsumesKeysAndClosesOnEscape(t *testing.T) {
 	}
 
 	// Esc closes it.
-	if !m.HandleInput(tea.KeyMsg{Type: tea.KeyEscape}) {
+	if !m.HandleInput(tea.KeyPressMsg{Code: tea.KeyEscape}) {
 		t.Fatal("esc should be consumed")
 	}
 	if m.Visible() {

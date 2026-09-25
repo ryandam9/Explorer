@@ -7,10 +7,10 @@ import (
 	"strings"
 	"time"
 
+	"charm.land/bubbles/v2/viewport"
+	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
 	"github.com/atotto/clipboard"
-	"github.com/charmbracelet/bubbles/viewport"
-	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/lipgloss"
 
 	"github.com/ryandam9/aws_explorer/internal/table"
 	"github.com/ryandam9/aws_explorer/internal/ui"
@@ -85,7 +85,7 @@ func codeColumns() []table.Column {
 
 // handleCodeKey routes keys while the code browser is open: scrolling the source
 // viewer when a file is open, otherwise navigating the file list.
-func (mm *m) handleCodeKey(msg tea.KeyMsg, cmds *[]tea.Cmd) {
+func (mm *m) handleCodeKey(msg tea.KeyPressMsg, cmds *[]tea.Cmd) {
 	if mm.codeViewing {
 		switch msg.String() {
 		case "q", "ctrl+c":
@@ -93,13 +93,13 @@ func (mm *m) handleCodeKey(msg tea.KeyMsg, cmds *[]tea.Cmd) {
 		case "esc", "backspace", "left", "h":
 			mm.codeViewing = false
 		case "up", "k":
-			mm.codeViewport.LineUp(1)
+			mm.codeViewport.ScrollUp(1)
 		case "down", "j":
-			mm.codeViewport.LineDown(1)
+			mm.codeViewport.ScrollDown(1)
 		case "pgup":
-			mm.codeViewport.LineUp(panelPageStep)
-		case "pgdown", "pgdn", " ":
-			mm.codeViewport.LineDown(panelPageStep)
+			mm.codeViewport.ScrollUp(panelPageStep)
+		case "pgdown", "pgdn", "space":
+			mm.codeViewport.ScrollDown(panelPageStep)
 		case "g", "home":
 			mm.codeViewport.GotoTop()
 		case "G", "end":
@@ -148,7 +148,7 @@ func (mm *m) openCodeFile() {
 	mm.codeFileName = mm.codeFiles[i].Name
 	mm.codeFileText = mm.codeDisplay(mm.codeFiles[i])
 	w, h := mm.codeViewportSize()
-	mm.codeViewport = viewport.New(w, h)
+	mm.codeViewport = viewport.New(viewport.WithWidth(w), viewport.WithHeight(h))
 	mm.codeViewport.SetContent(lipgloss.NewStyle().Width(w).Render(mm.codeFileText))
 	mm.codeViewing = true
 }
@@ -267,13 +267,13 @@ func (mm *m) renderCode() string {
 // to the current width on resize, mirroring the detail panels.
 func (mm *m) renderCodeFile(title string) string {
 	w, h := mm.codeViewportSize()
-	off := mm.codeViewport.YOffset
-	vp := viewport.New(w, h)
+	off := mm.codeViewport.YOffset()
+	vp := viewport.New(viewport.WithWidth(w), viewport.WithHeight(h))
 	vp.SetContent(lipgloss.NewStyle().Width(w).Render(mm.codeFileText))
 	vp.SetYOffset(off)
 	mm.codeViewport = vp
 
-	bar := ui.VScrollbar(vp.Height, vp.TotalLineCount(), vp.VisibleLineCount(), vp.YOffset)
+	bar := ui.VScrollbar(vp.Height(), vp.TotalLineCount(), vp.VisibleLineCount(), vp.YOffset())
 	content := lipgloss.JoinHorizontal(lipgloss.Top, vp.View(), " ", bar)
 	sub := lipgloss.NewStyle().Foreground(lipgloss.Color(ui.ColorMuted())).Render("  " + mm.codeFileName)
 	panel := lipgloss.NewStyle().
@@ -304,6 +304,6 @@ func (mm *m) renderCodeConfirm() string {
 		Border(lipgloss.RoundedBorder()).
 		BorderForeground(lipgloss.Color(ui.ColorBorderFocus())).
 		Padding(1, 2).
-		Width(w).
+		Width(w + 2).
 		Render(body)
 }

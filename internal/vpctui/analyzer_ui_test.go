@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/charmbracelet/bubbles/viewport"
+	"charm.land/bubbles/v2/viewport"
 	"github.com/charmbracelet/x/ansi"
 )
 
@@ -31,7 +31,7 @@ func TestRenderAnalyzerListEmpty(t *testing.T) {
 func TestViewAnalyzerConfirmWarnsAboutCost(t *testing.T) {
 	m := &Model{width: 100, height: 30, showAnalyzer: true, analyzerConfirm: true,
 		analyzerPendSrc: "eni-a", analyzerPendDst: "eni-b", analyzerPendPort: 443}
-	m.analyzerVP = viewport.New(80, 20)
+	m.analyzerVP = viewport.New(viewport.WithWidth(80), viewport.WithHeight(20))
 	out := ansi.Strip(m.viewAnalyzerOverlay("bg"))
 	if !strings.Contains(out, "incurs a per-analysis charge") {
 		t.Errorf("confirm step must warn about cost:\n%s", out)
@@ -48,7 +48,7 @@ func TestViewAnalyzerListMode(t *testing.T) {
 	m := &Model{width: 100, height: 30, showAnalyzer: true, analyzerList: []NetInsightsAnalysis{
 		{AnalysisID: "nia-1", Source: "eni-a", Destination: "eni-b", DestPort: 443, Status: "succeeded", PathFound: boolp(true)},
 	}}
-	m.analyzerVP = viewport.New(80, 20)
+	m.analyzerVP = viewport.New(viewport.WithWidth(80), viewport.WithHeight(20))
 	m.analyzerVP.SetContent(m.renderAnalyzerList())
 	out := ansi.Strip(m.viewAnalyzerOverlay("bg"))
 	if !strings.Contains(out, "Reachability Analyzer") || !strings.Contains(out, "n new analysis (paid)") {

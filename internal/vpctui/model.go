@@ -9,12 +9,12 @@ import (
 	"sync"
 	"time"
 
+	"charm.land/bubbles/v2/spinner"
+	"charm.land/bubbles/v2/textinput"
+	"charm.land/bubbles/v2/viewport"
+	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
 	"github.com/atotto/clipboard"
-	"github.com/charmbracelet/bubbles/spinner"
-	"github.com/charmbracelet/bubbles/textinput"
-	"github.com/charmbracelet/bubbles/viewport"
-	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/lipgloss"
 	"github.com/charmbracelet/x/ansi"
 	"github.com/ryandam9/aws_explorer/internal/config"
 	"github.com/ryandam9/aws_explorer/internal/consolelink"
@@ -361,16 +361,13 @@ func NewModel(
 	m.vpcSearch = textinput.New()
 	m.vpcSearch.Placeholder = "Filter VPCs…"
 	m.vpcSearch.CharLimit = 128
-	m.vpcSearch.Width = 40
-	m.vpcSearch.PromptStyle = lipgloss.NewStyle().Foreground(lipgloss.Color(ui.ColorAccent())).Bold(true)
-	m.vpcSearch.TextStyle = lipgloss.NewStyle().Foreground(lipgloss.Color(ui.ColorText()))
-	m.vpcSearch.PlaceholderStyle = lipgloss.NewStyle().Foreground(lipgloss.Color(ui.ColorMuted()))
-	m.vpcSearch.Cursor.Style = lipgloss.NewStyle().Foreground(lipgloss.Color(ui.ColorAccent()))
+	m.vpcSearch.SetWidth(40)
+	ui.StyleTextInput(&m.vpcSearch)
 
 	m.resourceFilter = textinput.New()
 	m.resourceFilter.Placeholder = "Filter rows…"
 	m.resourceFilter.CharLimit = 128
-	m.resourceFilter.Width = 40
+	m.resourceFilter.SetWidth(40)
 	m.styleFilterInput(&m.resourceFilter)
 
 	m.spinner = spinner.New(
@@ -378,31 +375,27 @@ func NewModel(
 		spinner.WithStyle(lipgloss.NewStyle().Foreground(lipgloss.Color(ui.ColorHeading())).Bold(true)),
 	)
 
-	m.detailViewport = viewport.New(80, 20)
-	m.findingsViewport = viewport.New(80, 20)
-	m.traceViewport = viewport.New(80, 20)
-	m.xrefViewport = viewport.New(80, 20)
-	m.effRulesVP = viewport.New(80, 20)
-	m.dnsVP = viewport.New(80, 20)
-	m.diffVP = viewport.New(80, 20)
-	m.exposureVP = viewport.New(80, 20)
-	m.analyzerVP = viewport.New(80, 20)
+	m.detailViewport = viewport.New(viewport.WithWidth(80), viewport.WithHeight(20))
+	m.findingsViewport = viewport.New(viewport.WithWidth(80), viewport.WithHeight(20))
+	m.traceViewport = viewport.New(viewport.WithWidth(80), viewport.WithHeight(20))
+	m.xrefViewport = viewport.New(viewport.WithWidth(80), viewport.WithHeight(20))
+	m.effRulesVP = viewport.New(viewport.WithWidth(80), viewport.WithHeight(20))
+	m.dnsVP = viewport.New(viewport.WithWidth(80), viewport.WithHeight(20))
+	m.diffVP = viewport.New(viewport.WithWidth(80), viewport.WithHeight(20))
+	m.exposureVP = viewport.New(viewport.WithWidth(80), viewport.WithHeight(20))
+	m.analyzerVP = viewport.New(viewport.WithWidth(80), viewport.WithHeight(20))
 
 	m.analyzerInput = textinput.New()
 	m.analyzerInput.Placeholder = "eni-src -> eni-dst:443  (or eni-src -> igw-xxxx)"
 	m.analyzerInput.CharLimit = 96
-	m.analyzerInput.Width = 48
-	m.analyzerInput.PromptStyle = lipgloss.NewStyle().Foreground(lipgloss.Color(ui.ColorAccent())).Bold(true)
-	m.analyzerInput.TextStyle = lipgloss.NewStyle().Foreground(lipgloss.Color(ui.ColorText()))
-	m.analyzerInput.Cursor.Style = lipgloss.NewStyle().Foreground(lipgloss.Color(ui.ColorAccent()))
+	m.analyzerInput.SetWidth(48)
+	ui.StyleTextInput(&m.analyzerInput)
 
 	m.traceInput = textinput.New()
 	m.traceInput.Placeholder = "10.0.1.20:3306  (or internet:443)"
 	m.traceInput.CharLimit = 64
-	m.traceInput.Width = 40
-	m.traceInput.PromptStyle = lipgloss.NewStyle().Foreground(lipgloss.Color(ui.ColorAccent())).Bold(true)
-	m.traceInput.TextStyle = lipgloss.NewStyle().Foreground(lipgloss.Color(ui.ColorText()))
-	m.traceInput.Cursor.Style = lipgloss.NewStyle().Foreground(lipgloss.Color(ui.ColorAccent()))
+	m.traceInput.SetWidth(40)
+	ui.StyleTextInput(&m.traceInput)
 
 	return m, nil
 }
@@ -529,10 +522,7 @@ func (m *Model) restyleForTheme() {
 }
 
 func (m *Model) styleFilterInput(in *textinput.Model) {
-	in.PromptStyle = lipgloss.NewStyle().Foreground(lipgloss.Color(ui.ColorAccent())).Bold(true)
-	in.TextStyle = lipgloss.NewStyle().Foreground(lipgloss.Color(ui.ColorText()))
-	in.PlaceholderStyle = lipgloss.NewStyle().Foreground(lipgloss.Color(ui.ColorMuted()))
-	in.Cursor.Style = lipgloss.NewStyle().Foreground(lipgloss.Color(ui.ColorAccent()))
+	ui.StyleTextInput(in)
 }
 
 // ---------------------------------------------------------------------------
@@ -1013,7 +1003,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.themeIdx = idx
 			}
 			m.restyleForTheme()
-		case tea.KeyMsg:
+		case tea.KeyPressMsg:
 			if msg.String() == "esc" && !m.settings.EditMode() {
 				m.showSettings = false
 			}
@@ -1243,7 +1233,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.err = msg.err
 		m.loading = false
 
-	case tea.KeyMsg:
+	case tea.KeyPressMsg:
 		return m.handleKey(msg)
 	}
 
@@ -1255,13 +1245,13 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 func scrollKeys(vp *viewport.Model, key string) bool {
 	switch key {
 	case "up", "k":
-		vp.LineUp(1)
+		vp.ScrollUp(1)
 	case "down", "j":
-		vp.LineDown(1)
+		vp.ScrollDown(1)
 	case "pgup":
-		vp.HalfViewUp()
-	case "pgdown", " ":
-		vp.HalfViewDown()
+		vp.HalfPageUp()
+	case "pgdown", "space":
+		vp.HalfPageDown()
 	case "g", "home":
 		vp.GotoTop()
 	case "G", "end":
@@ -1272,7 +1262,7 @@ func scrollKeys(vp *viewport.Model, key string) bool {
 	return true
 }
 
-func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+func (m *Model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	key := msg.String()
 
 	// Trace destination input: capture typing.
@@ -1500,7 +1490,7 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
-func (m *Model) handleVPCListKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+func (m *Model) handleVPCListKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	key := msg.String()
 	switch key {
 	case ">", ".":
@@ -1539,7 +1529,7 @@ func (m *Model) handleVPCListKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
-func (m *Model) handleVPCSearchKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+func (m *Model) handleVPCSearchKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	key := msg.String()
 	switch key {
 	case "esc":
@@ -1563,7 +1553,7 @@ func (m *Model) handleVPCSearchKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 
 // handleResourceFilterKey routes keys to the resource-table quick filter:
 // live-filtering on every keystroke, Enter keeps the query, Esc clears it.
-func (m *Model) handleResourceFilterKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+func (m *Model) handleResourceFilterKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	switch msg.String() {
 	case "esc":
 		m.clearResourceFilter()
@@ -1605,7 +1595,7 @@ func (m *Model) focusResourceTable() {
 	m.resourceTable.Focus()
 }
 
-func (m *Model) handleCategoryKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+func (m *Model) handleCategoryKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	key := msg.String()
 	switch key {
 	case "esc":
@@ -1656,7 +1646,7 @@ func (m *Model) handleCategoryKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
-func (m *Model) handleResourceTableKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+func (m *Model) handleResourceTableKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	key := msg.String()
 	switch key {
 	case "esc":
@@ -1875,8 +1865,8 @@ func (m *Model) updateTableSizes() {
 	if dvH < 5 {
 		dvH = 5
 	}
-	m.detailViewport.Width = dvW
-	m.detailViewport.Height = dvH
+	m.detailViewport.SetWidth(dvW)
+	m.detailViewport.SetHeight(dvH)
 
 	// All other overlay viewports share one size: the detail size minus room
 	// for the border, title and footer.
@@ -1884,8 +1874,8 @@ func (m *Model) updateTableSizes() {
 		&m.findingsViewport, &m.traceViewport, &m.xrefViewport, &m.effRulesVP,
 		&m.dnsVP, &m.diffVP, &m.exposureVP, &m.analyzerVP,
 	} {
-		vp.Width = dvW
-		vp.Height = max(dvH-2, 3)
+		vp.SetWidth(dvW)
+		vp.SetHeight(max(dvH-2, 3))
 	}
 
 	// Re-wrap already-loaded overlay content to the new width.
@@ -1961,7 +1951,7 @@ func firstID(r map[string]string) string {
 // View
 // ---------------------------------------------------------------------------
 
-func (m *Model) View() string {
+func (m *Model) viewString() string {
 	var content string
 	switch m.state {
 	case stateVPCList:
@@ -2151,8 +2141,8 @@ func (m *Model) viewVPCPanel(height int) string {
 
 	borderColor := ui.ColorBorder()
 	return lipgloss.NewStyle().
-		Width(vpcPanelInner+2).
-		Height(height).
+		Width(vpcPanelInner+4).
+		Height(height+2).
 		BorderStyle(lipgloss.RoundedBorder()).
 		BorderForeground(lipgloss.Color(borderColor)).
 		Padding(0, 1).
@@ -2209,8 +2199,8 @@ func (m *Model) viewCategoryPanel(height int) string {
 		borderColor = ui.ColorBorderFocus()
 	}
 	return lipgloss.NewStyle().
-		Width(catPanelInner+2).
-		Height(height).
+		Width(catPanelInner+4).
+		Height(height+2).
 		BorderStyle(lipgloss.RoundedBorder()).
 		BorderForeground(lipgloss.Color(borderColor)).
 		Padding(0, 1).
@@ -2276,8 +2266,8 @@ func (m *Model) viewResourcePanel(height int) string {
 	}
 
 	return lipgloss.NewStyle().
-		Width(rightWidth).
-		Height(height).
+		Width(rightWidth+2).
+		Height(height+2).
 		BorderStyle(lipgloss.RoundedBorder()).
 		BorderForeground(lipgloss.Color(borderColor)).
 		Padding(0, 1).
@@ -2315,7 +2305,7 @@ func (m *Model) overlayFrame(title, body, hint string) string {
 // so every scrollable overlay shows at a glance how much is above/below the
 // fold. The gutter is blank when the content fits, keeping the box stable.
 func vpWithScrollbar(vp *viewport.Model) string {
-	bar := ui.VScrollbar(vp.Height, vp.TotalLineCount(), vp.VisibleLineCount(), vp.YOffset)
+	bar := ui.VScrollbar(vp.Height(), vp.TotalLineCount(), vp.VisibleLineCount(), vp.YOffset())
 	return lipgloss.JoinHorizontal(lipgloss.Top, vp.View(), " ", bar)
 }
 
@@ -2353,7 +2343,7 @@ func (m *Model) renderFindings() string {
 	if len(m.findings) == 0 {
 		return ui.SuccessStyle().Render("No issues detected. ✓")
 	}
-	wrapW := m.findingsViewport.Width
+	wrapW := m.findingsViewport.Width()
 	if wrapW <= 0 {
 		wrapW = 100
 	}
@@ -2467,7 +2457,7 @@ func (m *Model) renderEffRules() string {
 	heading := lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color(ui.ColorAccent()))
 	muted := lipgloss.NewStyle().Foreground(lipgloss.Color(ui.ColorMuted()))
 
-	wrapW := m.effRulesVP.Width
+	wrapW := m.effRulesVP.Width()
 	if wrapW <= 0 {
 		wrapW = 80
 	}
@@ -2537,7 +2527,7 @@ func (m *Model) renderDNS() string {
 		return muted.Render(fmt.Sprintf("%-28s", label)) + val
 	}
 
-	wrapW := m.dnsVP.Width
+	wrapW := m.dnsVP.Width()
 	if wrapW <= 0 {
 		wrapW = 80
 	}
@@ -2926,3 +2916,8 @@ func clipLines(s string, w int) string {
 	}
 	return strings.Join(lines, "\n")
 }
+
+// View renders the frame for Bubble Tea v2. The terminal modes (alt screen,
+// mouse, window title) are declared by the application shell that wraps every
+// TUI (ui.WithWindowTitle); tests read the frame via View().Content.
+func (m *Model) View() tea.View { return tea.NewView(m.viewString()) }

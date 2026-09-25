@@ -5,8 +5,9 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/charmbracelet/bubbles/viewport"
-	"github.com/charmbracelet/lipgloss"
+	"charm.land/bubbles/v2/viewport"
+	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/x/ansi"
 
 	"github.com/ryandam9/aws_explorer/internal/model"
@@ -18,7 +19,7 @@ import (
 // only sees tagged resources, and only services that integrate with it.
 const CoverageNote = "Shows resources tagged & known to the Resource Groups Tagging API (untagged resources and unsupported services — e.g. IAM — won't appear)."
 
-func (mm *m) View() string {
+func (mm *m) viewString() string {
 	if mm.width == 0 {
 		return "Initializing…"
 	}
@@ -67,7 +68,7 @@ func (mm *m) tagsOverlay() string {
 	hint := lipgloss.NewStyle().Foreground(lipgloss.Color(ui.ColorMuted())).Render("↑/↓ scroll · Esc close")
 	body := lipgloss.JoinVertical(lipgloss.Left, mm.tagsVP.View(), "", hint)
 	title := "Tags — " + mm.tagsResTitle()
-	return ui.HelpView(title, body, mm.tagsVP.Width+4)
+	return ui.HelpView(title, body, mm.tagsVP.Width()+4)
 }
 
 // tagsResTitle is the short resource label shown in the popup title.
@@ -93,8 +94,8 @@ func (mm *m) layoutTagsVP() {
 	if h < 6 {
 		h = 6
 	}
-	off := mm.tagsVP.YOffset
-	mm.tagsVP = viewport.New(w, h)
+	off := mm.tagsVP.YOffset()
+	mm.tagsVP = viewport.New(viewport.WithWidth(w), viewport.WithHeight(h))
 	mm.tagsVP.SetContent(mm.tagsListContent(w))
 	mm.tagsVP.SetYOffset(off)
 }
@@ -137,7 +138,7 @@ func (mm *m) helpOverlay() string {
 	mm.layoutHelpVP()
 	hint := lipgloss.NewStyle().Foreground(lipgloss.Color(ui.ColorMuted())).Render("↑/↓ scroll · i/Esc close")
 	body := lipgloss.JoinVertical(lipgloss.Left, mm.overlayVP.View(), "", hint)
-	return ui.HelpView("Help — AWS Tags explorer", body, mm.overlayVP.Width+4)
+	return ui.HelpView("Help — AWS Tags explorer", body, mm.overlayVP.Width()+4)
 }
 
 // layoutHelpVP sizes the help viewport to the terminal (preserving the scroll
@@ -151,8 +152,8 @@ func (mm *m) layoutHelpVP() {
 	if h < 6 {
 		h = 6
 	}
-	off := mm.overlayVP.YOffset
-	mm.overlayVP = viewport.New(w, h)
+	off := mm.overlayVP.YOffset()
+	mm.overlayVP = viewport.New(viewport.WithWidth(w), viewport.WithHeight(h))
 	mm.overlayVP.SetContent(lipgloss.NewStyle().Width(w).Render(helpContent()))
 	mm.overlayVP.SetYOffset(off)
 }
@@ -419,3 +420,8 @@ func (mm *m) applyToast(rendered string) string {
 	}
 	return strings.Join(lines, "\n")
 }
+
+// View renders the frame for Bubble Tea v2. The terminal modes (alt screen,
+// mouse, window title) are declared by the application shell that wraps every
+// TUI (ui.WithWindowTitle); tests read the frame via View().Content.
+func (mm *m) View() tea.View { return tea.NewView(mm.viewString()) }

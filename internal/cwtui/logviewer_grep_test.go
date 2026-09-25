@@ -4,9 +4,9 @@ import (
 	"strings"
 	"testing"
 
+	"charm.land/bubbles/v2/textinput"
+	tea "charm.land/bubbletea/v2"
 	"github.com/aws/aws-sdk-go-v2/service/cloudwatchlogs/types"
-	"github.com/charmbracelet/bubbles/textinput"
-	tea "github.com/charmbracelet/bubbletea"
 )
 
 func newGrepViewer() *logViewer {
@@ -138,19 +138,19 @@ func TestGrepKeyFlow(t *testing.T) {
 	if len(m.viewer.lines) != 1 {
 		t.Fatalf("live filtering expected 1 line, got %v", m.viewer.lines)
 	}
-	m.handleViewerKeys(tea.KeyMsg{Type: tea.KeyEnter}, &cmds)
+	m.handleViewerKeys(tea.KeyPressMsg{Code: tea.KeyEnter}, &cmds)
 	if m.viewer.grepActive || m.viewer.grepRe == nil {
 		t.Fatal("enter must keep the filter and leave input mode")
 	}
 
 	// Esc inside the grep input clears the filter.
 	m.handleViewerKeys(key("&"), &cmds)
-	m.handleViewerKeys(tea.KeyMsg{Type: tea.KeyEscape}, &cmds)
+	m.handleViewerKeys(tea.KeyPressMsg{Code: tea.KeyEscape}, &cmds)
 	if m.viewer.grepRe != nil || len(m.viewer.lines) != 4 {
 		t.Fatalf("esc must clear the filter, got %d lines", len(m.viewer.lines))
 	}
 }
 
-func key(s string) tea.KeyMsg {
-	return tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune(s)}
+func key(s string) tea.KeyPressMsg {
+	return tea.KeyPressMsg{Code: []rune(s)[0], Text: s}
 }

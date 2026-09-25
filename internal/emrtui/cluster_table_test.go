@@ -5,8 +5,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/charmbracelet/bubbles/textinput"
-	tea "github.com/charmbracelet/bubbletea"
+	"charm.land/bubbles/v2/textinput"
+	tea "charm.land/bubbletea/v2"
 	"github.com/charmbracelet/x/ansi"
 
 	"github.com/ryandam9/aws_explorer/internal/findings"
@@ -60,8 +60,8 @@ func TestClusterRowKeepsFullName(t *testing.T) {
 // cluster list, not clipped with an ellipsis.
 func TestClusterListShowsFullNameWhenWide(t *testing.T) {
 	mm := newClusterTestModel(200, 24)
-	if !strings.Contains(mm.View(), "data-platform-production-analytics-cluster-2026") {
-		t.Errorf("wide render should show the full cluster name:\n%s", mm.View())
+	if !strings.Contains(mm.View().Content, "data-platform-production-analytics-cluster-2026") {
+		t.Errorf("wide render should show the full cluster name:\n%s", mm.View().Content)
 	}
 }
 
@@ -70,7 +70,7 @@ func TestClusterListShowsFullNameWhenWide(t *testing.T) {
 func TestClusterTableNeverWraps(t *testing.T) {
 	for _, w := range []int{200, 120, 100, 80, 60} {
 		mm := newClusterTestModel(w, 24)
-		out := mm.View()
+		out := mm.View().Content
 		for i, line := range strings.Split(out, "\n") {
 			if lw := ansi.StringWidth(line); lw > w {
 				t.Errorf("width %d: line %d overflows (%d > %d): %q", w, i, lw, w, line)
@@ -87,7 +87,7 @@ func TestClusterTableNavSelectsCluster(t *testing.T) {
 	if cl, ok := mm.selectedCluster(); !ok || cl.Name != mm.view[0].Name {
 		t.Fatalf("initial selection = %+v, ok=%v", cl, ok)
 	}
-	mm.handleKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("j")})
+	mm.handleKey(tea.KeyPressMsg{Code: 'j', Text: "j"})
 	if got := mm.tbl.Cursor(); got != 1 {
 		t.Fatalf("cursor after j = %d, want 1", got)
 	}
@@ -145,7 +145,7 @@ func TestTerminatedToggleReloads(t *testing.T) {
 	if mm.showTerminated {
 		t.Fatal("dashboard should default to active clusters only")
 	}
-	cmds := mm.handleKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("t")})
+	cmds := mm.handleKey(tea.KeyPressMsg{Code: 't', Text: "t"})
 	if !mm.showTerminated {
 		t.Error("t should toggle showTerminated on")
 	}
@@ -158,7 +158,7 @@ func TestTerminatedToggleReloads(t *testing.T) {
 	// The toggle is guarded while a load is in flight; let it complete, then a
 	// second t flips the scope back.
 	mm.loading = false
-	mm.handleKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("t")})
+	mm.handleKey(tea.KeyPressMsg{Code: 't', Text: "t"})
 	if mm.showTerminated {
 		t.Error("second t should toggle showTerminated back off")
 	}
@@ -182,7 +182,7 @@ func TestEMRFindingsPanel(t *testing.T) {
 	if !gotCrit {
 		t.Errorf("expected a CRITICAL finding for the terminated-with-errors cluster, got %+v", mm.findingList)
 	}
-	out := mm.View()
+	out := mm.View().Content
 	for i, line := range strings.Split(out, "\n") {
 		if lw := ansi.StringWidth(line); lw > 120 {
 			t.Errorf("findings line %d overflows (%d > 120): %q", i, lw, line)
@@ -201,7 +201,7 @@ func TestEMRStatusBarPinnedToBottom(t *testing.T) {
 	mm.inv = Inventory{} // no clusters
 	mm.rebuild()
 
-	out := mm.View()
+	out := mm.View().Content
 	if !strings.Contains(out, "No clusters found in scope.") {
 		t.Fatalf("expected the empty-list message:\n%s", out)
 	}
@@ -238,7 +238,7 @@ func TestEMREnrichmentGapWarningRenders(t *testing.T) {
 	mm := newClusterTestModel(120, 24)
 	mm.inv.EnrichFailures = 2
 	mm.rebuild()
-	out := mm.View()
+	out := mm.View().Content
 	if !strings.Contains(out, "could not be enriched") {
 		t.Errorf("expected enrichment-gap warning, got:\n%s", out)
 	}
@@ -258,11 +258,11 @@ func TestEMREnrichmentGapWarningRenders(t *testing.T) {
 func TestEMRDescribePanels(t *testing.T) {
 	mm := newClusterTestModel(120, 24)
 	cl, _ := mm.selectedCluster()
-	mm.handleKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("d")})
+	mm.handleKey(tea.KeyPressMsg{Code: 'd', Text: "d"})
 	if !mm.detailActive || !mm.descLoading {
 		t.Fatal("d should open the describe view and start the async load")
 	}
-	if out := mm.View(); !strings.Contains(out, "Describing") {
+	if out := mm.View().Content; !strings.Contains(out, "Describing") {
 		t.Errorf("describe should show a loading state first:\n%s", out)
 	}
 
@@ -275,7 +275,7 @@ func TestEMRDescribePanels(t *testing.T) {
 		t.Fatalf("panels not built: %d panels for %d sections", len(mm.descPanels), len(mm.descSections))
 	}
 
-	out := mm.View()
+	out := mm.View().Content
 	for _, want := range []string{"Describe — " + cl.Name, "Overview", "Networking", "Compute, memory & storage"} {
 		if !strings.Contains(out, want) {
 			t.Errorf("describe grid missing %q:\n%s", want, out)
@@ -288,24 +288,24 @@ func TestEMRDescribePanels(t *testing.T) {
 	}
 
 	// Tab moves focus to the next panel.
-	mm.handleKey(tea.KeyMsg{Type: tea.KeyTab})
+	mm.handleKey(tea.KeyPressMsg{Code: tea.KeyTab})
 	if mm.descFocus != 1 {
 		t.Errorf("Tab should advance the focused panel to 1, got %d", mm.descFocus)
 	}
 	// Shift+Tab wraps back to the first.
-	mm.handleKey(tea.KeyMsg{Type: tea.KeyShiftTab})
+	mm.handleKey(tea.KeyPressMsg{Code: tea.KeyTab, Mod: tea.ModShift})
 	if mm.descFocus != 0 {
 		t.Errorf("Shift+Tab should return focus to 0, got %d", mm.descFocus)
 	}
 
 	// The focused panel scrolls (the Overview panel content exceeds its tile).
 	mm.View() // ensure the panel viewport is sized/filled
-	mm.handleKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("j")})
-	if p := mm.focusedPanel(); p == nil || p.YOffset == 0 {
+	mm.handleKey(tea.KeyPressMsg{Code: 'j', Text: "j"})
+	if p := mm.focusedPanel(); p == nil || p.YOffset() == 0 {
 		t.Error("j should scroll the focused panel down")
 	}
 
-	mm.handleKey(tea.KeyMsg{Type: tea.KeyEsc})
+	mm.handleKey(tea.KeyPressMsg{Code: tea.KeyEsc})
 	if mm.detailActive {
 		t.Error("Esc should close the describe view")
 	}
@@ -317,13 +317,13 @@ func TestEMRDescribePanels(t *testing.T) {
 func TestEMRDescribeSinglePaneFallback(t *testing.T) {
 	mm := newClusterTestModel(100, 16) // narrow + short → single-pane fallback
 	cl, _ := mm.selectedCluster()
-	mm.handleKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("d")})
+	mm.handleKey(tea.KeyPressMsg{Code: 'd', Text: "d"})
 	mm.Update(descMsg{cluster: cl, desc: richTestDescription(cl)})
 
 	if _, _, single := mm.describeLayout(); !single {
 		t.Fatal("a 100x16 terminal should use the single-pane fallback")
 	}
-	out := mm.View()
+	out := mm.View().Content
 	lines := strings.Split(out, "\n")
 	if len(lines) != mm.height {
 		t.Errorf("rendered %d lines, want %d (status bar must reach the bottom)", len(lines), mm.height)
@@ -337,8 +337,8 @@ func TestEMRDescribeSinglePaneFallback(t *testing.T) {
 		}
 	}
 	// The single pane still scrolls.
-	mm.handleKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("j")})
-	if p := mm.focusedPanel(); p == nil || p.YOffset == 0 {
+	mm.handleKey(tea.KeyPressMsg{Code: 'j', Text: "j"})
+	if p := mm.focusedPanel(); p == nil || p.YOffset() == 0 {
 		t.Error("j should scroll the single fallback pane")
 	}
 }
@@ -388,11 +388,11 @@ func TestEMRRefreshGuardedWhileLoading(t *testing.T) {
 	mm := newClusterTestModel(120, 24)
 
 	mm.loading = true
-	if cmds := mm.handleKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("r")}); len(cmds) != 0 {
+	if cmds := mm.handleKey(tea.KeyPressMsg{Code: 'r', Text: "r"}); len(cmds) != 0 {
 		t.Errorf("r during a load should not start another (got %d cmds)", len(cmds))
 	}
 	before := mm.showTerminated
-	cmds := mm.handleKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("t")})
+	cmds := mm.handleKey(tea.KeyPressMsg{Code: 't', Text: "t"})
 	if mm.showTerminated != before {
 		t.Error("t during a load should not toggle the terminated scope")
 	}
@@ -401,7 +401,7 @@ func TestEMRRefreshGuardedWhileLoading(t *testing.T) {
 	}
 
 	mm.loading = false
-	if cmds := mm.handleKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("r")}); len(cmds) == 0 || !mm.loading {
+	if cmds := mm.handleKey(tea.KeyPressMsg{Code: 'r', Text: "r"}); len(cmds) == 0 || !mm.loading {
 		t.Error("r when idle should start a reload")
 	}
 }
@@ -436,15 +436,15 @@ func TestEMRAgeColumnAndSort(t *testing.T) {
 func TestEMRHBaseBoundToB(t *testing.T) {
 	mm := newClusterTestModel(120, 24)
 
-	mm.handleKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("h")})
+	mm.handleKey(tea.KeyPressMsg{Code: 'h', Text: "h"})
 	if mm.hbaseActive {
 		t.Error("h must not open the HBase browser from the cluster list")
 	}
-	mm.handleKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("b")})
+	mm.handleKey(tea.KeyPressMsg{Code: 'b', Text: "b"})
 	if !mm.hbaseActive {
 		t.Fatal("b should open the HBase browser")
 	}
-	mm.handleKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("h")})
+	mm.handleKey(tea.KeyPressMsg{Code: 'h', Text: "h"})
 	if mm.hbaseActive {
 		t.Error("h should go back from (close) the HBase sub-view")
 	}

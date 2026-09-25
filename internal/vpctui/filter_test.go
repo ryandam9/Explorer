@@ -3,12 +3,12 @@ package vpctui
 import (
 	"testing"
 
-	"github.com/charmbracelet/bubbles/textinput"
-	tea "github.com/charmbracelet/bubbletea"
+	"charm.land/bubbles/v2/textinput"
+	tea "charm.land/bubbletea/v2"
 )
 
-func keyRunes(s string) tea.KeyMsg {
-	return tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune(s)}
+func keyRunes(s string) tea.KeyPressMsg {
+	return tea.KeyPressMsg{Code: []rune(s)[0], Text: s}
 }
 
 func newFilterTestModel() *Model {
@@ -63,7 +63,7 @@ func TestResourceTableQuickFilter(t *testing.T) {
 	}
 
 	// Enter keeps the filter applied but leaves input mode.
-	m.handleKey(tea.KeyMsg{Type: tea.KeyEnter})
+	m.handleKey(tea.KeyPressMsg{Code: tea.KeyEnter})
 	if m.inResourceFilter {
 		t.Fatal("enter should leave filter input mode")
 	}
@@ -73,7 +73,7 @@ func TestResourceTableQuickFilter(t *testing.T) {
 
 	// Re-opening with "/" and pressing Esc clears it.
 	m.handleKey(keyRunes("/"))
-	m.handleKey(tea.KeyMsg{Type: tea.KeyEsc})
+	m.handleKey(tea.KeyPressMsg{Code: tea.KeyEsc})
 	if m.inResourceFilter || m.resourceFilter.Value() != "" {
 		t.Fatal("esc should clear the filter and leave input mode")
 	}
@@ -86,7 +86,7 @@ func TestResourceFilterSurvivesSortAndNumbersRows(t *testing.T) {
 	m := newFilterTestModel()
 	m.handleKey(keyRunes("/"))
 	m.handleKey(keyRunes("a")) // matches alpha, beta and gamma
-	m.handleKey(tea.KeyMsg{Type: tea.KeyEnter})
+	m.handleKey(tea.KeyPressMsg{Code: tea.KeyEnter})
 
 	// Sorting rebuilds the table; the filter must stay applied and the
 	// visible rows renumbered 1..n.

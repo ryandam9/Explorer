@@ -6,7 +6,7 @@ import (
 	"os"
 	"strings"
 
-	tea "github.com/charmbracelet/bubbletea"
+	tea "charm.land/bubbletea/v2"
 	"github.com/mattn/go-isatty"
 	"github.com/spf13/cobra"
 
@@ -66,7 +66,7 @@ connection step by step when something doesn't work.`,
 			return fmt.Errorf("initializing EMR dashboard: %w", err)
 		}
 
-		p := tea.NewProgram(ui.WithWindowTitle(model), tea.WithAltScreen(), tea.WithContext(ctx))
+		p := tea.NewProgram(ui.WithWindowTitle(model), tea.WithContext(ctx))
 		if _, err := p.Run(); err != nil {
 			return fmt.Errorf("running EMR dashboard: %w", err)
 		}

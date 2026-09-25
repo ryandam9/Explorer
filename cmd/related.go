@@ -8,7 +8,7 @@ import (
 	"strings"
 	"time"
 
-	tea "github.com/charmbracelet/bubbletea"
+	tea "charm.land/bubbletea/v2"
 	"github.com/mattn/go-isatty"
 	"github.com/spf13/cobra"
 
@@ -191,7 +191,7 @@ This generalizes 'whereused' (which answers only the "used by" direction).`,
 				ui.SetActiveTheme(idx)
 			}
 			model := relatedtui.NewModel(ctx, eng.AWSConfig, regions, AppConfig.App.MaxConcurrency, timeout, allRegions || AppConfig.AWS.AllRegions, args[0])
-			p := tea.NewProgram(ui.WithWindowTitle(model), tea.WithAltScreen(), tea.WithContext(ctx))
+			p := tea.NewProgram(ui.WithWindowTitle(model), tea.WithContext(ctx))
 			if _, err := p.Run(); err != nil {
 				return fmt.Errorf("running related explorer: %w", err)
 			}

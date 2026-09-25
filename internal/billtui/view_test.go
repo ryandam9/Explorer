@@ -5,7 +5,7 @@ import (
 	"testing"
 	"time"
 
-	tea "github.com/charmbracelet/bubbletea"
+	tea "charm.land/bubbletea/v2"
 
 	"github.com/ryandam9/aws_explorer/internal/billing"
 )
@@ -24,7 +24,7 @@ func TestStatusBarSurvivesClip(t *testing.T) {
 	v := mm.(Model)
 	v.rebuild()
 
-	lines := strings.Split(v.View(), "\n")
+	lines := strings.Split(v.View().Content, "\n")
 	last := lines[len(lines)-1]
 	// The active sort now shows as a header arrow, not a status-bar label, so
 	// identify the status-bar line by a key hint it always carries.

@@ -10,13 +10,13 @@ import (
 	"strings"
 	"time"
 
+	"charm.land/bubbles/v2/spinner"
+	"charm.land/bubbles/v2/textinput"
+	"charm.land/bubbles/v2/viewport"
+	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
 	"github.com/atotto/clipboard"
 	"github.com/aws/aws-sdk-go-v2/aws"
-	"github.com/charmbracelet/bubbles/spinner"
-	"github.com/charmbracelet/bubbles/textinput"
-	"github.com/charmbracelet/bubbles/viewport"
-	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/lipgloss"
 
 	"github.com/ryandam9/aws_explorer/internal/consolelink"
 	"github.com/ryandam9/aws_explorer/internal/model"
@@ -168,7 +168,7 @@ func (mm *m) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		mm.rev = xref.BuildIndex(msg.edges)
 		mm.recompute()
 
-	case tea.KeyMsg:
+	case tea.KeyPressMsg:
 		cmds = append(cmds, mm.handleKey(msg)...)
 	}
 	return mm, tea.Batch(cmds...)
@@ -209,7 +209,7 @@ func filterLinks(links []xref.Link, query string) []xref.Link {
 	return out
 }
 
-func (mm *m) handleKey(msg tea.KeyMsg) []tea.Cmd {
+func (mm *m) handleKey(msg tea.KeyPressMsg) []tea.Cmd {
 	var cmds []tea.Cmd
 
 	if mm.showHelp {
@@ -219,9 +219,9 @@ func (mm *m) handleKey(msg tea.KeyMsg) []tea.Cmd {
 		case "i", "?", "esc", "enter":
 			mm.showHelp = false
 		case "up", "k":
-			mm.overlayVP.LineUp(1)
+			mm.overlayVP.ScrollUp(1)
 		case "down", "j":
-			mm.overlayVP.LineDown(1)
+			mm.overlayVP.ScrollDown(1)
 		case "g", "home":
 			mm.overlayVP.GotoTop()
 		case "G", "end":

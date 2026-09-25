@@ -5,14 +5,14 @@ import (
 	"testing"
 	"time"
 
+	"charm.land/bubbles/v2/textinput"
+	tea "charm.land/bubbletea/v2"
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/service/sqs/types"
-	"github.com/charmbracelet/bubbles/textinput"
-	tea "github.com/charmbracelet/bubbletea"
 )
 
-func keyMsg(s string) tea.KeyMsg {
-	return tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune(s)}
+func keyMsg(s string) tea.KeyPressMsg {
+	return tea.KeyPressMsg{Code: []rune(s)[0], Text: s}
 }
 
 func testQueue(name, region string) Queue {
@@ -153,7 +153,7 @@ func TestPeekMsgOpensMessagesView(t *testing.T) {
 
 	// Esc returns to the overview.
 	m3.peekQueue = q
-	newModel, _ = m3.Update(tea.KeyMsg{Type: tea.KeyEsc})
+	newModel, _ = m3.Update(tea.KeyPressMsg{Code: tea.KeyEsc})
 	if newModel.(*model).view != viewOverview {
 		t.Error("Esc should return to the overview")
 	}
@@ -197,7 +197,7 @@ func TestMessageRecordOpensFromMessagesView(t *testing.T) {
 		t.Errorf("record should pretty-print the JSON body, got %q", m2.recordText)
 	}
 
-	newModel, _ = m2.Update(tea.KeyMsg{Type: tea.KeyEsc})
+	newModel, _ = m2.Update(tea.KeyPressMsg{Code: tea.KeyEsc})
 	m3 := newModel.(*model)
 	if m3.recordActive {
 		t.Error("Esc should close the record view")

@@ -6,7 +6,7 @@ import (
 	"strings"
 	"time"
 
-	tea "github.com/charmbracelet/bubbletea"
+	tea "charm.land/bubbletea/v2"
 	"github.com/spf13/cobra"
 
 	"github.com/ryandam9/aws_explorer/internal/cwtui"
@@ -91,7 +91,7 @@ list; otherwise the config's aws.regions list is used.`,
 			return fmt.Errorf("initializing CloudWatch Logs TUI: %w", err)
 		}
 
-		p := tea.NewProgram(ui.WithWindowTitle(m), tea.WithAltScreen(), tea.WithContext(ctx))
+		p := tea.NewProgram(ui.WithWindowTitle(m), tea.WithContext(ctx))
 
 		if _, err := p.Run(); err != nil {
 			return fmt.Errorf("running CloudWatch Logs TUI: %w", err)

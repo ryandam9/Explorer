@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/charmbracelet/bubbles/viewport"
+	"charm.land/bubbles/v2/viewport"
 	"github.com/charmbracelet/x/ansi"
 )
 
@@ -69,7 +69,7 @@ func TestRenderDNS(t *testing.T) {
 		VPCID: "vpc-1", EnableDnsSupport: true, EnableDnsHostnames: false,
 		DhcpOptionsID: "dopt-1", DomainNameServers: []string{"AmazonProvidedDNS"}, DomainName: "ec2.internal",
 	}}
-	m.dnsVP = viewport.New(80, 20)
+	m.dnsVP = viewport.New(viewport.WithWidth(80), viewport.WithHeight(20))
 	out := ansi.Strip(m.renderDNS())
 	for _, want := range []string{"DNS resolution", "Enabled", "DNS hostnames", "Disabled", "dopt-1", "ec2.internal", "Notes"} {
 		if !strings.Contains(out, want) {
@@ -80,7 +80,7 @@ func TestRenderDNS(t *testing.T) {
 
 func TestViewDNSOverlay(t *testing.T) {
 	m := &Model{width: 100, height: 30, dnsInfo: VPCDNSInfo{VPCID: "vpc-1", EnableDnsSupport: true, EnableDnsHostnames: true}}
-	m.dnsVP = viewport.New(80, 20)
+	m.dnsVP = viewport.New(viewport.WithWidth(80), viewport.WithHeight(20))
 	m.dnsVP.SetContent(m.renderDNS())
 	out := ansi.Strip(m.viewDNSOverlay("bg"))
 	if !strings.Contains(out, "DNS & VPC attributes: vpc-1") {

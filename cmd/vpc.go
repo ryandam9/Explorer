@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"strings"
 
-	tea "github.com/charmbracelet/bubbletea"
+	tea "charm.land/bubbletea/v2"
 	"github.com/spf13/cobra"
 
 	"github.com/ryandam9/aws_explorer/internal/ui"
@@ -47,7 +47,7 @@ toolkit (findings linter, path tracer, exposure audit, snapshot diff).`,
 			return fmt.Errorf("initializing VPC TUI: %w", err)
 		}
 
-		p := tea.NewProgram(ui.WithWindowTitle(m), tea.WithAltScreen(), tea.WithContext(ctx))
+		p := tea.NewProgram(ui.WithWindowTitle(m), tea.WithContext(ctx))
 		if _, err := p.Run(); err != nil {
 			return fmt.Errorf("running VPC TUI: %w", err)
 		}

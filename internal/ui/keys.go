@@ -1,6 +1,6 @@
 package ui
 
-import "github.com/charmbracelet/lipgloss"
+import "charm.land/lipgloss/v2"
 
 // Global key bindings shared by every TUI in the application. Keeping these in
 // one place means a key means the same thing everywhere (e.g. "S" always opens
@@ -32,8 +32,10 @@ func HelpView(title, body string, width int) string {
 		"",
 		body,
 	)
+	// Lip Gloss v2 counts the border inside Width/Height (v1 did not), so the
+	// border's two cells are added back to keep the inner size callers asked for.
 	return lipgloss.NewStyle().
-		Width(width).
+		Width(width+2).
 		BorderStyle(lipgloss.RoundedBorder()).
 		BorderForeground(lipgloss.Color(ColorBorderFocus())).
 		Foreground(lipgloss.Color(ColorText())).

@@ -4,8 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/charmbracelet/lipgloss"
-	"github.com/muesli/termenv"
+	"charm.land/lipgloss/v2"
 )
 
 func TestZebraDetection(t *testing.T) {
@@ -23,11 +22,9 @@ func TestZebraDetection(t *testing.T) {
 }
 
 func TestZebraStripesOddRows(t *testing.T) {
-	// Force a colour profile so the background escape is emitted in the non-TTY
-	// test environment (lipgloss otherwise downgrades to plain ASCII).
-	lipgloss.SetColorProfile(termenv.ANSI256)
-	t.Cleanup(func() { lipgloss.SetColorProfile(termenv.Ascii) })
-
+	// Lip Gloss v2 always renders full-fidelity colour (downsampling happens at
+	// the output), so the background escape is present without forcing a
+	// colour profile.
 	m := New(
 		WithColumns([]Column{{Title: "C", Width: 6}}),
 		WithRows([]Row{{"r0"}, {"r1"}, {"r2"}}),

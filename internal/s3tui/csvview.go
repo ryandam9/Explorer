@@ -9,11 +9,10 @@ import (
 	"strings"
 	"unicode/utf8"
 
+	"charm.land/bubbles/v2/textinput"
+	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
 	"github.com/atotto/clipboard"
-	"github.com/charmbracelet/bubbles/textinput"
-	"github.com/charmbracelet/bubbles/viewport"
-	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/lipgloss"
 
 	"github.com/ryandam9/aws_explorer/internal/table"
 	"github.com/ryandam9/aws_explorer/internal/ui"
@@ -578,7 +577,7 @@ func validDelimRune(r rune) bool {
 func (m *Model) startCSVPrompt(kind csvPromptKind) {
 	ti := textinput.New()
 	ti.CharLimit = 12
-	ti.Width = 22
+	ti.SetWidth(22)
 	switch kind {
 	case csvPromptDelim:
 		ti.Prompt = "delimiter: "
@@ -932,7 +931,7 @@ func (m *Model) openCSVRecord() {
 	if vpH < 3 {
 		vpH = 3
 	}
-	m.csvRecordViewport = viewport.New(vpW, vpH)
+	m.csvRecordViewport = verticalViewport(vpW, vpH)
 	m.csvRecordViewport.SetContent(hardWrap(strings.TrimRight(b.String(), "\n"), vpW))
 	m.csvRecordIndex = i
 	m.csvRecordActive = true
@@ -1010,10 +1009,10 @@ func (m *Model) csvRecordView() string {
 	title := ui.PanelTitleStyle().Render("RECORD: " + m.previewKey)
 	info := ui.MutedStyle().Render(fmt.Sprintf("row %d   ·   %d columns", m.csvRecordIndex+1, len(header)))
 	bar := ui.VScrollbar(
-		m.csvRecordViewport.Height,
+		m.csvRecordViewport.Height(),
 		m.csvRecordViewport.TotalLineCount(),
 		m.csvRecordViewport.VisibleLineCount(),
-		m.csvRecordViewport.YOffset,
+		m.csvRecordViewport.YOffset(),
 	)
 	body := lipgloss.JoinHorizontal(lipgloss.Top, m.csvRecordViewport.View(), " ", bar)
 	hints := ui.MutedStyle().Render("[↑/↓ PgUp/PgDn] scroll   [Esc] back to table")

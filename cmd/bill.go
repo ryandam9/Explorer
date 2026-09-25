@@ -7,7 +7,7 @@ import (
 	"strings"
 	"time"
 
-	tea "github.com/charmbracelet/bubbletea"
+	tea "charm.land/bubbletea/v2"
 	"github.com/spf13/cobra"
 
 	"github.com/ryandam9/aws_explorer/internal/auth"
@@ -103,7 +103,7 @@ per-resource drill-down). The call is read-only.`,
 			SilenceScanLogs()
 			label := billing.PeriodLabel(start, end, now)
 			m := billtui.New(ctx, api, start, end, label, billInterval, AppConfig.AWS.Profile)
-			p := tea.NewProgram(ui.WithWindowTitle(m), tea.WithAltScreen(), tea.WithContext(ctx))
+			p := tea.NewProgram(ui.WithWindowTitle(m), tea.WithContext(ctx))
 			if _, err := p.Run(); err != nil {
 				return fmt.Errorf("running bill TUI: %w", err)
 			}

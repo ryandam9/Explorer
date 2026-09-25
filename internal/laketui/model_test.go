@@ -5,8 +5,8 @@ import (
 	"strings"
 	"testing"
 
+	tea "charm.land/bubbletea/v2"
 	"github.com/aws/aws-sdk-go-v2/aws"
-	tea "github.com/charmbracelet/bubbletea"
 
 	"github.com/ryandam9/aws_explorer/internal/traillake"
 )
@@ -33,14 +33,14 @@ func newTestModel(t *testing.T) Model {
 	return mm.(Model)
 }
 
-func key(s string) tea.KeyMsg {
+func key(s string) tea.KeyPressMsg {
 	switch s {
 	case "enter":
-		return tea.KeyMsg{Type: tea.KeyEnter}
+		return tea.KeyPressMsg{Code: tea.KeyEnter}
 	case "esc":
-		return tea.KeyMsg{Type: tea.KeyEsc}
+		return tea.KeyPressMsg{Code: tea.KeyEsc}
 	}
-	return tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune(s)}
+	return tea.KeyPressMsg{Code: []rune(s)[0], Text: s}
 }
 
 func update(m Model, msg tea.Msg) Model {
@@ -56,7 +56,7 @@ func TestLoadBuildsGenericTable(t *testing.T) {
 	if len(m.visible) != 3 {
 		t.Fatalf("visible = %d, want 3", len(m.visible))
 	}
-	out := m.View()
+	out := m.View().Content
 	for _, want := range []string{"EVENTNAME", "EVENTS", "RunInstances", "CreateUser"} {
 		if !strings.Contains(out, want) {
 			t.Errorf("view missing %q", want)
@@ -95,7 +95,7 @@ func TestDetailOverlayShowsColumns(t *testing.T) {
 	if m.overlay != overlayDetail {
 		t.Fatal("enter should open detail")
 	}
-	out := m.View()
+	out := m.View().Content
 	if !strings.Contains(out, "eventName") || !strings.Contains(out, "events") {
 		t.Errorf("detail overlay should list column names:\n%s", out)
 	}
@@ -151,8 +151,8 @@ func TestLoadErrorBody(t *testing.T) {
 	m = mm.(Model)
 	mm, _ = m.Update(loadedMsg{err: errString("query timed out")})
 	m = mm.(Model)
-	if !strings.Contains(m.View(), "query timed out") {
-		t.Errorf("load error should surface in the body:\n%s", m.View())
+	if !strings.Contains(m.View().Content, "query timed out") {
+		t.Errorf("load error should surface in the body:\n%s", m.View().Content)
 	}
 }
 

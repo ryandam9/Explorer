@@ -8,12 +8,12 @@ import (
 	"os/exec"
 	"time"
 
+	"charm.land/bubbles/v2/spinner"
+	"charm.land/bubbles/v2/textinput"
+	"charm.land/bubbles/v2/viewport"
+	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
 	"github.com/atotto/clipboard"
-	"github.com/charmbracelet/bubbles/spinner"
-	"github.com/charmbracelet/bubbles/textinput"
-	"github.com/charmbracelet/bubbles/viewport"
-	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/lipgloss"
 
 	"github.com/ryandam9/aws_explorer/internal/config"
 	"github.com/ryandam9/aws_explorer/internal/consolelink"
@@ -177,7 +177,7 @@ func NewModel(ctx context.Context, awsCfg *config.AWSConfig, regions []string, a
 
 	f := textinput.New()
 	f.Placeholder = "Filter…"
-	f.Width = 30
+	f.SetWidth(30)
 
 	activeRegions := client.Regions()
 	return &m{
@@ -470,14 +470,14 @@ func (mm *m) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			mm.overlayVP.GotoTop()
 		}
 
-	case tea.KeyMsg:
+	case tea.KeyPressMsg:
 		cmds = append(cmds, mm.handleKey(msg)...)
 	}
 
 	return mm, tea.Batch(cmds...)
 }
 
-func (mm *m) handleKey(msg tea.KeyMsg) []tea.Cmd {
+func (mm *m) handleKey(msg tea.KeyPressMsg) []tea.Cmd {
 	var cmds []tea.Cmd
 
 	// Error screen: Enter/Esc retries, q quits.
@@ -707,7 +707,7 @@ func (mm *m) applyEnrichment(msg enrichMsg) {
 // signals quit (returns true); Esc/Enter close it; the rest scroll the shared
 // viewport once content has loaded. Shared by the job-definition and
 // resource-detail overlays.
-func (mm *m) closeOrScrollOverlay(msg tea.KeyMsg, loading bool, active *bool) bool {
+func (mm *m) closeOrScrollOverlay(msg tea.KeyPressMsg, loading bool, active *bool) bool {
 	switch msg.String() {
 	case "q", "ctrl+c":
 		return true
@@ -715,19 +715,19 @@ func (mm *m) closeOrScrollOverlay(msg tea.KeyMsg, loading bool, active *bool) bo
 		*active = false
 	case "up", "k":
 		if !loading {
-			mm.overlayVP.LineUp(1)
+			mm.overlayVP.ScrollUp(1)
 		}
 	case "down", "j":
 		if !loading {
-			mm.overlayVP.LineDown(1)
+			mm.overlayVP.ScrollDown(1)
 		}
 	case "pgup":
 		if !loading {
-			mm.overlayVP.ViewUp()
+			mm.overlayVP.PageUp()
 		}
-	case "pgdown", "pgdn", " ":
+	case "pgdown", "pgdn", "space":
 		if !loading {
-			mm.overlayVP.ViewDown()
+			mm.overlayVP.PageDown()
 		}
 	case "g", "home":
 		if !loading {
@@ -753,8 +753,8 @@ func (mm *m) layoutOverlayVP(content string) {
 	if h < 6 {
 		h = 6
 	}
-	off := mm.overlayVP.YOffset
-	mm.overlayVP = viewport.New(w, h)
+	off := mm.overlayVP.YOffset()
+	mm.overlayVP = viewport.New(viewport.WithWidth(w), viewport.WithHeight(h))
 	mm.overlayVP.SetContent(lipgloss.NewStyle().Width(w).Render(content))
 	mm.overlayVP.SetYOffset(off)
 }

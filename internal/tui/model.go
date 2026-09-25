@@ -10,16 +10,16 @@ import (
 	"strings"
 	"time"
 
+	"charm.land/bubbles/v2/spinner"
+	"charm.land/bubbles/v2/textinput"
+	"charm.land/bubbles/v2/viewport"
+	tea "charm.land/bubbletea/v2"
+	"charm.land/huh/v2"
+	"charm.land/lipgloss/v2"
 	"github.com/atotto/clipboard"
 	"github.com/aws/aws-sdk-go-v2/aws"
-	"github.com/charmbracelet/bubbles/spinner"
-	"github.com/charmbracelet/bubbles/textinput"
-	"github.com/charmbracelet/bubbles/viewport"
-	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/huh"
-	"github.com/charmbracelet/lipgloss"
 	"github.com/charmbracelet/x/ansi"
-	zone "github.com/lrstanley/bubblezone"
+	zone "github.com/lrstanley/bubblezone/v2"
 
 	"github.com/ryandam9/aws_explorer/internal/acctsnap"
 	"github.com/ryandam9/aws_explorer/internal/auth"
@@ -336,20 +336,14 @@ func NewModelWithSeed(ctx context.Context, eng *engine.Engine, configPath string
 	m.filterInput = textinput.New()
 	m.filterInput.Placeholder = "Filter resources…"
 	m.filterInput.CharLimit = 128
-	m.filterInput.Width = 32
-	m.filterInput.PromptStyle = lipgloss.NewStyle().Foreground(lipgloss.Color(ui.ColorAccent())).Bold(true)
-	m.filterInput.TextStyle = lipgloss.NewStyle().Foreground(lipgloss.Color(ui.ColorText()))
-	m.filterInput.PlaceholderStyle = lipgloss.NewStyle().Foreground(lipgloss.Color(ui.ColorMuted()))
-	m.filterInput.Cursor.Style = lipgloss.NewStyle().Foreground(lipgloss.Color(ui.ColorAccent()))
+	m.filterInput.SetWidth(32)
+	ui.StyleTextInput(&m.filterInput)
 
 	m.finderInput = textinput.New()
 	m.finderInput.Placeholder = "Search every resource — name, ID, ARN, type…"
 	m.finderInput.CharLimit = 128
-	m.finderInput.Width = 48
-	m.finderInput.PromptStyle = lipgloss.NewStyle().Foreground(lipgloss.Color(ui.ColorAccent())).Bold(true)
-	m.finderInput.TextStyle = lipgloss.NewStyle().Foreground(lipgloss.Color(ui.ColorText()))
-	m.finderInput.PlaceholderStyle = lipgloss.NewStyle().Foreground(lipgloss.Color(ui.ColorMuted()))
-	m.finderInput.Cursor.Style = lipgloss.NewStyle().Foreground(lipgloss.Color(ui.ColorAccent()))
+	m.finderInput.SetWidth(48)
+	ui.StyleTextInput(&m.finderInput)
 
 	m.table = table.New(
 		table.WithColumns(m.columns()),
@@ -408,7 +402,7 @@ func (m tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	// Route all events to the settings panel when it is open.
 	if m.showSettings {
 		switch msg := msg.(type) {
-		case tea.KeyMsg:
+		case tea.KeyPressMsg:
 			if msg.String() == "esc" && !m.settings.EditMode() {
 				m.showSettings = false
 				return m, nil
@@ -437,14 +431,14 @@ func (m tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	// in-progress scan keeps collecting underneath.
 	if m.showHelp {
 		switch msg := msg.(type) {
-		case tea.KeyMsg:
+		case tea.KeyPressMsg:
 			switch msg.String() {
 			case "esc", ui.KeyHelp, "q":
 				m.showHelp = false
 			case "up", "k", "[":
-				m.helpViewport.LineUp(3)
+				m.helpViewport.ScrollUp(3)
 			case "down", "j", "]":
-				m.helpViewport.LineDown(3)
+				m.helpViewport.ScrollDown(3)
 			case "g":
 				m.helpViewport.GotoTop()
 			case "G":
@@ -452,11 +446,11 @@ func (m tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			return m, nil
 		case tea.MouseMsg:
-			switch msg.Button {
-			case tea.MouseButtonWheelUp:
-				m.helpViewport.LineUp(3)
-			case tea.MouseButtonWheelDown:
-				m.helpViewport.LineDown(3)
+			switch msg.Mouse().Button {
+			case tea.MouseWheelUp:
+				m.helpViewport.ScrollUp(3)
+			case tea.MouseWheelDown:
+				m.helpViewport.ScrollDown(3)
 			}
 			return m, nil
 		}
@@ -466,7 +460,7 @@ func (m tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	// The About overlay is static text; any key closes it (and a fresh key
 	// re-issues nothing), so swallow input while it is open.
 	if m.showAbout {
-		if msg, ok := msg.(tea.KeyMsg); ok {
+		if msg, ok := msg.(tea.KeyPressMsg); ok {
 			switch msg.String() {
 			case "esc", ui.KeyAbout, "q":
 				m.showAbout = false
@@ -483,16 +477,16 @@ func (m tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	// stall collection and freeze the inventory.
 	if m.showDebug {
 		switch msg := msg.(type) {
-		case tea.KeyMsg:
+		case tea.KeyPressMsg:
 			switch msg.String() {
 			case "esc", ui.KeyDebug, "q":
 				m.showDebug = false
 			case "up", "k", "[":
 				m.debugViewport.SetContent(m.debugBody())
-				m.debugViewport.LineUp(3)
+				m.debugViewport.ScrollUp(3)
 			case "down", "j", "]":
 				m.debugViewport.SetContent(m.debugBody())
-				m.debugViewport.LineDown(3)
+				m.debugViewport.ScrollDown(3)
 			case "g":
 				m.debugViewport.SetContent(m.debugBody())
 				m.debugViewport.GotoTop()
@@ -504,13 +498,13 @@ func (m tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			// the table/sidebar underneath.
 			return m, nil
 		case tea.MouseMsg:
-			switch msg.Button {
-			case tea.MouseButtonWheelUp:
+			switch msg.Mouse().Button {
+			case tea.MouseWheelUp:
 				m.debugViewport.SetContent(m.debugBody())
-				m.debugViewport.LineUp(3)
-			case tea.MouseButtonWheelDown:
+				m.debugViewport.ScrollUp(3)
+			case tea.MouseWheelDown:
 				m.debugViewport.SetContent(m.debugBody())
-				m.debugViewport.LineDown(3)
+				m.debugViewport.ScrollDown(3)
 			}
 			return m, nil
 		}
@@ -523,23 +517,23 @@ func (m tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	// above: swallowing a chunkMsg here would stall the pull loop).
 	if m.showErrors {
 		switch msg := msg.(type) {
-		case tea.KeyMsg:
+		case tea.KeyPressMsg:
 			switch msg.String() {
 			case "esc", "e", "q":
 				m.showErrors = false
 			case "up", "k", "[":
-				m.errorsViewport.LineUp(3)
+				m.errorsViewport.ScrollUp(3)
 			case "down", "j", "]":
-				m.errorsViewport.LineDown(3)
+				m.errorsViewport.ScrollDown(3)
 			}
 			return m, nil
 		case tea.MouseMsg:
 			// Wheel scrolls the overlay's viewport.
-			switch msg.Button {
-			case tea.MouseButtonWheelUp:
-				m.errorsViewport.LineUp(3)
-			case tea.MouseButtonWheelDown:
-				m.errorsViewport.LineDown(3)
+			switch msg.Mouse().Button {
+			case tea.MouseWheelUp:
+				m.errorsViewport.ScrollUp(3)
+			case tea.MouseWheelDown:
+				m.errorsViewport.ScrollDown(3)
 			}
 			return m, nil
 		}
@@ -550,22 +544,22 @@ func (m tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	// Only input is intercepted so a running scan keeps progressing underneath.
 	if m.showCoverage {
 		switch msg := msg.(type) {
-		case tea.KeyMsg:
+		case tea.KeyPressMsg:
 			switch msg.String() {
 			case "esc", "c", "q":
 				m.showCoverage = false
 			case "up", "k", "[":
-				m.coverageViewport.LineUp(3)
+				m.coverageViewport.ScrollUp(3)
 			case "down", "j", "]":
-				m.coverageViewport.LineDown(3)
+				m.coverageViewport.ScrollDown(3)
 			}
 			return m, nil
 		case tea.MouseMsg:
-			switch msg.Button {
-			case tea.MouseButtonWheelUp:
-				m.coverageViewport.LineUp(3)
-			case tea.MouseButtonWheelDown:
-				m.coverageViewport.LineDown(3)
+			switch msg.Mouse().Button {
+			case tea.MouseWheelUp:
+				m.coverageViewport.ScrollUp(3)
+			case tea.MouseWheelDown:
+				m.coverageViewport.ScrollDown(3)
 			}
 			return m, nil
 		}
@@ -576,14 +570,14 @@ func (m tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	// so a running scan keeps progressing underneath.
 	if m.showAcctDiff {
 		switch msg := msg.(type) {
-		case tea.KeyMsg:
+		case tea.KeyPressMsg:
 			switch msg.String() {
 			case "esc", "D", "q":
 				m.showAcctDiff = false
 			case "up", "k", "[":
-				m.acctDiffVP.LineUp(3)
+				m.acctDiffVP.ScrollUp(3)
 			case "down", "j", "]":
-				m.acctDiffVP.LineDown(3)
+				m.acctDiffVP.ScrollDown(3)
 			case "b":
 				m.showAcctDiff = false
 				m.saveAcctBaseline()
@@ -591,11 +585,11 @@ func (m tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			return m, nil
 		case tea.MouseMsg:
-			switch msg.Button {
-			case tea.MouseButtonWheelUp:
-				m.acctDiffVP.LineUp(3)
-			case tea.MouseButtonWheelDown:
-				m.acctDiffVP.LineDown(3)
+			switch msg.Mouse().Button {
+			case tea.MouseWheelUp:
+				m.acctDiffVP.ScrollUp(3)
+			case tea.MouseWheelDown:
+				m.acctDiffVP.ScrollDown(3)
 			}
 			return m, nil
 		}
@@ -649,7 +643,7 @@ func (m tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	// (scan chunks, ticks) fall through so the stream keeps flowing behind
 	// the palette.
 	if m.showFinder {
-		if key, ok := msg.(tea.KeyMsg); ok {
+		if key, ok := msg.(tea.KeyPressMsg); ok {
 			switch key.String() {
 			case "esc", "ctrl+p":
 				m.closeFinder()
@@ -684,7 +678,7 @@ func (m tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	// Route keys to the quick-filter input while it is active.
 	if m.filtering {
-		if key, ok := msg.(tea.KeyMsg); ok {
+		if key, ok := msg.(tea.KeyPressMsg); ok {
 			switch key.String() {
 			case "enter":
 				m.filtering = false
@@ -719,7 +713,7 @@ func (m tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.syncDetailViewport()
 		}
 
-	case tea.KeyMsg:
+	case tea.KeyPressMsg:
 		switch msg.String() {
 		case "q", "ctrl+c":
 			return m, tea.Quit
@@ -769,7 +763,7 @@ func (m tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 		case "[", "up":
 			if m.focus == focusDetail {
-				m.detailViewport.LineUp(3)
+				m.detailViewport.ScrollUp(3)
 				return m, nil
 			}
 			if m.focus == focusSidebar {
@@ -782,7 +776,7 @@ func (m tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 		case "]", "down":
 			if m.focus == focusDetail {
-				m.detailViewport.LineDown(3)
+				m.detailViewport.ScrollDown(3)
 				return m, nil
 			}
 			if m.focus == focusSidebar {
@@ -1117,15 +1111,15 @@ func (m tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.MouseMsg:
 		// Wheel scrolling goes to the focused panel: the detail viewport when
 		// it has focus, otherwise the table (3 rows per tick) or the sidebar.
-		switch msg.Button {
-		case tea.MouseButtonWheelUp, tea.MouseButtonWheelDown:
-			down := msg.Button == tea.MouseButtonWheelDown
+		switch msg.Mouse().Button {
+		case tea.MouseWheelUp, tea.MouseWheelDown:
+			down := msg.Mouse().Button == tea.MouseWheelDown
 			switch m.focus {
 			case focusDetail:
 				if down {
-					m.detailViewport.LineDown(3)
+					m.detailViewport.ScrollDown(3)
 				} else {
-					m.detailViewport.LineUp(3)
+					m.detailViewport.ScrollUp(3)
 				}
 			case focusSidebar:
 				if down && m.activeService < len(m.services)-1 {
@@ -1162,7 +1156,7 @@ func (m tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 
 		// Table row clicks select the row; only the rendered rows have zones.
-		if !sidebarHit && msg.Button == tea.MouseButtonLeft {
+		if !sidebarHit && msg.Mouse().Button == tea.MouseLeft {
 			start, end := m.table.VisibleRange()
 			for i := start; i < end; i++ {
 				if m.zones.Get(fmt.Sprintf("%s%d", zoneRow, i)).InBounds(msg) {
@@ -2222,8 +2216,8 @@ func (m *tuiModel) syncDetailViewport() {
 	}
 	// Preserve scroll position across resizes so the user doesn't jump back
 	// to the top when the terminal is resized while reading the detail panel.
-	savedOffset := m.detailViewport.YOffset
-	m.detailViewport = viewport.New(vpWidth, vpHeight)
+	savedOffset := m.detailViewport.YOffset()
+	m.detailViewport = viewport.New(viewport.WithWidth(vpWidth), viewport.WithHeight(vpHeight))
 	m.detailViewport.SetContent(m.renderDetail(*m.detail, vpWidth))
 	if savedOffset > 0 {
 		m.detailViewport.SetYOffset(savedOffset)
@@ -2340,7 +2334,7 @@ func (m *tuiModel) openHelpOverlay() {
 	if h < 6 {
 		h = 6
 	}
-	m.helpViewport = viewport.New(w, h)
+	m.helpViewport = viewport.New(viewport.WithWidth(w), viewport.WithHeight(h))
 	m.helpViewport.SetContent(m.helpBody())
 	m.helpViewport.GotoTop()
 	m.showHelp = true
@@ -2354,7 +2348,7 @@ func (m tuiModel) helpView() string {
 	body := lipgloss.JoinVertical(lipgloss.Left, m.helpViewport.View(), "", hint)
 	// HelpView pads 2 cols on each side inside its width, so add that back so
 	// the viewport's lines fit exactly instead of wrapping.
-	return ui.HelpView("AWS Explorer Help", body, m.helpViewport.Width+4)
+	return ui.HelpView("AWS Explorer Help", body, m.helpViewport.Width()+4)
 }
 
 // loadingView renders the initial scan screen as a centered card: the app
@@ -2382,7 +2376,7 @@ func (m tuiModel) loadingView() string {
 	return lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center, card)
 }
 
-func (m tuiModel) View() string {
+func (m tuiModel) viewString() string {
 	var output string
 
 	if m.loading && len(m.sorted) == 0 {
@@ -2684,7 +2678,7 @@ func (m tuiModel) renderSidebar() string {
 	if h < 6 {
 		h = 6
 	}
-	return style.Width(sidebarInner).Height(h).Render(b.String())
+	return style.Width(sidebarInner + 2).Height(h + 2).Render(b.String())
 }
 
 func (m tuiModel) renderTablePanel() string {
@@ -2734,13 +2728,13 @@ func (m tuiModel) renderDetailPanel() string {
 	// Pair the viewport with a vertical scrollbar gutter so the reader can see
 	// at a glance how much detail is above/below the fold.
 	bar := ui.VScrollbar(
-		m.detailViewport.Height,
+		m.detailViewport.Height(),
 		m.detailViewport.TotalLineCount(),
 		m.detailViewport.VisibleLineCount(),
-		m.detailViewport.YOffset,
+		m.detailViewport.YOffset(),
 	)
 	content := lipgloss.JoinHorizontal(lipgloss.Top, m.detailViewport.View(), " ", bar)
-	return style.Width(m.detailWidth()).Height(h).Render(content)
+	return style.Width(m.detailWidth() + 2).Height(h + 2).Render(content)
 }
 
 // ── Status bar ────────────────────────────────────────────────────────────────
@@ -3160,7 +3154,7 @@ func (m *tuiModel) openErrorsOverlay() {
 	if h < 6 {
 		h = 6
 	}
-	m.errorsViewport = viewport.New(w, h)
+	m.errorsViewport = viewport.New(viewport.WithWidth(w), viewport.WithHeight(h))
 	m.errorsViewport.SetContent(m.errorsBody())
 	m.showErrors = true
 }
@@ -3191,7 +3185,7 @@ func (m *tuiModel) openDebugOverlay() {
 	if h < 6 {
 		h = 6
 	}
-	m.debugViewport = viewport.New(w, h)
+	m.debugViewport = viewport.New(viewport.WithWidth(w), viewport.WithHeight(h))
 	m.debugViewport.SetContent(m.debugBody())
 	m.debugViewport.GotoBottom()
 	m.showDebug = true
@@ -3273,7 +3267,7 @@ func (m *tuiModel) openAcctDiff() {
 	if h < 6 {
 		h = 6
 	}
-	m.acctDiffVP = viewport.New(w, h)
+	m.acctDiffVP = viewport.New(viewport.WithWidth(w), viewport.WithHeight(h))
 	m.acctDiffVP.SetContent(m.acctDiffBody())
 	m.showAcctDiff = true
 }
@@ -3353,7 +3347,7 @@ func (m *tuiModel) openCoverageOverlay() {
 	if h < 6 {
 		h = 6
 	}
-	m.coverageViewport = viewport.New(w, h)
+	m.coverageViewport = viewport.New(viewport.WithWidth(w), viewport.WithHeight(h))
 	m.coverageViewport.SetContent(m.coverageBody(w))
 	m.coverageViewport.GotoTop()
 	m.showCoverage = true
@@ -3426,7 +3420,7 @@ func (m tuiModel) coverageOverlay() string {
 	hint := lipgloss.NewStyle().Foreground(lipgloss.Color(ui.ColorMuted())).
 		Render("↑/↓ scroll · c/Esc close")
 	body := lipgloss.JoinVertical(lipgloss.Left, m.coverageViewport.View(), "", hint)
-	return ui.HelpView("Services with nothing shown", body, m.coverageViewport.Width+4)
+	return ui.HelpView("Services with nothing shown", body, m.coverageViewport.Width()+4)
 }
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
@@ -3776,3 +3770,8 @@ func (m tuiModel) watchTick(d time.Duration, id int) tea.Cmd {
 		return watchTickMsg{timerID: id}
 	})
 }
+
+// View renders the frame for Bubble Tea v2. The terminal modes (alt screen,
+// mouse, window title) are declared by the application shell that wraps every
+// TUI (ui.WithWindowTitle); tests read the frame via View().Content.
+func (m tuiModel) View() tea.View { return tea.NewView(m.viewString()) }

@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/charmbracelet/lipgloss"
+	"charm.land/lipgloss/v2"
 	"github.com/ryandam9/aws_explorer/internal/ui"
 )
 
@@ -164,7 +164,7 @@ func (m *Model) acceptPreviewSearch() {
 	}
 	m.previewMatchIdx = 0
 	for i, line := range m.previewMatches {
-		if line >= m.previewViewport.YOffset {
+		if line >= m.previewViewport.YOffset() {
 			m.previewMatchIdx = i
 			break
 		}
@@ -201,7 +201,7 @@ func (m *Model) stepPreviewMatch(dir int) {
 // mid-screen. SetYOffset clamps, so this never scrolls past either end.
 func (m *Model) centerPreviewMatch() {
 	if m.previewMatchIdx < len(m.previewMatches) {
-		m.previewViewport.SetYOffset(m.previewMatches[m.previewMatchIdx] - m.previewViewport.Height/2)
+		m.previewViewport.SetYOffset(m.previewMatches[m.previewMatchIdx] - m.previewViewport.Height()/2)
 	}
 }
 

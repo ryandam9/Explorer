@@ -9,7 +9,7 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/charmbracelet/bubbles/textinput"
+	"charm.land/bubbles/v2/textinput"
 )
 
 // fixedField is one column of a fixed-width (positional) record: a name, a
@@ -198,7 +198,7 @@ func (m *Model) startLayoutPrompt() {
 	ti.Prompt = "layout file: "
 	ti.Placeholder = "/path/to/layout.txt  (name,start,length per line)"
 	ti.CharLimit = 4096
-	ti.Width = 48
+	ti.SetWidth(48)
 	if m.lastLayoutPath != "" {
 		ti.SetValue(m.lastLayoutPath)
 		ti.CursorEnd()

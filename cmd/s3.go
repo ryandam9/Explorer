@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"strings"
 
-	tea "github.com/charmbracelet/bubbletea"
+	tea "charm.land/bubbletea/v2"
 	"github.com/spf13/cobra"
 
 	"github.com/ryandam9/aws_explorer/internal/s3tui"
@@ -52,7 +52,7 @@ delete operations.`,
 			return fmt.Errorf("initializing S3 TUI: %w", err)
 		}
 
-		p := tea.NewProgram(ui.WithWindowTitle(m), tea.WithAltScreen(), tea.WithContext(ctx))
+		p := tea.NewProgram(ui.WithWindowTitle(m), tea.WithContext(ctx))
 
 		if _, err := p.Run(); err != nil {
 			return fmt.Errorf("running S3 TUI: %w", err)

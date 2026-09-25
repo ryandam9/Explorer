@@ -5,12 +5,12 @@ import (
 	"strings"
 	"testing"
 
+	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/service/cloudwatch"
 	"github.com/aws/aws-sdk-go-v2/service/cloudwatchlogs"
 	cwltypes "github.com/aws/aws-sdk-go-v2/service/cloudwatchlogs/types"
-	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/lipgloss"
 	"github.com/charmbracelet/x/ansi"
 
 	"github.com/ryandam9/aws_explorer/internal/table"
@@ -36,16 +36,16 @@ func newActivityTestModel(logs *stubLogs) *m {
 	return mm
 }
 
-func key(s string) tea.KeyMsg {
+func key(s string) tea.KeyPressMsg {
 	switch s {
 	case "enter":
-		return tea.KeyMsg{Type: tea.KeyEnter}
+		return tea.KeyPressMsg{Code: tea.KeyEnter}
 	case "esc":
-		return tea.KeyMsg{Type: tea.KeyEsc}
+		return tea.KeyPressMsg{Code: tea.KeyEsc}
 	case "tab":
-		return tea.KeyMsg{Type: tea.KeyTab}
+		return tea.KeyPressMsg{Code: tea.KeyTab}
 	}
-	return tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune(s)}
+	return tea.KeyPressMsg{Code: []rune(s)[0], Text: s}
 }
 
 // runCmd executes a command (and every command in a batch), feeding the
@@ -102,7 +102,7 @@ func TestActivityFlow(t *testing.T) {
 	}
 
 	// Layout: the frame fills the terminal exactly, status bar last.
-	view := mm.View()
+	view := ansi.Strip(mm.View().Content) // v2 always emits colour; compare the text
 	if h := lipgloss.Height(view); h != mm.height {
 		t.Errorf("view height = %d, want %d", h, mm.height)
 	}
@@ -186,7 +186,7 @@ func TestActivityEmptyRegexListsAllEvents(t *testing.T) {
 			t.Error("listing all events has no matched text — no MATCH column")
 		}
 	}
-	view := mm.View()
+	view := ansi.Strip(mm.View().Content) // v2 always emits colour; compare the text
 	if !strings.Contains(view, "Log scan all events  3 events read · 1 START lines\n") || !strings.Contains(view, "·  3 events") {
 		t.Errorf("header should say all events, not a match count:\n%s", view)
 	}
@@ -244,7 +244,7 @@ func TestActivityMessageWraps(t *testing.T) {
 	if got := strings.Join(wrapped, " "); strings.Contains(got, "…") || strings.Count(got, "Duration: 1981.13 ms") != 20 {
 		t.Errorf("wrapping should keep the whole line, got %q", got)
 	}
-	for _, line := range strings.Split(mm.View(), "\n") {
+	for _, line := range strings.Split(mm.View().Content, "\n") {
 		if w := ansi.StringWidth(line); w > mm.width {
 			t.Fatalf("line overruns the %d-col terminal (%d): %q", mm.width, w, line)
 		}

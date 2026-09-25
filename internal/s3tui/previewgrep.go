@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/charmbracelet/lipgloss"
+	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/x/ansi"
 	"github.com/ryandam9/aws_explorer/internal/ui"
 )
@@ -46,7 +46,7 @@ func (m *Model) rebuildPreviewLines() {
 
 	display := ""
 	if len(kept) > 0 {
-		wrapW := max(10, m.previewViewport.Width-previewGutterWidth)
+		wrapW := max(10, m.previewViewport.Width()-previewGutterWidth)
 		display = ansi.Hardwrap(strings.Join(kept, "\n"), wrapW, false)
 	}
 	if m.previewTruncated {
@@ -123,7 +123,7 @@ func (m *Model) cancelPreviewGrep() {
 // viewer's viewerBodyHeight.
 func (m *Model) syncPreviewViewportHeight() {
 	_, h := m.previewViewportSize()
-	m.previewViewport.Height = h
+	m.previewViewport.SetHeight(h)
 }
 
 // previewGrepLine renders the grep bar shown under the Find line while the

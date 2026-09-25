@@ -5,9 +5,9 @@ import (
 	"encoding/json"
 	"strings"
 
+	"charm.land/bubbles/v2/viewport"
+	"charm.land/lipgloss/v2"
 	"github.com/atotto/clipboard"
-	"github.com/charmbracelet/bubbles/viewport"
-	"github.com/charmbracelet/lipgloss"
 	"github.com/charmbracelet/x/ansi"
 
 	"github.com/ryandam9/aws_explorer/internal/ui"
@@ -50,9 +50,10 @@ func (m *Model) openBucketJSON(title, raw, emptyMsg string) {
 	if vpH < 2 {
 		vpH = 2
 	}
-	vp := viewport.New(vpW, vpH)
+	vp := viewport.New(viewport.WithWidth(vpW), viewport.WithHeight(vpH))
 	vp.SetContent(ansi.Hardwrap(display, vpW, false)) // ANSI-aware so highlight survives
 
+	disableHorizontalKeys(&vp)
 	m.bucketJSONViewport = vp
 	m.bucketJSONTitle = title
 	m.bucketJSONContent = plain // copy yields clean JSON
@@ -121,10 +122,10 @@ func (m *Model) bucketJSONView() string {
 	title := ui.PanelTitleStyle().Render(m.bucketJSONTitle)
 
 	bar := ui.VScrollbar(
-		m.bucketJSONViewport.Height,
+		m.bucketJSONViewport.Height(),
 		m.bucketJSONViewport.TotalLineCount(),
 		m.bucketJSONViewport.VisibleLineCount(),
-		m.bucketJSONViewport.YOffset,
+		m.bucketJSONViewport.YOffset(),
 	)
 	body := lipgloss.JoinHorizontal(lipgloss.Top, m.bucketJSONViewport.View(), " ", bar)
 
@@ -135,7 +136,7 @@ func (m *Model) bucketJSONView() string {
 
 	panel := lipgloss.NewStyle().
 		Width(width).
-		Height(height).
+		Height(height+2).
 		MaxWidth(width+2).
 		MaxHeight(height+2).
 		BorderStyle(lipgloss.RoundedBorder()).

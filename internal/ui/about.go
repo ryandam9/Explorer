@@ -1,6 +1,6 @@
 package ui
 
-import "github.com/charmbracelet/lipgloss"
+import "charm.land/lipgloss/v2"
 
 // KeyAbout toggles the per-page "About" overlay, which explains what the
 // current screen is for. Kept here so every TUI binds the same key.
@@ -29,8 +29,10 @@ func AboutView(title, body string, width int) string {
 		"",
 		hintStyle.Render(aboutCloseHint()),
 	)
+	// Lip Gloss v2 counts the border inside Width/Height (v1 did not), so the
+	// border's two cells are added back to keep the inner size callers asked for.
 	return lipgloss.NewStyle().
-		Width(width).
+		Width(width+2).
 		BorderStyle(lipgloss.RoundedBorder()).
 		BorderForeground(lipgloss.Color(ColorBorderFocus())).
 		Padding(1, 2).

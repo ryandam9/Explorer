@@ -5,7 +5,8 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/charmbracelet/lipgloss"
+	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
 
 	"github.com/ryandam9/aws_explorer/internal/trail"
 	"github.com/ryandam9/aws_explorer/internal/ui"
@@ -28,7 +29,7 @@ func (m *Model) layoutTable() {
 	m.tbl.SetHeight(h)
 }
 
-func (m Model) View() string {
+func (m Model) viewString() string {
 	if m.width <= 0 {
 		return "Initializing…"
 	}
@@ -193,7 +194,7 @@ func (m Model) overlayStyle() lipgloss.Style {
 		w = 30
 	}
 	return lipgloss.NewStyle().
-		Width(w).
+		Width(w+2).
 		BorderStyle(lipgloss.RoundedBorder()).
 		BorderForeground(lipgloss.Color(ui.ColorBorderFocus())).
 		Padding(1, 2)
@@ -324,3 +325,8 @@ func (m Model) helpOverlay() string {
 	}
 	return style.Render(b.String())
 }
+
+// View renders the frame for Bubble Tea v2. The terminal modes (alt screen,
+// mouse, window title) are declared by the application shell that wraps every
+// TUI (ui.WithWindowTitle); tests read the frame via View().Content.
+func (m Model) View() tea.View { return tea.NewView(m.viewString()) }
