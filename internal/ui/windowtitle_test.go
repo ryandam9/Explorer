@@ -53,9 +53,19 @@ func TestWithWindowTitleSyncsOnChange(t *testing.T) {
 	}
 }
 
-func TestWithWindowTitlePassesThroughUntitled(t *testing.T) {
+// An untitled model gets no title syncing, only the background painting —
+// which, off by default, leaves its frame exactly as it rendered it.
+func TestWithWindowTitleUntitledIsPaintOnly(t *testing.T) {
+	SetPaintBackground(false)
 	m := untitled{}
-	if got := WithWindowTitle(m); got != tea.Model(m) {
-		t.Fatal("untitled models must be returned unchanged")
+	got := WithWindowTitle(m)
+	if _, ok := got.(*paintedModel); !ok {
+		t.Fatalf("untitled model should be wrapped for painting, got %T", got)
+	}
+	if got.View() != m.View() {
+		t.Error("with painting off the frame must be unchanged")
+	}
+	if _, cmd := got.Update(struct{}{}); cmd != nil {
+		t.Error("an untitled model must not get window-title commands")
 	}
 }

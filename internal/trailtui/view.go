@@ -12,8 +12,8 @@ import (
 )
 
 // chromeHeight is the height of everything below the header: the table panel's
-// top and bottom borders, the column-scroll hint, and the status bar.
-const chromeHeight = 2 /* panel border */ + 1 /* scroll hint */ + 1 /* status bar */
+// top and bottom borders and the status bar.
+const chromeHeight = 2 /* panel border (carries the row position and hidden-column marker) */ + 1 /* status bar */
 
 // layoutTable resizes the events table to the current terminal.
 func (m *Model) layoutTable() {
@@ -55,16 +55,16 @@ func (m Model) View() string {
 // headerView is two lines: the page name with the scope and load status, and a
 // running tally (events, failed count, filter/toggle indicators).
 func (m Model) headerView() string {
-	title := ui.HeaderStyle().Render("CloudTrail activity")
+	title := ui.HeaderStyle().Render(ui.Icon("cloudtrail") + "CloudTrail activity")
 
 	var status string
 	switch {
 	case m.loading:
-		prog := m.spin.View() + " looking up events…"
+		status = ui.MutedStyle().Render(m.spin.View() + " looking up events…")
 		if m.regionsTotal > 1 {
-			prog = m.spin.View() + fmt.Sprintf(" scanning regions %d/%d…", m.regionsDone, m.regionsTotal)
+			status = ui.MutedStyle().Render(m.spin.View()+" ") + ui.ProgressBar(ui.Fraction(m.regionsDone, m.regionsTotal), 16) +
+				ui.MutedStyle().Render(fmt.Sprintf(" scanning regions %d/%d…", m.regionsDone, m.regionsTotal))
 		}
-		status = ui.MutedStyle().Render(prog)
 	case m.loadErr != nil:
 		status = ui.ErrorStyle().Render("✗ lookup failed")
 	default:
@@ -128,9 +128,7 @@ func (m Model) bodyView() string {
 		}
 		return lipgloss.NewStyle().Padding(1, 2).Render(ui.MutedStyle().Render(hint))
 	}
-	panel := ui.TablePanelStyle(true).Render(m.tbl.View())
-	hint := ui.TableScrollIndicator(&m.tbl)
-	return panel + "\n" + hint
+	return ui.TablePanel(&m.tbl, true, "Events")
 }
 
 func (m Model) statusBarView() string {

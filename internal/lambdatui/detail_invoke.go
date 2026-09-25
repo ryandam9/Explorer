@@ -12,6 +12,8 @@ import (
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/service/lambda"
 	lambdatypes "github.com/aws/aws-sdk-go-v2/service/lambda/types"
+
+	"github.com/ryandam9/aws_explorer/internal/ui"
 )
 
 // How a function is invoked and released: its published versions and aliases
@@ -221,7 +223,7 @@ func versionsBody(d FunctionDetail) string {
 	case len(d.Aliases) == 0:
 		b.WriteString("  (no aliases — callers invoke $LATEST or a version directly)\n")
 	default:
-		b.WriteString("  aliases:\n")
+		b.WriteString(ui.Divider("Aliases") + "\n")
 		for _, a := range d.Aliases {
 			line := fmt.Sprintf("    %-12s → v%s", a.Name, a.Version)
 			if len(a.Weights) > 0 {
@@ -256,7 +258,7 @@ func versionsBody(d FunctionDetail) string {
 	case len(d.Versions) == 0:
 		b.WriteString("  (no published versions — only $LATEST)")
 	default:
-		b.WriteString(fmt.Sprintf("  versions (%d):\n", len(d.Versions)))
+		b.WriteString(ui.Divider(fmt.Sprintf("Versions (%d)", len(d.Versions))) + "\n")
 		for i, v := range d.Versions {
 			if i == maxVersionsShown {
 				b.WriteString(fmt.Sprintf("    … %d older", len(d.Versions)-maxVersionsShown))

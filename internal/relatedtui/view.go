@@ -6,7 +6,6 @@ import (
 
 	"github.com/charmbracelet/bubbles/viewport"
 	"github.com/charmbracelet/lipgloss"
-	"github.com/charmbracelet/x/ansi"
 
 	"github.com/ryandam9/aws_explorer/internal/table"
 	"github.com/ryandam9/aws_explorer/internal/ui"
@@ -85,7 +84,7 @@ func (mm *m) View() string {
 }
 
 func (mm *m) header() string {
-	crumb := "Related ▸ " + targetLabel(mm.stack)
+	crumb := ui.Icon("related") + "Related ▸ " + targetLabel(mm.stack)
 	return lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color(ui.ColorHeading())).Render(" " + crumb)
 }
 
@@ -159,23 +158,21 @@ func (mm *m) emptyMsg(base string) string {
 
 func (mm *m) panel(pane focusPane, title string, tbl *table.Model, items int, empty string, innerW, tableH int) string {
 	focused := mm.focus == pane
-	color := ui.ColorHeading()
-	if focused {
-		color = ui.ColorBorderFocus()
-	}
-	head := lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color(color)).
-		Width(innerW).Render(ansi.Truncate(title, innerW, "…"))
-
+	// The title sits in the panel's top border, so the table gets the line a
+	// title row used to take; the row position rides in the bottom border.
+	bodyH := tableH + 1
+	box := ui.TableBox(tbl, focused, title)
 	var body string
 	if items == 0 {
-		body = lipgloss.NewStyle().Width(innerW).Height(tableH).Render(ui.MutedStyle().Render(empty))
+		body = ui.MutedStyle().Render(empty)
+		box.Info = nil
 	} else {
 		tbl.SetWidth(innerW)
-		tbl.SetHeight(tableH)
+		tbl.SetHeight(bodyH)
 		body = tbl.View()
 	}
-	content := lipgloss.JoinVertical(lipgloss.Left, head, body)
-	return ui.TablePanelStyle(focused).Render(content)
+	box.Width, box.Height = innerW+4, bodyH
+	return box.Render(body)
 }
 
 // usedByEmpty renders the scoped "not referenced" message listing the reference

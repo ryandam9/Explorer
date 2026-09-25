@@ -13,6 +13,10 @@
 #
 # The comment above each theme lists the source feathers palette.
 #
+# canvas is the full-screen background painted when ui.paintBackground is on
+# (off by default). For the bird themes it is the border hue at ~35% intensity,
+# a dark tint of the palette that sits under the ~50% zebra stripe.
+#
 # tableRowAltBg (the zebra stripe behind alternate CSV/TSV rows) is not a
 # palette colour: it is the theme's border hue at roughly half intensity, so
 # the stripe stays a subtle tint under light cell text instead of the heavy
@@ -23,6 +27,7 @@
   heading: "#feca00"
   text: "#b4b9b3"
   background: ""
+  canvas: "#171919"
   border: "#424847"
   borderFocus: "#feca00"
   highlight: "#cb0300"
@@ -42,6 +47,7 @@
   heading: "#e7aa01"
   text: "#edd8c5"
   background: ""
+  canvas: "#281909"
   border: "#73481b"
   borderFocus: "#e7aa01"
   highlight: "#ac570f"
@@ -61,6 +67,7 @@
   heading: "#06ABDF"
   text: "#EDD03E"
   background: ""
+  canvas: "#001226"
   border: "#00346E"
   borderFocus: "#06ABDF"
   highlight: "#007CBF"
@@ -80,6 +87,7 @@
   heading: "#BD338F"
   text: "#CDD4DC"
   background: ""
+  canvas: "#212a0e"
   border: "#5F7929"
   borderFocus: "#BD338F"
   highlight: "#BD338F"
@@ -99,6 +107,7 @@
   heading: "#f4c623"
   text: "#bee183"
   background: ""
+  canvas: "#101d15"
   border: "#2f533c"
   borderFocus: "#f4c623"
   highlight: "#cd3122"
@@ -118,6 +127,7 @@
   heading: "#b8a53f"
   text: "#e2aba0"
   background: ""
+  canvas: "#262529"
   border: "#6c6b75"
   borderFocus: "#d97878"
   highlight: "#8a3223"
@@ -137,6 +147,7 @@
   heading: "#6eb245"
   text: "#8cb3de"
   background: ""
+  canvas: "#0c1a08"
   border: "#214917"
   borderFocus: "#6eb245"
   highlight: "#cf2236"
@@ -156,6 +167,7 @@
   heading: "#B03F05"
   text: "#D9C4A7"
   background: ""
+  canvas: "#1c120c"
   border: "#4F3321"
   borderFocus: "#B03F05"
   highlight: "#B03F05"
@@ -175,6 +187,7 @@
   heading: "#3EBCB6"
   text: "#BDA14D"
   background: ""
+  canvas: "#071222"
   border: "#153460"
   borderFocus: "#3EBCB6"
   highlight: "#D5114E"
@@ -194,6 +207,7 @@
   heading: "#FBEB5B"
   text: "#979EB9"
   background: ""
+  canvas: "#181a1e"
   border: "#454B56"
   borderFocus: "#E19E00"
   highlight: "#E19E00"
@@ -213,6 +227,7 @@
   heading: "#D05478"
   text: "#FFD2CF"
   background: ""
+  canvas: "#1b1e24"
   border: "#4C5766"
   borderFocus: "#D05478"
   highlight: "#D05478"
@@ -232,6 +247,7 @@
   heading: "#b5effb"
   text: "#d4d8e3"
   background: ""
+  canvas: "#01162b"
   border: "#02407c"
   borderFocus: "#b5effb"
   highlight: "#0b7595"
@@ -245,3 +261,190 @@
   accent: "#ad8d9f"
   error: "#FF5555"
   warning: "#FFAA00"
+
+# ── Popular terminal colour schemes ─────────────────────────────────────────
+# The themes below are well-known editor/terminal palettes, mapped onto the
+# roles above from the theme files of superfile (github.com/yorukot/superfile,
+# MIT licence), whose look inspired the panel frames. Each keeps its scheme's
+# own background as `canvas`, which is only painted when ui.paintBackground is
+# on; with it off the terminal's background shows through as usual. Roles the
+# source files don't define are derived: highlight is the active border mixed
+# 16–35% into the canvas with whichever palette text colour reads best on it
+# (≥4.5:1), muted is the text mixed 60% into the canvas, and the
+# zebra stripe is the border mixed a quarter into the canvas.
+
+# Catppuccin Mocha (catppuccin.com); via superfile's catppuccin-mocha.toml
+- name: catppuccin-mocha
+  heading: "#89b4fa"
+  text: "#a6adc8"
+  background: ""
+  canvas: "#1e1e2e"
+  border: "#6c7086"
+  borderFocus: "#b4befe"
+  highlight: "#484b68"
+  highlightText: "#98D0FD"
+  muted: "#70748a"
+  tableHeader: "#74c7ec"
+  tableHeaderLine: "#6c7086"
+  tableRowAltBg: "#323244"
+  statusBarBg: "#89b4fa"
+  statusBarText: "#1e1e2e"
+  accent: "#cba6f7"
+  error: "#f38ba8"
+  warning: "#f9e2af"
+  success: "#a6e3a1"
+  info: "#73c7ec"
+
+# Tokyo Night (enkia/tokyo-night-vscode-theme); via superfile's tokyonight.toml
+- name: tokyo-night
+  heading: "#7aa2f7"
+  text: "#a9b1d6"
+  background: ""
+  canvas: "#1a1b26"
+  border: "#414868"
+  borderFocus: "#b4befe"
+  highlight: "#454962"
+  highlightText: "#b4befe"
+  muted: "#707590"
+  tableHeader: "#73daca"
+  tableHeaderLine: "#414868"
+  tableRowAltBg: "#242636"
+  statusBarBg: "#7aa2f7"
+  statusBarText: "#1a1b26"
+  accent: "#bb9af7"
+  error: "#f7768e"
+  warning: "#e0af68"
+  success: "#9ece6a"
+  info: "#7dcfff"
+
+# Nord (nordtheme.com); via superfile's nord.toml
+- name: nord
+  heading: "#81a1c1"
+  text: "#e5e9f0"
+  background: ""
+  canvas: "#2e3440"
+  border: "#4c566a"
+  borderFocus: "#d8dee9"
+  highlight: "#5e646f"
+  highlightText: "#e5e9f0"
+  muted: "#9ca1aa"
+  tableHeader: "#81a1c1"
+  tableHeaderLine: "#4c566a"
+  tableRowAltBg: "#363c4a"
+  statusBarBg: "#81a1c1"
+  statusBarText: "#2e3440"
+  accent: "#bf616a"
+  error: "#bf616a"
+  warning: "#ebcb8b"
+  success: "#88c0d0"
+  info: "#8fbcbb"
+
+# Gruvbox (morhetz/gruvbox); via superfile's gruvbox.toml
+- name: gruvbox
+  heading: "#689d6a"
+  text: "#ebdbb2"
+  background: ""
+  canvas: "#282828"
+  border: "#868686"
+  borderFocus: "#fff1c5"
+  highlight: "#736e5f"
+  highlightText: "#fff1c5"
+  muted: "#9d937b"
+  tableHeader: "#cc241d"
+  tableHeaderLine: "#868686"
+  tableRowAltBg: "#404040"
+  statusBarBg: "#689d6a"
+  statusBarText: "#282828"
+  accent: "#fb4934"
+  error: "#ff6969"
+  warning: "#fabd2f"
+  success: "#8ec07c"
+  info: "#458588"
+
+# Dracula (draculatheme.com); via superfile's dracula.toml
+- name: dracula
+  heading: "#50fa7b"
+  text: "#f8f8f2"
+  background: ""
+  canvas: "#282a36"
+  border: "#6272a4"
+  borderFocus: "#44475a"
+  highlight: "#323443"
+  highlightText: "#f8f8f2"
+  muted: "#a5a6a7"
+  tableHeader: "#bd93f9"
+  tableHeaderLine: "#6272a4"
+  tableRowAltBg: "#363c52"
+  statusBarBg: "#50fa7b"
+  statusBarText: "#282a36"
+  accent: "#ff5555"
+  error: "#ff5555"
+  warning: "#f1fa8c"
+  success: "#50fa7b"
+  info: "#8be9fd"
+
+# Rosé Pine (rosepinetheme.com); via superfile's rose-pine.toml
+- name: rose-pine
+  heading: "#31784f"
+  text: "#e0def4"
+  background: ""
+  canvas: "#191724"
+  border: "#403d52"
+  borderFocus: "#6e6e86"
+  highlight: "#373546"
+  highlightText: "#e0def4"
+  muted: "#908ea1"
+  tableHeader: "#6e6e86"
+  tableHeaderLine: "#403d52"
+  tableRowAltBg: "#232030"
+  statusBarBg: "#31784f"
+  statusBarText: "#191724"
+  accent: "#eb6f92"
+  error: "#ff6969"
+  warning: "#f6c177"
+  success: "#8ec07c"
+  info: "#31784f"
+
+# One Dark (Atom); via superfile's onedark.toml
+- name: one-dark
+  heading: "#68aee8"
+  text: "#a7aab0"
+  background: ""
+  canvas: "#2c2d31"
+  border: "#737994"
+  borderFocus: "#57a5e5"
+  highlight: "#33404e"
+  highlightText: "#a7aab0"
+  muted: "#76787d"
+  tableHeader: "#57a5e5"
+  tableHeaderLine: "#737994"
+  tableRowAltBg: "#3e404a"
+  statusBarBg: "#68aee8"
+  statusBarText: "#2c2d31"
+  accent: "#bb70d2"
+  error: "#de5d68"
+  warning: "#e5c07b"
+  success: "#a6d189"
+  info: "#68aee8"
+
+# Everforest dark (sainnhe/everforest); via superfile's everforest-dark-medium.toml
+- name: everforest
+  heading: "#a7c080"
+  text: "#d3c6aa"
+  background: ""
+  canvas: "#2d353b"
+  border: "#859289"
+  borderFocus: "#fff1c5"
+  highlight: "#686a62"
+  highlightText: "#fff1c5"
+  muted: "#918c7e"
+  tableHeader: "#d699b6"
+  tableHeaderLine: "#859289"
+  tableRowAltBg: "#434c4e"
+  statusBarBg: "#a7c080"
+  statusBarText: "#2d353b"
+  accent: "#e67e80"
+  error: "#e67e80"
+  warning: "#dbbc7f"
+  success: "#a7c080"
+  info: "#7fbbb3"

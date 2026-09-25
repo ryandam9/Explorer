@@ -242,7 +242,7 @@ func (mm *m) header() string {
 			crumb = "Tags ▸ " + mm.filterDesc
 		}
 	}
-	return lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color(ui.ColorHeading())).Render(" " + crumb)
+	return lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color(ui.ColorHeading())).Render(" " + ui.Icon("tags") + crumb)
 }
 
 // columns renders the three always-visible Miller columns side by side, the
@@ -336,35 +336,26 @@ func (mm *m) columnView(col focusCol, outerW, tableH int) string {
 		}
 	}
 
-	box := lipgloss.NewStyle().Width(innerW).Height(tableH)
+	// The column title sits in the panel's top border, so the table gets the
+	// line a title row used to take; the row position rides in the bottom one.
+	bodyH := tableH + 1
 	var body string
 	switch {
 	case loading:
-		body = box.Render(fmt.Sprintf("%s Loading…", mm.spinner.View()))
+		body = fmt.Sprintf("%s Loading…", mm.spinner.View())
 	case items == 0:
-		body = box.Render(ui.MutedStyle().Render(ansi.Truncate(empty, innerW, "…")))
+		body = ui.MutedStyle().Render(ansi.Truncate(empty, innerW, "…"))
 	default:
 		tbl.SetWidth(innerW)
-		tbl.SetHeight(tableH)
+		tbl.SetHeight(bodyH)
 		body = tbl.View()
 	}
-
-	content := lipgloss.JoinVertical(lipgloss.Left, mm.colTitle(title, focused, innerW), body)
-	return ui.TablePanelStyle(focused).Render(content)
-}
-
-// colTitle renders a column's heading, truncated to the inner width and
-// highlighted when the column is focused.
-func (mm *m) colTitle(title string, focused bool, innerW int) string {
-	color := ui.ColorHeading()
-	if focused {
-		color = ui.ColorBorderFocus()
+	box := ui.TableBox(tbl, focused, title)
+	if loading || items == 0 {
+		box.Info = nil
 	}
-	return lipgloss.NewStyle().
-		Bold(true).
-		Foreground(lipgloss.Color(color)).
-		Width(innerW).
-		Render(ansi.Truncate(title, innerW, "…"))
+	box.Width, box.Height = innerW+4, bodyH
+	return box.Render(body)
 }
 
 // partialNote flags per-region failures across the loaded columns so empty/short

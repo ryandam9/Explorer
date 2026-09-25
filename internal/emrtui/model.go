@@ -333,15 +333,16 @@ func (mm *m) rebuild() {
 
 // layoutTable sizes the cluster table to the current terminal. The cluster
 // list's chrome is: an optional region badge, the title and filter lines above,
-// and the panel border plus the column-scroll hint and status bar below.
+// and the panel border and status bar below (the row position and hidden-column
+// marker sit in the panel's bottom border).
 func (mm *m) layoutTable() {
 	if mm.width <= 0 || mm.height <= 0 {
 		return
 	}
 	mm.tbl.SetWidth(mm.width - 4) // panel border + padding
-	// 1 title + 1 filter + 2 panel border + 1 scroll hint + 1 status bar, plus a
-	// badge line whenever the region scope is spotlighted.
-	chrome := 6
+	// 1 title + 1 filter + 2 panel border + 1 status bar, plus a badge line
+	// whenever the region scope is spotlighted.
+	chrome := 5
 	if ui.RegionBadge(mm.regions, mm.allRegions) != "" {
 		chrome++
 	}

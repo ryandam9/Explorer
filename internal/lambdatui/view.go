@@ -105,7 +105,7 @@ func (mm *m) renderTabBar() string {
 				Foreground(lipgloss.Color(ui.ColorText())).Render(label))
 		}
 	}
-	bar := "Lambda ▸ " + strings.Join(parts, " ")
+	bar := ui.Icon("lambda") + "Lambda ▸ " + strings.Join(parts, " ")
 	if mm.width > 0 {
 		bar = ansi.Truncate(bar, mm.width, "…")
 	}
@@ -130,11 +130,10 @@ func (mm *m) renderTable() string {
 	case len(mm.view) == 0:
 		b.WriteString("\n  No " + strings.ToLower(tabNames[mm.tab]) + " found in scope.")
 	default:
-		// fitTable accounts for the tab bar (1) and filter line (1) above, and the
-		// column-scroll hint (1) below.
-		mm.fitTable(&mm.tbl, 2, 1)
-		b.WriteString(ui.TablePanelStyle(true).Render(mm.tbl.View()))
-		b.WriteString("\n" + ui.TableScrollIndicator(&mm.tbl))
+		// fitTable accounts for the tab bar (1) and filter line (1) above; the
+		// row position and hidden-column marker sit in the panel's bottom border.
+		mm.fitTable(&mm.tbl, 2, 0)
+		b.WriteString(ui.TablePanel(&mm.tbl, true, fmt.Sprintf("%s (%d)", tabNames[mm.tab], len(mm.view))))
 	}
 	return b.String()
 }
@@ -163,9 +162,8 @@ func (mm *m) renderFindings() string {
 	}
 
 	foot := mm.findingsFooter()
-	mm.fitTable(&mm.findingsTbl, lipgloss.Height(head), lipgloss.Height(foot)+1)
-	return head + "\n" + ui.TablePanelStyle(true).Render(mm.findingsTbl.View()) +
-		"\n" + ui.TableScrollIndicator(&mm.findingsTbl) + "\n" + foot
+	mm.fitTable(&mm.findingsTbl, lipgloss.Height(head), lipgloss.Height(foot))
+	return head + "\n" + ui.TablePanel(&mm.findingsTbl, true, "Findings", findings.Summary(mm.findingList)) + "\n" + foot
 }
 
 // findingsFooter renders the selected finding's detail and suggested fix.

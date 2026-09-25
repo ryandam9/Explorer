@@ -101,6 +101,10 @@ output:
 
 ui:
   theme: spotted-pardalote    # active theme name (see themes.md)
+  paintBackground: false      # fill the screen with the theme's canvas color
+                              # (--paint-background for one run)
+  nerdFont: false             # Nerd Font icons; needs a Nerd Font in the
+                              # terminal (--nerd-font for one run)
 
 cw:
   maxEvents: 50000            # event ceiling for the `cw` full log viewer: the

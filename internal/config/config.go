@@ -269,4 +269,14 @@ type UIConfig struct {
 	// (say, the table header) never alters an unrelated part (say, a panel
 	// border). Only the roles you want to change need to be listed.
 	Themes map[string]map[string]string `mapstructure:"themes"`
+	// PaintBackground fills the whole screen with the theme's canvas colour
+	// (a dark tint of the palette for the bird themes, the scheme's own
+	// background for catppuccin-mocha, nord, …) instead of letting the
+	// terminal's background show through. Off by default.
+	PaintBackground bool `mapstructure:"paintBackground"`
+	// NerdFont switches the TUI's icons (service glyphs in tab bars and panel
+	// titles, status markers) to Nerd Font glyphs. Off by default: without a
+	// Nerd Font installed they render as empty boxes, so the plain-Unicode
+	// fallbacks are used instead.
+	NerdFont bool `mapstructure:"nerdFont"`
 }

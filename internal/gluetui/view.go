@@ -179,7 +179,7 @@ func (mm *m) renderTabBar() string {
 				Foreground(lipgloss.Color(ui.ColorText())).Render(label))
 		}
 	}
-	bar := "Glue ▸ " + strings.Join(parts, " ")
+	bar := ui.Icon("glue") + "Glue ▸ " + strings.Join(parts, " ")
 	// Clip to the terminal width so a wide tab set never wraps onto a second line.
 	if mm.width > 0 {
 		bar = ansi.Truncate(bar, mm.width, "…")
@@ -205,11 +205,10 @@ func (mm *m) renderTable() string {
 	case len(mm.view) == 0:
 		b.WriteString("\n  No " + strings.ToLower(tabNames[mm.tab]) + " found in scope.")
 	default:
-		// fitTable accounts for the tab bar (1) and filter line (1) above, and the
-		// column-scroll hint (1) below.
-		mm.fitTable(&mm.tbl, 2, 1)
-		b.WriteString(ui.TablePanelStyle(true).Render(mm.tbl.View()))
-		b.WriteString("\n" + ui.TableScrollIndicator(&mm.tbl))
+		// fitTable accounts for the tab bar (1) and filter line (1) above; the
+		// row position and hidden-column marker sit in the panel's bottom border.
+		mm.fitTable(&mm.tbl, 2, 0)
+		b.WriteString(ui.TablePanel(&mm.tbl, true, fmt.Sprintf("%s (%d)", tabNames[mm.tab], len(mm.view))))
 	}
 	return b.String()
 }
@@ -237,9 +236,8 @@ func (mm *m) renderRuns() string {
 			Render(fmt.Sprintf("  %d runs · %.2f DPU-hrs ≈ $%.2f %s", len(mm.runs), dpu, cost, costEstimateNote(mm.runsJob.Region))))
 
 		footStr := foot.String()
-		mm.fitTable(&mm.runsTbl, 1, lipgloss.Height(footStr)+1)
-		return head + "\n" + ui.TablePanelStyle(true).Render(mm.runsTbl.View()) +
-			"\n" + ui.TableScrollIndicator(&mm.runsTbl) + "\n" + footStr
+		mm.fitTable(&mm.runsTbl, 1, lipgloss.Height(footStr))
+		return head + "\n" + ui.TablePanel(&mm.runsTbl, true, "Runs") + "\n" + footStr
 	}
 }
 
@@ -258,9 +256,8 @@ func (mm *m) renderFindings() string {
 	}
 
 	foot := mm.findingsFooter()
-	mm.fitTable(&mm.findingsTbl, lipgloss.Height(head), lipgloss.Height(foot)+1)
-	return head + "\n" + ui.TablePanelStyle(true).Render(mm.findingsTbl.View()) +
-		"\n" + ui.TableScrollIndicator(&mm.findingsTbl) + "\n" + foot
+	mm.fitTable(&mm.findingsTbl, lipgloss.Height(head), lipgloss.Height(foot))
+	return head + "\n" + ui.TablePanel(&mm.findingsTbl, true, "Findings") + "\n" + foot
 }
 
 // findingsFooter renders the selected finding's detail and suggested fix.

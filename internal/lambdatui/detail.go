@@ -225,8 +225,8 @@ func (d FunctionDetail) sections() []section {
 	out = append(out, section{Title: "Async invocation", Body: asyncBody(d)})
 
 	// Permissions: the role it runs as, and who may invoke it.
-	out = append(out, section{Title: "Permissions", Body: dkv("Execution role", d.Role) + "\n\n" +
-		lipgloss.NewStyle().Foreground(lipgloss.Color(ui.ColorMuted())).Render("  Resource policy — who may invoke it:") + "\n" + resourcePolicyBody(d)})
+	out = append(out, section{Title: "Permissions", Body: dkv("Execution role", d.Role) + "\n" +
+		ui.Divider("Resource policy · who may invoke it") + "\n" + resourcePolicyBody(d)})
 
 	net := section{Title: "Networking", Body: vpcBody(d)}
 	if d.VpcID == "" && len(d.SubnetIDs) == 0 && len(d.SecurityGroupIDs) == 0 {

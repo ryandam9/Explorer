@@ -129,7 +129,8 @@ cloudwatch:GetMetricData and are skipped without it.`,
 		// audit accepts one format beyond the global set (sarif), so it
 		// validates the format itself, then runs the shared pre-flight auth
 		// check (audit overrides the root command's PersistentPreRunE, so the
-		// check has to be invoked here too).
+		// check has to be invoked here too — likewise the UI flags).
+		applyUIFlags(cmd)
 		if !strings.EqualFold(outputFormat, "sarif") {
 			if err := output.ValidateFormat(outputFormat); err != nil {
 				return err

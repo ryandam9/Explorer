@@ -25,6 +25,7 @@ type ThemeColors struct {
 	Heading       string // titles, section headers
 	Text          string // body text / foreground
 	Background    string // panel background (empty = terminal default)
+	Canvas        string // full-screen background, painted only when ui.paintBackground is on
 	Border        string // borders of unfocused panels
 	BorderFocus   string // border of the focused panel
 	Highlight     string // selected item background (lists, menus)
@@ -84,6 +85,7 @@ var Roles = []RoleSpec{
 	{"heading", "titles & section headers", func(c *ThemeColors) *string { return &c.Heading }, ""},
 	{"text", "body text", func(c *ThemeColors) *string { return &c.Text }, ""},
 	{"background", "panel background", func(c *ThemeColors) *string { return &c.Background }, ""},
+	{"canvas", "full-screen background (paintBackground)", func(c *ThemeColors) *string { return &c.Canvas }, "background"},
 	{"muted", "secondary text", func(c *ThemeColors) *string { return &c.Muted }, ""},
 	{"accent", "rails, prompts, cursors", func(c *ThemeColors) *string { return &c.Accent }, "heading"},
 	{"border", "unfocused panel border", func(c *ThemeColors) *string { return &c.Border }, ""},
@@ -244,6 +246,8 @@ func getActiveTheme() int {
 // InitFromConfig applies the UI config to the theme system: sets the active
 // theme and merges any per-theme color overrides from the config file.
 func InitFromConfig(ui config.UIConfig) {
+	SetPaintBackground(ui.PaintBackground)
+	SetNerdFont(ui.NerdFont)
 	// Apply per-theme color overrides from config before setting active theme.
 	// Role keys are matched case-insensitively because viper lower-cases all
 	// config keys.
@@ -309,6 +313,7 @@ func ActiveThemeColors() ThemeColors {
 func ColorHeading() string       { return ResolveRole("heading") }
 func ColorText() string          { return ResolveRole("text") }
 func ColorBackground() string    { return ResolveRole("background") }
+func ColorCanvas() string        { return ResolveRole("canvas") }
 func ColorBorder() string        { return ResolveRole("border") }
 func ColorHighlight() string     { return ResolveRole("highlight") }
 func ColorHighlightText() string { return ResolveRole("highlightText") }

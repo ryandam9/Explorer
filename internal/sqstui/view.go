@@ -367,7 +367,7 @@ func (m *model) renderPeekConfirm() string {
 		}
 	}
 
-	b.WriteString("\n" + lipgloss.NewStyle().Foreground(lipgloss.Color(ui.ColorMuted())).Render("Enter/y: peek · any other key: cancel"))
+	b.WriteString("\n" + ui.ConfirmButtons("y  Peek", "any other key  Cancel", false))
 
 	return lipgloss.NewStyle().
 		Border(lipgloss.RoundedBorder()).

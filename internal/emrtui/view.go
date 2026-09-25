@@ -64,8 +64,8 @@ func (mm *m) View() string {
 	}
 	if t, ok := mm.selectedHbaseTable(); mm.hbaseConfirm && ok {
 		body := fmt.Sprintf("Count the rows in %q?\n\nThis opens an HBase scanner and reads the whole table "+
-			"(up to %s rows). It is read-only but can be slow and load the cluster on a large table.\n\n"+
-			"y / Enter — scan now      any other key — cancel", t.Qualified, itoa(scannerCap))
+			"(up to %s rows). It is read-only but can be slow and load the cluster on a large table.\n\n",
+			t.Qualified, itoa(scannerCap)) + ui.ConfirmButtons("y  Scan now", "any other key  Cancel", false)
 		frame = ui.OverlayCenterBlank(ui.AboutView("Count rows — full scan", body, ui.AboutWidth(mm.width)), mm.width, mm.height)
 	}
 	if mm.showAbout {
@@ -142,7 +142,7 @@ func pluralizeClusters(n int) string {
 func (mm *m) renderTable() string {
 	var b strings.Builder
 	b.WriteString(lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color(ui.ColorHeading())).
-		Render(" EMR ▸ Clusters") + "\n")
+		Render(" "+ui.Icon("emr")+"EMR ▸ Clusters") + "\n")
 
 	// Filter line.
 	if mm.filterActive {
@@ -169,12 +169,9 @@ func (mm *m) renderTable() string {
 		b.WriteString("\n  No clusters found in scope.")
 	default:
 		// The shared table auto-fits columns, scrolls wide column sets, and draws
-		// its own vertical scrollbar; the panel and the "more columns" hint mirror
-		// the other table dashboards.
-		b.WriteString(ui.TablePanelStyle(true).Render(mm.tbl.View()))
-		if hint := ui.TableScrollIndicator(&mm.tbl); hint != "" {
-			b.WriteString("\n" + hint)
-		}
+		// its own vertical scrollbar; the panel's borders carry the title, the
+		// hidden-column marker and the row position like every table dashboard.
+		b.WriteString(ui.TablePanel(&mm.tbl, true, fmt.Sprintf("Clusters (%d)", len(mm.view))))
 	}
 
 	// The selected cluster's state-change reason (terminated-with-errors etc.)
@@ -195,16 +192,15 @@ func errLine(s string) string {
 }
 
 // renderSubTable composes a drill-down sub-view: the heading block, the shared
-// table panel sized to fill the remaining space, a column-scroll hint and an
-// optional footer line. A hint line is always reserved so the table height is
-// stable whether or not columns are scrolled.
+// table panel sized to fill the remaining space (its bottom border carries the
+// hidden-column marker and row position) and an optional footer line.
 func (mm *m) renderSubTable(tbl *table.Model, head, foot string) string {
 	footLines := 0
 	if foot != "" {
 		footLines = lipgloss.Height(foot)
 	}
-	mm.fitTable(tbl, lipgloss.Height(head), 1+footLines)
-	out := head + "\n" + ui.TablePanelStyle(true).Render(tbl.View()) + "\n" + ui.TableScrollIndicator(tbl)
+	mm.fitTable(tbl, lipgloss.Height(head), footLines)
+	out := head + "\n" + ui.TablePanel(tbl, true, "")
 	if foot != "" {
 		out += "\n" + foot
 	}

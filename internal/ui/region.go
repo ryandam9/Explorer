@@ -41,9 +41,9 @@ func RegionBadge(regions []string, allRegions bool) string {
 	if len(uniq) == 0 {
 		return ""
 	}
-	label := "◉ Region: " + uniq[0]
+	label := Icon("region") + "Region: " + uniq[0]
 	if len(uniq) > 1 {
-		label = "◉ Regions: " + strings.Join(uniq, ", ")
+		label = Icon("region") + "Regions: " + strings.Join(uniq, ", ")
 	}
 	return RegionBadgeStyle().Render(label)
 }

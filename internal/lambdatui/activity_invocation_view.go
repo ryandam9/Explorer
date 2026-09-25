@@ -192,8 +192,8 @@ func (mm *m) renderInvocation() string {
 	case len(v.inv.Lines) == 0:
 		return head + "\n\n  " + muted.Render("No lines of this invocation were found in its stream.")
 	}
-	mm.fitTable(&v.tbl, lipgloss.Height(head), 1)
-	return head + "\n" + ui.TablePanelStyle(true).Render(v.tbl.View()) + "\n" + ui.TableScrollIndicator(&v.tbl)
+	mm.fitTable(&v.tbl, lipgloss.Height(head), 0)
+	return head + "\n" + ui.TablePanel(&v.tbl, true, "Log lines")
 }
 
 func (mm *m) invocationHeader() string {

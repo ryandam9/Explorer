@@ -258,9 +258,8 @@ func (mm *m) renderCode() string {
 	sub := lipgloss.NewStyle().Foreground(lipgloss.Color(ui.ColorMuted())).
 		Render(fmt.Sprintf("  %d files · Enter to open · y copies · Esc back", len(mm.codeFiles)))
 	head := title + "\n" + sub
-	mm.fitTable(&mm.codeTbl, lipgloss.Height(head), 1)
-	return head + "\n" + ui.TablePanelStyle(true).Render(mm.codeTbl.View()) +
-		"\n" + ui.TableScrollIndicator(&mm.codeTbl)
+	mm.fitTable(&mm.codeTbl, lipgloss.Height(head), 0)
+	return head + "\n" + ui.TablePanel(&mm.codeTbl, true, "Files")
 }
 
 // renderCodeFile draws the scrolling source viewer for the open file. The
@@ -300,7 +299,7 @@ func (mm *m) renderCodeConfirm() string {
 			mm.codeSizeNote, mm.detailFunc.Name) +
 		lipgloss.NewStyle().Foreground(lipgloss.Color(ui.ColorMuted())).
 			Render("This is a read-only download from S3 (the function's own code).") + "\n\n" +
-		"[y] download    [Esc] cancel"
+		ui.ConfirmButtons("y  Download", "Esc  Cancel", false)
 	return lipgloss.NewStyle().
 		Border(lipgloss.RoundedBorder()).
 		BorderForeground(lipgloss.Color(ui.ColorBorderFocus())).

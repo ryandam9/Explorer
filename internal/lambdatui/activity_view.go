@@ -616,9 +616,12 @@ func (mm *m) renderActivity() string {
 		return head + "\n\n  " + lipgloss.NewStyle().Foreground(lipgloss.Color(ui.ColorMuted())).Render(msg)
 	}
 	foot := mm.activityFooter()
-	mm.fitTable(&a.tbl, lipgloss.Height(head), lipgloss.Height(foot)+1)
-	return head + "\n" + ui.TablePanelStyle(true).Render(a.tbl.View()) +
-		"\n" + ui.TableScrollIndicator(&a.tbl) + "\n" + foot
+	mm.fitTable(&a.tbl, lipgloss.Height(head), lipgloss.Height(foot))
+	title := "Matches"
+	if matchesAll(a.query.Pattern) {
+		title = "Log events"
+	}
+	return head + "\n" + ui.TablePanel(&a.tbl, true, title) + "\n" + foot
 }
 
 func (mm *m) activityHeader() string {
@@ -688,7 +691,9 @@ func (mm *m) activityHeader() string {
 		}
 		prefix := "  "
 		if a.scanning {
-			prefix = "  " + mm.spinner.View() + " "
+			// How far through the day the scan has read, on the same line so the
+			// header height (and the table below) doesn't change when it ends.
+			prefix = "  " + mm.spinner.View() + " " + ui.ProgressBar(a.scan.DayProgress(q.Day, time.Now()), 12) + " "
 		}
 		lines = append(lines, ansi.Truncate(prefix+"Log scan "+accent.Render(re)+"  "+a.scan.ScanSummary(), w, "…"))
 		for _, l := range perfLines(a.scan, q.TimeoutSec, q.Arch) {
