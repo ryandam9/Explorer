@@ -17,6 +17,7 @@ import (
 	"github.com/ryandam9/aws_explorer/internal/engine"
 	"github.com/ryandam9/aws_explorer/internal/model"
 	"github.com/ryandam9/aws_explorer/internal/output"
+	"github.com/ryandam9/aws_explorer/internal/ui"
 )
 
 // Build metadata, injected at build time via
@@ -163,10 +164,15 @@ func applyGlobalAWSOverrides() {
 
 // applyUIFlags lets --nerd-font / --paint-background override ui.nerdFont /
 // ui.paintBackground for one run (each TUI applies AppConfig.UI at start-up).
+// Both can also be switched while a TUI runs, in the Appearance panel.
+//
+// It also points the Appearance panel (ctrl+t in every TUI) at the config file,
+// so theme, icon and background choices made in the app can be saved.
 func applyUIFlags(cmd *cobra.Command) {
 	if AppConfig == nil {
 		return
 	}
+	ui.ConfigureSettings(configFilePath(), AppConfig)
 	if cmd.Flags().Changed("nerd-font") {
 		AppConfig.UI.NerdFont = uiNerdFont
 	}

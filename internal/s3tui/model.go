@@ -3659,7 +3659,7 @@ func (m *Model) helpView() string {
 	sections = append(sections,
 		"",
 		"Utility",
-		"  S                  Settings (theme & colors)",
+		"  S / Ctrl+T         Appearance (theme, icons, background)",
 		"  ~                  Debug: live view of what the tool is doing",
 		"  i                  About this page (what it does)",
 		"  ?                  Toggle this help",

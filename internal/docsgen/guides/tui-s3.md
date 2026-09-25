@@ -29,7 +29,7 @@ See the [`s3` command reference](s3.md) for every flag.
 | `/` | Search buckets |
 | `o` | Open the bucket in the AWS console |
 | `r` | Refresh |
-| `S` | Theme / settings |
+| `S` / `Ctrl+T` | Appearance: theme, icons, background |
 | `?` | Help · `q` Quit |
 
 ## Object list shortcuts

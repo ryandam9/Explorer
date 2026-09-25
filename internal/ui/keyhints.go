@@ -94,6 +94,28 @@ func RenderKeyHints(hints []KeyHint, maxWidth int) string {
 // fit are elided (see RenderKeyHints); the left text is truncated before any
 // hint is sacrificed beyond that.
 func StatusBar(width int, left string, hints []KeyHint) string {
+	return statusBar(width, left, withAppHints(hints))
+}
+
+// withAppHints adds the app-wide shortcut the shell handles (ctrl+t, the
+// Appearance panel) just before the final hint, which RenderKeyHints always
+// keeps — so on a narrow terminal it is elided before the screen's own.
+func withAppHints(hints []KeyHint) []KeyHint {
+	if !settingsConfigured() || len(hints) == 0 {
+		return hints
+	}
+	for _, h := range hints {
+		if h.Key == "^T" {
+			return hints
+		}
+	}
+	out := make([]KeyHint, 0, len(hints)+1)
+	out = append(out, hints[:len(hints)-1]...)
+	out = append(out, H("^T", "theme"), hints[len(hints)-1])
+	return out
+}
+
+func statusBar(width int, left string, hints []KeyHint) string {
 	if width < 12 {
 		width = 12
 	}

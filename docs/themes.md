@@ -118,7 +118,10 @@ ui:
 
 ### The theme console
 
-The in-app settings panel (press `S`) is styled as a sci-fi mission console.
+The in-app settings panel — **Appearance** — opens with **`Ctrl+T` on any
+screen of any TUI** (`lambda`, `s3`, `emr`, `cw`, `bill`, …; the dashboard, S3
+and VPC browsers also keep their `S` key). It is styled as a sci-fi mission
+console.
 It **floats over the live app** (the UI stays visible around it), it has a
 **fixed size** that never changes with the terminal, tab or mode, and every
 row is a control: `↑`/`↓` selects a row, `←`/`→` changes its value —
@@ -126,6 +129,12 @@ row is a control: `↑`/`↓` selects a row, `←`/`→` changes its value —
 
 - **Theme selector** — the top row. With it selected, `←`/`→` cycles the 20
   built-in themes and the whole app restyles in real time around the console.
+- **Icons** — the row under the theme. `←`/`→` (or `Space`/`Enter`) switches
+  between Nerd Font glyphs and plain symbols, live. A program can't change the
+  terminal's font, so the panel shows sample glyphs: if they render as boxes,
+  set a [Nerd Font](https://www.nerdfonts.com) in your terminal's settings.
+- **Background** — `terminal` (your terminal's own background) or `painted`
+  (the theme's canvas color fills the screen), live.
 - **Subsystem tabs** — the roles are grouped into segmented `GENERAL` /
   `TABLES` / `STATUS BAR` / `ALERTS` tabs (`Tab` or `1`–`4` to switch).
 - **Slider rows** — every role renders as a fader: the knob position is the
@@ -142,14 +151,18 @@ row is a control: `↑`/`↓` selects a row, `←`/`→` changes its value —
 - **Signal monitor** — a live preview strip (mini header, table row, status
   bar and alert glyphs) that follows every knob turn *before* you apply.
 
-All changes apply live to the running app; `Ctrl+S` persists the theme and
-every role edit back to `config.yaml`.
+All changes apply live to the running app — tables included, in every TUI —
+and `Ctrl+S` persists the theme, the icon and background switches and every
+role edit back to `config.yaml`. `Esc` (or `Ctrl+T` again) closes the panel
+without saving; what you changed stays in effect until you quit. While it is
+open, the screen underneath keeps updating (scans and log streams carry on).
 
 ## Look & feel
 
 Two display options sit beside the theme, both **off by default** so a plain
-terminal looks exactly as it always has. Each has a config key and a global
-flag to try it for one run:
+terminal looks exactly as it always has. Switch them while the app runs in the
+Appearance panel (`Ctrl+T`, then `↑` to the Icons / Background rows) and save
+with `Ctrl+S` — or set them in `config.yaml`, or pass a flag for one run:
 
 ```yaml
 ui:

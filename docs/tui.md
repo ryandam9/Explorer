@@ -39,7 +39,7 @@ what you see in the bar is always what works right now.
 | `P` | Switch AWS profile and/or region scope, then rescan — no restart needed |
 | `e` | Open the scan-errors overlay (services with errors also carry a `⚠n` badge in the sidebar) |
 | `~` | **Debug activity overlay**: a live, scrollable view of what the tool is doing — regions, services, API calls and access errors — so you can see progress instead of a blank screen (available during the initial scan too) |
-| `S` | Settings panel (themes & colors) |
+| `S` / `Ctrl+T` | Appearance panel (theme, icons, background, colors) |
 | `i` | **About this page**: a short overlay explaining what the screen is for (every TUI has one) |
 | `?` | Help overlay |
 | `Esc` | Close detail panel / overlay |

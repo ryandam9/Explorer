@@ -11,6 +11,7 @@ import (
 	"go.yaml.in/yaml/v3"
 
 	"github.com/ryandam9/aws_explorer/internal/config"
+	"github.com/ryandam9/aws_explorer/internal/table"
 )
 
 // ThemeColors holds the full color palette for a theme.
@@ -138,6 +139,21 @@ func invalidateRoleCache() {
 	roleCache.values = nil
 	roleCache.theme = -1
 	roleCache.mu.Unlock()
+	themeGen.Add(1)
+}
+
+// themeGen counts theme and colour-role changes. Every shared table re-reads
+// its styles when it moves on (table.SetThemeSource), so a theme switched in
+// the settings panel recolours every table in every TUI at once.
+var themeGen atomic.Uint64
+
+func init() {
+	table.SetThemeSource(themeGen.Load, func(zebra bool) table.Styles {
+		if zebra {
+			return TableStylesZebra()
+		}
+		return TableStyles()
+	})
 }
 
 // ResolveRole returns the effective color for a role in the active theme,

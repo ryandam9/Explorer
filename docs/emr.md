@@ -51,6 +51,7 @@ Step history (Enter on a cluster):
 | `/` | Filter the cluster list |
 | `o` | Open the selected cluster in the AWS console |
 | `r` | Refresh |
+| `Ctrl+T` | Appearance panel — theme, Nerd Font icons, painted background (applies live; `Ctrl+S` saves) |
 | `i` | About this page · `q` quit |
 
 (In the step history, `y` copies the selected step's failure reason.)

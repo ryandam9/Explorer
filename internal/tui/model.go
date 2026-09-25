@@ -2292,7 +2292,7 @@ func (m tuiModel) helpBody() string {
 		"  P                  Switch AWS profile / region and rescan",
 		"  e                  View access / scan errors",
 		"  ~                  Debug: live view of what the tool is doing",
-		"  S                  Settings (theme & colors)",
+		"  S / Ctrl+T         Appearance (theme, icons, background)",
 		"  i                  About this page (what it does)",
 		"  ?                  Toggle this help",
 		"  q, Ctrl+C          Quit",

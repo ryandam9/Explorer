@@ -45,7 +45,7 @@ works right now.
 | `t` | Timeline — recent CloudTrail "who changed this" events for the selected resource |
 | `P` | Switch AWS profile and/or region scope, then rescan — no restart |
 | `e` | Open the scan-errors overlay |
-| `S` | Settings panel (themes & colors) |
+| `S` / `Ctrl+T` | Appearance panel (theme, icons, background, colors) |
 | `?` | Help overlay |
 | `Esc` | Close detail panel / overlay |
 | `q` / `Ctrl+C` | Quit |
