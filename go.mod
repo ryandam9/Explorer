@@ -51,20 +51,20 @@ require (
 	github.com/aws/smithy-go v1.27.2
 	github.com/charmbracelet/colorprofile v0.4.3
 	github.com/charmbracelet/x/ansi v0.11.8
-	github.com/dustin/go-humanize v1.0.1
+	github.com/dustin/go-humanize v1.1.0
 	github.com/lrstanley/bubblezone/v2 v2.0.0
-	github.com/mattn/go-isatty v0.0.22
-	github.com/mattn/go-runewidth v0.0.27
-	github.com/parquet-go/parquet-go v0.30.1
+	github.com/mattn/go-isatty v0.0.24
+	github.com/mattn/go-runewidth v0.0.30
+	github.com/parquet-go/parquet-go v0.32.0
 	github.com/russross/blackfriday/v2 v2.1.0
 	github.com/spf13/cobra v1.10.2
 	github.com/spf13/pflag v1.0.10
 	github.com/spf13/viper v1.21.0
 	github.com/xuri/excelize/v2 v2.11.0
-	go.yaml.in/yaml/v3 v3.0.4
-	golang.org/x/crypto v0.56.0
-	golang.org/x/net v0.57.0
-	golang.org/x/sync v0.22.0
+	go.yaml.in/yaml/v3 v3.0.5
+	golang.org/x/crypto v0.57.0
+	golang.org/x/net v0.58.0
+	golang.org/x/sync v0.23.0
 )
 
 require (
@@ -119,7 +119,7 @@ require (
 	github.com/xo/terminfo v0.0.0-20220910002029-abceb7e1c41e // indirect
 	github.com/xuri/efp v0.0.1 // indirect
 	github.com/xuri/nfp v0.0.2-0.20250530014748-2ddeb826f9a9 // indirect
-	golang.org/x/sys v0.47.0 // indirect
-	golang.org/x/text v0.41.0 // indirect
+	golang.org/x/sys v0.48.0 // indirect
+	golang.org/x/text v0.42.0 // indirect
 	google.golang.org/protobuf v1.34.2 // indirect
 )
