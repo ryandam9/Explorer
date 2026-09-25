@@ -77,9 +77,10 @@ const lambdaAboutText = "This is the AWS Lambda dashboard. Tab across Functions,
 	"or soon-deprecating runtimes, missing dead-letter queues, failed-state functions) " +
 	"over the loaded functions; y copies the suggested fix.\n\n" +
 	"On a function, a opens its activity for a day: the invocation count (CloudWatch " +
-	"Invocations/Errors/Throttles, per hour) and, given a regex, a table of that day's " +
-	"matching log events with the request ID, level and each capture group in its own " +
-	"column; [ and ] step a day, e re-edits the query.\n\n" +
+	"Invocations/Errors/Throttles, per hour) and a table of that day's log events — " +
+	"those a regex matches, or every event when it is left empty — with the request ID, " +
+	"level and each capture group in its own column; [ and ] step a day, e re-edits the " +
+	"query, X exports the rows to an Excel workbook.\n\n" +
 	"On a function, L opens its CloudWatch logs (/aws/lambda/<name>). Press S to cycle " +
 	"the column the active tab is sorted by (R reverses the direction), o on any row to " +
 	"open it in the AWS console, / to filter, r to refresh, and ~ for the live debug pane."
@@ -283,7 +284,7 @@ func (mm *m) applyToast(rendered string) string {
 	toast := lipgloss.NewStyle().
 		Background(lipgloss.Color(ui.ColorSuccess())).
 		Foreground(lipgloss.Color(ui.ColorHighlightText())).
-		Padding(0, 2).Bold(true).Render("✓ " + mm.toast)
+		Padding(0, 2).Bold(true).Render(ansi.Truncate("✓ "+mm.toast, max(mm.width-4, 1), "…")) // never wider than the screen, or the frame wraps
 	lines := strings.Split(rendered, "\n")
 	if len(lines) >= 1 {
 		lines[0] = lipgloss.PlaceHorizontal(mm.width, lipgloss.Right, toast)

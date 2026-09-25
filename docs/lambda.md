@@ -96,6 +96,7 @@ execution environment runs one invocation at a time) and marked with `~`.
 | `e` | Edit the query (date, regex, filter) |
 | `r` | Run it again |
 | `y` | Copy the selected match's full log line |
+| `X` | Export the rows to an Excel workbook ([below](#excel-export)) |
 | `<` / `>` | Scroll the columns |
 | `Esc` | Stop a running scan (keeping what was read); again to go back |
 
@@ -108,6 +109,28 @@ e.g. `"Copied"` or `%orders-\d+%`) is applied by CloudWatch before the regex, so
 far less data is read. START lines are then filtered out too, and the count
 is shown as not counted rather than as 0. A custom log group that other
 functions also write to is flagged in the header.
+
+#### Excel export
+
+`X` writes the report's rows to an `.xlsx` workbook in the downloads directory
+(`app.downloadDir`, default `~/.aws_explorer/downloads`), named after what it
+holds, e.g. `lambda-stocks-notify-2026-09-24-matches-20260925-143012.xlsx`
+(`-events-` when the regex was empty). The status bar shows the path.
+
+- **`Matches <day>`** (or **`Events <day>`**) — one row per match: the time as a
+  real date-time in the day's zone (named in the header), the full request ID
+  (plus a "Request ID from START" column when any ID was inferred), level, one
+  column per capture group, the full message (wrapped, line breaks kept, never
+  cut with `…`) and the log stream. The header row is frozen and filterable.
+- **`Query`** — what produced the rows: function, region, log group, day, regex,
+  server filter, the invocation counts, the scan summary, and whether the scan
+  was complete or stopped at a bound (or by Esc) — so a partial export says so.
+
+The sheets are plain: no gridlines, a white background, a blue header band,
+and thin borders only around the cells that hold data. Log text is always
+written as text, so a line that starts with `=` can't run as a formula. A
+running scan isn't exported — wait for it, or Esc to stop it and export what
+was read.
 
 Cost: 3 metrics per `GetMetricData` run (billed per metric requested, fractions
 of a cent), and nothing auto-refreshes. The log search uses `FilterLogEvents`,

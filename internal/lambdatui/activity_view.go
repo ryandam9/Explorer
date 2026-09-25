@@ -5,6 +5,8 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"os"
+	"path/filepath"
 	"regexp"
 	"strings"
 	"time"
@@ -15,6 +17,7 @@ import (
 	"github.com/charmbracelet/lipgloss"
 	"github.com/charmbracelet/x/ansi"
 
+	"github.com/ryandam9/aws_explorer/internal/downloads"
 	"github.com/ryandam9/aws_explorer/internal/sparkline"
 	"github.com/ryandam9/aws_explorer/internal/table"
 	"github.com/ryandam9/aws_explorer/internal/ui"
@@ -472,11 +475,63 @@ func (mm *m) handleActivityKey(msg tea.KeyMsg, cmds *[]tea.Cmd) {
 			mm.setToast("Copied log message")
 			*cmds = append(*cmds, toastCmd(3*time.Second))
 		}
+	case "X":
+		mm.exportActivity(time.Now())
+		*cmds = append(*cmds, toastCmd(activityExportToast))
 	case ui.KeyDebug:
 		mm.debug.Open(mm.width, mm.height)
 	case ui.KeyAbout:
 		mm.showAbout = true
 	}
+}
+
+// activityExportToast is how long the export result stays in the status bar:
+// long enough to read the file's path.
+const activityExportToast = 8 * time.Second
+
+// exportActivity writes the run's matches to an Excel workbook in the shared
+// downloads directory and reports the path (or why it couldn't) in a toast.
+// A running scan is not exported: its rows are still arriving, and a file
+// taken mid-scan would look complete. Esc stops it, keeping what was read,
+// and that partial export is labelled as such in its Query sheet.
+func (mm *m) exportActivity(now time.Time) {
+	a := &mm.act
+	msg := func(s string) {
+		mm.setToast(s)
+		mm.toastExp = now.Add(activityExportToast)
+	}
+	switch {
+	case a.scan == nil:
+		msg("Nothing to export — no log scan in this report")
+		return
+	case a.scanning:
+		msg("Scan still running — wait for it, or Esc to stop it and export what was read")
+		return
+	case len(a.scan.Matches) == 0:
+		msg("Nothing to export — no log events in this report")
+		return
+	}
+	dir, err := downloads.Dir()
+	if err == nil {
+		path := filepath.Join(dir, activityWorkbookName(a.query, now))
+		if err = WriteActivityWorkbook(path, a.query, a.stats, a.statsErr, a.scan, now); err == nil {
+			slog.Info("Exported Lambda activity to Excel", "function", a.query.Function, "rows", len(a.scan.Matches), "path", path)
+			msg(fmt.Sprintf("Exported %d rows to %s", len(a.scan.Matches), homeRelative(path)))
+			return
+		}
+	}
+	slog.Warn("Lambda activity Excel export failed", "function", a.query.Function, "error", err.Error())
+	msg("Excel export failed: " + err.Error())
+}
+
+// homeRelative shortens a path under the home directory to "~/…" for display.
+func homeRelative(path string) string {
+	if home, err := os.UserHomeDir(); err == nil && home != "" {
+		if rel, err := filepath.Rel(home, path); err == nil && !strings.HasPrefix(rel, "..") {
+			return filepath.Join("~", rel)
+		}
+	}
+	return path
 }
 
 // --- rendering --------------------------------------------------------------
@@ -666,7 +721,7 @@ func (mm *m) activityHints() []ui.KeyHint {
 	} else {
 		hints = append(hints, ui.H("Esc", "back"))
 	}
-	hints = append(hints, ui.H("y", "copy message"), ui.H("r", "rerun"))
+	hints = append(hints, ui.H("y", "copy message"), ui.H("X", "excel"), ui.H("r", "rerun"))
 	if hl, hr := a.tbl.ColScrollInfo(); hl+hr > 0 {
 		hints = append(hints, ui.H("</>", "columns"))
 	}
