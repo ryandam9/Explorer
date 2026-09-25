@@ -157,21 +157,46 @@ func TestActivityFormValidation(t *testing.T) {
 	if !mm.act.formActive || !strings.Contains(mm.act.formErr, "invalid regex") {
 		t.Errorf("a bad regex keeps the form open with an error: %q", mm.act.formErr)
 	}
+}
+
+// An empty regex lists every event of the day: all lines become rows, there is
+// no MATCH column (nothing was searched for), and the header says so.
+func TestActivityEmptyRegexListsAllEvents(t *testing.T) {
+	logs := &stubLogs{pages: []*cloudwatchlogs.FilterLogEventsOutput{
+		{Events: []cwltypes.FilteredLogEvent{
+			logEvt(1790000000000, "s", "START RequestId: 3f772d5c-ddd1-4e9f-96e2-661d2ac65c6c Version: $LATEST"),
+			logEvt(1790000000100, "s", "[INFO]\t2026-09-23T21:35:37.940Z\t3f772d5c-ddd1-4e9f-96e2-661d2ac65c6c\tSent: stocks: asx.db"),
+			logEvt(1790000000200, "s", "END RequestId: 3f772d5c-ddd1-4e9f-96e2-661d2ac65c6c"),
+		}},
+	}}
+	mm := newActivityTestModel(logs)
+	mm.Update(key("a"))
 	mm.act.inputs[actFieldPattern].SetValue("")
-	mm.act.inputs[actFieldFilter].SetValue(`"Copied"`)
-	mm.Update(key("enter"))
-	if !mm.act.formActive || mm.act.formErr == "" {
-		t.Error("a server filter without a regex has nothing to show and must be rejected")
+	_, cmd := mm.Update(key("enter"))
+	if mm.act.formActive || mm.act.scan == nil || !mm.act.scanning {
+		t.Fatalf("an empty regex should start a scan: form=%v err=%q", mm.act.formActive, mm.act.formErr)
+	}
+	runCmd(mm, cmd)
+
+	if got := len(mm.act.scan.Matches); got != 3 {
+		t.Errorf("every event should be a row: %d, want 3", got)
+	}
+	for _, c := range mm.act.tbl.Columns() {
+		if c.Title == "MATCH" {
+			t.Error("listing all events has no matched text — no MATCH column")
+		}
+	}
+	view := mm.View()
+	if !strings.Contains(view, "Log scan all events  3 events read · 1 START lines\n") || !strings.Contains(view, "·  3 events") {
+		t.Errorf("header should say all events, not a match count:\n%s", view)
 	}
 
-	// No regex: metrics only, no log reads.
-	mm.act.inputs[actFieldFilter].SetValue("")
+	// With a server filter, an empty regex keeps every filtered event.
+	mm.Update(key("e"))
+	mm.act.inputs[actFieldFilter].SetValue(`"Sent"`)
 	mm.Update(key("enter"))
-	if !mm.act.active || mm.act.scan != nil || mm.act.scanning {
-		t.Errorf("an empty regex runs metrics only: active=%v scan=%v", mm.act.active, mm.act.scan)
-	}
-	if !strings.Contains(mm.View(), "No regex given") {
-		t.Error("the report should say how to add a regex")
+	if mm.act.formActive || mm.act.query.Filter != `"Sent"` || !matchesAll(mm.act.query.Pattern) {
+		t.Errorf("a filter without a regex should run: form=%v err=%q", mm.act.formActive, mm.act.formErr)
 	}
 }
 

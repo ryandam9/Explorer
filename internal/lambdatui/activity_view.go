@@ -92,7 +92,7 @@ func newActivityInputs() [actFieldCount]textinput.Model {
 	var in [actFieldCount]textinput.Model
 	placeholders := [actFieldCount]string{
 		"YYYY-MM-DD, today or yesterday",
-		`Go regex, e.g. Copied (\S+) to (\S+)  — empty: counts only`,
+		`Go regex, e.g. Copied (\S+) · empty = every event`,
 		`optional CloudWatch filter, e.g. "Copied"`,
 	}
 	for i := range in {
@@ -163,16 +163,15 @@ func (mm *m) activityQueryFromForm(now time.Time) (ActivityQuery, error) {
 	if err != nil {
 		return ActivityQuery{}, err
 	}
-	var re *regexp.Regexp
+	// An empty regex lists every event of the day (after the server filter,
+	// when one is given).
+	re := matchAll
 	if p := strings.TrimSpace(mm.act.inputs[actFieldPattern].Value()); p != "" {
 		if re, err = regexp.Compile(p); err != nil {
 			return ActivityQuery{}, fmt.Errorf("invalid regex: %v", err)
 		}
 	}
 	filter := strings.TrimSpace(mm.act.inputs[actFieldFilter].Value())
-	if re == nil && filter != "" {
-		return ActivityQuery{}, fmt.Errorf("the server filter narrows the log scan — also give a regex (. keeps every filtered event)")
-	}
 	fn := mm.act.fn
 	return ActivityQuery{
 		Region: fn.Region, Function: fn.Name, LogGroup: fn.LogGroup,
@@ -289,7 +288,7 @@ func activityColumns(scan *LogScan) []table.Column {
 		for _, g := range scan.GroupNames {
 			cols = append(cols, table.Column{Title: strings.ToUpper(groupHeader(g)), Width: 6})
 		}
-		if len(scan.GroupNames) == 0 {
+		if scan.MatchColumn() {
 			cols = append(cols, table.Column{Title: "MATCH", Width: 8})
 		}
 	}
@@ -300,7 +299,7 @@ func activityColumns(scan *LogScan) []table.Column {
 // its first block (enough to tell invocations apart; the footer shows it in
 // full). The message is left whole (last cell); refreshActivityRows wraps it to
 // the panel.
-func activityRow(m Match, loc *time.Location, groups int) table.Row {
+func activityRow(m Match, loc *time.Location, matchCol bool) table.Row {
 	id := "—"
 	if m.RequestID != "" {
 		id = m.RequestID
@@ -315,7 +314,7 @@ func activityRow(m Match, loc *time.Location, groups int) table.Row {
 	for _, g := range m.Groups {
 		row = append(row, dashEm(truncate(oneLine(g), matchCellMax)))
 	}
-	if groups == 0 {
+	if matchCol {
 		row = append(row, dashEm(truncate(oneLine(m.Matched), matchCellMax)))
 	}
 	return append(row, m.Body)
@@ -382,7 +381,7 @@ func (mm *m) refreshActivityRows() {
 	loc := a.query.Day.Start.Location()
 	matchRows := make([]table.Row, 0, len(a.scan.Matches))
 	for _, m := range a.scan.Matches {
-		matchRows = append(matchRows, activityRow(m, loc, len(a.scan.GroupNames)))
+		matchRows = append(matchRows, activityRow(m, loc, a.scan.MatchColumn()))
 	}
 	// A long message wraps onto continuation rows whose other cells are blank;
 	// the row groups keep each match one selectable, striped unit.
@@ -529,7 +528,12 @@ func (mm *m) renderActivity() string {
 	}
 	if len(a.scan.Matches) == 0 {
 		msg := "No log events matched yet…"
-		if !a.scanning {
+		switch {
+		case matchesAll(a.query.Pattern) && a.scanning:
+			msg = "No log events yet…"
+		case matchesAll(a.query.Pattern):
+			msg = "No log events for this day."
+		case !a.scanning:
 			msg = "No log events matched."
 		}
 		return head + "\n\n  " + lipgloss.NewStyle().Foreground(lipgloss.Color(ui.ColorMuted())).Render(msg)
@@ -588,6 +592,9 @@ func (mm *m) activityHeader() string {
 	// Log scan.
 	if a.scan != nil {
 		re := "/" + q.Pattern.String() + "/"
+		if matchesAll(q.Pattern) {
+			re = "all events"
+		}
 		if q.Filter != "" {
 			re += " (filter " + q.Filter + ")"
 		}
@@ -639,7 +646,11 @@ func (mm *m) activityStatusLeft() string {
 	a := &mm.act
 	s := fmt.Sprintf("Activity: %s · %s", a.query.Function, a.query.Day.Date)
 	if a.scan != nil {
-		s += fmt.Sprintf("  ·  %d matches", len(a.scan.Matches))
+		noun := "matches"
+		if matchesAll(a.scan.Pattern) {
+			noun = "events"
+		}
+		s += fmt.Sprintf("  ·  %d %s", len(a.scan.Matches), noun)
 		if a.scanning {
 			s += " · scanning…"
 		}

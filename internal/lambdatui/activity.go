@@ -282,6 +282,21 @@ func NewLogScan(pattern *regexp.Regexp, filter string, maxMatches int) *LogScan 
 	}
 }
 
+// matchAll is the pattern an empty regex stands for in the TUI: every event of
+// the day becomes a row.
+var matchAll = regexp.MustCompile(``)
+
+// matchesAll reports whether re keeps every event (the empty regex), so the
+// scan is a plain listing of the day's events rather than a search.
+func matchesAll(re *regexp.Regexp) bool { return re != nil && re.String() == "" }
+
+// MatchColumn reports whether the table needs a column for the matched text:
+// only for a search whose regex has no capture groups. Listing every event has
+// no matched text to show.
+func (s *LogScan) MatchColumn() bool {
+	return len(s.GroupNames) == 0 && !matchesAll(s.Pattern)
+}
+
 func groupNames(re *regexp.Regexp) []string {
 	if re == nil {
 		return nil
@@ -343,7 +358,11 @@ func (s *LogScan) Ingest(events []LogEvent) bool {
 		}
 		s.Matches = append(s.Matches, m)
 		if len(s.Matches) >= s.MaxMatches {
-			s.finish(fmt.Sprintf("stopped at %d matches — more may exist later in the day", s.MaxMatches))
+			if matchesAll(s.Pattern) {
+				s.finish(fmt.Sprintf("stopped at %d events — more may exist later in the day; a regex or server filter narrows it", s.MaxMatches))
+			} else {
+				s.finish(fmt.Sprintf("stopped at %d matches — more may exist later in the day", s.MaxMatches))
+			}
 			return false
 		}
 	}

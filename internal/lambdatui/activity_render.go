@@ -79,6 +79,9 @@ func (s *LogScan) ScanSummary() string {
 			starts = "≥" + starts + " (partial scan)"
 		}
 	}
+	if matchesAll(s.Pattern) {
+		return fmt.Sprintf("%s events read · %s", formatCount(float64(s.Events)), starts)
+	}
 	return fmt.Sprintf("%s events read · %s · %s matches", formatCount(float64(s.Events)), starts, formatCount(float64(len(s.Matches))))
 }
 

@@ -56,8 +56,10 @@ an S3-triggered function that copies each new object elsewhere: how many times
 it ran on the 24th, and which objects it copied.
 
 A small form asks for a **date** (`YYYY-MM-DD`, `today` or `yesterday`, in your
-local time zone), a **regex**, and an optional **server filter**. The report
-then shows:
+local time zone), a **regex**, and an optional **server filter**. Leave the
+regex empty to list **every event** of the day (with a server filter: every
+event it keeps) — the table then has no MATCH column and is bounded the same
+way, at 1,000 events. The report then shows:
 
 - **Invocations** — the day's `AWS/Lambda` `Invocations`, `Errors` and
   `Throttles` (Sum), from one batched `GetMetricData` call, with a per-hour
