@@ -17,6 +17,7 @@ import (
 	"github.com/atotto/clipboard"
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/service/cloudwatchlogs/types"
+	"github.com/charmbracelet/x/ansi"
 	"github.com/dustin/go-humanize"
 
 	"github.com/ryandam9/aws_explorer/internal/config"
@@ -868,47 +869,49 @@ func (m *model) handleDownload(cmds *[]tea.Cmd) {
 	if !ok {
 		return
 	}
-	var streamName string
+	var stream *types.LogStream
 	switch m.focus {
 	case focusStreams:
 		if len(m.filteredStreams) == 0 {
 			return
 		}
-		streamName = aws.ToString(m.filteredStreams[m.selectedStreamIdx].LogStreamName)
+		stream = &m.filteredStreams[m.selectedStreamIdx]
 	case focusEvents:
-		if !m.groupLevelSearch && len(m.filteredStreams) > 0 {
-			streamName = aws.ToString(m.filteredStreams[m.selectedStreamIdx].LogStreamName)
-		}
+		stream = m.selectedStream()
+	}
+	var streamName string
+	if stream != nil {
+		streamName = aws.ToString(stream.LogStreamName)
 	}
 
 	// The server-side query pattern applies to the download too (it is what
 	// the events panel shows); say so up front so a leftover pattern can't
 	// silently shrink the file.
-	toast := "Downloading events (window " + formatLookback(m.lookback) + ")…"
+	win := windowFor(m.lookback, time.Now(), stream)
+	toast := "Downloading events (window " + win.short() + ")…"
 	if p := m.eventSearch.Value(); p != "" {
-		toast = "Downloading events matching " + p + " (window " + formatLookback(m.lookback) + ")…"
+		toast = "Downloading events matching " + p + " (window " + win.short() + ")…"
 	}
 	m.downloading = true
 	m.setToast(toast)
-	*cmds = append(*cmds, toastCmd(3*time.Second), m.downloadEventsCmd(grp, streamName))
+	*cmds = append(*cmds, toastCmd(3*time.Second), m.downloadEventsCmd(grp, streamName, win))
 }
 
 // downloadEventsCmd runs the full-window fetch and the file write off the UI
 // loop, reporting back via downloadMsg.
-func (m *model) downloadEventsCmd(grp LogGroup, streamName string) tea.Cmd {
+func (m *model) downloadEventsCmd(grp LogGroup, streamName string, win queryWindow) tea.Cmd {
 	grpName := aws.ToString(grp.LogGroupName)
 	region := grp.Region
 	pattern := m.eventSearch.Value()
-	lookback := m.lookback
 	return func() tea.Msg {
-		slog.Info("Downloading log events", "group", grpName, "region", region, "stream", streamName, "pattern", pattern, "window", formatLookback(lookback))
-		events, truncated, err := m.client.DownloadLogEvents(m.ctx, region, grpName, streamName, SplitPatterns(pattern), lookback)
+		slog.Info("Downloading log events", "group", grpName, "region", region, "stream", streamName, "pattern", pattern, "window", win.short())
+		events, truncated, err := m.client.DownloadLogEvents(m.ctx, region, grpName, streamName, SplitPatterns(pattern), win.start)
 		if err != nil {
 			slog.Warn("Downloading log events failed", "group", grpName, "region", region, "error", err.Error())
 			return downloadMsg{err: err}
 		}
 		if len(events) == 0 {
-			return downloadMsg{err: fmt.Errorf("no matching events in the last %s", formatLookback(lookback))}
+			return downloadMsg{err: fmt.Errorf("no matching events in the window (%s)", win.label())}
 		}
 		grpLabel := sanitizeFilename(region + "-" + grpName)
 		streamLabel := "all_streams"
@@ -1034,6 +1037,20 @@ func (m *model) loadGroupsCmd(prefix string) tea.Cmd {
 
 // selectedGroup returns the highlighted log group, or false when the filtered
 // list is empty.
+// selectedStream is the stream the events pane is scoped to, or nil when it
+// searches the whole group.
+func (m *model) selectedStream() *types.LogStream {
+	if m.groupLevelSearch || len(m.filteredStreams) == 0 {
+		return nil
+	}
+	return &m.filteredStreams[m.selectedStreamIdx]
+}
+
+// window is the events pane's current query window (see windowFor).
+func (m *model) window() queryWindow {
+	return windowFor(m.lookback, time.Now(), m.selectedStream())
+}
+
 func (m *model) selectedGroup() (LogGroup, bool) {
 	if len(m.filteredGroups) == 0 {
 		return LogGroup{}, false
@@ -1089,12 +1106,11 @@ func (m *model) loadEventsCmd() tea.Cmd {
 		streamName = aws.ToString(m.filteredStreams[m.selectedStreamIdx].LogStreamName)
 	}
 	pattern := m.eventSearch.Value()
-	lookback := m.lookback
+	win := m.window()
 
 	return func() tea.Msg {
-		slog.Info("Fetching log events", "group", grpName, "region", region, "stream", streamName, "pattern", pattern, "window", formatLookback(lookback))
-		since := time.Now().Add(-lookback).UnixMilli()
-		events, err := m.client.GetLogEventsSinceMulti(m.ctx, region, grpName, streamName, SplitPatterns(pattern), since, 100)
+		slog.Info("Fetching log events", "group", grpName, "region", region, "stream", streamName, "pattern", pattern, "window", win.short())
+		events, err := m.client.GetLogEventsSinceMulti(m.ctx, region, grpName, streamName, SplitPatterns(pattern), win.start, 100)
 		if err != nil {
 			slog.Warn("Fetching log events failed", "group", grpName, "region", region, "error", err.Error())
 		}
@@ -1174,7 +1190,7 @@ func (m *model) viewString() string {
 		countLabel(len(m.filteredStreams), len(m.streams), m.streamSearch.Value() != ""),
 		len(m.events))
 	if m.view == viewEvents {
-		statusText += "  ·  Window: " + formatLookback(m.lookback)
+		statusText += "  ·  Window: " + m.window().short()
 	}
 	if m.watchMode {
 		statusText += "  ·  [WATCH ACTIVE]"
@@ -1427,16 +1443,29 @@ func (m *model) renderEventsPanel(width int) string {
 	b.WriteString(headingStyle.Render(title) + "\n")
 
 	accent := lipgloss.NewStyle().Foreground(lipgloss.Color(ui.ColorAccent()))
-	window := "  ·  Window: last " + accent.Render(formatLookback(m.lookback)) + " (p)"
-	if m.eventSearchActive {
-		b.WriteString(" Query pattern: " + m.eventSearch.View() + window + "\n")
-	} else {
-		hint := "  (Press / to set serverside query pattern)"
-		if m.eventSearch.Value() != "" {
-			hint = "  (/ edits · C clears all filters)"
-		}
-		b.WriteString("  Pattern filter: " + accent.Render(m.eventSearch.Value()) + hint + window + "\n")
+	// The pattern line, degrading to fit the panel (measured, so it never
+	// wraps): the full window description first, then its compact form, then
+	// a shorter key hint.
+	win := m.window()
+	hint, shortHint := "  (Press / to set serverside query pattern)", "  (/ sets a pattern)"
+	if m.eventSearch.Value() != "" {
+		hint, shortHint = "  (/ edits · C clears all filters)", "  (/ edits · C clears)"
 	}
+	lead := func(hint string) string {
+		if m.eventSearchActive {
+			return " Query pattern: " + m.eventSearch.View()
+		}
+		return "  Pattern filter: " + accent.Render(m.eventSearch.Value()) + hint
+	}
+	windowPart := func(desc string) string { return "  ·  Window: " + accent.Render(desc) + " (p)" }
+	line := lead(hint) + windowPart(win.label())
+	for _, alt := range []string{lead(hint) + windowPart(win.short()), lead(shortHint) + windowPart(win.short())} {
+		if ansi.StringWidth(line) <= width {
+			break
+		}
+		line = alt
+	}
+	b.WriteString(line + "\n")
 
 	b.WriteString("\n")
 
@@ -1446,7 +1475,7 @@ func (m *model) renderEventsPanel(width int) string {
 		b.WriteString("  Type pattern(s) — ; separates OR'd patterns — and press Enter.\n")
 		b.WriteString("  An empty pattern browses every stream's events; Esc backs out.\n")
 	} else if len(m.events) == 0 {
-		b.WriteString("  No matching log events found in this window.\n")
+		b.WriteString("  " + win.emptyNote() + "\n")
 	} else if m.eventsTableMode {
 		// Shared zebra-striped table. Size it against what the header block
 		// actually renders as (measure, don't assume), leaving one line for

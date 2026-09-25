@@ -523,8 +523,9 @@ func (m *model) loadViewerEventsCmd(initial bool) tea.Cmd {
 	since := m.viewer.lastTS
 	if since == 0 {
 		// Nothing seen yet: fall back to the selected query window, matching
-		// the events panel the viewer was opened from.
-		since = time.Now().Add(-m.lookback).UnixMilli()
+		// the events panel the viewer was opened from (moved back to the
+		// stream's last event for an old stream — see windowFor).
+		since = m.window().start
 	}
 	maxEvents := int32(m.maxEvents)
 	return func() tea.Msg {

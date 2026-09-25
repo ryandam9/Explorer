@@ -125,6 +125,17 @@ events. The query runs server-side (`FilterLogEvents`) over a bounded
 **query window** — narrower windows scan less data, so busy groups answer
 faster. The active window shows in the panel header and the status bar.
 
+The window normally counts back from now ("last 7d"). For a single stream whose
+last event is older than that — a Lambda stream from last month, say — the
+window instead ends at the stream's own last event: the header reads
+`Window: 7d before this stream's last event (2026-09-03 14:22)`, so the
+stream's events load without widening the window (no preset reaches that far
+back anyway). The window stays open-ended, since CloudWatch updates a stream's
+last-event time only eventually. Whole-group searches (`G`) always count back
+from now, where the window is what bounds how much data a search scans. When a
+query finds nothing, the panel names the exact range it searched. The full log
+viewer and the `D` download use the same window.
+
 | Key | Action |
 |-----|--------|
 | `/` | Set the server-side query pattern(s). Separate several with `;` to OR them — `ERROR; timeout` shows events matching either, across every stream when combined with `G`. Each pattern runs as its own `FilterLogEvents` query; results are deduplicated and interleaved by time. The pattern(s) also scope the full log viewer and the `D` download, so "download only the matched lines across all streams" is: `G` → set patterns → `D` |
