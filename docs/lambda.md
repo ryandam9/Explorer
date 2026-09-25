@@ -72,8 +72,12 @@ then shows:
   matches. Each match is a row: **time** (to the millisecond), **request ID**,
   **level**, one column per **capture group** (named groups by name, others as
   `$1`, `$2`…; the matched text when there are no groups), and the message
-  with the runtime's timestamp/ID/level prefix removed. The footer shows the
-  selected match in full with its log stream.
+  with the runtime's timestamp/ID/level prefix removed. A long message wraps
+  across the full width of the panel instead of being cut off, and a multi-line one
+  (a Python traceback) keeps its line breaks. A match takes at most 8 lines;
+  beyond that the last line says how many were left out and `y` copies the whole
+  line. `↑/↓` move a whole match at a time. The footer shows the selected
+  match with its log stream.
   The scan also counts **START lines**, the invocations the logs saw, as a
   cross-check on the metric.
 

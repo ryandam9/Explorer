@@ -42,8 +42,13 @@ const matchCellMax = 120
 
 // activityMessageMin is the narrowest the MESSAGE column is squeezed to. On a
 // terminal too narrow for that, the column keeps this width and the table
-// scrolls horizontally (< >) rather than cutting the message to a sliver.
+// scrolls horizontally (< >) rather than wrapping the message into a sliver.
 const activityMessageMin = 40
+
+// activityWrapMax caps how many table lines one match's message may take, so a
+// multi-kilobyte line or a long traceback can't fill the page by itself. Past
+// the cap the last line says how much was left; y copies the full line.
+const activityWrapMax = 8
 
 type activityState struct {
 	// Form.
@@ -293,7 +298,8 @@ func activityColumns(scan *LogScan) []table.Column {
 
 // activityRow renders one match as a table row. The request ID is shortened to
 // its first block (enough to tell invocations apart; the footer shows it in
-// full). The message is left whole; refreshActivityRows fits it to the panel.
+// full). The message is left whole (last cell); refreshActivityRows wraps it to
+// the panel.
 func activityRow(m Match, loc *time.Location, groups int) table.Row {
 	id := "—"
 	if m.RequestID != "" {
@@ -312,7 +318,26 @@ func activityRow(m Match, loc *time.Location, groups int) table.Row {
 	if groups == 0 {
 		row = append(row, dashEm(truncate(oneLine(m.Matched), matchCellMax)))
 	}
-	return append(row, oneLine(m.Body))
+	return append(row, m.Body)
+}
+
+// wrapActivityMessage lays a message out over the MESSAGE column: line breaks
+// in the message start new lines (Python tracebacks separate theirs with a
+// bare \r), and a line too wide wraps at word boundaries, hard-breaking a
+// token with no space in it (an ARN, a JSON blob). At most activityWrapMax
+// lines; when the cap bites, the last line says how many were left out.
+func wrapActivityMessage(msg string, width int) []string {
+	msg = strings.NewReplacer("\r\n", "\n", "\r", "\n", "\t", " ").Replace(msg)
+	var out []string
+	for _, para := range strings.Split(strings.TrimRight(msg, "\n"), "\n") {
+		out = append(out, ui.WrapWords(para, width)...)
+	}
+	if len(out) > activityWrapMax {
+		hidden := len(out) - (activityWrapMax - 1)
+		note := fmt.Sprintf("… +%d more line(s) — y copies the full line", hidden)
+		out = append(out[:activityWrapMax-1], ansi.Truncate(note, width, "…"))
+	}
+	return out
 }
 
 // activityMessageWidth is the width left for the MESSAGE (last) column once the
@@ -353,23 +378,32 @@ func (mm *m) refreshActivityRows() {
 		a.tbl.SetRows(nil)
 		return
 	}
-	cur := a.tbl.Cursor()
+	cur := a.tbl.CursorGroup()
 	loc := a.query.Day.Start.Location()
-	rows := make([]table.Row, 0, len(a.scan.Matches))
+	matchRows := make([]table.Row, 0, len(a.scan.Matches))
 	for _, m := range a.scan.Matches {
-		rows = append(rows, activityRow(m, loc, len(a.scan.GroupNames)))
+		matchRows = append(matchRows, activityRow(m, loc, len(a.scan.GroupNames)))
 	}
-	if msgW := activityMessageWidth(mm.width, activityColumns(a.scan), rows); len(rows) > 0 {
-		last := len(rows[0]) - 1
-		for _, r := range rows {
-			r[last] = ansi.Truncate(r[last], msgW, "…")
+	// A long message wraps onto continuation rows whose other cells are blank;
+	// the row groups keep each match one selectable, striped unit.
+	msgW := activityMessageWidth(mm.width, activityColumns(a.scan), matchRows)
+	rows := make([]table.Row, 0, len(matchRows))
+	groups := make([]int, 0, len(matchRows))
+	for i, r := range matchRows {
+		last := len(r) - 1
+		for j, line := range wrapActivityMessage(r[last], msgW) {
+			row := make(table.Row, len(r))
+			if j == 0 {
+				copy(row, r[:last])
+			}
+			row[last] = line
+			rows = append(rows, row)
+			groups = append(groups, i)
 		}
 	}
 	a.tbl.SetRows(rows)
-	if cur >= len(rows) {
-		cur = len(rows) - 1
-	}
-	a.tbl.SetCursor(max(cur, 0))
+	a.tbl.SetRowGroups(groups)
+	a.tbl.SetCursorGroup(max(min(cur, len(matchRows)-1), 0))
 }
 
 func (mm *m) selectedMatch() (Match, bool) {
@@ -377,7 +411,7 @@ func (mm *m) selectedMatch() (Match, bool) {
 	if a.scan == nil {
 		return Match{}, false
 	}
-	i := a.tbl.Cursor()
+	i := a.tbl.CursorGroup()
 	if i < 0 || i >= len(a.scan.Matches) {
 		return Match{}, false
 	}
