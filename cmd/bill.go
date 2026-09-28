@@ -48,6 +48,12 @@ A Δ column shows what moved since the previous refresh, and pressing x on a
 line lists that service's per-resource costs (resource ID / ARN, usage,
 amount) when the account has resource-level data enabled.
 
+A real bill arrives as hundreds of usage-type lines, most of them free:
+press T in --tui for a per-service summary (one row per service with its
+total, share and line count) and z to hide the lines that carry no cost.
+Both totals describe the rows on screen, so a filtered table never reports
+the whole bill's figure.
+
 Cost note: Cost Explorer is a paid API — AWS bills every request at $0.01,
 including each automatic refresh in --tui. The live screen names the cadence
 so the cost is visible; raise --interval to spend less.

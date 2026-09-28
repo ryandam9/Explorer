@@ -11,6 +11,7 @@ package billtui
 import (
 	"context"
 	"errors"
+	"fmt"
 	"log/slog"
 	"sort"
 	"strconv"
@@ -72,6 +73,18 @@ var columns = []table.Column{
 	{Title: "CHANGE", Width: 11},
 }
 
+// summaryColumns of the per-service rollup ("T"). LINES and NO COST are what
+// explain the detailed view's length: a service can contribute forty usage
+// types and one dollar.
+var summaryColumns = []table.Column{
+	{Title: "#", Width: 5},
+	{Title: "SERVICE", Width: 40},
+	{Title: "COST", Width: 14},
+	{Title: "SHARE", Width: 9},
+	{Title: "LINES", Width: 8},
+	{Title: "NO COST", Width: 9},
+}
+
 // Model is the live bill TUI.
 type Model struct {
 	ctx      context.Context
@@ -86,9 +99,17 @@ type Model struct {
 	visible  []billing.Line
 	deltas   map[string]float64 // line key → amount change vs previous fetch
 	fetching bool
-	fetchErr string
-	updated  time.Time
-	timerID  int
+	// summary swaps the usage-type detail for a per-service rollup ("T");
+	// hideZero drops the lines that accrued usage but no cost ("z").
+	// zeroCount counts those lines before they're dropped, so the footer can
+	// say what hiding them removed instead of silently shortening the table.
+	summary   bool
+	hideZero  bool
+	totals    []ServiceTotal
+	zeroCount int
+	fetchErr  string
+	updated   time.Time
+	timerID   int
 
 	tbl       table.Model
 	filtering bool
@@ -314,33 +335,48 @@ func (m Model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		m.filter.Focus()
 		return m, textinput.Blink
 	case "enter":
+		if m.summary {
+			// Drill from a service's total into the usage types behind it: the
+			// filter is the mechanism the detailed view already has for that,
+			// so set it rather than inventing a second kind of scoping.
+			if svc := m.selectedService(); svc != "" {
+				m.filter.SetValue(svc)
+				m.setSummary(false)
+			}
+			return m, nil
+		}
 		if m.selected() != nil {
 			m.overlay = overlayDetail
 		}
+	case "T":
+		m.setSummary(!m.summary)
+	case "z":
+		m.hideZero = !m.hideZero
+		m.rebuild()
 	case "u":
 		if !m.fetching {
 			m.fetching = true
 			return m, tea.Batch(m.fetchCmd(), m.spin.Tick)
 		}
 	case "x":
-		if l := m.selected(); l != nil && !m.resFetching {
+		if svc := m.selectedService(); svc != "" && !m.resFetching {
 			m.overlay = overlayResources
-			m.resService = l.Service
+			m.resService = svc
 			m.resRows, m.resErr, m.resScroll = nil, "", 0
 			m.resFetching = true
-			return m, tea.Batch(m.resourcesCmd(l.Service), m.spin.Tick)
+			return m, tea.Batch(m.resourcesCmd(svc), m.spin.Tick)
 		}
 	case "s":
 		// Cycle: natural cost ranking (-1) → each data column → back. The "#"
-		// column (index 0) is a positional counter, so it is skipped. USAGE,
-		// COST and CHANGE start descending (biggest first).
+		// column (index 0) is a positional counter, so it is skipped. Numeric
+		// columns start descending (biggest first).
 		m.sortCol++
-		if m.sortCol >= len(columns) {
+		if m.sortCol >= len(m.activeColumns()) {
 			m.sortCol = -1
 		} else if m.sortCol == 0 {
 			m.sortCol = 1
 		}
-		m.sortAsc = !(m.sortCol == 3 || m.sortCol == 5 || m.sortCol == 6)
+		m.sortAsc = !m.numericColumn(m.sortCol)
 		m.rebuild()
 	case "R":
 		if m.sortCol > 0 {
@@ -356,6 +392,12 @@ func (m Model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	case ">", ".":
 		m.tbl.ScrollRight()
 	case "y":
+		if m.summary {
+			if svc := m.selectedService(); svc != "" {
+				m.copyToClipboard(svc, svc)
+			}
+			return m, nil
+		}
 		if l := m.selected(); l != nil {
 			s := l.Service + " " + l.UsageType
 			m.copyToClipboard(s, s)
@@ -376,13 +418,66 @@ func (m Model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
-// selected returns the bill line under the cursor, or nil.
+// selected returns the bill line under the cursor, or nil. In summary mode the
+// cursor indexes the rolled-up rows, not m.visible, so there is no single line
+// under it — the detail overlay and its clipboard copy stay closed rather than
+// describing whichever line happens to share the index.
 func (m *Model) selected() *billing.Line {
+	if m.summary {
+		return nil
+	}
 	i := m.tbl.Cursor()
 	if i < 0 || i >= len(m.visible) {
 		return nil
 	}
 	return &m.visible[i]
+}
+
+// selectedService names the service under the cursor in either mode — what the
+// per-resource drill-down ("x") needs, and all the summary rows carry.
+func (m *Model) selectedService() string {
+	i := m.tbl.Cursor()
+	if m.summary {
+		if i < 0 || i >= len(m.totals) {
+			return ""
+		}
+		return m.totals[i].Service
+	}
+	if l := m.selected(); l != nil {
+		return l.Service
+	}
+	return ""
+}
+
+// setSummary switches between the rollup and the usage-type detail. The sort
+// resets because the column it named belongs to the other table, and the
+// cursor resets because row N means a different thing on each side.
+func (m *Model) setSummary(on bool) {
+	if m.summary == on {
+		return
+	}
+	m.summary = on
+	m.sortCol, m.sortAsc = -1, false
+	m.tbl.SetCursor(0)
+	m.rebuild() // SetColumns inside resets the horizontal scroll for the new set
+
+}
+
+// activeColumns is the column set of whichever table is on screen.
+func (m *Model) activeColumns() []table.Column {
+	if m.summary {
+		return summaryColumns
+	}
+	return columns
+}
+
+// numericColumn reports whether a column sorts biggest-first on its first
+// press (amounts and counts) rather than A→Z.
+func (m *Model) numericColumn(col int) bool {
+	if m.summary {
+		return col >= 2 // COST, SHARE, LINES, NO COST
+	}
+	return col == 3 || col == 5 || col == 6 // USAGE, COST, CHANGE
 }
 
 // clipboardWrite is the clipboard sink, indirected through a variable so tests
@@ -415,17 +510,30 @@ func (m *Model) exportCSV() {
 	}
 	dir, err := csvexport.DefaultDir()
 	if err == nil {
-		var rows [][]string
-		for _, l := range m.visible {
-			rows = append(rows, []string{
-				l.Service, l.UsageType,
-				strconv.FormatFloat(l.Quantity, 'f', -1, 64), l.Unit,
-				strconv.FormatFloat(l.Amount, 'f', -1, 64), currency,
-			})
+		// The export follows the screen: a summary on screen exports the
+		// rollup, so what you see is what lands in the file.
+		name, header, rows := "bill", []string{"Service", "UsageType", "Usage", "Unit", "Cost", "Currency"}, [][]string{}
+		if m.summary {
+			name = "bill-summary"
+			header = []string{"Service", "Cost", "Currency", "Lines", "ZeroCostLines"}
+			for _, t := range m.totals {
+				rows = append(rows, []string{
+					t.Service,
+					strconv.FormatFloat(t.Amount, 'f', -1, 64), currency,
+					strconv.Itoa(t.Lines), strconv.Itoa(t.Zero),
+				})
+			}
+		} else {
+			for _, l := range m.visible {
+				rows = append(rows, []string{
+					l.Service, l.UsageType,
+					strconv.FormatFloat(l.Quantity, 'f', -1, 64), l.Unit,
+					strconv.FormatFloat(l.Amount, 'f', -1, 64), currency,
+				})
+			}
 		}
 		var path string
-		path, err = csvexport.Write(dir, "bill",
-			[]string{"Service", "UsageType", "Usage", "Unit", "Cost", "Currency"}, rows)
+		path, err = csvexport.Write(dir, name, header, rows)
 		if err == nil {
 			m.status = "exported " + path
 			return
@@ -440,7 +548,23 @@ func (m *Model) rebuild() {
 	if m.bill != nil {
 		lines = m.bill.Lines
 	}
-	m.visible = filterLines(lines, m.filter.Value())
+	lines = filterLines(lines, m.filter.Value())
+	// Counted before the drop so the footer can report what "z" is hiding
+	// rather than leaving a shorter table unexplained.
+	m.zeroCount = countZeroCost(lines)
+	if m.hideZero {
+		lines = dropZeroCost(lines)
+	}
+	m.visible = lines
+	if m.summary {
+		m.rebuildSummary()
+		// Toggling a view can add or remove the footer line, so the table is
+		// re-measured for the space that's actually left — an unmeasured
+		// footer is what pushes the status bar off the bottom.
+		m.layoutTable()
+		return
+	}
+	m.totals = nil
 	m.sortVisible()
 
 	// Re-title columns so the active sort column carries the direction arrow.
@@ -467,6 +591,76 @@ func (m *Model) rebuild() {
 	if c := m.tbl.Cursor(); c >= len(rows) && len(rows) > 0 {
 		m.tbl.SetCursor(len(rows) - 1)
 	}
+	m.layoutTable() // the zero-cost footer comes and goes; re-measure for it
+}
+
+// rebuildSummary lays out the per-service rollup over the same filtered lines
+// the detailed view shows, so the two always describe the same subset of the
+// bill.
+func (m *Model) rebuildSummary() {
+	m.totals = summarizeByService(m.visible)
+	m.sortTotals()
+
+	cols := append([]table.Column(nil), summaryColumns...)
+	table.ApplySortHeader(cols, m.sortCol, m.sortAsc, func(i int) bool { return i > 0 })
+	m.tbl.SetColumns(cols)
+
+	currency := ""
+	if m.bill != nil {
+		currency = m.bill.Currency
+	}
+	// Share is of the rows on screen, matching the footer's total: under a
+	// filter, a percentage of the whole bill would not add up to the 100% the
+	// column implies.
+	total := totalOf(m.totals)
+	rows := make([]table.Row, 0, len(m.totals))
+	for i, t := range m.totals {
+		zero := ""
+		if t.Zero > 0 {
+			zero = strconv.Itoa(t.Zero)
+		}
+		rows = append(rows, table.Row{
+			strconv.Itoa(i + 1),
+			t.Service,
+			billing.FormatAmount(t.Amount, currency),
+			fmt.Sprintf("%.1f%%", shareOf(t.Amount, total)),
+			strconv.Itoa(t.Lines),
+			zero,
+		})
+	}
+	m.tbl.SetRows(rows)
+	if c := m.tbl.Cursor(); c >= len(rows) && len(rows) > 0 {
+		m.tbl.SetCursor(len(rows) - 1)
+	}
+}
+
+// sortTotals orders the rollup; col -1 keeps summarizeByService's cost-
+// descending ranking. Column indices match summaryColumns (1=SERVICE …
+// 5=NO COST); column 0 ("#") is positional and never a sort target.
+func (m *Model) sortTotals() {
+	col, asc := m.sortCol, m.sortAsc
+	if col <= 0 {
+		return
+	}
+	less := func(a, b ServiceTotal) bool {
+		switch col {
+		case 1:
+			return a.Service < b.Service
+		case 4:
+			return a.Lines < b.Lines
+		case 5:
+			return a.Zero < b.Zero
+		default:
+			// COST and SHARE rank identically: share is cost over one total.
+			return a.Amount < b.Amount
+		}
+	}
+	sort.SliceStable(m.totals, func(i, j int) bool {
+		if asc {
+			return less(m.totals[i], m.totals[j])
+		}
+		return less(m.totals[j], m.totals[i])
+	})
 }
 
 // diffBills maps each line key to its amount change between two fetches.

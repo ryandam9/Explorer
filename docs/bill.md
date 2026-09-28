@@ -40,7 +40,9 @@ update.
 | Key | Action |
 |-----|--------|
 | `↑`/`↓` | Navigate bill lines |
-| `Enter` | Detail overlay for the selected line |
+| `Enter` | Detail overlay for the selected line (in the summary: filter down to that service's lines) |
+| `T` | Toggle the per-service summary |
+| `z` | Hide / show the lines that carry no cost |
 | `x` | Per-resource breakdown for the selected service (resource ID/ARN, usage, amount) |
 | `u` | Refresh now |
 | `/` | Filter by service, usage type or unit |
@@ -48,6 +50,35 @@ update.
 | `y` | Copy the selected service and usage type |
 | `C` | Export the current view to CSV |
 | `?` / `q` | Help / quit |
+
+#### Summary by service (`T`)
+
+Cost Explorer returns one line per (service, usage type), so a real account's
+bill is hundreds of rows and most of them are free tier or metered-but-not-
+charged — usage with a `$0.00` amount. `T` folds them into one row per
+service:
+
+```
+#   SERVICE                      COST      SHARE   LINES  NO COST
+1   Amazon EC2                   $8.00     80.0%   14     11
+2   Amazon S3                    $1.75     17.5%   9      7
+3   AWS Lambda                   $0.25      2.5%   4      3
+4   Amazon CloudWatch            $0.00      0.0%   6      6
+
+4 service(s) · total $10.00 · 27 line(s) carry no cost — z hides them
+```
+
+`LINES` and `NO COST` are why the detailed view is long: a service can
+contribute a dozen usage types and one dollar. `z` hides the zero-cost lines
+in either view, and the footer always says how many are hidden — a shorter
+table never passes for a shorter bill. `Enter` on a summary row drops back
+into the detailed view filtered to that service.
+
+Both the `SHARE` column and the footer total describe **the rows on screen**.
+Under a filter (or with `z` on) that is less than the whole bill, and the
+footer then names the whole-bill total alongside (`total $5.00 of $10.00
+billed`) so neither number can be read as the other. `C` exports whichever
+of the two tables is showing.
 
 The per-resource drill-down (`x`) uses Cost Explorer's resource-level data,
 which AWS keeps for the trailing **14 days** and only when the account has
