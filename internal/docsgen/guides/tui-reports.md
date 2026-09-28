@@ -32,6 +32,13 @@ column shows what each line moved since the previous refresh, and `x` drills int
 service's per-resource costs (resource ID/ARN) when the account has
 resource-level data enabled. See the [`bill` command reference](bill.md).
 
+Cost Explorer returns one line per (service, usage type), so most of a real
+bill is usage that carried no charge. `T` folds the table into one row per
+service (total, share of what's shown, line count and how many of those were
+free); `z` hides the zero-cost lines in either view. Both totals describe the
+rows on screen — under a filter the footer names the whole-bill total
+alongside, so neither figure can be read as the other.
+
 > **PAID feature.** Cost Explorer bills **$0.01 per request**, including every
 > automatic refresh. The live screen carries a `PAID` badge and names the
 > cadence; the minimum interval is 1 minute. Raise `--interval` to spend less.
@@ -39,7 +46,9 @@ resource-level data enabled. See the [`bill` command reference](bill.md).
 | Key | Action |
 |-----|--------|
 | `↑` / `↓` | Navigate bill lines |
-| `Enter` | Detail overlay for the selected line |
+| `Enter` | Detail overlay for the selected line (in the summary: filter to that service's lines) |
+| `T` | Per-service summary — one row per service with its total, share and line count |
+| `z` | Hide / show the lines that carry no cost |
 | `x` | Per-resource breakdown for the selected service |
 | `u` | Refresh now (one paid request) |
 | `/` | Filter by service, usage type or unit |

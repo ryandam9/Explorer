@@ -2,6 +2,7 @@ package billtui
 
 import (
 	"fmt"
+	"math"
 	"sort"
 	"strings"
 
@@ -26,6 +27,12 @@ func (m *Model) layoutTable() {
 	}
 	m.tbl.SetWidth(m.width - 4) // panel border + padding
 	h := m.height - lipgloss.Height(m.headerView()) - chromeHeight
+	// The footer is conditional (summary total, hidden zero-cost lines), so
+	// its height is measured rather than folded into chromeHeight — assuming
+	// it away is what clips the status bar off the bottom.
+	if f := m.footerView(); f != "" {
+		h -= lipgloss.Height(f)
+	}
 	if h < 3 {
 		h = 3
 	}
@@ -37,11 +44,13 @@ func (m Model) viewString() string {
 		return "Initializing…"
 	}
 
-	header := m.headerView()
-	body := m.bodyView()
-	status := m.statusBarView()
+	parts := []string{m.headerView(), m.bodyView()}
+	if f := m.footerView(); f != "" {
+		parts = append(parts, f)
+	}
+	parts = append(parts, m.statusBarView())
 
-	view := lipgloss.JoinVertical(lipgloss.Left, header, body, status)
+	view := lipgloss.JoinVertical(lipgloss.Left, parts...)
 	view = ui.ClipToSize(view, m.width, m.height)
 
 	switch m.overlay {
@@ -110,7 +119,65 @@ func (m Model) bodyView() string {
 		msg := ui.SuccessStyle().Render("✓ Nothing billed in this period.")
 		return lipgloss.NewStyle().Padding(1, 2).Render(msg)
 	}
-	return ui.TablePanel(&m.tbl, true, "Costs")
+	title := "Costs"
+	if m.summary {
+		title = "Cost by service"
+	}
+	return ui.TablePanel(&m.tbl, true, title)
+}
+
+// footerView sits between the table and the status bar. It carries the two
+// facts a shortened or rolled-up table must not leave unsaid: what the rows on
+// screen add up to, and how many lines are being hidden. It is empty — and
+// costs no height — when the table shows the bill as fetched.
+//
+// The total is of the rows shown, not bill.Total: under a filter or with
+// zero-cost lines hidden those differ, and reporting the whole bill's total
+// beneath a narrowed table would misdescribe what is on screen. When they do
+// differ, the whole-bill figure is named alongside so neither number can be
+// mistaken for the other.
+func (m Model) footerView() string {
+	if m.bill == nil {
+		return ""
+	}
+	currency := m.bill.Currency
+
+	var head string
+	if m.summary {
+		shown := totalOf(m.totals)
+		text := fmt.Sprintf("%d service(s) · total %s",
+			len(m.totals), billing.FormatAmount(shown, currency))
+		if math.Abs(shown-m.bill.Total) > 0.0000005 {
+			text += fmt.Sprintf(" of %s billed", billing.FormatAmount(m.bill.Total, currency))
+		}
+		head = lipgloss.NewStyle().Bold(true).
+			Foreground(lipgloss.Color(ui.ColorText())).Render(text)
+	}
+
+	var hints []string
+	switch {
+	case m.zeroCount == 0:
+	case m.hideZero:
+		hints = append(hints, fmt.Sprintf("hiding %d line(s) with no cost — z shows them", m.zeroCount))
+	case m.summary:
+		hints = append(hints, fmt.Sprintf("%d line(s) carry no cost — z hides them", m.zeroCount))
+	default:
+		hints = append(hints, fmt.Sprintf("%d line(s) carry no cost — z hides them, T summarises by service", m.zeroCount))
+	}
+
+	line := head
+	if len(hints) > 0 {
+		h := ui.MutedStyle().Render(strings.Join(hints, " · "))
+		if line == "" {
+			line = h
+		} else {
+			line += ui.MutedStyle().Render(" · ") + h
+		}
+	}
+	if line == "" {
+		return ""
+	}
+	return lipgloss.NewStyle().Padding(0, 1).Render(line)
 }
 
 func (m Model) statusBarView() string {
@@ -138,9 +205,13 @@ func (m Model) keyHints() []ui.KeyHint {
 		return []ui.KeyHint{ui.H("Esc", "close")}
 	}
 
+	enter := ui.H("Enter", "detail")
+	if m.summary {
+		enter = ui.H("Enter", "lines")
+	}
 	hints := []ui.KeyHint{
 		ui.H("↑/↓", "navigate"),
-		ui.H("Enter", "detail"),
+		enter,
 		ui.H("x", "resources"),
 		ui.H("u", "refresh"),
 		ui.H("/", "filter"),
@@ -148,6 +219,19 @@ func (m Model) keyHints() []ui.KeyHint {
 	}
 	if m.sortCol > 0 {
 		hints = append(hints, ui.H("R", "reverse"))
+	}
+	// The view toggles sit after the primary actions: the status bar elides
+	// from the end, and dropping "sort" on a narrow terminal to make room for
+	// them would trade a key people use for one they use occasionally.
+	if m.summary {
+		hints = append(hints, ui.H("T", "detail view"))
+	} else {
+		hints = append(hints, ui.H("T", "summary"))
+	}
+	if m.hideZero {
+		hints = append(hints, ui.H("z", "show $0"))
+	} else {
+		hints = append(hints, ui.H("z", "hide $0"))
 	}
 	if hl, hr := m.tbl.ColScrollInfo(); hl+hr > 0 {
 		hints = append(hints, ui.H("</>", "columns"))
@@ -172,6 +256,10 @@ const billAboutText = "This is the live bill — your account's actual cost from
 	"In --tui mode the screen re-fetches on a fixed interval; a Δ column shows " +
 	"what each line moved since the last refresh. Press x for a per-resource " +
 	"breakdown of a service, u to refresh now, / to filter and C to export.\n\n" +
+	"A real bill arrives as hundreds of usage-type lines, most of them free: " +
+	"press T for one row per service with its total and share, and z to hide " +
+	"the lines that carry no cost. Both totals describe the rows on screen, so " +
+	"a filtered table never reports the whole bill's figure.\n\n" +
 	"Note: Cost Explorer is a paid API — every request (including each automatic " +
 	"refresh) costs $0.01. Press ? for the full list of keyboard shortcuts."
 
@@ -305,7 +393,9 @@ func (m Model) helpOverlay() string {
 	style := m.overlayStyle()
 	rows := []struct{ key, action string }{
 		{"↑/↓, j/k", "Navigate bill lines"},
-		{"Enter", "Open the detail overlay for the selected line"},
+		{"Enter", "Open the detail overlay for the selected line (in the summary: filter down to that service's lines)"},
+		{"T", "Toggle the per-service summary — one row per service with its total, share and line count"},
+		{"z", "Hide / show the lines that accrued usage but no cost"},
 		{"x", "Per-resource breakdown for the selected service (needs resource-level data enabled)"},
 		{"u", "Refresh now (PAID — one $0.01 Cost Explorer request)"},
 		{"/", "Quick filter (matches service, usage type, unit)"},
