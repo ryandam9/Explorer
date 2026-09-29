@@ -331,7 +331,11 @@ Writes a self-contained report — a resource-count summary, every finding in a
 table grouped by severity (**resource · issue · suggested fix**), and
 inventory tables (subnets, security groups, route
 tables, NAT gateways, endpoints, network interfaces) — in three formats sharing
-a basename under the downloads directory as `<vpc-id>-<timestamp>.{md,html,svg}`:
+a basename under the downloads directory as `<vpc>-<timestamp>.{md,html,svg}`,
+where `<vpc>` is the VPC's **Name** tag when it has one and its ID otherwise
+(`payments-prod-20260929-113000.html`). The name is reduced to plain filename
+characters first, so a tag containing spaces, slashes or anything else cannot
+decide where the file lands:
 
 - **Markdown** (`.md`) — ideal for pasting into a support case or runbook.
 - **HTML** (`.html`) — a single self-contained page: a header naming the VPC,

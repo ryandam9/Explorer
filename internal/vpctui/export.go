@@ -679,7 +679,7 @@ func writeExport(data fullExport, findings []Finding, now time.Time) (mdPath, ht
 	if err != nil {
 		return "", "", "", err
 	}
-	base := fmt.Sprintf("%s-%s", data.VPC.ID, now.In(reportLoc).Format("20060102-150405"))
+	base := fmt.Sprintf("%s-%s", exportBaseName(data.VPC), now.In(reportLoc).Format("20060102-150405"))
 	mdPath = filepath.Join(dir, base+".md")
 	if err := os.WriteFile(mdPath, []byte(exportMarkdown(data, findings, now)), 0o644); err != nil {
 		return "", "", "", err
@@ -696,6 +696,59 @@ func writeExport(data fullExport, findings []Finding, now time.Time) (mdPath, ht
 		return mdPath, htmlPath, "", err
 	}
 	return mdPath, htmlPath, svgPath, nil
+}
+
+// exportBaseName is what the report's files are named after: the VPC's Name
+// tag when it has one, because "payments-prod-20260929-113000.html" is worth
+// more in a downloads folder than "vpc-0b4e13de8b16c75e7-…", and its ID
+// otherwise.
+//
+// The name is sanitized first. A Name tag is arbitrary user input — it can
+// hold spaces, slashes, colons, unicode, or "../.." — and here it becomes a
+// path component, so anything that is not a plain filename character is
+// replaced. If sanitizing leaves nothing usable, the ID is used: a file named
+// after the VPC is the point, but a file that lands somewhere unexpected is a
+// bug.
+func exportBaseName(v VPCInfo) string {
+	if n := sanitizeFileName(v.Name); n != "" {
+		return n
+	}
+	if id := sanitizeFileName(v.ID); id != "" {
+		return id
+	}
+	return "vpc"
+}
+
+// exportNameMaxLen caps the name's contribution to the filename. The
+// timestamp and extension follow it, and some filesystems still stop at 255
+// bytes for one component.
+const exportNameMaxLen = 60
+
+// sanitizeFileName reduces s to characters that are safe in a filename on
+// every platform we build for: letters, digits, dot, dash and underscore.
+// Runs of replacements collapse, and leading or trailing dots and dashes are
+// trimmed so the result is never hidden, never "..", and never empty-looking.
+func sanitizeFileName(s string) string {
+	var b strings.Builder
+	lastDash := false
+	for _, r := range s {
+		switch {
+		case r >= 'a' && r <= 'z', r >= 'A' && r <= 'Z', r >= '0' && r <= '9', r == '.', r == '_':
+			b.WriteRune(r)
+			lastDash = false
+		default:
+			// Everything else — spaces, separators, unicode — becomes one dash.
+			if !lastDash {
+				b.WriteRune('-')
+				lastDash = true
+			}
+		}
+	}
+	out := strings.Trim(b.String(), "-.")
+	if len([]rune(out)) > exportNameMaxLen {
+		out = strings.Trim(string([]rune(out)[:exportNameMaxLen]), "-.")
+	}
+	return out
 }
 
 // exportResourceCSV writes the currently displayed resource table (full
