@@ -2,6 +2,8 @@ package vpctui
 
 import (
 	"bytes"
+	_ "embed"
+	"fmt"
 	"html/template"
 	"regexp"
 	"strings"
@@ -14,27 +16,61 @@ import (
 // ---------------------------------------------------------------------------
 // HTML export
 //
-// exportHTML renders the same content as exportMarkdown into a styled HTML
-// document: a sticky table-of-contents sidebar (built from the level-2 section
-// headings), a header banner, and the Markdown converted to HTML. Resource
-// tables are turned into interactive DataTables (per-table search + column
-// sorting) via a CDN; opened offline they degrade to plain, horizontally
-// scrolling tables. The page's own CSS is embedded.
+// exportHTML renders the same content as exportMarkdown into a self-contained
+// HTML document: a header naming the VPC, a row of headline counts, the
+// architecture diagram with its layer switches, a sticky table of contents
+// built from the level-2 headings, and every resource table in its own
+// scrollable box with a filter and sortable columns.
+//
+// The page is one file and needs no network: the stylesheet and the script are
+// embedded, the fonts fall back to the system stack, and the tables' search
+// and sort are ~100 lines of vanilla JS rather than jQuery + DataTables from a
+// CDN. A report mailed to someone, or opened on a laptop with no connection,
+// looks and behaves exactly as it did when it was written.
+//
+// Colours are theme tokens (see assets/report.css), so the document has a real
+// dark mode and the SVG diagram — which styles itself from those same tokens —
+// follows it.
 // ---------------------------------------------------------------------------
+
+//go:embed assets/report.css
+var reportCSS string
+
+//go:embed assets/report.js
+var reportJS string
 
 type htmlTOCEntry struct {
 	Title  string
 	Anchor string
+	Count  string // row count shown beside the link ("" when the heading has none)
+}
+
+// htmlKPI is one headline count in the row under the header.
+type htmlKPI struct {
+	Label  string
+	Value  string
+	Tone   string // "", "ok", "warn", "crit"
+	Detail string
 }
 
 type reportHTMLData struct {
 	Title       string
 	VPCID       string
+	VPCName     string
 	Region      string
+	Account     string
+	CIDR        string
+	State       string
 	GeneratedAt string
+	Status      string // findings summary shown beside the title
+	StatusTone  string
+	LoadErrors  []string
+	KPIs        []htmlKPI
 	TOC         []htmlTOCEntry
 	Diagram     template.HTML
 	Content     template.HTML
+	CSS         template.CSS
+	JS          template.JS
 }
 
 // exportHTML builds the complete HTML report for a VPC.
@@ -42,19 +78,31 @@ func exportHTML(data fullExport, findings []Finding, generatedAt time.Time) stri
 	md := exportMarkdown(data, findings, generatedAt)
 	rendered := blackfriday.Run([]byte(md),
 		blackfriday.WithExtensions(blackfriday.CommonExtensions|blackfriday.AutoHeadingIDs))
-	wrapped := tableWrapRe.ReplaceAllString(string(rendered), `<div class="dt-wrap"><table>$1</table></div>`)
+
+	crit, warn, info := countBySeverity(findings)
+	status, tone := findingsStatus(crit, warn, info)
 
 	// The architecture diagram leads the report; give it its own TOC entry.
 	toc := append([]htmlTOCEntry{{Title: "Architecture", Anchor: "architecture"}}, buildTOC(md)...)
 
 	d := reportHTMLData{
-		Title:       "VPC Report: " + data.VPC.ID,
+		Title:       "VPC report · " + data.VPC.ID,
 		VPCID:       data.VPC.ID,
+		VPCName:     data.VPC.Name,
 		Region:      data.VPC.Region,
+		Account:     data.VPC.OwnerId,
+		CIDR:        data.VPC.CIDR,
+		State:       data.VPC.State,
 		GeneratedAt: reportTime(generatedAt),
+		Status:      status,
+		StatusTone:  tone,
+		LoadErrors:  data.LoadErrors,
+		KPIs:        reportKPIs(data, crit, warn),
 		TOC:         toc,
-		Diagram:     template.HTML(vpcDiagramSVG(data)), //nolint:gosec // generated from our own snapshot
-		Content:     template.HTML(wrapped),             //nolint:gosec // generated from our own report
+		Diagram:     template.HTML(vpcDiagramSVG(data)),          //nolint:gosec // generated from our own snapshot
+		Content:     template.HTML(sectionize(string(rendered))), //nolint:gosec // generated from our own report
+		CSS:         template.CSS(reportCSS),
+		JS:          template.JS(reportJS),
 	}
 	var buf bytes.Buffer
 	if err := reportTmpl.Execute(&buf, d); err != nil {
@@ -62,6 +110,158 @@ func exportHTML(data fullExport, findings []Finding, generatedAt time.Time) stri
 	}
 	return buf.String()
 }
+
+// findingsStatus summarises the findings for the badge beside the title. It
+// names the worst severity present rather than a total, since one critical
+// matters more than nine info notes.
+func findingsStatus(crit, warn, info int) (label, tone string) {
+	switch {
+	case crit > 0:
+		return plural(crit, "critical finding", "critical findings"), "crit"
+	case warn > 0:
+		return plural(warn, "warning", "warnings"), "warn"
+	case info > 0:
+		return plural(info, "info note", "info notes"), ""
+	default:
+		return "no findings", "ok"
+	}
+}
+
+// reportKPIs picks the headline counts. They are the shape of the VPC — how
+// much is in it and how much of it is exposed — not a repeat of the Summary
+// table, which lists every resource type below.
+func reportKPIs(data fullExport, crit, warn int) []htmlKPI {
+	snap := data.Snap
+	azs := map[string]bool{}
+	public := 0
+	egress := subnetEgress(snap)
+	for _, s := range snap.Subnets {
+		if s.AZ != "" {
+			azs[s.AZ] = true
+		}
+		if egress[s.ID].kind == "igw" {
+			public++
+		}
+	}
+	findingsTone := ""
+	switch {
+	case crit > 0:
+		findingsTone = "crit"
+	case warn > 0:
+		findingsTone = "warn"
+	}
+	return []htmlKPI{
+		{Label: "Subnets", Value: itoa(len(snap.Subnets)),
+			Detail: fmt.Sprintf("%d public · across %d AZ%s", public, len(azs), pluralSuffix(len(azs)))},
+		{Label: "Network interfaces", Value: itoa(len(snap.NetworkInterfaces)),
+			Detail: "attached ENIs"},
+		{Label: "Security groups", Value: itoa(len(snap.SecurityGroups)),
+			Detail: fmt.Sprintf("%d NACL%s", len(snap.NetworkACLs), pluralSuffix(len(snap.NetworkACLs)))},
+		{Label: "Routing", Value: itoa(len(snap.RouteTables)),
+			Detail: fmt.Sprintf("route tables · %d NAT · %d IGW", len(snap.NatGateways), len(snap.InternetGateways))},
+		{Label: "External links", Value: itoa(len(snap.Endpoints) + len(snap.Peerings) + len(data.TransitGatewayAttachments) + len(data.VPNConnections)),
+			Detail: fmt.Sprintf("%d endpoint · %d peering · %d TGW · %d VPN",
+				len(snap.Endpoints), len(snap.Peerings), len(data.TransitGatewayAttachments), len(data.VPNConnections))},
+		{Label: "Findings", Value: itoa(crit + warn), Tone: findingsTone,
+			Detail: fmt.Sprintf("%d critical · %d warning", crit, warn)},
+	}
+}
+
+func pluralSuffix(n int) string {
+	if n == 1 {
+		return ""
+	}
+	return "s"
+}
+
+// h2Re matches the level-2 headings blackfriday emits, which are where one
+// report section ends and the next begins.
+var h2Re = regexp.MustCompile(`<h2 id="([^"]*)">(.*?)</h2>`)
+
+// tableRe matches a bare <table>…</table> block.
+var tableRe = regexp.MustCompile(`(?s)<table>(.*?)</table>`)
+
+// bodyRowRe counts the rows in a table body.
+var bodyRowRe = regexp.MustCompile(`(?s)<tbody>(.*?)</tbody>`)
+
+// filterMinRows is the point at which a table gets its own search box. Below
+// it the whole table is on screen already and the box is just furniture.
+const filterMinRows = 8
+
+// sectionize wraps each level-2 heading and the content that follows it in a
+// <section>, and puts every table in a scrollable box (with a filter above it
+// when the table is long enough to need one). The Markdown pipeline emits a
+// flat stream of headings and tables; the page needs the structure to give
+// sections their own spacing, scroll anchors and sidebar highlighting.
+func sectionize(html string) string {
+	locs := h2Re.FindAllStringSubmatchIndex(html, -1)
+	if len(locs) == 0 {
+		return wrapTables(html)
+	}
+
+	var b strings.Builder
+	// Anything before the first heading (the partial-data blockquote) stays
+	// outside the sections, minus the Markdown's own title and timestamp: the
+	// page header already names the VPC and when it was generated, and showing
+	// them twice reads like two documents stapled together.
+	if head := strings.TrimSpace(dropMarkdownTitle(html[:locs[0][0]])); head != "" {
+		b.WriteString(head + "\n")
+	}
+	for i, loc := range locs {
+		end := len(html)
+		if i+1 < len(locs) {
+			end = locs[i+1][0]
+		}
+		anchor := html[loc[2]:loc[3]]
+		heading := html[loc[0]:loc[1]]
+		body := html[loc[1]:end]
+		b.WriteString(`<section id="` + anchor + `">` + "\n")
+		b.WriteString(heading + "\n")
+		b.WriteString(wrapTables(body))
+		b.WriteString("</section>\n")
+	}
+	return b.String()
+}
+
+// mdTitleRe matches the report's own <h1> and the italic "Generated …" line
+// under it — the two pieces of the Markdown preamble the HTML header repeats.
+var mdTitleRe = regexp.MustCompile(`(?s)^\s*<h1[^>]*>.*?</h1>\s*(<p><em>Generated[^<]*</em></p>)?`)
+
+// dropMarkdownTitle removes that duplicated title block, leaving any other
+// preamble (notably the partial-data notice) untouched.
+func dropMarkdownTitle(html string) string {
+	return mdTitleRe.ReplaceAllString(html, "")
+}
+
+// wrapTables puts each table in its own scrollable box, with a filter bar when
+// the table is long.
+func wrapTables(html string) string {
+	return tableRe.ReplaceAllStringFunc(html, func(tbl string) string {
+		rows := countTableRows(tbl)
+		var b strings.Builder
+		if rows >= filterMinRows {
+			b.WriteString(`<div class="tblbar">`)
+			b.WriteString(`<input class="filter" type="search" placeholder="Filter these rows…" aria-label="Filter table rows" hidden>`)
+			b.WriteString(`<span class="count">` + plural(rows, "row", "rows") + `</span>`)
+			b.WriteString("</div>\n")
+		}
+		b.WriteString(`<div class="tbl">` + tbl + "</div>")
+		return b.String()
+	})
+}
+
+// countTableRows counts the body rows of one rendered table.
+func countTableRows(tbl string) int {
+	m := bodyRowRe.FindStringSubmatch(tbl)
+	if len(m) < 2 {
+		return 0
+	}
+	return strings.Count(m[1], "<tr>")
+}
+
+// headingCountRe pulls the trailing "(n)" off a section heading so the sidebar
+// can show the count in its own column instead of in the link text.
+var headingCountRe = regexp.MustCompile(`^(.*?)\s*\((\d+)\)$`)
 
 // buildTOC extracts the level-2 ("## ") section headings from the Markdown and
 // pairs each with the anchor blackfriday's AutoHeadingIDs assigns, so the
@@ -73,7 +273,11 @@ func buildTOC(md string) []htmlTOCEntry {
 			continue
 		}
 		title := strings.TrimSpace(strings.TrimPrefix(line, "## "))
-		toc = append(toc, htmlTOCEntry{Title: title, Anchor: sanitizedAnchorName(title)})
+		entry := htmlTOCEntry{Title: title, Anchor: sanitizedAnchorName(title)}
+		if m := headingCountRe.FindStringSubmatch(title); m != nil {
+			entry.Title, entry.Count = m[1], m[2]
+		}
+		toc = append(toc, entry)
 	}
 	return toc
 }
@@ -98,162 +302,78 @@ func sanitizedAnchorName(text string) string {
 	return string(anchor)
 }
 
-// tableWrapRe matches blackfriday's bare <table>…</table> blocks so each can be
-// wrapped in a horizontally scrollable container. A block-level table shrinks
-// to its content width, which leaves a gap after the last column; wrapping lets
-// the table use width:100% (filling the row) while the wrapper handles overflow.
-var tableWrapRe = regexp.MustCompile(`(?s)<table>(.*?)</table>`)
-
 var reportTmpl = template.Must(template.New("report").Parse(reportHTMLTemplate))
 
-const reportHTMLTemplate = `<!DOCTYPE html>
+const reportHTMLTemplate = `<!doctype html>
 <html lang="en">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="generator" content="aws_explorer">
 <title>{{.Title}}</title>
-<link rel="stylesheet" href="https://cdn.datatables.net/2.1.8/css/dataTables.dataTables.min.css">
-<link rel="preconnect" href="https://fonts.googleapis.com">
-<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Archivo+Black&family=Roboto+Condensed:wght@400;500;700&family=Space+Grotesk:wght@400;500;600;700&family=Space+Mono:wght@400;700&display=swap" rel="stylesheet">
-<style>
-/* Neo-brutalism: flat bright blocks, thick black borders, hard offset shadows. */
-:root {
-  --bg:#fff8e7; --panel:#ffffff; --ink:#111111;
-  --yellow:#ffe500; --pink:#ff6b9d; --blue:#00d4ff; --lime:#b8ff3c;
-  --shadow:6px 6px 0 var(--ink); --shadow-sm:3px 3px 0 var(--ink);
-  --body:"Space Grotesk",ui-sans-serif,system-ui,-apple-system,"Segoe UI",sans-serif;
-  --display:"Archivo Black","Space Grotesk",sans-serif;
-  --mono:"Space Mono",ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
-  --table:"Roboto Condensed",ui-sans-serif,system-ui,-apple-system,"Segoe UI",sans-serif;
-}
-* { box-sizing:border-box; }
-html { scroll-behavior:smooth; }
-body { margin:0; font:16px/1.55 var(--body); color:var(--ink); background:var(--bg); }
-/* Banner */
-.banner { background:var(--yellow); border-bottom:5px solid var(--ink); padding:1.7rem 2rem; }
-.banner h1 { margin:0 0 .6rem; font-family:var(--display); font-size:2rem; text-transform:uppercase; letter-spacing:-.01em; }
-.banner .meta { display:flex; gap:.7rem; flex-wrap:wrap; align-items:center; font-weight:600; font-size:.9rem; }
-.banner .meta span { background:var(--panel); border:3px solid var(--ink); box-shadow:var(--shadow-sm); padding:.15rem .65rem; font-family:var(--mono); }
-.banner .badge { background:var(--pink); font-weight:700; text-transform:uppercase; }
-/* Layout */
-.layout { display:flex; align-items:flex-start; gap:1.5rem; max-width:1900px; margin:0 auto; padding:1.5rem; }
-nav.toc { position:sticky; top:1rem; width:250px; flex:0 0 250px; max-height:calc(100vh - 2rem); overflow-y:auto; background:var(--panel); border:4px solid var(--ink); box-shadow:var(--shadow); padding:1rem; }
-nav.toc h2 { margin:0 0 .8rem; font-family:var(--display); font-size:.85rem; text-transform:uppercase; background:var(--blue); border:3px solid var(--ink); box-shadow:var(--shadow-sm); padding:.35rem .55rem; }
-nav.toc a { display:block; margin:.45rem 0; padding:.35rem .55rem; color:var(--ink); text-decoration:none; font-weight:600; font-size:.84rem; background:var(--panel); border:2px solid var(--ink); box-shadow:var(--shadow-sm); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; transition:transform .05s ease,box-shadow .05s ease; }
-nav.toc a:hover { background:var(--yellow); transform:translate(-2px,-2px); box-shadow:5px 5px 0 var(--ink); }
-/* Main column */
-main { flex:1 1 auto; min-width:0; }
-main h1 { display:none; }
-main h2 { display:inline-block; margin:2rem 0 1rem; font-family:var(--display); font-size:1.15rem; text-transform:uppercase; background:var(--lime); border:4px solid var(--ink); box-shadow:var(--shadow); padding:.4rem .85rem; scroll-margin-top:1rem; }
-main h2:first-of-type { margin-top:0; }
-main h3 { margin:1.5rem 0 .5rem; font-family:var(--display); font-size:1rem; text-transform:uppercase; }
-main > p em { display:inline-block; background:var(--panel); border:2px solid var(--ink); padding:.1rem .45rem; font-style:normal; font-weight:600; }
-/* Architecture diagram — framed like a table, scrolls if wider than the column. */
-.diagram { overflow-x:auto; margin:.4rem 0 1.4rem; padding:1rem; background:var(--panel); border:3px solid var(--ink); box-shadow:var(--shadow); }
-.diagram svg { max-width:100%; height:auto; display:block; margin:0 auto; }
-/* Layer toggles — checkboxes that show/hide the SVG's <g data-layer> groups.
-   Pure CSS via :has() — no JavaScript, so it works offline and with JS off. */
-.layer-toggles { display:flex; flex-wrap:wrap; gap:.45rem .9rem; margin:.4rem 0 .8rem; font-weight:600; font-size:.85rem; }
-.layer-toggles label { display:inline-flex; align-items:center; gap:.35rem; background:var(--panel); border:2px solid var(--ink); box-shadow:var(--shadow-sm); padding:.18rem .55rem; cursor:pointer; user-select:none; }
-.layer-toggles input { accent-color:var(--ink); }
-.arch:has(#lt-subnet:not(:checked)) [data-layer="subnet"],
-.arch:has(#lt-labels:not(:checked)) [data-layer="labels"],
-.arch:has(#lt-sg:not(:checked)) [data-layer="sg"],
-.arch:has(#lt-nat:not(:checked)) [data-layer="nat"],
-.arch:has(#lt-traffic:not(:checked)) [data-layer="traffic"] { display:none; }
-a { color:var(--ink); font-weight:700; text-decoration:underline; text-decoration-thickness:2px; }
-code { background:var(--lime); border:2px solid var(--ink); padding:.05em .3em; font-family:var(--mono); font-size:.85em; }
-ul { padding-left:1.2rem; }
-li { margin:.25rem 0; }
-blockquote { margin:1rem 0; padding:.6rem 1rem; background:var(--panel); border:3px solid var(--ink); border-left:9px solid var(--pink); box-shadow:var(--shadow-sm); }
-hr { border:none; border-top:3px solid var(--ink); margin:2rem 0; }
-/* Tables — wrapper scrolls horizontally; table fills the row so column
-   backgrounds (e.g. the header) always reach the right edge. */
-.dt-wrap { overflow-x:auto; margin:.4rem 0 1.4rem; background:var(--panel); border:3px solid var(--ink); box-shadow:var(--shadow); }
-/* Plain tables (offline / no-JS, and the small two-column ones DataTables
-   skips) get a bounded height so a long table scrolls inside the box at ~80%
-   of the viewport instead of forcing a page scroll that hides the header. The
-   DataTables-enhanced tables get the same effect from their own scrollY body
-   (see the init below), so this rule only needs to bound the non-DataTables
-   ones. */
-.dt-wrap:not(:has(.dt-container)) { max-height:80vh; overflow:auto; }
-table { border-collapse:separate; border-spacing:0; width:100%; margin:0; background:var(--panel); font-size:.86rem; }
-th, td { border-right:2px solid var(--ink); border-bottom:2px solid var(--ink); padding:.5rem .7rem; text-align:left; vertical-align:top; white-space:nowrap; font-family:var(--table); font-size:.86rem; }
-th:last-child, td:last-child { border-right:none; }
-tbody tr:last-child td { border-bottom:none; }
-/* Pin the header so it stays visible while the table body scrolls. */
-th { background:var(--blue); font-weight:700; text-transform:uppercase; font-size:.78rem; letter-spacing:.02em; position:sticky; top:0; z-index:1; }
-tbody tr:nth-child(even) { background:#fff7d6; }
-tbody tr:hover { background:var(--yellow); }
-/* DataTables controls, restyled to match */
-.dt-container { margin-bottom:1.4rem; }
-.dt-container .dt-layout-row { display:flex; flex-wrap:wrap; gap:.6rem; align-items:center; justify-content:space-between; margin:.5rem 0; }
-.dt-search input, .dt-length select { border:3px solid var(--ink) !important; border-radius:0 !important; box-shadow:var(--shadow-sm); padding:.3rem .5rem !important; font-family:inherit; font-weight:600; background:var(--panel); }
-.dt-search input:focus, .dt-length select:focus { outline:none; background:var(--yellow); }
-.dt-info { font-weight:700; }
-.dt-paging .dt-paging-button { border:3px solid var(--ink) !important; border-radius:0 !important; background:var(--panel) !important; box-shadow:var(--shadow-sm); margin:0 .15rem; padding:.25rem .6rem !important; font-weight:700; color:var(--ink) !important; }
-.dt-paging .dt-paging-button.current, .dt-paging .dt-paging-button:hover:not(.disabled) { background:var(--pink) !important; }
-@media (max-width:900px){ .layout{display:block;} nav.toc{position:static;width:auto;max-height:none;margin-bottom:1rem;} }
-@media print { nav.toc{display:none;} .banner{-webkit-print-color-adjust:exact;print-color-adjust:exact;} }
-</style>
+<style>{{.CSS}}</style>
 </head>
 <body>
-<header class="banner">
-<h1>VPC Report · {{.VPCID}}</h1>
-<div class="meta">
-{{if .Region}}<span class="badge">{{.Region}}</span>{{end}}
-<span>Generated {{.GeneratedAt}}</span>
+<div class="wrap">
+  <div class="top">
+    <div class="brand"><b>aws_explorer</b> · VPC report · generated {{.GeneratedAt}}</div>
+    <div class="topr"><button type="button" class="themebtn" id="themebtn" hidden>Light / dark</button></div>
+  </div>
+
+  <header class="head">
+    <h1>{{if .VPCName}}{{.VPCName}}{{else}}VPC{{end}} <span class="status {{.StatusTone}}">{{.Status}}</span></h1>
+    <div class="idline">
+      <span>VPC <b class="mono">{{.VPCID}}</b></span>
+      {{if .CIDR}}<span>CIDR <b class="mono">{{.CIDR}}</b></span>{{end}}
+      {{if .Region}}<span>Region <b>{{.Region}}</b></span>{{end}}
+      {{if .Account}}<span>Account <b class="mono">{{.Account}}</b></span>{{end}}
+      {{if .State}}<span>State <b>{{.State}}</b></span>{{end}}
+    </div>
+    {{if .LoadErrors}}<div class="missing">
+      <h3>Partial data — {{len .LoadErrors}} listing(s) failed</h3>
+      <p>These resource listings could not be read, so the counts and tables below under-report them: {{range $i, $e := .LoadErrors}}{{if $i}}, {{end}}<b>{{$e}}</b>{{end}}. Everything else was collected normally.</p>
+    </div>{{end}}
+  </header>
+
+  <div class="kpis">
+    {{range .KPIs}}<div class="kpi"><span class="l">{{.Label}}</span><span class="v{{if .Tone}} {{.Tone}}{{end}}">{{.Value}}</span><span class="x">{{.Detail}}</span></div>
+    {{end}}
+  </div>
+
+  <div class="layout">
+    <nav class="toc" aria-label="Sections">
+      {{- range .TOC}}
+      <a href="#{{.Anchor}}">{{.Title}}{{if .Count}}<span class="n">{{.Count}}</span>{{end}}</a>
+      {{- end}}
+    </nav>
+
+    <main>
+      <section class="arch" id="architecture">
+        <h2>Architecture</h2>
+        <div class="layer-toggles" role="group" aria-label="Diagram layers">
+          <label><input type="checkbox" id="lt-subnets" checked><span>Subnets</span></label>
+          <label><input type="checkbox" id="lt-labels" checked><span>Detail labels</span></label>
+          <label><input type="checkbox" id="lt-traffic" checked><span>Internet path</span></label>
+          <label><input type="checkbox" id="lt-nat" checked><span>NAT</span></label>
+          <label><input type="checkbox" id="lt-routing" checked><span>Route tables</span></label>
+          <label><input type="checkbox" id="lt-endpoints" checked><span>Endpoints</span></label>
+          <label><input type="checkbox" id="lt-peering" checked><span>Peerings &amp; gateways</span></label>
+          <label><input type="checkbox" id="lt-nacl"><span>Network ACLs</span></label>
+          <label><input type="checkbox" id="lt-sg"><span>Security groups</span></label>
+        </div>
+        <div class="diagram">{{.Diagram}}</div>
+        <p class="cap">Drawn from this snapshot alone: a subnet's class comes from the default route in the route table associated with it, so "public" here means a 0.0.0.0/0 route to an internet gateway — not that anything in it has a public address. Switch layers off to follow one kind of relationship at a time.</p>
+      </section>
+      {{.Content}}
+    </main>
+  </div>
+
+  <footer>
+    <span>Generated by aws_explorer · {{.GeneratedAt}}</span>
+    <span>Read-only snapshot of {{.VPCID}}{{if .Region}} in {{.Region}}{{end}}</span>
+  </footer>
 </div>
-</header>
-<div class="layout">
-<nav class="toc">
-<h2>Contents</h2>
-{{- range .TOC}}
-<a href="#{{.Anchor}}">{{.Title}}</a>
-{{- end}}
-</nav>
-<main>
-<section class="arch">
-<h2 id="architecture">Architecture</h2>
-<div class="layer-toggles" role="group" aria-label="Toggle diagram layers">
-<label><input type="checkbox" id="lt-subnet" checked> Subnets</label>
-<label><input type="checkbox" id="lt-traffic" checked> Traffic &amp; IGW</label>
-<label><input type="checkbox" id="lt-nat" checked> NAT gateways</label>
-<label><input type="checkbox" id="lt-sg" checked> Security groups</label>
-<label><input type="checkbox" id="lt-labels" checked> Detail labels</label>
-</div>
-<div class="diagram">{{.Diagram}}</div>
-</section>
-{{.Content}}
-</main>
-</div>
-<script src="https://code.jquery.com/jquery-3.7.1.min.js"></script>
-<script src="https://cdn.datatables.net/2.1.8/js/dataTables.min.js"></script>
-<script>
-// Turn each resource table into a searchable, sortable DataTable. The small
-// two-column Summary and VPC tables are left as plain tables. If the CDN can't
-// load (offline), the tables still render as styled HTML.
-document.addEventListener('DOMContentLoaded', function () {
-  if (typeof DataTable === 'undefined') { return; }
-  document.querySelectorAll('main table').forEach(function (t) {
-    if (t.querySelectorAll('thead th').length <= 2) { return; }
-    new DataTable(t, {
-      // Scroll the body within ~80% of the viewport instead of paginating, so
-      // every row of a long table is reachable with the table's own scrollbar
-      // (no page flipping, no page scroll to find the last row). scrollCollapse
-      // lets a short table shrink to its content height, so the scrollbar only
-      // appears once the table is taller than ~80vh. The header stays pinned.
-      paging: false,
-      scrollY: '80vh',
-      scrollCollapse: true,
-      order: [],
-      autoWidth: false,
-      stateSave: false
-    });
-  });
-});
-</script>
+<script>{{.JS}}</script>
 </body>
 </html>
 `

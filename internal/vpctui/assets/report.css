@@ -1,0 +1,213 @@
+/* VPC report stylesheet.
+ *
+ * A quiet, printable document: one surface colour, 1px lines, a single accent,
+ * and type that stays out of the way. Everything is a theme token so the page
+ * has a real dark mode (and so the SVG diagram, which styles itself from these
+ * same variables, follows it) — the previous report hard-coded its colours and
+ * could only ever be one thing.
+ *
+ * No network: fonts fall back to the system stack, and the DataTables/jQuery
+ * CDNs are gone, so a report opened from a laptop with no connection looks and
+ * behaves exactly as it did when it was written.
+ */
+:root{
+  --bg:#F4F6F8; --surface:#FFFFFF; --surface-2:#EEF2F5; --ink:#15212B; --muted:#586674; --faint:#8794A1; --line:#D9E0E6;
+  --accent:#1D6A86; --accent-soft:#DCEDF3;
+  --ok:#2F7A4E; --ok-soft:#E1F1E7; --warn:#9A5F0C; --warn-soft:#FBEFD9; --crit:#B83227; --crit-soft:#F8E1DE; --na:#6F7C88; --na-soft:#E9EDF1;
+  --sans:"IBM Plex Sans",system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;
+  --cond:"IBM Plex Sans Condensed","IBM Plex Sans",system-ui,sans-serif;
+  --mono:"IBM Plex Mono",ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
+  /* Subnet classes, carried into the diagram. Public/private/isolated differ
+     in hue and in label, so colour is never the only cue. */
+  --pub:#2F7A4E; --pub-soft:#E1F1E7;
+  --priv:#1D6A86; --priv-soft:#DCEDF3;
+  --iso:#6F7C88; --iso-soft:#E9EDF1;
+  --edge:#9A5F0C; --edge-soft:#FBEFD9;
+}
+@media (prefers-color-scheme: dark){
+  :root:not([data-theme="light"]){
+    color-scheme:dark;
+    --bg:#0E1419; --surface:#151D24; --surface-2:#1B252E; --ink:#E3E9EE; --muted:#9CA9B5; --faint:#6C7A87; --line:#26323C;
+    --accent:#5DB1CE; --accent-soft:#16323D;
+    --ok:#5CC08A; --ok-soft:#15301F; --warn:#E3A845; --warn-soft:#3A2B12; --crit:#EE7466; --crit-soft:#3D1B17; --na:#8C99A5; --na-soft:#1F2830;
+    --pub:#5CC08A; --pub-soft:#15301F;
+    --priv:#5DB1CE; --priv-soft:#16323D;
+    --iso:#8C99A5; --iso-soft:#1F2830;
+    --edge:#E3A845; --edge-soft:#3A2B12;
+  }
+}
+:root[data-theme="dark"]{
+  color-scheme:dark;
+  --bg:#0E1419; --surface:#151D24; --surface-2:#1B252E; --ink:#E3E9EE; --muted:#9CA9B5; --faint:#6C7A87; --line:#26323C;
+  --accent:#5DB1CE; --accent-soft:#16323D;
+  --ok:#5CC08A; --ok-soft:#15301F; --warn:#E3A845; --warn-soft:#3A2B12; --crit:#EE7466; --crit-soft:#3D1B17; --na:#8C99A5; --na-soft:#1F2830;
+  --pub:#5CC08A; --pub-soft:#15301F;
+  --priv:#5DB1CE; --priv-soft:#16323D;
+  --iso:#8C99A5; --iso-soft:#1F2830;
+  --edge:#E3A845; --edge-soft:#3A2B12;
+}
+*{box-sizing:border-box}
+html{scroll-behavior:smooth}
+body{margin:0;background:var(--bg);color:var(--ink);font:15px/1.55 var(--sans);-webkit-font-smoothing:antialiased}
+.wrap{max-width:1440px;margin:0 auto;padding-inline:20px;padding-block:24px 64px}
+h1,h2,h3,h4{font-family:var(--cond);font-weight:600;text-wrap:balance;margin:0;letter-spacing:-.005em}
+h1{font-size:30px;line-height:1.15}
+h2{font-size:21px;line-height:1.25}
+h3{font-size:15px}
+p{margin:0}
+code,.mono{font-family:var(--mono);font-size:.86em}
+a{color:var(--accent)}
+:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+
+/* header */
+.top{display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:8px 16px;padding-bottom:14px;border-bottom:1px solid var(--line)}
+.brand{font-family:var(--mono);font-weight:500;font-size:14px;color:var(--muted)}
+.brand b{color:var(--accent);font-weight:500}
+.topr{display:flex;gap:8px;align-items:center}
+.themebtn{font:inherit;font-size:12.5px;color:var(--muted);background:var(--surface);border:1px solid var(--line);border-radius:4px;padding:3px 10px;cursor:pointer}
+.themebtn:hover{color:var(--ink)}
+.head{display:grid;gap:10px;padding-block:22px 18px}
+.idline{display:flex;flex-wrap:wrap;gap:6px 18px;color:var(--muted);font-size:13.5px}
+.idline b{color:var(--ink);font-weight:500}
+.status{display:inline-flex;align-items:center;gap:6px;font-family:var(--cond);font-weight:600;font-size:14px;padding:3px 10px;border-radius:4px;background:var(--ok-soft);color:var(--ok);vertical-align:middle;margin-left:10px}
+.status::before{content:"";width:7px;height:7px;border-radius:50%;background:currentColor}
+.status.warn{background:var(--warn-soft);color:var(--warn)}
+.status.crit{background:var(--crit-soft);color:var(--crit)}
+
+/* A run that could not read everything says so at the top, not only in a
+   footnote: a short inventory is otherwise indistinguishable from a small VPC. */
+.missing{border:1px dashed var(--warn);border-radius:8px;padding:14px 16px;display:grid;gap:8px;background:transparent}
+.missing h3{color:var(--warn);font-size:13px;letter-spacing:.05em;text-transform:uppercase;font-family:var(--sans);font-weight:500}
+.missing p{font-size:14px;color:var(--muted)}
+
+/* layout */
+.layout{display:grid;grid-template-columns:220px minmax(0,1fr);gap:36px;margin-top:26px}
+nav.toc{position:sticky;top:16px;align-self:start;display:grid;gap:2px;font-size:13.5px;max-height:calc(100vh - 32px);overflow-y:auto}
+nav.toc a{display:flex;justify-content:space-between;gap:8px;text-decoration:none;color:var(--muted);padding:5px 8px;border-radius:4px}
+nav.toc a:hover{background:var(--surface-2);color:var(--ink)}
+nav.toc a.on{background:var(--accent-soft);color:var(--ink)}
+nav.toc .n{color:var(--faint);font-variant-numeric:tabular-nums;font-size:12px}
+main{display:grid;gap:40px;min-width:0}
+section{display:grid;gap:14px;scroll-margin-top:16px}
+
+/* KPI row */
+.kpis{display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:0;background:var(--surface);border:1px solid var(--line);border-radius:8px;overflow:hidden}
+.kpi{padding:14px 16px;display:grid;gap:2px;align-content:start;box-shadow:inset -1px -1px 0 var(--line)}
+.kpi .l{font-size:12px;letter-spacing:.05em;text-transform:uppercase;color:var(--muted)}
+.kpi .v{font-family:var(--cond);font-size:26px;font-weight:600;font-variant-numeric:tabular-nums;line-height:1.2}
+.kpi .v.crit{color:var(--crit)} .kpi .v.warn{color:var(--warn)} .kpi .v.ok{color:var(--ok)}
+.kpi .x{font-size:13px;color:var(--muted)}
+
+/* diagram */
+.diagram{background:var(--surface);border:1px solid var(--line);border-radius:8px;padding:14px 12px;overflow-x:auto}
+.diagram svg{display:block;margin:0 auto;max-width:100%;height:auto}
+.layer-toggles{display:flex;flex-wrap:wrap;gap:6px 10px;font-size:12.5px}
+.layer-toggles label{display:inline-flex;align-items:center;gap:6px;background:var(--surface);border:1px solid var(--line);border-radius:999px;padding:3px 11px;cursor:pointer;user-select:none;color:var(--muted)}
+.layer-toggles label:hover{color:var(--ink)}
+.layer-toggles input{accent-color:var(--accent);margin:0}
+.layer-toggles input:checked+span{color:var(--ink);font-weight:500}
+/* Pure CSS via :has() — the layers work with JavaScript off. */
+.arch:has(#lt-subnets:not(:checked)) [data-layer="subnets"],
+.arch:has(#lt-labels:not(:checked)) [data-layer="labels"],
+.arch:has(#lt-sg:not(:checked)) [data-layer="sg"],
+.arch:has(#lt-nat:not(:checked)) [data-layer="nat"],
+.arch:has(#lt-routing:not(:checked)) [data-layer="routing"],
+.arch:has(#lt-endpoints:not(:checked)) [data-layer="endpoints"],
+.arch:has(#lt-peering:not(:checked)) [data-layer="peering"],
+.arch:has(#lt-nacl:not(:checked)) [data-layer="nacl"],
+.arch:has(#lt-traffic:not(:checked)) [data-layer="traffic"]{display:none}
+.cap{font-size:12.5px;color:var(--muted);max-width:90ch}
+
+/* tables */
+.tbl{overflow:auto;max-height:75vh;background:var(--surface);border:1px solid var(--line);border-radius:8px}
+.tbl thead th{position:sticky;top:0;z-index:2}
+@media (min-width:900px){
+  .tbl th:first-child,.tbl td:first-child{position:sticky;left:0;z-index:1}
+  .tbl td:first-child{background:var(--surface);box-shadow:inset -1px 0 0 var(--line)}
+  .tbl thead th:first-child{z-index:3;box-shadow:inset -1px 0 0 var(--line)}
+}
+table{width:100%;border-collapse:collapse;font-size:13.5px;background:var(--surface)}
+th,td{text-align:left;padding:9px 12px;border-bottom:1px solid var(--line);vertical-align:top}
+th{font-weight:500;color:var(--muted);font-size:12px;letter-spacing:.03em;background:var(--surface-2);white-space:nowrap}
+tr:last-child td{border-bottom:0}
+tbody tr:hover td{background:var(--surface-2)}
+th[data-sort]{cursor:pointer;user-select:none}
+th[data-sort]::after{content:" ↕";color:var(--faint);font-size:11px}
+th[data-dir="asc"]::after{content:" ↑";color:var(--accent)}
+th[data-dir="desc"]::after{content:" ↓";color:var(--accent)}
+.tblbar{display:flex;flex-wrap:wrap;gap:8px 12px;align-items:center;justify-content:space-between}
+.filter{font:inherit;font-size:13.5px;padding:5px 9px;border:1px solid var(--line);border-radius:6px;background:var(--surface);color:var(--ink);width:min(100%,300px)}
+.count{font-size:12.5px;color:var(--muted);font-variant-numeric:tabular-nums}
+
+/* findings, rendered from the Markdown's blockquotes and lists */
+main h2{margin-top:0}
+main h3{margin:.4rem 0 0;font-size:16px}
+main ul{margin:0;padding-left:1.2em;display:grid;gap:6px}
+main li::marker{color:var(--faint)}
+blockquote{margin:0;padding:12px 16px;background:var(--surface);border:1px solid var(--line);border-left:3px solid var(--warn);border-radius:8px;color:var(--ink);font-size:14px}
+code{background:var(--surface-2);border-radius:4px;padding:.08em .34em}
+hr{border:none;border-top:1px solid var(--line);margin:0}
+.pill{display:inline-block;font-size:12px;font-weight:500;padding:2px 8px;border-radius:999px;white-space:nowrap}
+.pill.crit{background:var(--crit-soft);color:var(--crit)}
+.pill.warn{background:var(--warn-soft);color:var(--warn)}
+.pill.info{background:var(--accent-soft);color:var(--accent)}
+.pill.ok{background:var(--ok-soft);color:var(--ok)}
+
+footer{margin-top:40px;padding-top:14px;border-top:1px solid var(--line);color:var(--muted);font-size:12.5px;display:flex;flex-wrap:wrap;gap:6px 18px;justify-content:space-between}
+
+/* ---- the architecture diagram's own classes --------------------------------
+   The SVG carries no colours of its own: every fill and stroke resolves to a
+   theme token here, which is what makes the diagram follow light/dark and
+   print legibly on white. */
+.vpcd text{font:12px var(--sans);fill:var(--ink)}
+.vpcd .t-title{font:600 16px var(--cond)}
+.vpcd .t-head{font:600 13px var(--cond)}
+.vpcd .t-name{font-weight:600;font-size:13px}
+.vpcd .t-id{font:11px var(--mono);fill:var(--muted)}
+.vpcd .t-meta{font-size:11px;fill:var(--muted)}
+.vpcd .t-tag{font-size:11px;font-weight:600}
+.vpcd .t-chip{font:600 10.5px var(--sans)}
+.vpcd .t-legend{font-size:11.5px;fill:var(--muted)}
+.vpcd .canvas{fill:var(--surface)}
+.vpcd .cloud{fill:none;stroke:var(--line);stroke-width:1.5;stroke-dasharray:7 5}
+.vpcd .vpc{fill:var(--surface);stroke:var(--accent);stroke-width:1.5}
+.vpcd .vpcband{fill:var(--accent-soft);stroke:none}
+.vpcd .az{fill:none;stroke:var(--line);stroke-width:1;stroke-dasharray:4 4}
+.vpcd .azband{fill:var(--surface-2);stroke:none}
+.vpcd .node{fill:var(--surface);stroke:var(--line);stroke-width:1}
+.vpcd .pub .box{fill:var(--pub-soft);stroke:var(--pub)}
+.vpcd .priv .box{fill:var(--priv-soft);stroke:var(--priv)}
+.vpcd .iso .box{fill:var(--iso-soft);stroke:var(--iso);stroke-dasharray:5 4}
+.vpcd .pub .t-tag{fill:var(--pub)} .vpcd .priv .t-tag{fill:var(--priv)} .vpcd .iso .t-tag{fill:var(--iso)}
+.vpcd .edge{fill:var(--edge-soft);stroke:var(--edge);stroke-width:1}
+.vpcd .chip{fill:var(--surface);stroke:var(--muted);stroke-width:1}
+.vpcd .chip.nat{fill:var(--edge-soft);stroke:var(--edge)}
+.vpcd .chip.ep{fill:var(--accent-soft);stroke:var(--accent)}
+.vpcd .chip.rt{fill:var(--surface-2);stroke:var(--muted)}
+.vpcd .chip.nacl{fill:var(--na-soft);stroke:var(--na)}
+.vpcd .ct{fill:var(--ink)}
+.vpcd .flow{fill:none;stroke:var(--muted);stroke-width:1.5}
+.vpcd .flow.pub{stroke:var(--pub)} .vpcd .flow.priv{stroke:var(--priv)} .vpcd .flow.edge{stroke:var(--edge)}
+.vpcd .flow.assoc{stroke:var(--faint);stroke-width:1;stroke-dasharray:4 3}
+.vpcd .flow.peer{stroke:var(--accent);stroke-dasharray:6 4}
+.vpcd .head-m{fill:var(--muted)}
+.vpcd .swatch{stroke-width:1}
+@media (max-width:900px){
+  .layout{grid-template-columns:minmax(0,1fr);gap:20px}
+  nav.toc{position:static;display:flex;overflow-x:auto;gap:4px;max-height:none;padding-bottom:4px}
+  nav.toc a{white-space:nowrap;background:var(--surface);border:1px solid var(--line)}
+}
+@media (max-width:640px){
+  .wrap{padding-inline:16px}
+  h1{font-size:24px}
+  .kpis{grid-template-columns:repeat(2,minmax(0,1fr))}
+}
+@media (prefers-reduced-motion:reduce){*{scroll-behavior:auto!important}}
+@media print{
+  nav.toc,.themebtn,.filter,.layer-toggles{display:none}
+  .layout{grid-template-columns:minmax(0,1fr)}
+  .tbl{max-height:none;overflow:visible}
+  .tbl th,.tbl td{position:static!important}
+  section{break-inside:avoid-page}
+  body{background:#fff}
+}

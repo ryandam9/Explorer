@@ -60,7 +60,7 @@ answering "why can't this connect?" and "what's exposed?":
 | `D` | **DNS** — the VPC's DNS resolution / hostnames / DHCP options | free |
 | `P` | **Public exposure** — everything reachable from the internet | free |
 | `w` | **What changed** — baseline the VPC, then diff against it later | free |
-| `E` | **Export** — write a Markdown report of resources + findings | free |
+| `E` | **Export** — write the report as Markdown, a self-contained HTML page and an SVG architecture diagram | free |
 | `A` | **Reachability Analyzer** — list AWS Network Insights analyses; create new ones | listing free; creating ~$0.10/analysis |
 
 Inside any overlay, `↑` / `↓` scroll and `Esc` (or the same trigger key) closes
