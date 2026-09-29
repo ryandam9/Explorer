@@ -362,6 +362,22 @@ dashed line from a subnet to a rail node means that subnet's route table has a
 route to it. An attachment nothing routes to is still drawn, without a line —
 "attached but unrouted" is worth seeing.
 
+In the HTML report the diagram is explorable, which is the whole reason it is
+an HTML page rather than a picture:
+
+- **Hover** (or tab to) any box — a subnet, a route table chip, a NAT gateway,
+  a peering — and everything not connected to it dims, leaving that one
+  relationship on screen. Hovering a route-table chip lights every subnet that
+  table governs.
+- **Click** a box to jump to its row in the inventory below, which flashes so
+  the eye lands on it: the diagram says what connects to what, the table says
+  everything else about it.
+- **Drag** to pan, **double-click** or ctrl/⌘+wheel to zoom, and *Reset* to go
+  back. A bare wheel still scrolls the page.
+
+All of it is additive — with JavaScript off the diagram is the same static
+picture, and every box still carries a tooltip naming it.
+
 A checkbox bar above the diagram toggles each layer — Subnets, Detail labels,
 Internet path, NAT, Route tables, Endpoints, Peerings & gateways, Network ACLs,
 Security groups — in pure CSS (`:has()`), so the layers work with JavaScript

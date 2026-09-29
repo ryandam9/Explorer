@@ -145,6 +145,10 @@ func vpcDiagramSVG(data fullExport) string {
 	}
 
 	hasIGW := len(snap.InternetGateways) > 0
+	igwID := ""
+	if hasIGW {
+		igwID = snap.InternetGateways[0].ID
+	}
 	rail := buildRailNodes(data)
 
 	// ---- layout pass 1: lane counts + widths ----------------------------
@@ -278,6 +282,13 @@ func vpcDiagramSVG(data fullExport) string {
 		fmt.Fprintf(&b, `<marker id="%s" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" class="%s"/></marker>`+"\n", m.id, m.class)
 	}
 	b.WriteString("</defs>\n")
+	graph := dgGraph{byRT: map[string][]string{}}
+	for i := range placed {
+		if rt := placed[i].rt; rt != "" {
+			graph.byRT[rt] = append(graph.byRT[rt], placed[i].info.ID)
+		}
+	}
+	graph.writeGraph(&b)
 	fmt.Fprintf(&b, `<rect class="canvas" x="0" y="0" width="%d" height="%d" fill="#FFFFFF"/>`+"\n", canvasW, canvasH)
 
 	// AWS Cloud boundary + region.
@@ -326,7 +337,7 @@ func vpcDiagramSVG(data fullExport) string {
 	b.WriteString(`<g data-layer="routing">` + "\n")
 	for i := range placed {
 		if placed[i].rt != "" {
-			dgChipLeft(&b, &placed[i], "rt", 0, "RT "+placed[i].rt)
+			dgChipLeft(&b, &placed[i], "rt", placed[i].rt, 0, "RT "+placed[i].rt)
 		}
 	}
 	b.WriteString("</g>\n")
@@ -335,7 +346,7 @@ func vpcDiagramSVG(data fullExport) string {
 	b.WriteString(`<g data-layer="nacl">` + "\n")
 	for i := range placed {
 		if placed[i].nacl != "" {
-			dgChipRight(&b, &placed[i], "nacl", 0, "ACL "+placed[i].nacl)
+			dgChipRight(&b, &placed[i], "nacl", placed[i].nacl, 0, "ACL "+placed[i].nacl)
 		}
 	}
 	b.WriteString("</g>\n")
@@ -359,7 +370,7 @@ func vpcDiagramSVG(data fullExport) string {
 	b.WriteString(`<g data-layer="endpoints">` + "\n")
 	for i := range placed {
 		if len(placed[i].epIDs) > 0 {
-			dgChipLeft(&b, &placed[i], "ep", 1, endpointChipLabel(placed[i].epIDs))
+			dgChipLeft(&b, &placed[i], "ep", singleID(placed[i].epIDs), 1, endpointChipLabel(placed[i].epIDs))
 		}
 	}
 	dgRailGroup(&b, rail, placed, rtByID, "endpoints", vpcY+vpcH)
@@ -381,7 +392,7 @@ func vpcDiagramSVG(data fullExport) string {
 		switch ps.egress.kind {
 		case "igw":
 			if hasIGW {
-				dgGutterUp(&b, "flow pub", "arrow-pub", ps.x, ps.y+22, ps.gutter, vpcTopInner+2)
+				dgGutterUp(&b, "flow pub", "arrow-pub", dgEdgeAttrs(ps.info.ID, igwID), ps.x, ps.y+22, ps.gutter, vpcTopInner+2)
 			}
 		case "nat":
 			if tn, ok := natByID[ps.egress.target]; ok && tn.info.ID != ps.info.ID {
@@ -393,30 +404,34 @@ func vpcDiagramSVG(data fullExport) string {
 				if ps.gutter > pillR {
 					target = pillR
 				}
-				dgGutterTo(&b, "flow priv", "arrow-priv", ps.x, ps.y+22, ps.gutter,
-					target, tn.y+dgSubnetH-dgChipH-6+dgChipH/2)
+				dgGutterTo(&b, "flow priv", "arrow-priv", dgEdgeAttrs(ps.info.ID, tn.nat.ID),
+					ps.x, ps.y+22, ps.gutter, target, tn.y+dgSubnetH-dgChipH-6+dgChipH/2)
 			}
 		}
 	}
 	if hasIGW {
 		for _, id := range sortedNatIDs(natByID) {
 			ps := natByID[id]
-			dgGutterUp(&b, "flow edge", "arrow-edge", ps.x, ps.y+dgSubnetH-dgChipH-6+dgChipH/2,
-				ps.gutter, vpcTopInner+2)
+			dgGutterUp(&b, "flow edge", "arrow-edge", dgEdgeAttrs(id, igwID),
+				ps.x, ps.y+dgSubnetH-dgChipH-6+dgChipH/2, ps.gutter, vpcTopInner+2)
 		}
 		netX := centerX - dgInternetW/2
+		fmt.Fprintf(&b, `<g%s>`+"\n", dgNodeAttrs("internet", "The public internet"))
 		dgRect(&b, "node", netX, topY, dgInternetW, dgInternetH, 22)
 		dgText(&b, "t-name", centerX, topY+dgInternetH/2+5, "middle", "Internet")
+		b.WriteString("</g>\n")
 		igwY := topY + dgInternetH + dgGapNetIGW
 		igwX := centerX - dgIGWW/2
-		dgArrow2(&b, "flow", "arrow", centerX, topY+dgInternetH, centerX, igwY)
-		dgRect(&b, "edge", igwX, igwY, dgIGWW, dgIGWH, 6)
+		dgArrow2(&b, "flow", "arrow", dgEdgeAttrs("internet", igwID), centerX, topY+dgInternetH, centerX, igwY)
 		igwLabel := "Internet gateway"
-		if id := snap.InternetGateways[0].ID; id != "" {
-			igwLabel += " · " + id
+		if igwID != "" {
+			igwLabel += " · " + igwID
 		}
+		fmt.Fprintf(&b, `<g%s>`+"\n", dgNodeAttrs(igwID, igwLabel))
+		dgRect(&b, "edge", igwX, igwY, dgIGWW, dgIGWH, 6)
 		dgText(&b, "t-chip ct", centerX, igwY+dgIGWH/2+4, "middle", esc(dgTrunc(igwLabel, 30)))
-		dgArrow(&b, "flow edge", "arrow-edge", centerX, igwY+dgIGWH, centerX, vpcY)
+		b.WriteString("</g>\n")
+		dgArrow(&b, "flow edge", "arrow-edge", dgEdgeAttrs(igwID, data.VPC.ID), centerX, igwY+dgIGWH, centerX, vpcY)
 	}
 	b.WriteString("</g>\n")
 
@@ -442,6 +457,52 @@ func standaloneDiagramSVG(data fullExport) string {
 	// otherwise make the file invalid XML.
 	style := "<style><![CDATA[\n" + reportCSS + "\n]]></style>\n"
 	return svg[:i] + style + svg[i:]
+}
+
+// dgNodeAttrs makes an element a first-class node of the diagram: something the
+// reader can hover, tab to and click. The id ties it to the relationship graph
+// (see dgGraph) and to its row in the tables below; the <title> gives every
+// node a plain browser tooltip, which works with no script at all.
+func dgNodeAttrs(id, label string) string {
+	return fmt.Sprintf(` data-node="%s" tabindex="0" role="img" aria-label="%s"`, esc(id), esc(label))
+}
+
+// dgEdgeAttrs tags a line with the two nodes it joins, so hovering either end
+// can light up the line and the node at the other end of it.
+func dgEdgeAttrs(from, to string) string {
+	return fmt.Sprintf(` data-from="%s" data-to="%s"`, esc(from), esc(to))
+}
+
+// dgGraph is the relationship graph the page's script reads out of the SVG:
+// which subnets share a route table, so hovering a route-table chip can show
+// everything it governs. Edges are on the lines themselves.
+type dgGraph struct {
+	byRT map[string][]string
+}
+
+// writeGraph emits the graph as JSON in the SVG's <metadata>, where it travels
+// with the diagram instead of being rebuilt by the script from the drawing.
+func (g dgGraph) writeGraph(b *strings.Builder) {
+	rts := make([]string, 0, len(g.byRT))
+	for rt := range g.byRT {
+		rts = append(rts, rt)
+	}
+	sort.Strings(rts)
+	b.WriteString(`<metadata id="vpcd-graph">{"rt":{`)
+	for i, rt := range rts {
+		if i > 0 {
+			b.WriteString(",")
+		}
+		fmt.Fprintf(b, `%q:[`, rt)
+		for j, sn := range g.byRT[rt] {
+			if j > 0 {
+				b.WriteString(",")
+			}
+			fmt.Fprintf(b, "%q", sn)
+		}
+		b.WriteString("]")
+	}
+	b.WriteString("}}</metadata>\n")
 }
 
 // dgMarkers is one arrowhead per line colour (see the comment where they are
@@ -541,18 +602,21 @@ func dgRailGroup(b *strings.Builder, rail []railNode, placed []placedSubnet, rtB
 				continue
 			}
 			cx := ps.x + dgSubnetW/2
-			dgElbowDown(b, "flow peer", "arrow-peer", cx, ps.y+dgSubnetH, n.x+dgRailW/2, n.y, vpcBottom)
+			dgElbowDown(b, "flow peer", "arrow-peer", dgEdgeAttrs(ps.info.ID, n.id),
+				cx, ps.y+dgSubnetH, n.x+dgRailW/2, n.y, vpcBottom)
 		}
 		class := "node"
 		if n.kind == "endpoint" {
 			class = "chip ep"
 		}
+		fmt.Fprintf(b, `<g%s>`+"\n", dgNodeAttrs(n.id, n.title+" "+n.id))
 		dgRect(b, class, n.x, n.y, dgRailW, dgRailH, 6)
 		dgText(b, "t-chip ct", n.x+12, n.y+21, "start", esc(n.title))
 		dgText(b, "t-id", n.x+12, n.y+38, "start", esc(dgTrunc(n.id, 30)))
 		if n.sub != "" {
 			dgText(b, "t-meta", n.x+12, n.y+52, "start", esc(dgTrunc(n.sub, 32)))
 		}
+		b.WriteString("</g>\n")
 	}
 }
 
@@ -582,6 +646,15 @@ func endpointChipLabel(ids []string) string {
 	}
 }
 
+// singleID names a chip's node only when it stands for exactly one resource:
+// a chip reading "Endpoints a, b +3" is not any one of them.
+func singleID(ids []string) string {
+	if len(ids) == 1 {
+		return ids[0]
+	}
+	return ""
+}
+
 // shortServiceName trims the "com.amazonaws.<region>." prefix off an endpoint's
 // service name, leaving the part that identifies the service ("s3").
 func shortServiceName(s string) string {
@@ -601,6 +674,27 @@ func sortedNatIDs(m map[string]*placedSubnet) []string {
 	return ids
 }
 
+// subnetAria describes a subnet card for a screen reader (and as its tooltip):
+// what it is, how big, and how it reaches the internet — the same three facts
+// the card shows visually.
+func subnetAria(ps *placedSubnet) string {
+	kind := "Isolated subnet"
+	switch ps.egress.kind {
+	case "igw":
+		kind = "Public subnet"
+	case "nat":
+		kind = "Private subnet"
+	}
+	out := kind + " " + ps.info.ID
+	if ps.info.CIDR != "" {
+		out += ", " + ps.info.CIDR
+	}
+	if ps.info.AZ != "" {
+		out += ", in " + ps.info.AZ
+	}
+	return out + ", " + egressTag(ps.egress)
+}
+
 // dgCardTitle is the subnet's display name on the card: the Name tag when it
 // has one (the ID is on the line below it either way), the ID otherwise.
 func dgCardTitle(s SubnetInfo) string {
@@ -612,7 +706,8 @@ func dgCardTitle(s SubnetInfo) string {
 
 // dgSubnetBox draws the subnet's card, accent bar, name and ID.
 func dgSubnetBox(b *strings.Builder, ps *placedSubnet) {
-	fmt.Fprintf(b, `<g class="%s">`+"\n", dgSubnetClass(ps.egress.kind))
+	fmt.Fprintf(b, `<g class="%s"%s>`+"\n", dgSubnetClass(ps.egress.kind),
+		dgNodeAttrs(ps.info.ID, subnetAria(ps)))
 	dgRect(b, "box", ps.x, ps.y, dgSubnetW, dgSubnetH, 6)
 	dgText(b, "t-name", ps.x+14, ps.y+24, "start", esc(dgTrunc(dgCardTitle(ps.info), 30)))
 	dgText(b, "t-id", ps.x+14, ps.y+41, "start", esc(ps.info.ID))
@@ -625,7 +720,7 @@ func dgSubnetLabels(b *strings.Builder, ps *placedSubnet) {
 	if cidr == "" {
 		cidr = "—"
 	}
-	fmt.Fprintf(b, `<g class="%s">`+"\n", dgSubnetClass(ps.egress.kind))
+	fmt.Fprintf(b, `<g class="%s" data-node="%s">`+"\n", dgSubnetClass(ps.egress.kind), esc(ps.info.ID))
 	dgText(b, "t-meta", ps.x+14, ps.y+58, "start", esc(cidr+"  ·  "+plural(ps.enis, "ENI", "ENIs")))
 	dgText(b, "t-tag", ps.x+14, ps.y+76, "start", esc(egressTag(ps.egress)))
 	b.WriteString("</g>\n")
@@ -640,7 +735,7 @@ func dgSubnetSG(b *strings.Builder, ps *placedSubnet) {
 	if len(ps.sgs) > 2 {
 		label = fmt.Sprintf("SG %s +%d", strings.Join(ps.sgs[:2], ", "), len(ps.sgs)-2)
 	}
-	dgChipRight(b, ps, "", 1, label)
+	dgChipRight(b, ps, "", "", 1, label)
 }
 
 // dgSubnetNat draws the NAT-gateway pill when one lives in the subnet.
@@ -650,8 +745,10 @@ func dgSubnetNat(b *strings.Builder, ps *placedSubnet) {
 	}
 	pillW := dgSubnetW - 28
 	pillY := ps.y + dgSubnetH - dgChipH - 6
+	fmt.Fprintf(b, `<g%s>`+"\n", dgNodeAttrs(ps.nat.ID, "NAT gateway "+ps.nat.ID))
 	dgRect(b, "chip nat", ps.x+14, pillY, pillW, dgChipH, 9)
 	dgText(b, "t-chip ct", ps.x+dgSubnetW/2, pillY+dgChipH/2+4, "middle", esc("NAT gateway · "+ps.nat.ID))
+	b.WriteString("</g>\n")
 }
 
 // ---- small SVG helpers ----------------------------------------------------
@@ -660,17 +757,30 @@ func dgSubnetNat(b *strings.Builder, ps *placedSubnet) {
 // a card, whatever the resource is called.
 const dgSlotChars = 19
 
-// dgChipLeft draws a chip in the left slot of a chip row.
-func dgChipLeft(b *strings.Builder, ps *placedSubnet, kind string, row int, label string) {
-	dgChip(b, kind, ps.x+14, chipY(ps, row), dgTrunc(label, dgSlotChars))
+// dgChipLeft draws a chip in the left slot of a chip row. id, when given, makes
+// the chip its own node — hovering a route-table chip lights up every subnet
+// that table governs.
+func dgChipLeft(b *strings.Builder, ps *placedSubnet, kind, id string, row int, label string) {
+	dgChipNode(b, kind, id, label, ps.x+14, chipY(ps, row))
 }
 
 // dgChipRight draws a chip in the right slot, aligned to the card's right edge
 // so its width does not depend on what is in the left slot.
-func dgChipRight(b *strings.Builder, ps *placedSubnet, kind string, row int, label string) {
+func dgChipRight(b *strings.Builder, ps *placedSubnet, kind, id string, row int, label string) {
+	w := dgTextWidth(dgTrunc(label, dgSlotChars), 10.5) + 16
+	dgChipNode(b, kind, id, label, ps.x+dgSubnetW-14-w, chipY(ps, row))
+}
+
+// dgChipNode draws a slot chip, wrapped as a node when it names a resource.
+func dgChipNode(b *strings.Builder, kind, id, label string, x, y int) {
 	label = dgTrunc(label, dgSlotChars)
-	w := dgTextWidth(label, 10.5) + 16
-	dgChip(b, kind, ps.x+dgSubnetW-14-w, chipY(ps, row), label)
+	if id != "" {
+		fmt.Fprintf(b, `<g%s>`+"\n", dgNodeAttrs(id, label))
+	}
+	dgChip(b, kind, x, y, label)
+	if id != "" {
+		b.WriteString("</g>\n")
+	}
 }
 
 // dgChip draws a small rounded label chip sized to its text.
@@ -707,41 +817,41 @@ func dgText(b *strings.Builder, class string, x, y int, anchor, content string) 
 	fmt.Fprintf(b, `<text class="%s" x="%d" y="%d" text-anchor="%s">%s</text>`+"\n", class, x, y, anchor, content)
 }
 
-func dgArrow(b *strings.Builder, class, marker string, x1, y1, x2, y2 int) {
-	fmt.Fprintf(b, `<line class="%s" x1="%d" y1="%d" x2="%d" y2="%d" marker-end="url(#%s)"/>`+"\n",
-		class, x1, y1, x2, y2, marker)
+func dgArrow(b *strings.Builder, class, marker, edge string, x1, y1, x2, y2 int) {
+	fmt.Fprintf(b, `<line class="%s"%s x1="%d" y1="%d" x2="%d" y2="%d" marker-end="url(#%s)"/>`+"\n",
+		class, edge, x1, y1, x2, y2, marker)
 }
 
-func dgArrow2(b *strings.Builder, class, marker string, x1, y1, x2, y2 int) {
-	fmt.Fprintf(b, `<line class="%s" x1="%d" y1="%d" x2="%d" y2="%d" marker-start="url(#%s)" marker-end="url(#%s)"/>`+"\n",
-		class, x1, y1, x2, y2, marker, marker)
+func dgArrow2(b *strings.Builder, class, marker, edge string, x1, y1, x2, y2 int) {
+	fmt.Fprintf(b, `<line class="%s"%s x1="%d" y1="%d" x2="%d" y2="%d" marker-start="url(#%s)" marker-end="url(#%s)"/>`+"\n",
+		class, edge, x1, y1, x2, y2, marker, marker)
 }
 
 // dgGutterUp leaves a card by its left edge, crosses into the channel beside
 // the AZ column, and climbs it — so the line never runs over a card or a
 // heading on its way up.
-func dgGutterUp(b *strings.Builder, class, marker string, x1, y1, gutterX, y2 int) {
-	fmt.Fprintf(b, `<polyline class="%s" points="%d,%d %d,%d %d,%d" marker-end="url(#%s)"/>`+"\n",
-		class, x1, y1, gutterX, y1, gutterX, y2, marker)
+func dgGutterUp(b *strings.Builder, class, marker, edge string, x1, y1, gutterX, y2 int) {
+	fmt.Fprintf(b, `<polyline class="%s"%s points="%d,%d %d,%d %d,%d" marker-end="url(#%s)"/>`+"\n",
+		class, edge, x1, y1, gutterX, y1, gutterX, y2, marker)
 }
 
 // dgGutterTo is dgGutterUp continued back out of the channel into a target on
 // another card (a private subnet reaching its NAT gateway).
-func dgGutterTo(b *strings.Builder, class, marker string, x1, y1, gutterX, x2, y2 int) {
-	fmt.Fprintf(b, `<polyline class="%s" points="%d,%d %d,%d %d,%d %d,%d" marker-end="url(#%s)"/>`+"\n",
-		class, x1, y1, gutterX, y1, gutterX, y2, x2, y2, marker)
+func dgGutterTo(b *strings.Builder, class, marker, edge string, x1, y1, gutterX, x2, y2 int) {
+	fmt.Fprintf(b, `<polyline class="%s"%s points="%d,%d %d,%d %d,%d %d,%d" marker-end="url(#%s)"/>`+"\n",
+		class, edge, x1, y1, gutterX, y1, gutterX, y2, x2, y2, marker)
 }
 
 // dgElbowDown routes a line from a subnet's bottom edge, down past the VPC's
 // boundary, across, and up into a rail node — so the lines run in the gutter
 // between the two instead of over the subnets.
-func dgElbowDown(b *strings.Builder, class, marker string, x1, y1, x2, y2, vpcBottom int) {
+func dgElbowDown(b *strings.Builder, class, marker, edge string, x1, y1, x2, y2, vpcBottom int) {
 	midY := vpcBottom + dgGapVPCRail/2
 	if midY <= y1 {
 		midY = y1 + 4
 	}
-	fmt.Fprintf(b, `<polyline class="%s" points="%d,%d %d,%d %d,%d %d,%d" marker-end="url(#%s)"/>`+"\n",
-		class, x1, y1, x1, midY, x2, midY, x2, y2, marker)
+	fmt.Fprintf(b, `<polyline class="%s"%s points="%d,%d %d,%d %d,%d %d,%d" marker-end="url(#%s)"/>`+"\n",
+		class, edge, x1, y1, x1, midY, x2, midY, x2, y2, marker)
 }
 
 // dgLegendItems is the key, shared by the width calc and the renderer.

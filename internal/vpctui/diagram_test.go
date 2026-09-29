@@ -4,6 +4,7 @@ import (
 	"encoding/xml"
 	"fmt"
 	"io"
+	"regexp"
 	"strconv"
 	"strings"
 	"testing"
@@ -407,5 +408,59 @@ func TestStandaloneDiagramSVGCarriesItsStyles(t *testing.T) {
 	// The inline copy stays clean: the report's own <head> styles it.
 	if strings.Contains(vpcDiagramSVG(relationFixture()), "<style>") {
 		t.Error("the inline diagram should not repeat the report's stylesheet")
+	}
+}
+
+// The diagram is interactive in the report, which needs three things in the
+// markup: every box identified, every line saying which two nodes it joins,
+// and the route-table groupings the lines cannot express.
+func TestVPCDiagramSVGCarriesItsGraph(t *testing.T) {
+	svg := vpcDiagramSVG(relationFixture())
+
+	for _, want := range []string{
+		`data-node="subnet-priv-a"`, // subnet cards
+		`data-node="rtb-priv"`,      // route-table chips
+		`data-node="acl-1"`,         // network ACL chips
+		`data-node="nat-1"`,         // the NAT pill
+		`data-node="pcx-1"`,         // rail nodes
+		`data-node="igw-1"`,
+		`data-node="internet"`,
+		`data-from="subnet-priv-a" data-to="pcx-1"`, // the routes-to relationship
+		`data-from="subnet-pub-a" data-to="igw-1"`,  // the internet path
+		`<metadata id="vpcd-graph">`,                // subnets per route table
+		`"rtb-priv":["subnet-priv-a","subnet-priv-b"]`,
+		`tabindex="0"`, // reachable by keyboard, not only by mouse
+	} {
+		if !strings.Contains(svg, want) {
+			t.Errorf("diagram SVG missing %q", want)
+		}
+	}
+
+	// Every edge names nodes that exist, or hovering one highlights nothing.
+	ids := map[string]bool{}
+	for _, m := range regexp.MustCompile(`data-node="([^"]+)"`).FindAllStringSubmatch(svg, -1) {
+		ids[m[1]] = true
+	}
+	for _, m := range regexp.MustCompile(`data-from="([^"]+)" data-to="([^"]+)"`).FindAllStringSubmatch(svg, -1) {
+		for _, end := range m[1:] {
+			if end != "vpc-1" && !ids[end] {
+				t.Errorf("edge references %q, which is not a node on the diagram", end)
+			}
+		}
+	}
+}
+
+// A chip standing for several endpoints names none of them: clicking it could
+// only jump to one row, and highlighting it would claim a relationship the
+// diagram never drew.
+func TestEndpointChipIsOnlyANodeWhenItNamesOne(t *testing.T) {
+	if got := singleID([]string{"vpce-1"}); got != "vpce-1" {
+		t.Errorf("singleID one = %q, want vpce-1", got)
+	}
+	if got := singleID([]string{"vpce-1", "vpce-2"}); got != "" {
+		t.Errorf("singleID many = %q, want empty", got)
+	}
+	if got := singleID(nil); got != "" {
+		t.Errorf("singleID none = %q, want empty", got)
 	}
 }

@@ -211,3 +211,36 @@ footer{margin-top:40px;padding-top:14px;border-top:1px solid var(--line);color:v
   section{break-inside:avoid-page}
   body{background:#fff}
 }
+
+/* ---- interactive diagram --------------------------------------------------
+   Hovering, focusing or tapping a node dims everything that is not connected
+   to it, so one relationship can be read out of a dense diagram. The page is
+   complete without any of this: with JavaScript off the .live class is never
+   added, no node is ever selected, and the diagram is the static picture it
+   was before. */
+.vpcd.live [data-node]{cursor:pointer}
+.vpcd.live [data-node]:focus-visible{outline:none}
+.vpcd.live [data-node]:focus-visible rect{stroke:var(--ink);stroke-width:2.5}
+/* Dim the unrelated rather than recolour the related: the subnet classes still
+   mean what the legend says while a selection is active. */
+.vpcd.sel [data-node],.vpcd.sel [data-from]{opacity:.18;transition:opacity .12s ease}
+.vpcd.sel [data-node].hot,.vpcd.sel [data-from].hot{opacity:1}
+.vpcd.sel [data-node].hot rect{stroke-width:2.5}
+.vpcd.sel [data-from].hot{stroke-width:2.5}
+@media (prefers-reduced-motion:reduce){.vpcd.sel [data-node],.vpcd.sel [data-from]{transition:none}}
+
+.diagram{position:relative}
+.dgtools{display:flex;gap:6px;align-items:center;margin-bottom:8px}
+.dgtools button{font:inherit;font-size:12.5px;line-height:1;color:var(--muted);background:var(--surface);border:1px solid var(--line);border-radius:4px;padding:5px 9px;cursor:pointer}
+.dgtools button:hover{color:var(--ink);border-color:var(--muted)}
+.dgtools .hint{font-size:12.5px;color:var(--faint);margin-left:4px}
+.dgtools .sel-name{font-size:12.5px;color:var(--accent);font-family:var(--mono)}
+.diagram.grab svg{cursor:grab}
+.diagram.grabbing svg{cursor:grabbing}
+
+/* The row a diagram node points at, flashed so the eye lands on it after the
+   jump. */
+@keyframes rowflash{from{background:var(--accent-soft)}to{background:transparent}}
+tr.flash td{animation:rowflash 1.6s ease-out}
+@media (prefers-reduced-motion:reduce){tr.flash td{animation:none;background:var(--accent-soft)}}
+@media print{.dgtools{display:none}}

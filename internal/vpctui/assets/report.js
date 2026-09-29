@@ -103,6 +103,206 @@
     });
   });
 
+
+  // ---- the diagram, made explorable -------------------------------------
+  // All of this is additive: the SVG is a complete, readable picture on its
+  // own, and none of these handlers change what it says — they only let you
+  // ask it one question at a time.
+  (function diagram() {
+    var svg = document.querySelector(".diagram svg.vpcd");
+    var box = document.querySelector(".diagram");
+    if (!svg || !box) return;
+    svg.classList.add("live");
+
+    // Which subnets each route table governs, carried in the SVG itself.
+    var groups = {};
+    try {
+      var meta = svg.querySelector("#vpcd-graph");
+      if (meta) groups = (JSON.parse(meta.textContent) || {}).rt || {};
+    } catch (e) {}
+
+    var edges = Array.prototype.slice.call(svg.querySelectorAll("[data-from]"));
+    var nodes = Array.prototype.slice.call(svg.querySelectorAll("[data-node]"));
+
+    // related(id) is what stays lit: the node itself (a subnet is drawn across
+    // several layers, so one id can be several elements), everything one hop
+    // away along a line, and — for a route table — every subnet it governs,
+    // with their one-hop neighbours.
+    //
+    // One hop, deliberately. Following the lines onward instead lights the
+    // whole diagram after two or three steps (a private subnet reaches its
+    // NAT, which reaches the gateway, which reaches the internet), and a
+    // highlight that dims nothing answers nothing. To follow a path, hover
+    // the next node along.
+    function related(id) {
+      var seeds = {};
+      seeds[id] = true;
+      (groups[id] || []).forEach(function (s) { seeds[s] = true; });
+      var keep = {};
+      Object.keys(seeds).forEach(function (k) { keep[k] = true; });
+      edges.forEach(function (e) {
+        var f = e.getAttribute("data-from"), t = e.getAttribute("data-to");
+        if (seeds[f] || seeds[t]) { keep[f] = true; keep[t] = true; }
+      });
+      return { keep: keep, seeds: seeds };
+    }
+
+    var current = null;
+    var label = null;
+
+    function clear() {
+      current = null;
+      svg.classList.remove("sel");
+      nodes.concat(edges).forEach(function (el) { el.classList.remove("hot"); });
+      if (label) label.textContent = "";
+    }
+
+    function select(id) {
+      if (!id) { clear(); return; }
+      if (current === id) return;
+      current = id;
+      var r = related(id);
+      svg.classList.add("sel");
+      nodes.forEach(function (el) {
+        el.classList.toggle("hot", !!r.keep[el.getAttribute("data-node")]);
+      });
+      edges.forEach(function (el) {
+        var f = el.getAttribute("data-from"), t = el.getAttribute("data-to");
+        el.classList.toggle("hot", !!(r.seeds[f] || r.seeds[t]));
+      });
+      if (label) label.textContent = id;
+    }
+
+    nodes.forEach(function (el) {
+      var id = el.getAttribute("data-node");
+      el.addEventListener("mouseenter", function () { select(id); });
+      el.addEventListener("focus", function () { select(id); });
+      el.addEventListener("blur", clear);
+      el.addEventListener("click", function (e) { e.stopPropagation(); jumpTo(id); });
+      el.addEventListener("keydown", function (e) {
+        if (e.key === "Enter" || e.key === " ") { e.preventDefault(); jumpTo(id); }
+        if (e.key === "Escape") clear();
+      });
+    });
+    svg.addEventListener("mouseleave", clear);
+
+    // Clicking a node jumps to its row in the inventory below and flashes it:
+    // the diagram says what connects to what, the table says everything else
+    // about it.
+    function jumpTo(id) {
+      var target = null;
+      var cells = document.querySelectorAll("main .tbl td");
+      for (var i = 0; i < cells.length && !target; i++) {
+        if (cells[i].textContent.trim() === id) target = cells[i].parentNode;
+      }
+      if (!target) return;
+      document.querySelectorAll("tr.flash").forEach(function (tr) { tr.classList.remove("flash"); });
+      target.scrollIntoView({ block: "center", behavior: "smooth" });
+      // Restart the animation even if the same row is clicked twice.
+      void target.offsetWidth;
+      target.classList.add("flash");
+    }
+
+    // Pan and zoom by moving the viewBox, so nothing in the drawing has to
+    // know about it. The page's own scrolling is left alone: a bare wheel
+    // scrolls the page as usual, and zooming is on the buttons, a double
+    // click, or ctrl/⌘+wheel.
+    var vb = (svg.getAttribute("viewBox") || "").split(/\s+/).map(Number);
+    if (vb.length !== 4 || vb.some(isNaN)) return;
+    var home = vb.slice();
+    var view = vb.slice();
+
+    function apply() { svg.setAttribute("viewBox", view.join(" ")); }
+    function zoom(factor, cx, cy) {
+      var w = view[2] * factor, h = view[3] * factor;
+      // Bounded so the diagram can't be lost off-screen or shrunk to a dot.
+      if (w > home[2] * 4 || w < home[2] / 8) return;
+      view[0] = cx - (cx - view[0]) * factor;
+      view[1] = cy - (cy - view[1]) * factor;
+      view[2] = w;
+      view[3] = h;
+      apply();
+    }
+    function center() { return [view[0] + view[2] / 2, view[1] + view[3] / 2]; }
+    function svgPoint(e) {
+      var r = svg.getBoundingClientRect();
+      return [
+        view[0] + ((e.clientX - r.left) / r.width) * view[2],
+        view[1] + ((e.clientY - r.top) / r.height) * view[3]
+      ];
+    }
+
+    var tools = document.querySelector(".dgtools");
+    if (tools) {
+      tools.hidden = false;
+      label = tools.querySelector(".sel-name");
+      tools.addEventListener("click", function (e) {
+        var act = e.target.getAttribute && e.target.getAttribute("data-act");
+        if (!act) return;
+        var c = center();
+        if (act === "in") zoom(0.8, c[0], c[1]);
+        if (act === "out") zoom(1.25, c[0], c[1]);
+        if (act === "reset") { view = home.slice(); apply(); clear(); }
+      });
+    }
+
+    svg.addEventListener("wheel", function (e) {
+      if (!e.ctrlKey && !e.metaKey) return; // let the page scroll
+      e.preventDefault();
+      var p = svgPoint(e);
+      zoom(e.deltaY > 0 ? 1.1 : 0.9, p[0], p[1]);
+    }, { passive: false });
+
+    svg.addEventListener("dblclick", function (e) {
+      var p = svgPoint(e);
+      zoom(0.7, p[0], p[1]);
+    });
+
+    // Drag to pan. The pointer is captured only once it has actually moved:
+    // capturing on pointerdown retargets the click that follows to the <svg>,
+    // which silently breaks click-to-jump on every node. A drag also swallows
+    // the click it ends with, so releasing the mouse over a card does not
+    // jump to its row.
+    var drag = null;
+    var dragged = false;
+    var dragSlop = 4;
+
+    svg.addEventListener("pointerdown", function (e) {
+      if (e.button !== 0) return;
+      drag = { x: e.clientX, y: e.clientY, vx: view[0], vy: view[1], id: e.pointerId, live: false };
+      dragged = false;
+    });
+    svg.addEventListener("pointermove", function (e) {
+      if (!drag) return;
+      if (!drag.live) {
+        if (Math.abs(e.clientX - drag.x) + Math.abs(e.clientY - drag.y) < dragSlop) return;
+        drag.live = true;
+        dragged = true;
+        box.classList.add("grabbing");
+        svg.setPointerCapture(drag.id);
+      }
+      var r = svg.getBoundingClientRect();
+      view[0] = drag.vx - ((e.clientX - drag.x) / r.width) * view[2];
+      view[1] = drag.vy - ((e.clientY - drag.y) / r.height) * view[3];
+      apply();
+    });
+    function endDrag(e) {
+      if (!drag) return;
+      if (drag.live && svg.hasPointerCapture(drag.id)) svg.releasePointerCapture(drag.id);
+      drag = null;
+      box.classList.remove("grabbing");
+    }
+    svg.addEventListener("pointerup", endDrag);
+    svg.addEventListener("pointercancel", endDrag);
+    svg.addEventListener("click", function (e) {
+      if (!dragged) return;
+      dragged = false;
+      e.stopPropagation();
+      e.preventDefault();
+    }, true);
+    box.classList.add("grab");
+  })();
+
   // Highlight the section the reader is in, so a long inventory doesn't lose
   // its place in the sidebar.
   if (window.IntersectionObserver) {

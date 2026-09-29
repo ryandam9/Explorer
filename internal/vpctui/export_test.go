@@ -169,6 +169,8 @@ func TestExportHTMLStructure(t *testing.T) {
 		`prefers-color-scheme: dark`,           // the report has a real dark mode
 		`data-theme="dark"`,
 		`id="themebtn"`,
+		`class="dgtools"`, // the diagram's zoom / reset controls
+		`data-act="reset"`,
 	} {
 		if !strings.Contains(html, want) {
 			t.Errorf("export HTML missing %q", want)

@@ -361,6 +361,13 @@ const reportHTMLTemplate = `<!doctype html>
           <label><input type="checkbox" id="lt-nacl"><span>Network ACLs</span></label>
           <label><input type="checkbox" id="lt-sg"><span>Security groups</span></label>
         </div>
+        <div class="dgtools" hidden>
+          <button type="button" data-act="in" title="Zoom in">Zoom in</button>
+          <button type="button" data-act="out" title="Zoom out">Zoom out</button>
+          <button type="button" data-act="reset" title="Reset the view">Reset</button>
+          <span class="hint">Hover a box to isolate what it connects to · click it to jump to its row · drag to pan</span>
+          <span class="sel-name" aria-live="polite"></span>
+        </div>
         <div class="diagram">{{.Diagram}}</div>
         <p class="cap">Drawn from this snapshot alone: a subnet's class comes from the default route in the route table associated with it, so "public" here means a 0.0.0.0/0 route to an internet gateway — not that anything in it has a public address. Switch layers off to follow one kind of relationship at a time.</p>
       </section>
