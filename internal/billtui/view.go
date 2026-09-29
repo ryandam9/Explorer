@@ -373,24 +373,46 @@ func (m Model) resHeader(w int) string {
 		shown += r.Amount
 	}
 
-	// Say both numbers. These totals cover a rolling 14-day window while the
-	// bill covers the billing period, so they routinely disagree — and a
-	// caveat sentence under a smaller number reads as a discrepancy, not as an
-	// explanation. Naming the service's own bill total beside the window's
-	// makes the difference the point rather than a puzzle.
-	note := fmt.Sprintf(
-		"%s across %s in the last %d days (%s → %s). This service is %s on the bill, which covers %s → %s — resource-level data does not reach back that far.",
-		billing.FormatAmount(shown, currency), plural(len(m.resRows), "resource", "resources"),
-		resWindowDays, m.resStart.Format("2006-01-02"), m.end.Format("2006-01-02"),
-		billing.FormatAmount(m.serviceTotal(m.resService), currency),
-		m.start.Format("2006-01-02"), m.end.Format("2006-01-02"))
-	if len(m.resRows) == 0 {
-		note = fmt.Sprintf(
-			"Cost Explorer keeps resource-level data for %d days (since %s), so these totals cover that window, not the whole bill.",
-			resWindowDays, m.resStart.Format("2006-01-02"))
+	// Three separate facts, so three bullets. Run together as a paragraph they
+	// wrapped into a block of grey that reads as boilerplate — and the second
+	// one, that this window is not the whole bill, is the one that stops the
+	// smaller total looking like an error.
+	var points []string
+	if len(m.resRows) > 0 {
+		points = append(points, fmt.Sprintf("%s across %s in the last %d days (%s → %s).",
+			billing.FormatAmount(shown, currency),
+			plural(len(m.resRows), "resource", "resources"),
+			resWindowDays, m.resStart.Format("2006-01-02"), m.end.Format("2006-01-02")))
+		points = append(points, fmt.Sprintf("This service is %s on the bill, which covers %s → %s.",
+			billing.FormatAmount(m.serviceTotal(m.resService), currency),
+			m.start.Format("2006-01-02"), m.end.Format("2006-01-02")))
 	}
-	return ui.HeaderStyle().Render("Resources — "+m.resService) + "\n" +
-		ui.MutedStyle().Width(w).Render(note)
+	points = append(points, fmt.Sprintf(
+		"This table reflects the last %d days only — Cost Explorer keeps resource-level data no further back.",
+		resWindowDays))
+
+	out := ui.HeaderStyle().Render("Resources — " + m.resService)
+	for _, p := range points {
+		out += "\n" + bulletLine(p, w)
+	}
+	return out
+}
+
+// bulletLine renders one bullet, wrapped to w with the continuation lines
+// indented under the text rather than under the marker — so a wrapped bullet
+// still reads as one point.
+func bulletLine(text string, w int) string {
+	const marker = "• "
+	body := ui.MutedStyle().Width(w - len([]rune(marker))).Render(text)
+	lines := strings.Split(body, "\n")
+	for i := range lines {
+		if i == 0 {
+			lines[i] = ui.MutedStyle().Render(marker) + lines[i]
+			continue
+		}
+		lines[i] = "  " + lines[i]
+	}
+	return strings.Join(lines, "\n")
 }
 
 // serviceTotal is what one service costs over the whole billing period — the
