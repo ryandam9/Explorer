@@ -285,17 +285,30 @@ func TestWriteExportRoundTrip(t *testing.T) {
 	if err != nil {
 		t.Fatalf("writeExport: %v", err)
 	}
-	if !strings.HasSuffix(mdPath, "vpc-1-20260609-220000.md") { // 12:00 UTC → 22:00 Melbourne (AEST)
+	// The fixture VPC is tagged Name=primary, so the files are named for it.
+	// (12:00 UTC → 22:00 Melbourne, AEST.)
+	if !strings.HasSuffix(mdPath, "primary-20260609-220000.md") {
 		t.Errorf("unexpected markdown export path: %s", mdPath)
 	}
-	if !strings.HasSuffix(htmlPath, "vpc-1-20260609-220000.html") {
+	if !strings.HasSuffix(htmlPath, "primary-20260609-220000.html") {
 		t.Errorf("unexpected html export path: %s", htmlPath)
 	}
-	if !strings.HasSuffix(svgPath, "vpc-1-20260609-220000.svg") {
+	if !strings.HasSuffix(svgPath, "primary-20260609-220000.svg") {
 		t.Errorf("unexpected svg export path: %s", svgPath)
 	}
 	if b, rerr := os.ReadFile(svgPath); rerr != nil || !strings.Contains(string(b), "<svg") {
 		t.Errorf("svg file missing or not an SVG: err=%v", rerr)
+	}
+
+	// An untagged VPC still gets files, named for its ID.
+	untagged := exportSnap()
+	untagged.VPC.Name = ""
+	mdPath, _, _, err = writeExport(untagged, nil, at)
+	if err != nil {
+		t.Fatalf("writeExport (untagged): %v", err)
+	}
+	if !strings.HasSuffix(mdPath, "vpc-1-20260609-220000.md") {
+		t.Errorf("untagged VPC export path: %s, want it named for the ID", mdPath)
 	}
 }
 
@@ -423,5 +436,46 @@ func TestDiagramBordersAreVisible(t *testing.T) {
 		if strings.Contains(html, bad) {
 			t.Errorf("diagram still draws a border with the table hairline: %q", bad)
 		}
+	}
+}
+
+// The report is named after the VPC when it has a Name tag — a downloads
+// folder full of "vpc-0b4e13de8b16c75e7-…" tells you nothing.
+func TestExportBaseName(t *testing.T) {
+	cases := []struct{ name, id, want, why string }{
+		{"payments-prod", "vpc-1", "payments-prod", "a clean name is used as-is"},
+		{"", "vpc-0b4e13de8b16c75e7", "vpc-0b4e13de8b16c75e7", "no Name tag falls back to the ID"},
+		{"Payments Prod", "vpc-1", "Payments-Prod", "spaces become dashes"},
+		{"prod / shared", "vpc-1", "prod-shared", "a separator can never reach the path"},
+		{"Team:Payments", "vpc-1", "Team-Payments", "colons break Windows paths"},
+		{"../../etc/passwd", "vpc-1", "etc-passwd", "traversal is stripped, not escaped"},
+		{"...", "vpc-2", "vpc-2", "a name that sanitizes to nothing falls back"},
+		{"   ", "vpc-3", "vpc-3", "whitespace only falls back"},
+		{"生产环境", "vpc-4", "vpc-4", "a name with no filename-safe characters falls back"},
+		{".hidden", "vpc-5", "hidden", "never produce a dotfile"},
+	}
+	for _, c := range cases {
+		got := exportBaseName(VPCInfo{ID: c.id, Name: c.name})
+		if got != c.want {
+			t.Errorf("exportBaseName(name=%q, id=%q) = %q, want %q — %s", c.name, c.id, got, c.want, c.why)
+		}
+		for _, bad := range []string{"/", `\`, "..", ":"} {
+			if strings.Contains(got, bad) {
+				t.Errorf("exportBaseName(%q) = %q, which contains %q", c.name, got, bad)
+			}
+		}
+	}
+
+	// A long name is capped, and the cap does not leave a trailing dash.
+	long := exportBaseName(VPCInfo{ID: "vpc-1", Name: strings.Repeat("a", 200)})
+	if len(long) != exportNameMaxLen {
+		t.Errorf("long name produced %d characters, want the %d cap", len(long), exportNameMaxLen)
+	}
+	if strings.HasSuffix(long, "-") || strings.HasSuffix(long, ".") {
+		t.Errorf("capped name ends in a separator: %q", long)
+	}
+	// Even with nothing at all to go on, there is still a filename.
+	if got := exportBaseName(VPCInfo{}); got == "" {
+		t.Error("an empty VPC produced an empty filename")
 	}
 }
