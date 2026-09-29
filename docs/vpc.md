@@ -336,7 +336,10 @@ a basename under the downloads directory as `<vpc-id>-<timestamp>.{md,html,svg}`
 - **HTML** (`.html`) — a single self-contained page: a header naming the VPC,
   a row of headline counts, the architecture diagram, a sticky table of
   contents, and every inventory table in its own scrolling box with sortable
-  columns and a filter. It has a light and a dark theme (following the system,
+  columns and a filter. **Cells never wrap** — an ID split across two lines
+  (`subnet-` / `08eb40f52431d2921`) cannot be read or copied — so a wide table
+  scrolls sideways instead, keeping the row counter and the ID column pinned
+  so a row stays identifiable while you scroll. It has a light and a dark theme (following the system,
   with a toggle that remembers your choice) and prints cleanly. Nothing is
   fetched over the network — no CDN stylesheet, script or font — so a report
   mailed to a colleague or opened offline looks exactly as it did when it was

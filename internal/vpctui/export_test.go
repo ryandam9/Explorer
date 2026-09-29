@@ -298,3 +298,30 @@ func TestWriteExportRoundTrip(t *testing.T) {
 		t.Errorf("svg file missing or not an SVG: err=%v", rerr)
 	}
 }
+
+// Table cells must not wrap. Every AWS identifier contains a hyphen, which the
+// browser treats as a break opportunity, so a narrow column split
+// "subnet-08eb40f52431d2921" across two lines — unreadable, and impossible to
+// scan down a column. The table scrolls instead, and the row stays identifiable
+// while it does.
+func TestReportTablesDoNotWrapCells(t *testing.T) {
+	data := exportSnap()
+	html := exportHTML(data, analyzeVPC(data.Snap), time.Date(2026, 6, 9, 12, 0, 0, 0, time.UTC))
+
+	for _, want := range []string{
+		"th,td{text-align:left;padding:9px 12px;border-bottom:1px solid var(--line);vertical-align:top;white-space:nowrap}",
+		"min-width:max-content", // the table may grow past its box…
+		".tbl{overflow:auto",    // …which then scrolls
+		"::-webkit-scrollbar",   // with a visible bar
+		"scrollbar-width:thin",
+		".tbl.pinned td:nth-child(2)", // the ID column pins beside the counter
+		"--col1",
+	} {
+		if !strings.Contains(html, want) {
+			t.Errorf("report stylesheet missing %q", want)
+		}
+	}
+	if !strings.Contains(html, "pinIDColumns") {
+		t.Error("the script does not measure the counter column, so the pinned ID would be misaligned")
+	}
+}

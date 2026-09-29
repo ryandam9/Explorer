@@ -303,6 +303,31 @@
     box.classList.add("grab");
   })();
 
+  // Pin the ID column beside the row counter on wide tables. The offset is
+  // the counter column's real width, which only the browser knows, so it is
+  // measured here and published to the stylesheet. A table narrow enough not
+  // to scroll is left alone: pinning costs nothing visually but the class is
+  // what the CSS keys off, and there is no reason to set it.
+  function pinIDColumns() {
+    document.querySelectorAll(".tbl").forEach(function (box) {
+      var table = box.querySelector("table");
+      if (!table || !table.tHead) return;
+      var head = table.tHead.rows[0];
+      if (!head || head.cells.length < 3) return; // a two-column table has nothing to pin
+      box.classList.remove("pinned");
+      box.style.removeProperty("--col1");
+      if (box.scrollWidth <= box.clientWidth) return;
+      box.style.setProperty("--col1", head.cells[0].getBoundingClientRect().width + "px");
+      box.classList.add("pinned");
+    });
+  }
+  pinIDColumns();
+  var pinTimer = null;
+  window.addEventListener("resize", function () {
+    clearTimeout(pinTimer);
+    pinTimer = setTimeout(pinIDColumns, 150);
+  });
+
   // Highlight the section the reader is in, so a long inventory doesn't lose
   // its place in the sidebar.
   if (window.IntersectionObserver) {
