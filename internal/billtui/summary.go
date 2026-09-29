@@ -3,7 +3,6 @@ package billtui
 import (
 	"fmt"
 	"sort"
-	"strings"
 
 	"github.com/ryandam9/aws_explorer/internal/billing"
 )
@@ -80,17 +79,23 @@ func shareOf(amount, total float64) float64 {
 // costsNothing reports whether an amount is zero *as the table prints it*.
 //
 // Testing amount == 0 is not the same thing and is the wrong test here: Cost
-// Explorer returns full precision, so a service billing $0.0031 is not zero,
-// renders as "$0.00", and survived a filter whose whole promise was that rows
-// reading $0.00 would be gone. The filter is therefore defined by the
-// rendering — hide what displays as nothing — so what you see and what is
-// hidden can never disagree.
+// Explorer returns full precision, so a service billing a ten-thousandth of a
+// cent is not zero, prints as "$0.0000", and would otherwise survive a filter
+// whose whole promise was that rows reading zero would be gone. The filter is
+// therefore defined by the rendering — hide what displays as nothing — so
+// what you see and what is hidden can never disagree, at whatever precision
+// the amount happens to be shown.
+//
+// It looks for a non-zero digit rather than comparing against a formatted
+// zero, because the two are not formatted alike: "$0.00" has two decimals and
+// "$0.0000" has four, and a sub-cent credit carries a minus sign as well.
 func costsNothing(amount float64, currency string) bool {
-	// A sub-cent credit renders as "-$0.00", which is just as much a row of
-	// nothing as "$0.00" — the sign is dropped before the comparison so both
-	// are treated the same.
-	shown := strings.TrimPrefix(billing.FormatAmount(amount, currency), "-")
-	return shown == billing.FormatAmount(0, currency)
+	for _, r := range billing.FormatAmount(amount, currency) {
+		if r >= '1' && r <= '9' {
+			return false
+		}
+	}
+	return true
 }
 
 // dropZeroCost removes the lines that print as costing nothing. It is the

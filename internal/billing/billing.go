@@ -13,6 +13,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"math"
 	"sort"
 	"strconv"
 	"strings"
@@ -320,8 +321,23 @@ func PeriodLabel(start, end, now time.Time) string {
 	return label
 }
 
+// Cost Explorer returns full precision, and plenty of real charges are worth
+// less than a cent. Two decimals is what money normally looks like, so it
+// stays the default — but a figure that two decimals cannot state is shown
+// with as many as it needs, up to four. A row is never rounded into saying
+// something untrue: $0.0031 reads $0.0031, not $0.00.
+const (
+	amountMinDecimals = 2
+	amountMaxDecimals = 4
+	// amountEpsilon is the point below which a difference is float noise
+	// rather than money: summing floats turns 0.30 into 0.30000000000000004,
+	// and that must still print as $0.30, not $0.3000.
+	amountEpsilon = 1e-9
+)
+
 // FormatAmount renders a cost for display: "$1,234.56" for USD (the Cost
-// Explorer default), "-$0.42" for credits, "1,234.56 EUR" otherwise.
+// Explorer default), "-$0.42" for credits, "1,234.56 EUR" otherwise, and
+// "$0.0031" where two decimals would round a real charge away to nothing.
 func FormatAmount(amount float64, currency string) string {
 	abs := amount
 	sign := ""
@@ -329,11 +345,27 @@ func FormatAmount(amount float64, currency string) string {
 		abs = -amount
 		sign = "-"
 	}
-	n := humanize.FormatFloat("#,###.##", abs)
+	n := humanize.FormatFloat("#,###."+strings.Repeat("#", amountDecimals(abs)), abs)
 	if currency == "" || currency == "USD" {
 		return sign + "$" + n
 	}
 	return sign + n + " " + currency
+}
+
+// amountDecimals is the fewest decimal places that state a figure without
+// rounding it into something it is not — two normally, more only where they
+// carry information, and never more than four. Below what four decimals can
+// express the amount does read as zero, which is the cost of a fixed cap and
+// is why the zero-cost filter is defined by the rendering: whatever prints as
+// nothing is treated as nothing, consistently.
+func amountDecimals(abs float64) int {
+	for d := amountMinDecimals; d < amountMaxDecimals; d++ {
+		pow := math.Pow(10, float64(d))
+		if math.Abs(math.Round(abs*pow)/pow-abs) < amountEpsilon {
+			return d
+		}
+	}
+	return amountMaxDecimals
 }
 
 // FormatQty renders a usage quantity with up to four significant decimals
