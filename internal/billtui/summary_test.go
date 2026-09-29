@@ -350,23 +350,24 @@ func TestSummaryToggleResetsSort(t *testing.T) {
 	}
 }
 
-// A row that prints "$0.00" is hidden whatever its true value: Cost Explorer
-// returns full precision, so a service billing a third of a cent is not zero
-// but reads as zero, and leaving it on screen makes the filter look broken.
-// (Reported against the shipped build: "CloudWatch Events is 0 dollars, why is
-// it still shown".)
-func TestSubCentRowsCountAsCostingNothing(t *testing.T) {
-	if !costsNothing(0.0031, "USD") {
-		t.Error("$0.0031 renders as $0.00 and must count as costing nothing")
+// A sub-cent charge is shown, exactly, rather than rounded into "$0.00" and
+// then hidden as if it were nothing. (Reported against the shipped build:
+// "CloudWatch Events is 0 dollars, why is it still shown" — it was not zero,
+// it was $0.0031 being printed as $0.00.)
+func TestSubCentChargesAreShownExactly(t *testing.T) {
+	if costsNothing(0.0031, "USD") {
+		t.Error("$0.0031 prints as $0.0031 and is a real charge, not nothing")
 	}
-	if !costsNothing(-0.002, "USD") {
-		t.Error("a sub-cent credit also renders as $0.00")
+	if costsNothing(-0.002, "USD") {
+		t.Error("a sub-cent credit prints exactly too")
 	}
-	if costsNothing(0.005, "USD") {
-		t.Error("$0.005 rounds up to $0.01 and is a real charge")
+	if !costsNothing(0, "USD") {
+		t.Error("zero is nothing")
 	}
-	if costsNothing(0.01, "AUD") {
-		t.Error("a cent is a cent in any currency")
+	// Below what four decimals can state, the row does print as zero — and is
+	// then treated as zero, so what is shown and what is hidden agree.
+	if !costsNothing(0.00004, "USD") {
+		t.Error("an amount that prints as $0.0000 must count as costing nothing")
 	}
 
 	m := billModel(t,
@@ -375,12 +376,17 @@ func TestSubCentRowsCountAsCostingNothing(t *testing.T) {
 	)
 	mm, _ := m.Update(key("T"))
 	m = mm.(Model)
+
+	var found string
 	for _, r := range m.tbl.Rows() {
 		if r[1] == "CloudWatch Events" {
-			t.Errorf("a service showing %s is still in the summary", r[2])
+			found = r[2]
 		}
 	}
-	if m.zeroSvc != 1 {
-		t.Errorf("zeroSvc = %d, want 1", m.zeroSvc)
+	if found != "$0.0031" {
+		t.Errorf("CloudWatch Events shows %q, want its exact $0.0031", found)
+	}
+	if m.zeroSvc != 0 {
+		t.Errorf("zeroSvc = %d, want 0 — nothing here costs nothing", m.zeroSvc)
 	}
 }

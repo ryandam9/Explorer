@@ -68,6 +68,12 @@ service:
 8 service(s) · total $9.95 of $11.02 billed · hiding 3 services that cost nothing — z shows them
 ```
 
+**Amounts are shown exactly.** Two decimals is the default, because that is
+what money looks like, but a figure two decimals cannot state is shown with as
+many as it needs, up to four: a service billing `$0.0031` reads `$0.0031`, not
+`$0.00`. Machine output (`-o json`, `ndjson`, `csv`) is unchanged and carries
+full precision as it always did.
+
 **Rows that cost nothing are hidden by default**, in both views: the question
 this screen answers is what you are being charged for. `z` brings them back,
 and the footer always says how many are out of sight — a table quietly shorter
@@ -75,7 +81,9 @@ than the bill would misreport it.
 
 In the summary a service is hidden when its *total* is zero, which also
 catches one whose charge and credit cancel out — not only one whose lines are
-all free. `Enter` on a row drops back into the detailed view filtered to that
+all free. "Zero" means what the row prints: an amount too small for four
+decimals does read as `$0.0000` and is treated as nothing, so what you see and
+what is hidden always agree. `Enter` on a row drops back into the detailed view filtered to that
 service.
 
 Both the `SHARE` column and the footer total describe **the rows on screen**.

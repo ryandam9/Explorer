@@ -245,6 +245,19 @@ func TestFormatAmount(t *testing.T) {
 		{-0.42, "USD", "-$0.42"},
 		{1234.56, "EUR", "1,234.56 EUR"},
 		{5, "", "$5.00"},
+		// Two decimals is the default, but a charge two decimals cannot state
+		// is shown with as many as it needs, up to four — Cost Explorer
+		// returns full precision and plenty of real charges are sub-cent.
+		{0.0031, "USD", "$0.0031"},
+		{0.003, "USD", "$0.003"},
+		{-0.002, "USD", "-$0.002"},
+		{0.12345, "USD", "$0.1235"},
+		// Summing floats must not invent decimals: 0.1+0.2 is 0.30, not
+		// 0.3000000000000000444.
+		{0.1 + 0.2, "USD", "$0.30"},
+		// Past four decimals the cap wins and the amount reads as zero; the
+		// zero-cost filter keys off exactly that rendering.
+		{0.00004, "USD", "$0.0000"},
 	}
 	for _, c := range cases {
 		if got := FormatAmount(c.amount, c.currency); got != c.want {
