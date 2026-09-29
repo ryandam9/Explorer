@@ -312,13 +312,17 @@ func (m Model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	if m.overlay != overlayNone {
 		switch msg.String() {
 		case "up", "k":
-			if m.overlay == overlayResources && m.resScroll > 0 {
-				m.resScroll--
-			}
+			m.scrollResources(-1)
 		case "down", "j":
-			if m.overlay == overlayResources && m.resScroll < len(m.resRows)-1 {
-				m.resScroll++
-			}
+			m.scrollResources(1)
+		case "pgup", "b":
+			m.scrollResources(-m.resVisibleRows())
+		case "pgdown", "f", " ":
+			m.scrollResources(m.resVisibleRows())
+		case "home", "g":
+			m.scrollResources(-len(m.resRows))
+		case "end", "G":
+			m.scrollResources(len(m.resRows))
 		case "esc", "q", "enter", "?", "x", ui.KeyAbout:
 			m.overlay = overlayNone
 			m.resService = ""
@@ -423,6 +427,22 @@ func (m Model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		return m, cmd
 	}
 	return m, nil
+}
+
+// scrollResources moves the resource list by n lines, stopping at the last
+// offset that still fills the panel. Scrolling into empty space below the last
+// row is what made the overlay shrink line by line as you held ↓.
+func (m *Model) scrollResources(n int) {
+	if m.overlay != overlayResources || len(m.resRows) == 0 {
+		return
+	}
+	m.resScroll += n
+	if max := m.resMaxScroll(); m.resScroll > max {
+		m.resScroll = max
+	}
+	if m.resScroll < 0 {
+		m.resScroll = 0
+	}
 }
 
 // selected returns the bill line under the cursor, or nil. In summary mode the
@@ -557,10 +577,14 @@ func (m *Model) rebuild() {
 	lines = filterLines(lines, m.filter.Value())
 	// Counted before the drop so the footer can report what "z" is hiding
 	// rather than leaving a shorter table unexplained.
-	m.zeroCount = countZeroCost(lines)
+	currency := ""
+	if m.bill != nil {
+		currency = m.bill.Currency
+	}
+	m.zeroCount = countZeroCost(lines, currency)
 	m.filtered = lines
 	if m.hideZero {
-		lines = dropZeroCost(lines)
+		lines = dropZeroCost(lines, currency)
 	}
 	m.visible = lines
 	if m.summary {
@@ -581,10 +605,6 @@ func (m *Model) rebuild() {
 	table.ApplySortHeader(cols, m.sortCol, m.sortAsc, func(i int) bool { return i > 0 })
 	m.tbl.SetColumns(cols)
 
-	currency := ""
-	if m.bill != nil {
-		currency = m.bill.Currency
-	}
 	rows := make([]table.Row, 0, len(m.visible))
 	for i, l := range m.visible {
 		rows = append(rows, table.Row{
@@ -611,12 +631,16 @@ func (m *Model) rebuildSummary() {
 	// would make a service that is entirely free disappear before it could be
 	// counted — and would still leave a $0.00 row for a service whose charge
 	// and credit cancel out.
+	currency := ""
+	if m.bill != nil {
+		currency = m.bill.Currency
+	}
 	m.totals = summarizeByService(m.filtered)
 	m.zeroSvc = 0
 	if m.hideZero {
 		kept := make([]ServiceTotal, 0, len(m.totals))
 		for _, t := range m.totals {
-			if t.Amount == 0 {
+			if costsNothing(t.Amount, currency) {
 				m.zeroSvc++
 				continue
 			}
@@ -630,10 +654,6 @@ func (m *Model) rebuildSummary() {
 	table.ApplySortHeader(cols, m.sortCol, m.sortAsc, func(i int) bool { return i > 0 })
 	m.tbl.SetColumns(cols)
 
-	currency := ""
-	if m.bill != nil {
-		currency = m.bill.Currency
-	}
 	// Share is of the rows on screen, matching the footer's total: under a
 	// filter, a percentage of the whole bill would not add up to the 100% the
 	// column implies.

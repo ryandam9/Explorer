@@ -76,10 +76,10 @@ func TestDropAndCountZeroCost(t *testing.T) {
 		line("EC2", "DataTransfer-In", 0),
 		line("S3", "Requests", 0),
 	}
-	if got := countZeroCost(lines); got != 2 {
+	if got := countZeroCost(lines, "USD"); got != 2 {
 		t.Errorf("countZeroCost = %d, want 2", got)
 	}
-	kept := dropZeroCost(lines)
+	kept := dropZeroCost(lines, "USD")
 	if len(kept) != 1 || kept[0].UsageType != "BoxUsage" {
 		t.Errorf("dropZeroCost kept %+v, want only the charged line", kept)
 	}
@@ -347,5 +347,40 @@ func TestSummaryToggleResetsSort(t *testing.T) {
 
 	if m.sortCol != -1 {
 		t.Errorf("sortCol = %d after switching views, want -1", m.sortCol)
+	}
+}
+
+// A row that prints "$0.00" is hidden whatever its true value: Cost Explorer
+// returns full precision, so a service billing a third of a cent is not zero
+// but reads as zero, and leaving it on screen makes the filter look broken.
+// (Reported against the shipped build: "CloudWatch Events is 0 dollars, why is
+// it still shown".)
+func TestSubCentRowsCountAsCostingNothing(t *testing.T) {
+	if !costsNothing(0.0031, "USD") {
+		t.Error("$0.0031 renders as $0.00 and must count as costing nothing")
+	}
+	if !costsNothing(-0.002, "USD") {
+		t.Error("a sub-cent credit also renders as $0.00")
+	}
+	if costsNothing(0.005, "USD") {
+		t.Error("$0.005 rounds up to $0.01 and is a real charge")
+	}
+	if costsNothing(0.01, "AUD") {
+		t.Error("a cent is a cent in any currency")
+	}
+
+	m := billModel(t,
+		line("Amazon EC2", "BoxUsage", 4.15),
+		line("CloudWatch Events", "Events", 0.0031),
+	)
+	mm, _ := m.Update(key("T"))
+	m = mm.(Model)
+	for _, r := range m.tbl.Rows() {
+		if r[1] == "CloudWatch Events" {
+			t.Errorf("a service showing %s is still in the summary", r[2])
+		}
+	}
+	if m.zeroSvc != 1 {
+		t.Errorf("zeroSvc = %d, want 1", m.zeroSvc)
 	}
 }
