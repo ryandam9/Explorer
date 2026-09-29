@@ -125,9 +125,12 @@ func TestResourcesOverlayNamesBothTotals(t *testing.T) {
 	m.resStart = time.Date(2026, 6, 1, 0, 0, 0, 0, time.UTC)
 	m.resRows = []billing.ResourceCost{{Resource: "NoResourceId", Amount: 0.05, Quantity: 0.53, Unit: "GB-Month"}}
 
-	// Asserted phrase by phrase: the note is wrapped to the panel, so a line
-	// break can fall anywhere in it.
+	// Asserted phrase by phrase: each bullet is wrapped to the panel, so a
+	// line break can fall anywhere in it.
 	got := m.resourcesOverlay()
+	if n := strings.Count(got, "• "); n != 3 {
+		t.Errorf("got %d bullets, want 3 — the window total, the bill total and the standing caveat", n)
+	}
 	for _, want := range []string{
 		"$0.05", "across 1 resource", "last 14 days", // what this window holds
 		"$0.12", "on the bill", // and what the service costs over the period
@@ -135,5 +138,22 @@ func TestResourcesOverlayNamesBothTotals(t *testing.T) {
 		if !strings.Contains(got, want) {
 			t.Errorf("overlay is missing %q, so the two totals look inconsistent:\n%s", want, got)
 		}
+	}
+}
+
+// With no resource data there is no window total to state, but the caveat
+// that explains why still shows — otherwise an empty panel looks like a
+// service with no resources rather than one outside the data window.
+func TestResourcesOverlayKeepsTheCaveatWhenEmpty(t *testing.T) {
+	m := resourcesModel(t, 0)
+	got := m.resourcesOverlay()
+	if n := strings.Count(got, "• "); n != 1 {
+		t.Errorf("got %d bullets with no data, want just the caveat", n)
+	}
+	if !strings.Contains(got, "last 14 days only") {
+		t.Errorf("the window caveat is missing:\n%s", got)
+	}
+	if !strings.Contains(got, "No resource-level cost recorded") {
+		t.Errorf("the empty state does not say it found nothing:\n%s", got)
 	}
 }
