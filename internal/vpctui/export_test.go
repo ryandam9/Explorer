@@ -396,3 +396,32 @@ func TestFindingsRenderAsATable(t *testing.T) {
 		t.Error("a prose table must not inherit min-width:max-content, or it scrolls instead of wrapping")
 	}
 }
+
+// The diagram's structural borders must not be drawn in --line. That token is
+// a table hairline: it separates dense rows against a flat background, and at
+// diagram scale, with white space around it, it vanishes. (Reported: "borders
+// in the VPC architecture diagram are too light".)
+func TestDiagramBordersAreVisible(t *testing.T) {
+	data := exportSnap()
+	html := exportHTML(data, analyzeVPC(data.Snap), time.Date(2026, 6, 9, 12, 0, 0, 0, time.UTC))
+
+	for _, want := range []string{
+		".vpcd .cloud{fill:none;stroke:var(--muted)",
+		".vpcd .az{fill:none;stroke:var(--faint)",
+		".vpcd .node{fill:var(--surface);stroke:var(--muted)",
+	} {
+		if !strings.Contains(html, want) {
+			t.Errorf("diagram border rule missing or weakened: want %q", want)
+		}
+	}
+	// Belt and braces: no diagram rule may fall back to the hairline token.
+	for _, bad := range []string{
+		".vpcd .cloud{fill:none;stroke:var(--line)",
+		".vpcd .az{fill:none;stroke:var(--line)",
+		".vpcd .node{fill:var(--surface);stroke:var(--line)",
+	} {
+		if strings.Contains(html, bad) {
+			t.Errorf("diagram still draws a border with the table hairline: %q", bad)
+		}
+	}
+}
