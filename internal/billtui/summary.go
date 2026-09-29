@@ -3,6 +3,7 @@ package billtui
 import (
 	"fmt"
 	"sort"
+	"strings"
 
 	"github.com/ryandam9/aws_explorer/internal/billing"
 )
@@ -76,26 +77,43 @@ func shareOf(amount, total float64) float64 {
 	return amount / total * 100
 }
 
-// dropZeroCost removes the lines that accrued no cost. It is the detailed
-// view's answer to the same noise the summary folds away, for when you want
-// the usage-type detail but only for what you are actually paying for.
-func dropZeroCost(lines []billing.Line) []billing.Line {
+// costsNothing reports whether an amount is zero *as the table prints it*.
+//
+// Testing amount == 0 is not the same thing and is the wrong test here: Cost
+// Explorer returns full precision, so a service billing $0.0031 is not zero,
+// renders as "$0.00", and survived a filter whose whole promise was that rows
+// reading $0.00 would be gone. The filter is therefore defined by the
+// rendering — hide what displays as nothing — so what you see and what is
+// hidden can never disagree.
+func costsNothing(amount float64, currency string) bool {
+	// A sub-cent credit renders as "-$0.00", which is just as much a row of
+	// nothing as "$0.00" — the sign is dropped before the comparison so both
+	// are treated the same.
+	shown := strings.TrimPrefix(billing.FormatAmount(amount, currency), "-")
+	return shown == billing.FormatAmount(0, currency)
+}
+
+// dropZeroCost removes the lines that print as costing nothing. It is the
+// detailed view's answer to the same noise the summary folds away, for when
+// you want the usage-type detail but only for what you are actually paying
+// for.
+func dropZeroCost(lines []billing.Line, currency string) []billing.Line {
 	out := make([]billing.Line, 0, len(lines))
 	for _, l := range lines {
-		if l.Amount != 0 {
+		if !costsNothing(l.Amount, currency) {
 			out = append(out, l)
 		}
 	}
 	return out
 }
 
-// countZeroCost reports how many lines carry no cost, so the UI can say what
-// hiding them would remove (and what it did remove) instead of silently
-// shortening the table.
-func countZeroCost(lines []billing.Line) int {
+// countZeroCost reports how many lines print as costing nothing, so the UI can
+// say what hiding them would remove (and what it did remove) instead of
+// silently shortening the table.
+func countZeroCost(lines []billing.Line, currency string) int {
 	n := 0
 	for _, l := range lines {
-		if l.Amount == 0 {
+		if costsNothing(l.Amount, currency) {
 			n++
 		}
 	}

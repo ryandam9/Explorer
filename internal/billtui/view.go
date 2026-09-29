@@ -284,6 +284,16 @@ func (m Model) overlayStyle() lipgloss.Style {
 		Padding(1, 2)
 }
 
+// overlayContentWidth is the usable width inside an overlay. Lip Gloss v2
+// counts the border inside Width, so the frame takes its two columns out of
+// the content — subtracting only the padding (as this did) leaves every line
+// two columns too wide, which wraps the last word of a paragraph onto its own
+// line and pushes a scrollbar gutter onto the line below the row it belongs to.
+func (m Model) overlayContentWidth() int {
+	style := m.overlayStyle()
+	return style.GetWidth() - style.GetHorizontalPadding() - style.GetHorizontalBorderSize()
+}
+
 // detailRows returns the (label, value) pairs shown in the line detail overlay
 // — the single source shared by the rendered overlay and the plain-text
 // clipboard copy. The Change row only appears when there's a delta to show.
@@ -310,7 +320,7 @@ func (m Model) detailOverlay() string {
 		return ""
 	}
 	style := m.overlayStyle()
-	w := style.GetWidth() - style.GetHorizontalPadding()
+	w := m.overlayContentWidth()
 
 	label := lipgloss.NewStyle().Foreground(lipgloss.Color(ui.ColorMuted())).Width(12)
 	value := lipgloss.NewStyle().Foreground(lipgloss.Color(ui.ColorText())).Width(w - 12)
@@ -344,52 +354,158 @@ func (m Model) detailText(l *billing.Line) string {
 	return strings.TrimRight(b.String(), "\n")
 }
 
-func (m Model) resourcesOverlay() string {
-	style := m.overlayStyle()
-	w := style.GetWidth() - style.GetHorizontalPadding()
+// resNote is the standing caveat on the resource breakdown: Cost Explorer only
+// keeps resource-level data for a trailing window, so these totals are not the
+// service's whole bill.
+const resWindowDays = 14
+
+// resHeader is the overlay's fixed top block. It is built separately from the
+// body so its height can be measured rather than guessed — the note wraps to
+// one line or two depending on the terminal's width, and assuming either is
+// how an overlay ends up taller than the screen.
+func (m Model) resHeader(w int) string {
 	currency := ""
 	if m.bill != nil {
 		currency = m.bill.Currency
 	}
+	var shown float64
+	for _, r := range m.resRows {
+		shown += r.Amount
+	}
+
+	// Say both numbers. These totals cover a rolling 14-day window while the
+	// bill covers the billing period, so they routinely disagree — and a
+	// caveat sentence under a smaller number reads as a discrepancy, not as an
+	// explanation. Naming the service's own bill total beside the window's
+	// makes the difference the point rather than a puzzle.
+	note := fmt.Sprintf(
+		"%s across %s in the last %d days (%s → %s). This service is %s on the bill, which covers %s → %s — resource-level data does not reach back that far.",
+		billing.FormatAmount(shown, currency), plural(len(m.resRows), "resource", "resources"),
+		resWindowDays, m.resStart.Format("2006-01-02"), m.end.Format("2006-01-02"),
+		billing.FormatAmount(m.serviceTotal(m.resService), currency),
+		m.start.Format("2006-01-02"), m.end.Format("2006-01-02"))
+	if len(m.resRows) == 0 {
+		note = fmt.Sprintf(
+			"Cost Explorer keeps resource-level data for %d days (since %s), so these totals cover that window, not the whole bill.",
+			resWindowDays, m.resStart.Format("2006-01-02"))
+	}
+	return ui.HeaderStyle().Render("Resources — "+m.resService) + "\n" +
+		ui.MutedStyle().Width(w).Render(note)
+}
+
+// serviceTotal is what one service costs over the whole billing period — the
+// figure the summary shows, which the resource window's total is compared
+// against.
+func (m Model) serviceTotal(service string) float64 {
+	var sum float64
+	if m.bill == nil {
+		return 0
+	}
+	for _, l := range m.bill.Lines {
+		if l.Service == service {
+			sum += l.Amount
+		}
+	}
+	return sum
+}
+
+// resVisibleRows is how many resource rows fit in the overlay. The view and the
+// key handler both need it — the view to window the list, the handler to know
+// where scrolling stops — and they must agree, or the last page scrolls into
+// empty space.
+func (m Model) resVisibleRows() int {
+	w := m.overlayContentWidth()
+	// Overlay chrome: the border (2) and the style's vertical padding (2),
+	// then the header, the blank line under it and the footer line, and two
+	// rows of breathing room so the panel never runs to the screen edge.
+	chrome := 4 + lipgloss.Height(m.resHeader(w)) + 2 + 2
+	n := m.height - chrome
+	if n < 3 {
+		n = 3
+	}
+	return n
+}
+
+// resMaxScroll is the last offset that still fills the panel. Scrolling past it
+// would leave a short, ragged list at the bottom — and, when the panel sizes
+// itself to its content, a box that visibly shrinks as you press down.
+func (m Model) resMaxScroll() int {
+	if max := len(m.resRows) - m.resVisibleRows(); max > 0 {
+		return max
+	}
+	return 0
+}
+
+func (m Model) resourcesOverlay() string {
+	style := m.overlayStyle()
+	w := m.overlayContentWidth()
+	currency := ""
+	if m.bill != nil {
+		currency = m.bill.Currency
+	}
+	rows := m.resVisibleRows()
 
 	var b strings.Builder
-	b.WriteString(ui.HeaderStyle().Render("Resources — "+m.resService) + "\n")
-	b.WriteString(ui.MutedStyle().Width(w).Render(
-		fmt.Sprintf("Cost Explorer keeps resource-level data for %d days (since %s), so these totals cover that window, not the whole bill.",
-			14, m.resStart.Format("2006-01-02"))) + "\n\n")
+	b.WriteString(m.resHeader(w) + "\n\n")
+
+	// Every state renders the same number of body lines, so the panel keeps
+	// one size: switching between "fetching", an error and the list, or
+	// scrolling to the end of a short page, must not resize the overlay under
+	// the reader's cursor.
+	pad := func(block string, footer string) {
+		lines := strings.Split(block, "\n")
+		for len(lines) < rows {
+			lines = append(lines, "")
+		}
+		b.WriteString(strings.Join(lines[:rows], "\n"))
+		b.WriteString("\n" + footer)
+	}
 
 	switch {
 	case m.resFetching:
-		b.WriteString(m.spin.View() + " fetching resource costs…")
+		pad(m.spin.View()+" fetching resource costs…", ui.MutedStyle().Render("Esc closes"))
 	case m.resErr != "":
-		b.WriteString(ui.ErrorStyle().Width(w).Render("⚠ " + m.resErr))
+		pad(ui.ErrorStyle().Width(w).Render("⚠ "+m.resErr), ui.MutedStyle().Render("Esc closes"))
 	case len(m.resRows) == 0:
-		b.WriteString(ui.MutedStyle().Render("No resource-level cost recorded for this service in the window."))
+		pad(ui.MutedStyle().Render("No resource-level cost recorded for this service in the window."),
+			ui.MutedStyle().Render("Esc closes"))
 	default:
-		// Window the list around the scroll position so long lists fit.
-		maxLines := m.height - 14
-		if maxLines < 4 {
-			maxLines = 4
-		}
 		start := m.resScroll
-		if start > len(m.resRows)-1 {
-			start = len(m.resRows) - 1
+		if max := m.resMaxScroll(); start > max {
+			start = max
 		}
-		end := start + maxLines
+		if start < 0 {
+			start = 0
+		}
+		end := start + rows
 		if end > len(m.resRows) {
 			end = len(m.resRows)
 		}
+
+		// The scrollbar's column is reserved whether or not it has a thumb
+		// (VScrollbar returns a blank gutter when everything fits), so the
+		// rows do not reflow the moment the list grows past one page.
+		bodyW := w - 2
 		amount := lipgloss.NewStyle().Foreground(lipgloss.Color(ui.ColorText())).Width(12)
+		var list []string
 		for _, r := range m.resRows[start:end] {
-			line := lipgloss.JoinHorizontal(lipgloss.Top,
+			list = append(list, lipgloss.JoinHorizontal(lipgloss.Top,
 				amount.Render(billing.FormatAmount(r.Amount, currency)),
-				lipgloss.NewStyle().Width(w-12).Render(
-					fmt.Sprintf("%s  (%s %s)", r.Resource, billing.FormatQty(r.Quantity), r.Unit)))
-			b.WriteString(line + "\n")
+				lipgloss.NewStyle().Width(bodyW-12).MaxWidth(bodyW-12).Render(
+					fmt.Sprintf("%s  (%s %s)", r.Resource, billing.FormatQty(r.Quantity), r.Unit))))
 		}
-		if end < len(m.resRows) {
-			b.WriteString(ui.MutedStyle().Render(fmt.Sprintf("… %d more (↓ to scroll)", len(m.resRows)-end)))
+		for len(list) < rows {
+			list = append(list, lipgloss.NewStyle().Width(bodyW).Render(""))
 		}
+		body := lipgloss.JoinHorizontal(lipgloss.Top,
+			strings.Join(list[:rows], "\n"),
+			" ",
+			ui.VScrollbar(rows, len(m.resRows), rows, start))
+
+		b.WriteString(body)
+		b.WriteString("\n" + ui.MutedStyle().Render(fmt.Sprintf(
+			"%d–%d of %d · ↑/↓ PgUp/PgDn Home/End scroll · Esc closes",
+			start+1, end, len(m.resRows))))
 	}
 	return style.Render(b.String())
 }
