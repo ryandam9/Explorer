@@ -59,31 +59,30 @@ charged — usage with a `$0.00` amount. `T` folds them into one row per
 service:
 
 ```
-#   SERVICE                      COST      SHARE   LINES  NO COST
-1   Amazon EC2                   $8.00     80.0%   14     11
-2   Amazon S3                    $1.75     17.5%   9      7
-3   AWS Lambda                   $0.25      2.5%   4      3
-4   Amazon CloudWatch            $0.00      0.0%   6      6
+#   SERVICE                                    COST      SHARE
+1   Amazon Elastic Compute Cloud - Compute     $4.15     41.7%
+2   Amazon Elastic Container Service           $1.38     13.9%
+3   AWS Secrets Manager                        $1.11     11.2%
+4   Tax                                        $1.00     10.1%
 
-4 service(s) · total $10.00 · 27 line(s) carry no cost — z hides them
+8 service(s) · total $9.95 of $11.02 billed · hiding 3 services that cost nothing — z shows them
 ```
 
-`LINES` and `NO COST` are why the detailed view is long: a service can
-contribute a dozen usage types and one dollar. `z` hides the zero-cost lines
-in either view, and the footer always says how many are hidden — a shorter
-table never passes for a shorter bill. `Enter` on a summary row drops back
-into the detailed view filtered to that service.
+**Rows that cost nothing are hidden by default**, in both views: the question
+this screen answers is what you are being charged for. `z` brings them back,
+and the footer always says how many are out of sight — a table quietly shorter
+than the bill would misreport it.
+
+In the summary a service is hidden when its *total* is zero, which also
+catches one whose charge and credit cancel out — not only one whose lines are
+all free. `Enter` on a row drops back into the detailed view filtered to that
+service.
 
 Both the `SHARE` column and the footer total describe **the rows on screen**.
-Under a filter (or with `z` on) that is less than the whole bill, and the
-footer then names the whole-bill total alongside (`total $5.00 of $10.00
-billed`) so neither number can be read as the other. `C` exports whichever
-of the two tables is showing.
-
-The per-resource drill-down (`x`) uses Cost Explorer's resource-level data,
-which AWS keeps for the trailing **14 days** and only when the account has
-opted in (Billing → Cost Management Preferences → "Daily granularity
-resource-level data"). Without it, the overlay says so instead of failing.
+Under a filter (or with the free rows hidden) that is less than the whole bill,
+and the footer then names the whole-bill total alongside (`total $9.95 of
+$11.02 billed`) so neither number can be read as the other. `C` exports
+whichever of the two tables is showing.
 
 | Flag | Default | Description |
 |------|---------|-------------|

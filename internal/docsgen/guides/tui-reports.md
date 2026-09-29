@@ -33,11 +33,11 @@ service's per-resource costs (resource ID/ARN) when the account has
 resource-level data enabled. See the [`bill` command reference](bill.md).
 
 Cost Explorer returns one line per (service, usage type), so most of a real
-bill is usage that carried no charge. `T` folds the table into one row per
-service (total, share of what's shown, line count and how many of those were
-free); `z` hides the zero-cost lines in either view. Both totals describe the
-rows on screen — under a filter the footer names the whole-bill total
-alongside, so neither figure can be read as the other.
+bill is usage that carried no charge. Those rows are hidden by default in both
+views and the footer says how many; `z` shows them. `T` folds the table into
+one row per service with its total and share of what's shown. Both totals
+describe the rows on screen — under a filter the footer names the whole-bill
+total alongside, so neither figure can be read as the other.
 
 > **PAID feature.** Cost Explorer bills **$0.01 per request**, including every
 > automatic refresh. The live screen carries a `PAID` badge and names the

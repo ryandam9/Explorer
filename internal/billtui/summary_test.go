@@ -113,8 +113,9 @@ func TestSummaryToggleBuildsServiceRows(t *testing.T) {
 	if rows[0][3] != "80.0%" {
 		t.Errorf("share = %q, want 80.0%% of the $10.00 shown", rows[0][3])
 	}
-	if rows[0][4] != "2" {
-		t.Errorf("line count = %q, want 2", rows[0][4])
+	if len(rows[0]) != len(summaryColumns) {
+		t.Errorf("row has %d cells, want %d — the summary answers what you pay for, not how many usage types it took",
+			len(rows[0]), len(summaryColumns))
 	}
 
 	// And back: the detail view returns with its own columns.
@@ -160,24 +161,59 @@ func TestHideZeroCostIsCounted(t *testing.T) {
 		line("Amazon EC2", "DataTransfer-In", 0),
 		line("AWS Lambda", "Requests", 0),
 	)
-	if got := m.footerView(); !strings.Contains(got, "2 line(s) carry no cost") {
-		t.Errorf("footer = %q, want the free-line count", got)
-	}
-
-	mm, _ := m.Update(key("z"))
-	m = mm.(Model)
+	// Hidden by default — the screen opens on what is being charged.
 	if len(m.visible) != 1 {
-		t.Fatalf("z left %d lines, want 1", len(m.visible))
+		t.Fatalf("opened with %d lines, want only the charged one", len(m.visible))
 	}
 	if got := m.footerView(); !strings.Contains(got, "hiding 2 line(s)") {
 		t.Errorf("footer = %q, want it to report the 2 hidden lines", got)
 	}
 
-	// The hidden lines come back, so hiding is a view, not a loss.
-	mm, _ = m.Update(key("z"))
+	// z brings them back, so hiding is a view, not a loss.
+	mm, _ := m.Update(key("z"))
 	m = mm.(Model)
 	if len(m.visible) != 3 {
-		t.Errorf("z left %d lines on the way back, want all 3", len(m.visible))
+		t.Fatalf("z left %d lines, want all 3", len(m.visible))
+	}
+	if got := m.footerView(); !strings.Contains(got, "2 line(s) carry no cost") {
+		t.Errorf("footer = %q, want the free-line count", got)
+	}
+}
+
+// The summary lists what costs money. A service whose total is zero — every
+// line free, or a charge and a credit that cancel — is not a row until asked
+// for, and the footer says how many were left out.
+func TestSummaryHidesZeroCostServices(t *testing.T) {
+	m := billModel(t,
+		line("Amazon EC2", "BoxUsage", 5),
+		line("AWS Glue", "Crawler", 0),
+		line("AWS Lambda", "Requests", 0),
+		// Nets to zero without a single zero line: a charge and its credit.
+		line("Amazon S3", "Storage", 2),
+		line("Amazon S3", "Credit", -2),
+	)
+	mm, _ := m.Update(key("T"))
+	m = mm.(Model)
+
+	var names []string
+	for _, r := range m.tbl.Rows() {
+		names = append(names, r[1])
+	}
+	if strings.Join(names, ",") != "Amazon EC2" {
+		t.Errorf("summary shows %v, want only the service that cost something", names)
+	}
+	if m.zeroSvc != 3 {
+		t.Errorf("zeroSvc = %d, want 3 (Glue, Lambda and the netted-out S3)", m.zeroSvc)
+	}
+	if got := m.footerView(); !strings.Contains(got, "hiding") || !strings.Contains(got, "3 services that cost nothing") {
+		t.Errorf("footer = %q, want it to name the 3 hidden services", got)
+	}
+
+	// z shows them again.
+	mm, _ = m.Update(key("z"))
+	m = mm.(Model)
+	if got := len(m.tbl.Rows()); got != 4 {
+		t.Errorf("z showed %d services, want all 4", got)
 	}
 }
 
@@ -252,10 +288,16 @@ func TestSortTotals(t *testing.T) {
 		t.Errorf("service-asc first = %q, want A", m.totals[0].Service)
 	}
 
-	m.sortCol, m.sortAsc = 4, false // LINES, biggest first
+	m.sortCol, m.sortAsc = 2, false // COST, biggest first
 	m.sortTotals()
-	if m.totals[0].Lines != 7 {
-		t.Errorf("lines-desc first = %d, want 7", m.totals[0].Lines)
+	if m.totals[0].Amount != 9 {
+		t.Errorf("cost-desc first = %v, want 9", m.totals[0].Amount)
+	}
+
+	m.sortCol, m.sortAsc = 3, false // SHARE ranks the same as COST
+	m.sortTotals()
+	if m.totals[0].Amount != 9 {
+		t.Errorf("share-desc first = %v, want 9", m.totals[0].Amount)
 	}
 
 	m.sortCol = -1 // natural ranking: untouched
