@@ -39,6 +39,23 @@ var reportCSS string
 //go:embed assets/report.js
 var reportJS string
 
+// reportHTMLFlags is blackfriday's default set with every Smartypants
+// substitution removed. Smartypants is on by default and rewrites the text of
+// a document that is nothing but identifiers and literals:
+//
+//   - SmartypantsFractions turns "122.104.83.64/32" into a typeset fraction,
+//     printing the last octet and the prefix length as superscript over
+//     subscript — which is how a CIDR came to be unreadable;
+//   - SmartypantsDashes and SmartypantsLatexDashes turn "--profile" into an
+//     en dash, so a flag copied out of the report does not run;
+//   - Smartypants itself curls the quotes in ARNs and policy JSON, so those
+//     do not parse when pasted.
+//
+// None of that belongs in a report whose content is meant to be copied
+// verbatim, so the renderer is built explicitly rather than taking the
+// package default.
+const reportHTMLFlags = blackfriday.UseXHTML
+
 type htmlTOCEntry struct {
 	Title  string
 	Anchor string
@@ -77,7 +94,10 @@ type reportHTMLData struct {
 func exportHTML(data fullExport, findings []Finding, generatedAt time.Time) string {
 	md := exportMarkdown(data, findings, generatedAt)
 	rendered := blackfriday.Run([]byte(md),
-		blackfriday.WithExtensions(blackfriday.CommonExtensions|blackfriday.AutoHeadingIDs))
+		blackfriday.WithExtensions(blackfriday.CommonExtensions|blackfriday.AutoHeadingIDs),
+		blackfriday.WithRenderer(blackfriday.NewHTMLRenderer(blackfriday.HTMLRendererParameters{
+			Flags: reportHTMLFlags,
+		})))
 
 	crit, warn, info := countBySeverity(findings)
 	status, tone := findingsStatus(crit, warn, info)

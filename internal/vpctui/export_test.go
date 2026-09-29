@@ -325,3 +325,36 @@ func TestReportTablesDoNotWrapCells(t *testing.T) {
 		t.Error("the script does not measure the counter column, so the pinned ID would be misaligned")
 	}
 }
+
+// The report is a document of identifiers and literals, so the Markdown
+// renderer must not "improve" its punctuation. Blackfriday enables
+// Smartypants by default, which typeset "122.104.83.64/32" as a fraction —
+// superscript 64 over subscript 32 — and does two other things just as bad.
+func TestReportDoesNotTypesetIdentifiers(t *testing.T) {
+	data := exportSnap()
+	data.Snap.SecurityGroups = []SGInfo{{
+		ID: "sg-1", Name: "web", VPCID: "vpc-1",
+		Rules: []SGRule{
+			{Direction: "inbound", Protocol: "TCP", PortRange: "22", Source: "122.104.83.64/32"},
+			{Direction: "inbound", Protocol: "TCP", PortRange: "443", Source: "10.0.0.0/8",
+				Description: `run with --profile "prod"`},
+		},
+	}}
+	html := exportHTML(data, analyzeVPC(data.Snap), time.Date(2026, 6, 9, 12, 0, 0, 0, time.UTC))
+
+	if !strings.Contains(html, "122.104.83.64/32") {
+		t.Error("the CIDR was rewritten; it must survive verbatim")
+	}
+	for _, bad := range []string{
+		"<sup>64</sup>", "&frasl;", "<sub>32</sub>", // fractions
+		"&ndash;", "&mdash;", // dashes: --profile must stay copy-pastable
+		"&ldquo;", "&rdquo;", // curly quotes: ARNs and policy JSON must paste
+	} {
+		if strings.Contains(html, bad) {
+			t.Errorf("report contains %q — Smartypants is rewriting the content", bad)
+		}
+	}
+	if !strings.Contains(html, "--profile") {
+		t.Error("a command flag was rewritten into a dash")
+	}
+}
