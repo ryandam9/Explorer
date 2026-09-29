@@ -157,6 +157,14 @@ th[data-sort]{cursor:pointer;user-select:none}
 th[data-sort]::after{content:" ↕";color:var(--faint);font-size:11px}
 th[data-dir="asc"]::after{content:" ↑";color:var(--accent)}
 th[data-dir="desc"]::after{content:" ↓";color:var(--accent)}
+/* The findings table is prose, not identifiers. Its Issue and Suggested fix
+   columns wrap and are bounded to a readable measure — left to the no-wrap
+   rule above, one sentence would make the table wider than any screen — while
+   the counter and the resource ID beside it still do not break. */
+.tbl.prose table{min-width:0}
+.tbl.prose td:nth-child(n+3){white-space:normal;min-width:30ch;max-width:58ch}
+.tbl.prose td:nth-child(2){font-family:var(--mono);font-size:12.5px}
+
 .tblbar{display:flex;flex-wrap:wrap;gap:8px 12px;align-items:center;justify-content:space-between}
 .filter{font:inherit;font-size:13.5px;padding:5px 9px;border:1px solid var(--line);border-radius:6px;background:var(--surface);color:var(--ink);width:min(100%,300px)}
 .count{font-size:12.5px;color:var(--muted);font-variant-numeric:tabular-nums}

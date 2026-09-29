@@ -635,12 +635,26 @@ func writeFindingGroup(b *strings.Builder, label string, sev Severity, findings 
 	if len(group) == 0 {
 		return
 	}
+	// A table, not a list: the three things you do with a finding — see which
+	// resource it is about, read what is wrong, and read what to do — line up
+	// as columns, so a screen of them can be scanned down rather than read
+	// through.
 	b.WriteString("### " + label + "\n\n")
-	for _, f := range group {
-		b.WriteString(fmt.Sprintf("- **%s** (`%s`) — %s\n", f.Title, f.Resource, f.Detail))
-		if f.Fix != "" {
-			b.WriteString("  - Fix: " + f.Fix + "\n")
+	b.WriteString("| # | Resource | Issue | Suggested fix |\n|---|---|---|---|\n")
+	for i, f := range group {
+		resource := f.Resource
+		if resource == "" {
+			resource = "-"
 		}
+		issue := "**" + mdCell(f.Title) + "**"
+		if f.Detail != "" {
+			issue += " — " + mdCell(f.Detail)
+		}
+		fix := mdCell(f.Fix)
+		if fix == "" {
+			fix = "-"
+		}
+		b.WriteString(fmt.Sprintf("| %d | %s | %s | %s |\n", i+1, mdCell(resource), issue, fix))
 	}
 	b.WriteString("\n")
 }

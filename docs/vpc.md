@@ -327,8 +327,9 @@ a NACL re-association or an endpoint SG swap.
 
 ### Export (`E`)
 
-Writes a self-contained report — a resource-count summary, all findings grouped
-by severity with fixes, and inventory tables (subnets, security groups, route
+Writes a self-contained report — a resource-count summary, every finding in a
+table grouped by severity (**resource · issue · suggested fix**), and
+inventory tables (subnets, security groups, route
 tables, NAT gateways, endpoints, network interfaces) — in three formats sharing
 a basename under the downloads directory as `<vpc-id>-<timestamp>.{md,html,svg}`:
 

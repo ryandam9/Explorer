@@ -192,7 +192,7 @@ func TestExportHTMLStructure(t *testing.T) {
 // screen already and the box would just be furniture.
 func TestExportHTMLFiltersOnlyLongTables(t *testing.T) {
 	long := strings.Repeat("<tr>\n<td>x</td>\n</tr>\n", filterMinRows)
-	got := wrapTables("<table>\n<tbody>\n" + long + "</tbody>\n</table>")
+	got := wrapTables("<table>\n<tbody>\n"+long+"</tbody>\n</table>", "")
 	if !strings.Contains(got, `class="filter"`) {
 		t.Errorf("a %d-row table got no filter box", filterMinRows)
 	}
@@ -201,7 +201,7 @@ func TestExportHTMLFiltersOnlyLongTables(t *testing.T) {
 	}
 
 	short := strings.Repeat("<tr>\n<td>x</td>\n</tr>\n", filterMinRows-1)
-	got = wrapTables("<table>\n<tbody>\n" + short + "</tbody>\n</table>")
+	got = wrapTables("<table>\n<tbody>\n"+short+"</tbody>\n</table>", "")
 	if strings.Contains(got, `class="filter"`) {
 		t.Error("a short table should not get a filter box")
 	}
@@ -356,5 +356,43 @@ func TestReportDoesNotTypesetIdentifiers(t *testing.T) {
 	}
 	if !strings.Contains(html, "--profile") {
 		t.Error("a command flag was rewritten into a dash")
+	}
+}
+
+// Findings are a table, not a list: the three things you do with a finding —
+// see which resource it is about, read what is wrong, read what to do — line
+// up as columns so a screen of them can be scanned down.
+func TestFindingsRenderAsATable(t *testing.T) {
+	data := exportSnap()
+	findings := analyzeVPC(data.Snap)
+	if len(findings) == 0 {
+		t.Fatal("fixture produces no findings")
+	}
+	md := exportMarkdown(data, findings, time.Date(2026, 6, 9, 12, 0, 0, 0, time.UTC))
+
+	if !strings.Contains(md, "| # | Resource | Issue | Suggested fix |") {
+		t.Errorf("findings are not a table:\n%s", md[strings.Index(md, "## Findings"):min(strings.Index(md, "## Findings")+400, len(md))])
+	}
+	if strings.Contains(md, "  - Fix: ") {
+		t.Error("the old bullet list is still being written")
+	}
+	// A finding with no fix still gets a cell, or the row would lose a column.
+	table := "| 1 | sg-web |"
+	if !strings.Contains(md, table) {
+		t.Errorf("no numbered row for the first finding; want a line starting %q", table)
+	}
+
+	// In HTML the prose columns must be allowed to wrap: cells elsewhere are
+	// nowrap, and one sentence per cell would make this table wider than any
+	// screen.
+	html := exportHTML(data, findings, time.Date(2026, 6, 9, 12, 0, 0, 0, time.UTC))
+	if !strings.Contains(html, `<div class="tbl prose">`) {
+		t.Error("the findings table is not marked as prose, so its sentences will not wrap")
+	}
+	if !strings.Contains(html, ".tbl.prose td:nth-child(n+3){white-space:normal") {
+		t.Error("stylesheet does not let the prose columns wrap")
+	}
+	if strings.Contains(html, `<div class="tbl prose">`) && !strings.Contains(html, ".tbl.prose table{min-width:0}") {
+		t.Error("a prose table must not inherit min-width:max-content, or it scrolls instead of wrapping")
 	}
 }

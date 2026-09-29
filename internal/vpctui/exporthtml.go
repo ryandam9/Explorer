@@ -216,7 +216,7 @@ const filterMinRows = 8
 func sectionize(html string) string {
 	locs := h2Re.FindAllStringSubmatchIndex(html, -1)
 	if len(locs) == 0 {
-		return wrapTables(html)
+		return wrapTables(html, "")
 	}
 
 	var b strings.Builder
@@ -225,7 +225,7 @@ func sectionize(html string) string {
 	// page header already names the VPC and when it was generated, and showing
 	// them twice reads like two documents stapled together.
 	if head := strings.TrimSpace(dropMarkdownTitle(html[:locs[0][0]])); head != "" {
-		b.WriteString(head + "\n")
+		b.WriteString(wrapTables(head, "") + "\n")
 	}
 	for i, loc := range locs {
 		end := len(html)
@@ -237,7 +237,7 @@ func sectionize(html string) string {
 		body := html[loc[1]:end]
 		b.WriteString(`<section id="` + anchor + `">` + "\n")
 		b.WriteString(heading + "\n")
-		b.WriteString(wrapTables(body))
+		b.WriteString(wrapTables(body, tableClass(anchor)))
 		b.WriteString("</section>\n")
 	}
 	return b.String()
@@ -253,9 +253,19 @@ func dropMarkdownTitle(html string) string {
 	return mdTitleRe.ReplaceAllString(html, "")
 }
 
+// tableClass marks the tables that hold prose rather than identifiers. The
+// findings table's Issue and Suggested fix columns are sentences: they have to
+// wrap, where an inventory table's cells must not.
+func tableClass(anchor string) string {
+	if strings.HasPrefix(anchor, "findings") {
+		return " prose"
+	}
+	return ""
+}
+
 // wrapTables puts each table in its own scrollable box, with a filter bar when
 // the table is long.
-func wrapTables(html string) string {
+func wrapTables(html, extraClass string) string {
 	return tableRe.ReplaceAllStringFunc(html, func(tbl string) string {
 		rows := countTableRows(tbl)
 		var b strings.Builder
@@ -265,7 +275,7 @@ func wrapTables(html string) string {
 			b.WriteString(`<span class="count">` + plural(rows, "row", "rows") + `</span>`)
 			b.WriteString("</div>\n")
 		}
-		b.WriteString(`<div class="tbl">` + tbl + "</div>")
+		b.WriteString(`<div class="tbl` + extraClass + `">` + tbl + "</div>")
 		return b.String()
 	})
 }
