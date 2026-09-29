@@ -148,31 +148,90 @@ func TestExportHTMLStructure(t *testing.T) {
 	html := exportHTML(data, findings, at)
 
 	for _, want := range []string{
-		"<!DOCTYPE html>",
-		"<title>VPC Report: vpc-1</title>",
-		"VPC Report · vpc-1",
-		"<span class=\"badge\">ap-southeast-2</span>",
-		"Generated 2026-06-09 22:00:00 AEST",
-		"<nav class=\"toc\">",
-		"<a href=\"#subnets-1\">Subnets (1)</a>", // TOC anchor matches blackfriday's heading id
-		"<div class=\"dt-wrap\"><table>",         // tables wrapped for full-width fill + scroll
-		"cdn.datatables.net",                     // DataTables stylesheet/script loaded
-		"new DataTable(t,",                       // resource tables initialized as DataTables
-		"scrollY: '80vh'",                        // long tables scroll within ~80vh instead of paginating
-		"scrollCollapse: true",                   // short tables shrink to content (scrollbar only when tall)
-		"Roboto+Condensed",                       // #212: Roboto Condensed loaded for the table text
-		`--table:"Roboto Condensed"`,             // #212: and applied via the table font var
-		"max-height:80vh",                        // #212: plain/offline tables scroll within ~80vh
-		"position:sticky",                        // #212: header pinned during scroll
-		`<h2 id="architecture">`,                 // architecture section
-		`<div class="layer-toggles"`,             // layer checkbox bar
-		`id="lt-sg"`,                             // security-group toggle
-		`.arch:has(#lt-traffic:not(:checked))`,   // pure-CSS layer toggle (no JS)
-		`<g data-layer="traffic">`,               // the inline SVG carries the layers
+		"<!doctype html>",
+		"<title>VPC report \u00b7 vpc-1</title>",
+		`<b class="mono">vpc-1</b>`,
+		"Region <b>ap-southeast-2</b>",
+		"generated 2026-06-09 22:00:00 AEST",
+		`<nav class="toc"`,
+		`<a href="#subnets-1">Subnets<span class="n">1</span></a>`, // count split out of the link text
+		`<div class="tbl">`,                                        // every table in its own scrolling box
+		`<div class="kpis">`,                                       // headline counts under the header
+		`<section id="subnets-1">`,                                 // headings wrapped into sections
+		`<section class="arch" id="architecture">`,
+		`<div class="layer-toggles"`,
+		`id="lt-sg"`,
+		`id="lt-routing"`, // the new relationship layers are switchable
+		`id="lt-endpoints"`,
+		`id="lt-peering"`,
+		`.arch:has(#lt-traffic:not(:checked))`, // pure-CSS layer toggle (no JS)
+		`<g data-layer="traffic">`,             // the inline SVG carries the layers
+		`prefers-color-scheme: dark`,           // the report has a real dark mode
+		`data-theme="dark"`,
+		`id="themebtn"`,
+		`class="dgtools"`, // the diagram's zoom / reset controls
+		`data-act="reset"`,
 	} {
 		if !strings.Contains(html, want) {
 			t.Errorf("export HTML missing %q", want)
 		}
+	}
+
+	// The report is one self-contained file: no stylesheet, script or font is
+	// fetched over the network, so it reads the same offline and years later.
+	for _, forbidden := range []string{
+		"cdn.datatables.net", "code.jquery.com", "fonts.googleapis.com", "<link ",
+	} {
+		if strings.Contains(html, forbidden) {
+			t.Errorf("export HTML reaches the network: found %q", forbidden)
+		}
+	}
+}
+
+// A long table gets a filter box; a short one does not, since it is all on
+// screen already and the box would just be furniture.
+func TestExportHTMLFiltersOnlyLongTables(t *testing.T) {
+	long := strings.Repeat("<tr>\n<td>x</td>\n</tr>\n", filterMinRows)
+	got := wrapTables("<table>\n<tbody>\n" + long + "</tbody>\n</table>")
+	if !strings.Contains(got, `class="filter"`) {
+		t.Errorf("a %d-row table got no filter box", filterMinRows)
+	}
+	if !strings.Contains(got, plural(filterMinRows, "row", "rows")) {
+		t.Errorf("row count missing from the filter bar:\n%s", got)
+	}
+
+	short := strings.Repeat("<tr>\n<td>x</td>\n</tr>\n", filterMinRows-1)
+	got = wrapTables("<table>\n<tbody>\n" + short + "</tbody>\n</table>")
+	if strings.Contains(got, `class="filter"`) {
+		t.Error("a short table should not get a filter box")
+	}
+	if !strings.Contains(got, `<div class="tbl">`) {
+		t.Error("every table still goes in a scroll box")
+	}
+}
+
+// Content before the first heading (the intro line, the partial-data notice)
+// must survive sectionizing rather than being swallowed with the first section.
+func TestSectionizeKeepsPreamble(t *testing.T) {
+	in := `<p>intro</p>` + "\n" + `<h2 id="a">A</h2>` + "\n<p>body</p>\n"
+	got := sectionize(in)
+	if !strings.Contains(got, "<p>intro</p>") {
+		t.Errorf("preamble lost:\n%s", got)
+	}
+	if !strings.Contains(got, `<section id="a">`) || !strings.Contains(got, "<p>body</p>") {
+		t.Errorf("section not built:\n%s", got)
+	}
+	if strings.Count(got, "<section") != strings.Count(got, "</section>") {
+		t.Errorf("unbalanced sections:\n%s", got)
+	}
+}
+
+// A report with no headings at all (an empty VPC) must still render its tables
+// rather than losing the content to a missing-section path.
+func TestSectionizeWithoutHeadings(t *testing.T) {
+	got := sectionize("<p>only a paragraph</p>")
+	if !strings.Contains(got, "only a paragraph") {
+		t.Errorf("content dropped when there are no headings: %q", got)
 	}
 }
 

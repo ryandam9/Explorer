@@ -674,9 +674,11 @@ func writeExport(data fullExport, findings []Finding, now time.Time) (mdPath, ht
 	if err := os.WriteFile(htmlPath, []byte(exportHTML(data, findings, now)), 0o644); err != nil {
 		return mdPath, "", "", err
 	}
-	// Also write the architecture diagram as a standalone SVG for reuse.
+	// Also write the architecture diagram as a standalone SVG for reuse — with
+	// the stylesheet inlined, since outside the report there is nothing to
+	// resolve its classes against.
 	svgPath = filepath.Join(dir, base+".svg")
-	if err := os.WriteFile(svgPath, []byte(vpcDiagramSVG(data)), 0o644); err != nil {
+	if err := os.WriteFile(svgPath, []byte(standaloneDiagramSVG(data)), 0o644); err != nil {
 		return mdPath, htmlPath, "", err
 	}
 	return mdPath, htmlPath, svgPath, nil

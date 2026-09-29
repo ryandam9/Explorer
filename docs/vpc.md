@@ -333,18 +333,55 @@ tables, NAT gateways, endpoints, network interfaces) — in three formats sharin
 a basename under the downloads directory as `<vpc-id>-<timestamp>.{md,html,svg}`:
 
 - **Markdown** (`.md`) — ideal for pasting into a support case or runbook.
-- **HTML** (`.html`) — styled, with a sticky table-of-contents and searchable,
-  paginated resource tables; leads with the architecture diagram and a checkbox
-  bar to **toggle diagram layers** — Subnets, Traffic & IGW, NAT gateways,
-  Security groups, Detail labels — implemented in pure CSS (`:has()`), so it
-  works offline with no JavaScript.
-- **SVG** (`.svg`) — a deterministic **architecture diagram**: the internet and
-  its gateway, the VPC as a container, availability-zone columns of subnets
-  (wrapping into lanes when an AZ has many) colour-coded public / private /
-  isolated by their default route, NAT gateways drawn in their subnet,
-  per-subnet security-group badges, and arrows for the traffic-flow paths
-  (internet ⇄ IGW, public → IGW, private → NAT → IGW). Pure function of the
-  snapshot — no AI.
+- **HTML** (`.html`) — a single self-contained page: a header naming the VPC,
+  a row of headline counts, the architecture diagram, a sticky table of
+  contents, and every inventory table in its own scrolling box with sortable
+  columns and a filter. It has a light and a dark theme (following the system,
+  with a toggle that remembers your choice) and prints cleanly. Nothing is
+  fetched over the network — no CDN stylesheet, script or font — so a report
+  mailed to a colleague or opened offline looks exactly as it did when it was
+  written.
+- **SVG** (`.svg`) — the same **architecture diagram** as a standalone file,
+  with the stylesheet embedded so it keeps its colours (and its dark mode)
+  outside the report.
+
+#### The architecture diagram
+
+Drawn the way an AWS architecture diagram is: a dashed AWS Cloud boundary
+carrying the region, the VPC inside it, dashed availability-zone columns (each
+wrapping into lanes when the AZ has many subnets) and a card per subnet,
+colour-coded public / private / isolated **by its default route**.
+
+The point of the diagram is the relationships, since the tables below it
+already list every resource. So each subnet card carries what is bound to it —
+its route table, its network ACL, the interface endpoints with an ENI in it, a
+NAT gateway living in it, its ENIs' security groups — and everything the VPC
+reaches out to sits on a rail below it: internet gateway, gateway endpoints,
+peerings, transit gateways, VPN gateways. **A line means a route exists**: a
+dashed line from a subnet to a rail node means that subnet's route table has a
+route to it. An attachment nothing routes to is still drawn, without a line —
+"attached but unrouted" is worth seeing.
+
+In the HTML report the diagram is explorable, which is the whole reason it is
+an HTML page rather than a picture:
+
+- **Hover** (or tab to) any box — a subnet, a route table chip, a NAT gateway,
+  a peering — and everything not connected to it dims, leaving that one
+  relationship on screen. Hovering a route-table chip lights every subnet that
+  table governs.
+- **Click** a box to jump to its row in the inventory below, which flashes so
+  the eye lands on it: the diagram says what connects to what, the table says
+  everything else about it.
+- **Drag** to pan, **double-click** or ctrl/⌘+wheel to zoom, and *Reset* to go
+  back. A bare wheel still scrolls the page.
+
+All of it is additive — with JavaScript off the diagram is the same static
+picture, and every box still carries a tooltip naming it.
+
+A checkbox bar above the diagram toggles each layer — Subnets, Detail labels,
+Internet path, NAT, Route tables, Endpoints, Peerings & gateways, Network ACLs,
+Security groups — in pure CSS (`:has()`), so the layers work with JavaScript
+off. The diagram is a pure function of the snapshot: deterministic, no AI.
 
 The status bar shows the paths.
 
