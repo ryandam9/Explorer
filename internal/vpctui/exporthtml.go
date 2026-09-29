@@ -39,6 +39,23 @@ var reportCSS string
 //go:embed assets/report.js
 var reportJS string
 
+// reportHTMLFlags is blackfriday's default set with every Smartypants
+// substitution removed. Smartypants is on by default and rewrites the text of
+// a document that is nothing but identifiers and literals:
+//
+//   - SmartypantsFractions turns "122.104.83.64/32" into a typeset fraction,
+//     printing the last octet and the prefix length as superscript over
+//     subscript — which is how a CIDR came to be unreadable;
+//   - SmartypantsDashes and SmartypantsLatexDashes turn "--profile" into an
+//     en dash, so a flag copied out of the report does not run;
+//   - Smartypants itself curls the quotes in ARNs and policy JSON, so those
+//     do not parse when pasted.
+//
+// None of that belongs in a report whose content is meant to be copied
+// verbatim, so the renderer is built explicitly rather than taking the
+// package default.
+const reportHTMLFlags = blackfriday.UseXHTML
+
 type htmlTOCEntry struct {
 	Title  string
 	Anchor string
@@ -77,7 +94,10 @@ type reportHTMLData struct {
 func exportHTML(data fullExport, findings []Finding, generatedAt time.Time) string {
 	md := exportMarkdown(data, findings, generatedAt)
 	rendered := blackfriday.Run([]byte(md),
-		blackfriday.WithExtensions(blackfriday.CommonExtensions|blackfriday.AutoHeadingIDs))
+		blackfriday.WithExtensions(blackfriday.CommonExtensions|blackfriday.AutoHeadingIDs),
+		blackfriday.WithRenderer(blackfriday.NewHTMLRenderer(blackfriday.HTMLRendererParameters{
+			Flags: reportHTMLFlags,
+		})))
 
 	crit, warn, info := countBySeverity(findings)
 	status, tone := findingsStatus(crit, warn, info)
@@ -196,7 +216,7 @@ const filterMinRows = 8
 func sectionize(html string) string {
 	locs := h2Re.FindAllStringSubmatchIndex(html, -1)
 	if len(locs) == 0 {
-		return wrapTables(html)
+		return wrapTables(html, "")
 	}
 
 	var b strings.Builder
@@ -205,7 +225,7 @@ func sectionize(html string) string {
 	// page header already names the VPC and when it was generated, and showing
 	// them twice reads like two documents stapled together.
 	if head := strings.TrimSpace(dropMarkdownTitle(html[:locs[0][0]])); head != "" {
-		b.WriteString(head + "\n")
+		b.WriteString(wrapTables(head, "") + "\n")
 	}
 	for i, loc := range locs {
 		end := len(html)
@@ -217,7 +237,7 @@ func sectionize(html string) string {
 		body := html[loc[1]:end]
 		b.WriteString(`<section id="` + anchor + `">` + "\n")
 		b.WriteString(heading + "\n")
-		b.WriteString(wrapTables(body))
+		b.WriteString(wrapTables(body, tableClass(anchor)))
 		b.WriteString("</section>\n")
 	}
 	return b.String()
@@ -233,9 +253,19 @@ func dropMarkdownTitle(html string) string {
 	return mdTitleRe.ReplaceAllString(html, "")
 }
 
+// tableClass marks the tables that hold prose rather than identifiers. The
+// findings table's Issue and Suggested fix columns are sentences: they have to
+// wrap, where an inventory table's cells must not.
+func tableClass(anchor string) string {
+	if strings.HasPrefix(anchor, "findings") {
+		return " prose"
+	}
+	return ""
+}
+
 // wrapTables puts each table in its own scrollable box, with a filter bar when
 // the table is long.
-func wrapTables(html string) string {
+func wrapTables(html, extraClass string) string {
 	return tableRe.ReplaceAllStringFunc(html, func(tbl string) string {
 		rows := countTableRows(tbl)
 		var b strings.Builder
@@ -245,7 +275,7 @@ func wrapTables(html string) string {
 			b.WriteString(`<span class="count">` + plural(rows, "row", "rows") + `</span>`)
 			b.WriteString("</div>\n")
 		}
-		b.WriteString(`<div class="tbl">` + tbl + "</div>")
+		b.WriteString(`<div class="tbl` + extraClass + `">` + tbl + "</div>")
 		return b.String()
 	})
 }
