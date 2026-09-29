@@ -199,18 +199,22 @@ footer{margin-top:40px;padding-top:14px;border-top:1px solid var(--line);color:v
 .vpcd .t-chip{font:600 10.5px var(--sans)}
 .vpcd .t-legend{font-size:11.5px;fill:var(--muted)}
 .vpcd .canvas{fill:var(--surface)}
-.vpcd .cloud{fill:none;stroke:var(--line);stroke-width:1.5;stroke-dasharray:7 5}
-.vpcd .vpc{fill:var(--surface);stroke:var(--accent);stroke-width:1.5}
+/* Borders carry the structure of the diagram, so they are drawn in the text
+   greys rather than in --line. --line is a hairline meant to separate rows in
+   a dense table against a flat background; at diagram scale, with a lot of
+   white around it, the same colour disappears. */
+.vpcd .cloud{fill:none;stroke:var(--muted);stroke-width:1.5;stroke-dasharray:7 5}
+.vpcd .vpc{fill:var(--surface);stroke:var(--accent);stroke-width:2}
 .vpcd .vpcband{fill:var(--accent-soft);stroke:none}
-.vpcd .az{fill:none;stroke:var(--line);stroke-width:1;stroke-dasharray:4 4}
+.vpcd .az{fill:none;stroke:var(--faint);stroke-width:1.25;stroke-dasharray:4 4}
 .vpcd .azband{fill:var(--surface-2);stroke:none}
-.vpcd .node{fill:var(--surface);stroke:var(--line);stroke-width:1}
-.vpcd .pub .box{fill:var(--pub-soft);stroke:var(--pub)}
-.vpcd .priv .box{fill:var(--priv-soft);stroke:var(--priv)}
-.vpcd .iso .box{fill:var(--iso-soft);stroke:var(--iso);stroke-dasharray:5 4}
+.vpcd .node{fill:var(--surface);stroke:var(--muted);stroke-width:1.25}
+.vpcd .pub .box{fill:var(--pub-soft);stroke:var(--pub);stroke-width:1.5}
+.vpcd .priv .box{fill:var(--priv-soft);stroke:var(--priv);stroke-width:1.5}
+.vpcd .iso .box{fill:var(--iso-soft);stroke:var(--iso);stroke-width:1.5;stroke-dasharray:5 4}
 .vpcd .pub .t-tag{fill:var(--pub)} .vpcd .priv .t-tag{fill:var(--priv)} .vpcd .iso .t-tag{fill:var(--iso)}
-.vpcd .edge{fill:var(--edge-soft);stroke:var(--edge);stroke-width:1}
-.vpcd .chip{fill:var(--surface);stroke:var(--muted);stroke-width:1}
+.vpcd .edge{fill:var(--edge-soft);stroke:var(--edge);stroke-width:1.5}
+.vpcd .chip{fill:var(--surface);stroke:var(--muted);stroke-width:1.25}
 .vpcd .chip.nat{fill:var(--edge-soft);stroke:var(--edge)}
 .vpcd .chip.ep{fill:var(--accent-soft);stroke:var(--accent)}
 .vpcd .chip.rt{fill:var(--surface-2);stroke:var(--muted)}
@@ -221,7 +225,7 @@ footer{margin-top:40px;padding-top:14px;border-top:1px solid var(--line);color:v
 .vpcd .flow.assoc{stroke:var(--faint);stroke-width:1;stroke-dasharray:4 3}
 .vpcd .flow.peer{stroke:var(--accent);stroke-dasharray:6 4}
 .vpcd .head-m{fill:var(--muted)}
-.vpcd .swatch{stroke-width:1}
+.vpcd .swatch{stroke-width:1.5}
 @media (max-width:900px){
   .layout{grid-template-columns:minmax(0,1fr);gap:20px}
   nav.toc{position:static;display:flex;overflow-x:auto;gap:4px;max-height:none;padding-bottom:4px}
