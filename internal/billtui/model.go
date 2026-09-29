@@ -73,16 +73,14 @@ var columns = []table.Column{
 	{Title: "CHANGE", Width: 11},
 }
 
-// summaryColumns of the per-service rollup ("T"). LINES and NO COST are what
-// explain the detailed view's length: a service can contribute forty usage
-// types and one dollar.
+// summaryColumns of the per-service rollup ("T"): what you are paying for and
+// how much of the bill it is, and nothing else. The usage-type counts behind
+// each service are a property of the detailed view, which is one keypress away.
 var summaryColumns = []table.Column{
 	{Title: "#", Width: 5},
-	{Title: "SERVICE", Width: 40},
+	{Title: "SERVICE", Width: 44},
 	{Title: "COST", Width: 14},
 	{Title: "SHARE", Width: 9},
-	{Title: "LINES", Width: 8},
-	{Title: "NO COST", Width: 9},
 }
 
 // Model is the live bill TUI.
@@ -97,16 +95,20 @@ type Model struct {
 
 	bill     *billing.Bill
 	visible  []billing.Line
+	filtered []billing.Line     // matched the filter, before the zero-cost drop
 	deltas   map[string]float64 // line key → amount change vs previous fetch
 	fetching bool
 	// summary swaps the usage-type detail for a per-service rollup ("T");
-	// hideZero drops the lines that accrued usage but no cost ("z").
+	// hideZero drops what carries no cost ("z"): the free usage-type lines in
+	// the detailed view, and additionally any service that nets to zero in the
+	// summary — a service can hold a charge and a credit that cancel out.
 	// zeroCount counts those lines before they're dropped, so the footer can
 	// say what hiding them removed instead of silently shortening the table.
 	summary   bool
 	hideZero  bool
 	totals    []ServiceTotal
 	zeroCount int
+	zeroSvc   int // services hidden from the summary for netting to zero
 	fetchErr  string
 	updated   time.Time
 	timerID   int
@@ -164,6 +166,11 @@ func New(ctx context.Context, api billing.API, start, end time.Time, label strin
 		label:    label,
 		profile:  profile,
 		fetching: true,
+		// A real bill is mostly metered-but-free usage, so the zero-cost rows
+		// start hidden: the question on opening this screen is what is being
+		// charged. "z" brings them back, and the footer always says how many
+		// are out of sight, so nothing is hidden silently.
+		hideZero: true,
 		tbl:      tbl,
 		filter:   fi,
 		sortCol:  -1,
@@ -515,12 +522,11 @@ func (m *Model) exportCSV() {
 		name, header, rows := "bill", []string{"Service", "UsageType", "Usage", "Unit", "Cost", "Currency"}, [][]string{}
 		if m.summary {
 			name = "bill-summary"
-			header = []string{"Service", "Cost", "Currency", "Lines", "ZeroCostLines"}
+			header = []string{"Service", "Cost", "Currency"}
 			for _, t := range m.totals {
 				rows = append(rows, []string{
 					t.Service,
 					strconv.FormatFloat(t.Amount, 'f', -1, 64), currency,
-					strconv.Itoa(t.Lines), strconv.Itoa(t.Zero),
 				})
 			}
 		} else {
@@ -552,6 +558,7 @@ func (m *Model) rebuild() {
 	// Counted before the drop so the footer can report what "z" is hiding
 	// rather than leaving a shorter table unexplained.
 	m.zeroCount = countZeroCost(lines)
+	m.filtered = lines
 	if m.hideZero {
 		lines = dropZeroCost(lines)
 	}
@@ -598,7 +605,25 @@ func (m *Model) rebuild() {
 // the detailed view shows, so the two always describe the same subset of the
 // bill.
 func (m *Model) rebuildSummary() {
-	m.totals = summarizeByService(m.visible)
+	// Rolled up from everything that matched the filter, free lines included:
+	// they add nothing to a total, and starting from them is what lets the
+	// count of hidden services be the true one. Dropping free lines first
+	// would make a service that is entirely free disappear before it could be
+	// counted — and would still leave a $0.00 row for a service whose charge
+	// and credit cancel out.
+	m.totals = summarizeByService(m.filtered)
+	m.zeroSvc = 0
+	if m.hideZero {
+		kept := make([]ServiceTotal, 0, len(m.totals))
+		for _, t := range m.totals {
+			if t.Amount == 0 {
+				m.zeroSvc++
+				continue
+			}
+			kept = append(kept, t)
+		}
+		m.totals = kept
+	}
 	m.sortTotals()
 
 	cols := append([]table.Column(nil), summaryColumns...)
@@ -615,17 +640,11 @@ func (m *Model) rebuildSummary() {
 	total := totalOf(m.totals)
 	rows := make([]table.Row, 0, len(m.totals))
 	for i, t := range m.totals {
-		zero := ""
-		if t.Zero > 0 {
-			zero = strconv.Itoa(t.Zero)
-		}
 		rows = append(rows, table.Row{
 			strconv.Itoa(i + 1),
 			t.Service,
 			billing.FormatAmount(t.Amount, currency),
 			fmt.Sprintf("%.1f%%", shareOf(t.Amount, total)),
-			strconv.Itoa(t.Lines),
-			zero,
 		})
 	}
 	m.tbl.SetRows(rows)
@@ -635,25 +654,19 @@ func (m *Model) rebuildSummary() {
 }
 
 // sortTotals orders the rollup; col -1 keeps summarizeByService's cost-
-// descending ranking. Column indices match summaryColumns (1=SERVICE …
-// 5=NO COST); column 0 ("#") is positional and never a sort target.
+// descending ranking. Column indices match summaryColumns (1=SERVICE, 2=COST,
+// 3=SHARE); column 0 ("#") is positional and never a sort target.
 func (m *Model) sortTotals() {
 	col, asc := m.sortCol, m.sortAsc
 	if col <= 0 {
 		return
 	}
 	less := func(a, b ServiceTotal) bool {
-		switch col {
-		case 1:
+		if col == 1 {
 			return a.Service < b.Service
-		case 4:
-			return a.Lines < b.Lines
-		case 5:
-			return a.Zero < b.Zero
-		default:
-			// COST and SHARE rank identically: share is cost over one total.
-			return a.Amount < b.Amount
 		}
+		// COST and SHARE rank identically: share is cost over one total.
+		return a.Amount < b.Amount
 	}
 	sort.SliceStable(m.totals, func(i, j int) bool {
 		if asc {

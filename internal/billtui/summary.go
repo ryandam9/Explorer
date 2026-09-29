@@ -1,6 +1,7 @@
 package billtui
 
 import (
+	"fmt"
 	"sort"
 
 	"github.com/ryandam9/aws_explorer/internal/billing"
@@ -99,4 +100,13 @@ func countZeroCost(lines []billing.Line) int {
 		}
 	}
 	return n
+}
+
+// plural renders a count with the right noun ("1 free line", "3 free lines"),
+// so the footer reads as a sentence rather than as a debug counter.
+func plural(n int, one, many string) string {
+	if n == 1 {
+		return "1 " + one
+	}
+	return fmt.Sprintf("%d %s", n, many)
 }

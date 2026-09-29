@@ -40,7 +40,7 @@ per-screen guides list the rest.
 | `x` | Bill TUI | Per-resource cost breakdown |
 | `u` | Bill TUI | Refresh now (paid request) |
 | `T` | Bill TUI | Per-service summary with totals |
-| `z` | Bill TUI | Hide the lines that carry no cost |
+| `z` | Bill TUI | Show the rows that cost nothing (hidden by default) |
 
 See each TUI's own guide for the complete list:
 [Summary](guide-summary.md) · [VPC explorer](guide-vpc.md) ·

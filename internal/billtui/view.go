@@ -154,11 +154,15 @@ func (m Model) footerView() string {
 			Foreground(lipgloss.Color(ui.ColorText())).Render(text)
 	}
 
+	// What is hidden is always said out loud: the zero rows are hidden by
+	// default, and a table quietly shorter than the bill would misreport it.
 	var hints []string
 	switch {
-	case m.zeroCount == 0:
-	case m.hideZero:
+	case m.summary && m.hideZero && m.zeroSvc > 0:
+		hints = append(hints, "hiding "+plural(m.zeroSvc, "service", "services")+" that cost nothing — z shows them")
+	case m.hideZero && m.zeroCount > 0:
 		hints = append(hints, fmt.Sprintf("hiding %d line(s) with no cost — z shows them", m.zeroCount))
+	case m.zeroCount == 0:
 	case m.summary:
 		hints = append(hints, fmt.Sprintf("%d line(s) carry no cost — z hides them", m.zeroCount))
 	default:
@@ -256,10 +260,11 @@ const billAboutText = "This is the live bill — your account's actual cost from
 	"In --tui mode the screen re-fetches on a fixed interval; a Δ column shows " +
 	"what each line moved since the last refresh. Press x for a per-resource " +
 	"breakdown of a service, u to refresh now, / to filter and C to export.\n\n" +
-	"A real bill arrives as hundreds of usage-type lines, most of them free: " +
-	"press T for one row per service with its total and share, and z to hide " +
-	"the lines that carry no cost. Both totals describe the rows on screen, so " +
-	"a filtered table never reports the whole bill's figure.\n\n" +
+	"A real bill arrives as hundreds of usage-type lines, most of them free, so " +
+	"the rows that cost nothing start hidden and the footer says how many; z " +
+	"shows them. Press T for one row per service with its total and share. Both " +
+	"totals describe the rows on screen, so a filtered table never reports the " +
+	"whole bill's figure.\n\n" +
 	"Note: Cost Explorer is a paid API — every request (including each automatic " +
 	"refresh) costs $0.01. Press ? for the full list of keyboard shortcuts."
 
@@ -394,8 +399,8 @@ func (m Model) helpOverlay() string {
 	rows := []struct{ key, action string }{
 		{"↑/↓, j/k", "Navigate bill lines"},
 		{"Enter", "Open the detail overlay for the selected line (in the summary: filter down to that service's lines)"},
-		{"T", "Toggle the per-service summary — one row per service with its total, share and line count"},
-		{"z", "Hide / show the lines that accrued usage but no cost"},
+		{"T", "Toggle the per-service summary — one row per service with its total and share of the bill"},
+		{"z", "Show / hide the rows that cost nothing (hidden by default)"},
 		{"x", "Per-resource breakdown for the selected service (needs resource-level data enabled)"},
 		{"u", "Refresh now (PAID — one $0.01 Cost Explorer request)"},
 		{"/", "Quick filter (matches service, usage type, unit)"},
