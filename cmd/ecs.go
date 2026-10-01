@@ -19,7 +19,7 @@ var ecsStoppedCluster string
 // ecsCmd groups ECS-specific subcommands.
 var ecsCmd = &cobra.Command{
 	Use:   "ecs",
-	Short: "ECS triage helpers",
+	Short: "Triage helpers for ECS",
 	Long:  `ECS-specific subcommands. Currently: "stopped" triages recently stopped tasks.`,
 }
 

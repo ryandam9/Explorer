@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/charmbracelet/fang"
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
 
@@ -127,9 +128,28 @@ Run "aws_explorer config init" to write a starter file.`,
 	},
 }
 
-// Execute adds all child commands to the root command and sets flags appropriately.
+// Execute runs the CLI through Fang, which styles the help, usage and error
+// pages for all 40-odd commands without each one having to format anything
+// itself.
+//
+// Two of its features are turned off deliberately:
+//
+//   - the version string. Fang would rebuild it from the Go build info, and
+//     ours already carries the commit and the build date, set in init().
+//   - the manpage command. `aws_explorer docs --format man` already writes the
+//     whole command tree (see `make man`); a second, hidden way to produce one
+//     page to stdout is a thing to explain, not a feature.
+//
+// Fang returns the command's own error untouched, so a command that asks for a
+// specific exit code — audit --fail-on returns 2 — still gets it in main.
+// It does set SilenceErrors, printing the error itself in its own style, which
+// is why nothing here prints one.
 func Execute() error {
-	return rootCmd.Execute()
+	return fang.Execute(
+		context.Background(), rootCmd,
+		fang.WithoutVersion(),
+		fang.WithoutManpage(),
+	)
 }
 
 // applyGlobalAWSOverrides applies the persistent CLI auth and region flags
@@ -209,15 +229,15 @@ func init() {
 
 	// Define global flags
 	rootCmd.PersistentFlags().StringVar(&cfgFile, "config", "", "config file (default: ./config.yaml, then the user config dir, then built-in defaults)")
-	rootCmd.PersistentFlags().StringVar(&awsProfile, "profile", "", "AWS named profile (overrides aws.profile in config)")
+	rootCmd.PersistentFlags().StringVar(&awsProfile, "profile", "", "Named AWS profile (overrides aws.profile in config)")
 	rootCmd.PersistentFlags().StringVar(&awsAuthMethod, "auth-method", "", "auth method: auto, profile, env, static, sts (overrides aws.authMethod in config)")
-	rootCmd.PersistentFlags().StringVar(&awsRoleARN, "role-arn", "", "IAM role ARN to assume via STS (sets auth method to sts)")
+	rootCmd.PersistentFlags().StringVar(&awsRoleARN, "role-arn", "", "Assume this IAM role ARN via STS (sets auth method to sts)")
 	rootCmd.PersistentFlags().StringVarP(&awsRegion, "region", "r", "", "scan only this region (overrides aws.regions, --all-regions and region filters)")
 	rootCmd.PersistentFlags().StringVarP(&outputFormat, "output", "o", "table", "output format: "+output.FormatList())
 	rootCmd.PersistentFlags().BoolVar(&noHeader, "no-header", false, "omit the header row in table and csv output")
 	rootCmd.PersistentFlags().BoolVar(&allRegions, "all-regions", false, "scan all available AWS regions")
-	rootCmd.PersistentFlags().BoolVar(&uiNerdFont, "nerd-font", false, "TUI: use Nerd Font icons (overrides ui.nerdFont; needs a Nerd Font in your terminal)")
-	rootCmd.PersistentFlags().BoolVar(&uiPaintBackground, "paint-background", false, "TUI: fill the screen with the theme's background colour (overrides ui.paintBackground)")
+	rootCmd.PersistentFlags().BoolVar(&uiNerdFont, "nerd-font", false, "Use Nerd Font icons in the TUIs (overrides ui.nerdFont; needs a Nerd Font in your terminal)")
+	rootCmd.PersistentFlags().BoolVar(&uiPaintBackground, "paint-background", false, "Paint the TUI background with the theme's colour (overrides ui.paintBackground)")
 
 	// Shell completion for flag values.
 	_ = rootCmd.RegisterFlagCompletionFunc("output",

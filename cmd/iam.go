@@ -20,7 +20,7 @@ import (
 
 var iamCmd = &cobra.Command{
 	Use:   "iam",
-	Short: "IAM / access debugging helpers",
+	Short: "Access and IAM debugging helpers",
 	Long: `Helpers for the most common AWS support question: "why am I denied?".
 
 Currently: decode — turn an "Encoded authorization failure message" blob into
