@@ -38,8 +38,9 @@ var (
 )
 
 var relatedCmd = &cobra.Command{
-	Use:   "related <arn-or-id>",
-	Short: "Related resources — what a resource uses and what uses it",
+	Use:         "related <arn-or-id>",
+	Short:       "Related resources — what a resource uses and what uses it",
+	Annotations: map[string]string{extraFormatsAnnotation: "tree"},
 	Long: `Related shows everything linked to a resource, in both directions:
 
   Depends on →   what the resource uses (a Lambda's execution role, a volume's
@@ -114,6 +115,7 @@ This generalizes 'whereused' (which answers only the "used by" direction).`,
   aws_explorer related sg-0abc123 -o json | jq '.used_by'
   aws_explorer related sg-0abc123 -o csv --no-header > links.csv
   aws_explorer related my-fn -o ndjson
+  aws_explorer related my-fn --depth 2 -o tree          # the hops, as a tree
   aws_explorer related my-fn --depth 2 --format mermaid > graph.md
   aws_explorer related my-fn --depth 2 --format dot | dot -Tpng -o graph.png
 

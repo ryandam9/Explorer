@@ -16,8 +16,9 @@ import (
 )
 
 var whereUsedCmd = &cobra.Command{
-	Use:   "whereused <arn-or-id>",
-	Short: `Where-used / blast radius — "can I delete this?"`,
+	Use:         "whereused <arn-or-id>",
+	Annotations: map[string]string{extraFormatsAnnotation: "tree"},
+	Short:       `Where-used / blast radius — "can I delete this?"`,
 	Long: `Whereused answers "can I delete this?" for the resources people actually ask
 about: IAM roles, KMS keys, ACM certificates and security groups. It scans the
 account for the linking fields the inventory does not keep — a Lambda's
@@ -45,6 +46,9 @@ This is the CLI generalization of the summary TUI's 'x' cross-reference.`,
 
   # What is this security group attached to?
   aws_explorer whereused sg-0abc123 -r eu-west-1
+
+  # Grouped by service, as a tree
+  aws_explorer whereused sg-0abc123 -o tree
 
   # Machine-readable
   aws_explorer whereused sg-0abc123 -o json | jq '.references'`,
