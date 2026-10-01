@@ -62,7 +62,7 @@ delete operations.`,
 }
 
 func init() {
-	s3Cmd.Flags().StringVarP(&s3Bucket, "bucket", "b", "", "S3 bucket to explore")
+	s3Cmd.Flags().StringVarP(&s3Bucket, "bucket", "b", "", "Name of the S3 bucket to explore")
 	s3Cmd.Flags().StringVarP(&s3Prefix, "prefix", "p", "", "Initial S3 prefix")
 	s3Cmd.Flags().StringVar(&s3Theme, "theme", defaultThemeName, "Color theme ("+strings.Join(ui.ThemeNames(), ", ")+")")
 	s3Cmd.Flags().BoolVar(&s3AllowDelete, "allow-delete", false, "Enable delete operations (guarded by confirmation)")

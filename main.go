@@ -37,7 +37,8 @@ func main() {
 
 	cmd.SetDefaultConfig(defaultConfig)
 	if err := cmd.Execute(); err != nil {
-		// Cobra has already printed the error (and usage where relevant).
+		// Fang has already printed the error, styled, and suppressed the usage
+		// dump that used to follow it.
 		// A command may request a specific exit code (e.g. audit --fail-on
 		// signals findings with code 2) via an error implementing ExitCode.
 		code := 1
