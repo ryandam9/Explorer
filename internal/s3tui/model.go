@@ -930,6 +930,16 @@ func (m *Model) fetchGzipPreview(key string) tea.Cmd {
 		if err != nil {
 			return objectPreviewMsg{key: key, err: err}
 		}
+		// A compressed PDF ("report.pdf.gz") is still a PDF: extract its
+		// text rather than letting the NUL-byte check in decompressedPreview
+		// write it off as unreadable binary.
+		if looksLikePDF(innerName(key)) || looksLikePDFContent(out) {
+			text, perr := pdfPreviewContent(out, truncated, errPDFTruncated)
+			if perr != nil {
+				return objectPreviewMsg{key: key, err: perr}
+			}
+			return objectPreviewMsg{key: key, content: text}
+		}
 		return objectPreviewMsg{key: key, content: decompressedPreview(out, truncated, looksLikeCSV(innerName(key)))}
 	}
 }
@@ -997,13 +1007,10 @@ func (m *Model) fetchPDFPreview(key string) tea.Cmd {
 		if err != nil {
 			return objectPreviewMsg{key: key, err: err}
 		}
-		if truncated {
-			return objectPreviewMsg{key: key, err: errPDFTruncated}
-		}
 		if len(data) == 0 {
 			return objectPreviewMsg{key: key, content: "Empty object."}
 		}
-		text, perr := pdfText(data)
+		text, perr := pdfPreviewContent(data, truncated, errPDFTruncated)
 		if perr != nil {
 			return objectPreviewMsg{key: key, err: perr}
 		}

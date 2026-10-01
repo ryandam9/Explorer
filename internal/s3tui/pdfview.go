@@ -38,9 +38,43 @@ const pdfPageCap = 200
 var errPDFTruncated = errors.New(
 	"PDF is larger than the preview window — press D to download it and open it in a reader")
 
+// errPDFMemberTooLarge explains why a PDF inside an archive cannot be
+// previewed. Same reason as errPDFTruncated — the xref lives at the end of the
+// file — but a different lever: the archive is already in memory, it is the
+// per-member extraction window that was hit, so the archive is what to
+// download.
+var errPDFMemberTooLarge = fmt.Errorf(
+	"PDF is larger than the %d MB per-file window — press Esc, then D to download the archive and open it in a reader",
+	memberPreviewCap>>20)
+
 // looksLikePDF reports whether a key names a PDF.
 func looksLikePDF(key string) bool {
 	return strings.HasSuffix(strings.ToLower(key), ".pdf")
+}
+
+// pdfMagicWindow bounds the content sniff. The PDF spec puts "%PDF-" at the
+// start of the file, but readers tolerate leading junk, so look a little way
+// in rather than only at offset 0.
+const pdfMagicWindow = 1024
+
+// looksLikePDFContent reports whether raw bytes are a PDF, for the cases where
+// the name cannot say so: an archive member called "invoice" or "scan.bin"
+// would otherwise hit the NUL-byte check and be written off as unreadable
+// binary when its text is right there.
+func looksLikePDFContent(data []byte) bool {
+	return bytes.Contains(data[:min(len(data), pdfMagicWindow)], []byte("%PDF-"))
+}
+
+// pdfPreviewContent turns raw PDF bytes into preview text, or the reason they
+// could not be read. Every path that lands on a PDF — a .pdf object, a
+// .pdf.gz, an archive member — goes through here so the rule that a truncated
+// PDF is unreadable (not partial) lives in one place and is reported with the
+// lever that applies to that path.
+func pdfPreviewContent(data []byte, truncated bool, tooLarge error) (string, error) {
+	if truncated {
+		return "", tooLarge
+	}
+	return pdfText(data)
 }
 
 // pdfText extracts a readable preview from raw PDF bytes: a header naming the
