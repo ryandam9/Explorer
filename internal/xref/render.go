@@ -20,6 +20,8 @@ func Render(w io.Writer, res Result, format string, noHeader bool) error {
 		return renderNDJSON(w, res)
 	case "csv":
 		return renderCSV(w, res, noHeader)
+	case "tree":
+		return whereUsedTree(w, res)
 	default:
 		return renderTable(w, res, noHeader)
 	}

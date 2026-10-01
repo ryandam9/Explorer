@@ -70,6 +70,8 @@ func RenderRelated(w io.Writer, res RelatedResult, format string, noHeader, show
 		return renderRelatedGraph(w, res, showUses, showUsedBy, dotStyle)
 	case "mermaid":
 		return renderRelatedGraph(w, res, showUses, showUsedBy, mermaidStyle)
+	case "tree":
+		return relatedTree(w, res, showUses, showUsedBy, partial)
 	default:
 		return renderRelatedTable(w, res, noHeader, showUses, showUsedBy, partial)
 	}

@@ -254,12 +254,41 @@ aws_explorer related sg-0abc123 --direction usedby -r eu-west-1
 # Walk two hops: a Lambda → its role → that role's policies/trust principals
 aws_explorer related arn:aws:iam::123456789012:role/app --depth 2 --all-regions
 
+# The hops, as a tree instead of a table
+aws_explorer related arn:aws:iam::123456789012:role/app --depth 2 -o tree
+
 # Machine-readable (CSV is formula-injection-sanitised)
 aws_explorer related sg-0abc123 -o json | jq '.uses'
 ```
 
+### Tree output (`-o tree`)
+
+A multi-hop walk is a tree, and the table can only put the hop in a column.
+`-o tree` draws the shape instead: each direction, then the links grouped by
+how far away they are.
+
+```
+arn:aws:iam::123456789012:role/app-role  (IAM role)
+├── Depends on →  (2)
+│   ├── 1 hop away  (1)
+│   │   └── kms key  alias/app  [ap-southeast-2]  — role policy
+│   └── 2 hops away  (1)
+│       └── s3 bucket  app-data  [ap-southeast-2]  — bucket policy
+└── Used by ←  (1)
+    └── 1 hop away  (1)
+        └── lambda function  checkout  [ap-southeast-2]  — execution role
+```
+
+At `--depth 1` there is nothing to group, so the links hang straight off each
+direction. `--show-paths all` swaps the single relationship for the whole chain,
+as in the table. The honesty notes are unchanged — an empty side still says
+whether the scan was clean or hit errors, and the list of link types checked
+still follows. `whereused -o tree` groups its references by service.
+
+The tree carries no colour, so it pipes into a file or a pager unchanged.
+
 Flags: `--depth 1-5`, `--direction both|uses|usedby`, `--show-paths shortest|all`,
-`-o table|json|ndjson|csv`, `--no-header`, `--cache-ttl <dur>`, `--refresh`,
+`-o table|json|ndjson|csv|tree`, `--no-header`, `--cache-ttl <dur>`, `--refresh`,
 `--debug-scan`, plus the global `-r/--region` and `--all-regions`. The coverage
 caveat and any per-region failures go to **stderr**, so stdout stays clean for
 pipelines. The report is printed **first**; the collection-error summary follows
