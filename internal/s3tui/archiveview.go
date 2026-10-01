@@ -91,6 +91,16 @@ func (m *Model) openArchiveMember() {
 		return
 	}
 	m.previewErr = nil
+
+	// A PDF member gets the same text extraction a top-level .pdf object
+	// does. Without this it trips the NUL-byte check in decompressedPreview
+	// and reports as unreadable binary — the whole point of the PDF preview
+	// is that its text *is* readable.
+	if looksLikePDF(name) || looksLikePDFContent(content) {
+		m.showArchivePDF(content, truncated)
+		return
+	}
+
 	text := decompressedPreview(content, truncated, looksLikeCSV(name))
 	m.previewContent = text
 	// decompressedPreview already bakes any truncation note into text, so don't
@@ -104,6 +114,29 @@ func (m *Model) openArchiveMember() {
 	}
 	m.showPreview = true
 	m.showCSV = false
+	m.initPreviewViewport(text, nil)
+}
+
+// showArchivePDF renders a PDF archive member as extracted text.
+//
+// A member cut off at memberPreviewCap cannot be parsed at all — a PDF is read
+// from the xref table at its end, so a prefix is unreadable rather than
+// partial — and that is reported as the size limit it is, not as a corrupt
+// file, which is what the parser would otherwise claim about a perfectly good
+// document.
+func (m *Model) showArchivePDF(content []byte, truncated bool) {
+	m.showPreview = true
+	m.showCSV = false
+	m.previewTruncated = false
+	m.previewContent = ""
+
+	text, err := pdfPreviewContent(content, truncated, errPDFMemberTooLarge)
+	if err != nil {
+		m.previewErr = err
+		m.initPreviewViewport("", err)
+		return
+	}
+	m.previewContent = text
 	m.initPreviewViewport(text, nil)
 }
 

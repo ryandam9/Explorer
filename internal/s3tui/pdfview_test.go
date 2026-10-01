@@ -1,6 +1,8 @@
 package s3tui
 
 import (
+	"bytes"
+	"errors"
 	"os"
 	"strings"
 	"testing"
@@ -79,5 +81,53 @@ func TestPDFTextSaysWhenThereIsNoText(t *testing.T) {
 	}
 	if !strings.Contains(out, "No text could be extracted") && !strings.Contains(out, "no text on this page") {
 		t.Errorf("a textless PDF should say so:\n%s", out)
+	}
+}
+
+func TestLooksLikePDFContent(t *testing.T) {
+	data, err := os.ReadFile("testdata/sample.pdf")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !looksLikePDFContent(data) {
+		t.Error("a real PDF should be recognised by its bytes")
+	}
+	// Leading junk is tolerated the way readers tolerate it.
+	if !looksLikePDFContent(append([]byte("\n\n   "), data...)) {
+		t.Error("a PDF with leading bytes should still be recognised")
+	}
+	for _, not := range [][]byte{
+		nil,
+		[]byte(""),
+		[]byte("plain text"),
+		[]byte{0x50, 0x4b, 0x03, 0x04}, // a zip
+	} {
+		if looksLikePDFContent(not) {
+			t.Errorf("%q should not sniff as a PDF", not)
+		}
+	}
+	// The magic must be near the front, not anywhere in the file.
+	far := append(bytes.Repeat([]byte{'x'}, pdfMagicWindow), []byte("%PDF-1.4")...)
+	if looksLikePDFContent(far) {
+		t.Error("magic beyond the sniff window should not count")
+	}
+}
+
+// A truncated PDF is unreadable, not partial, so every path reports the size
+// limit it hit rather than letting the parser call a good document corrupt.
+func TestPDFPreviewContentTruncated(t *testing.T) {
+	data, err := os.ReadFile("testdata/sample.pdf")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := pdfPreviewContent(data[:len(data)/2], true, errPDFMemberTooLarge); !errors.Is(err, errPDFMemberTooLarge) {
+		t.Errorf("want the caller's size error, got %v", err)
+	}
+	out, err := pdfPreviewContent(data, false, errPDFMemberTooLarge)
+	if err != nil {
+		t.Fatalf("pdfPreviewContent: %v", err)
+	}
+	if !strings.Contains(out, "Hello from page one") {
+		t.Errorf("preview missing page text:\n%s", out)
 	}
 }
