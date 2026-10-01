@@ -2,9 +2,11 @@ package s3tui
 
 import (
 	"archive/tar"
+	"archive/zip"
 	"bytes"
 	"compress/gzip"
 	"fmt"
+	"sort"
 	"strings"
 	"testing"
 )
@@ -151,6 +153,8 @@ func TestOpenPreviewRouting(t *testing.T) {
 		archive, csv, text bool
 	}{
 		{"logs.tar.gz", true, false, false},
+		{"bundle.zip", true, false, false},
+		{"BUNDLE.ZIP", true, false, false},
 		{"bundle.tar", true, false, false},
 		{"release.tgz", true, false, false},
 		{"data.csv.gz", false, true, false}, // gz of a csv → CSV view
@@ -182,4 +186,154 @@ func TestDecompressedPreview(t *testing.T) {
 	if got := decompressedPreview([]byte{'a', 0, 'b'}, false, false); !strings.Contains(got, "Binary") {
 		t.Errorf("binary not detected: %q", got)
 	}
+}
+
+// zipBytes builds an in-memory zip with a folder entry and the given files.
+func zipBytes(t *testing.T, files map[string]string) []byte {
+	t.Helper()
+	var b bytes.Buffer
+	zw := zip.NewWriter(&b)
+	if _, err := zw.Create("logs/"); err != nil { // a directory entry
+		t.Fatal(err)
+	}
+	names := make([]string, 0, len(files))
+	for n := range files {
+		names = append(names, n)
+	}
+	sort.Strings(names) // deterministic archive
+	for _, n := range names {
+		w, err := zw.Create(n)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := w.Write([]byte(files[n])); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := zw.Close(); err != nil {
+		t.Fatal(err)
+	}
+	return b.Bytes()
+}
+
+func TestLooksLikeZip(t *testing.T) {
+	for key, want := range map[string]bool{
+		"bundle.zip":       true,
+		"BUNDLE.ZIP":       true,
+		"a/b/c.zip":        true,
+		"archive.zipper":   false, // not an extension
+		"logs.tar.gz":      false,
+		"notes.txt":        false,
+		"weird.zip.tar.gz": false, // the outer format wins
+	} {
+		if got := looksLikeZip(key); got != want {
+			t.Errorf("looksLikeZip(%q) = %v, want %v", key, got, want)
+		}
+	}
+}
+
+func TestZipMembersAndContent(t *testing.T) {
+	data := zipBytes(t, map[string]string{
+		"logs/app.log":  "hello from the zip",
+		"logs/data.csv": "a,b\n1,2\n",
+	})
+
+	members, err := zipMembers(data)
+	if err != nil {
+		t.Fatalf("zipMembers: %v", err)
+	}
+	var files, dirs int
+	sizes := map[string]int64{}
+	for _, m := range members {
+		if m.Dir {
+			dirs++
+			continue
+		}
+		files++
+		sizes[m.Name] = m.Size
+	}
+	if files != 2 || dirs != 1 {
+		t.Errorf("got %d files and %d folders, want 2 and 1", files, dirs)
+	}
+	if sizes["logs/app.log"] != int64(len("hello from the zip")) {
+		t.Errorf("uncompressed size = %d, want %d", sizes["logs/app.log"], len("hello from the zip"))
+	}
+
+	out, truncated, err := zipMemberContent(data, "logs/app.log", memberPreviewCap)
+	if err != nil {
+		t.Fatalf("zipMemberContent: %v", err)
+	}
+	if string(out) != "hello from the zip" || truncated {
+		t.Errorf("content = %q (truncated=%v), want the whole member", out, truncated)
+	}
+
+	// A member longer than the cap is cut and says so, rather than being read
+	// into memory whole. (readCapped keeps the byte it peeks to detect the
+	// overrun, so the result is the cap plus one — the same contract the tar
+	// path has always had.)
+	short, truncated, err := zipMemberContent(data, "logs/app.log", 5)
+	if err != nil {
+		t.Fatalf("capped read: %v", err)
+	}
+	if !truncated {
+		t.Error("a member longer than the cap must report truncation")
+	}
+	if len(short) > 6 || !strings.HasPrefix("hello from the zip", string(short)) {
+		t.Errorf("capped content = %q, want a short prefix of the member", short)
+	}
+
+	// A name that isn't in the archive, and a folder entry, are both "not a
+	// file you can open" rather than an empty preview.
+	if _, _, err := zipMemberContent(data, "logs/missing.log", memberPreviewCap); err == nil {
+		t.Error("expected an error for a member that is not in the archive")
+	}
+	if _, _, err := zipMemberContent(data, "logs/", memberPreviewCap); err == nil {
+		t.Error("expected an error when opening a directory entry")
+	}
+}
+
+// A zip is read from the central directory at the end of the file, so a
+// prefix of one is unreadable rather than partial. Go's reader says "not a
+// valid zip file", which is wrong and alarming for a file that is perfectly
+// valid and merely large — the UI must say what actually happened.
+func TestZipMembersRejectsATruncatedArchive(t *testing.T) {
+	data := zipBytes(t, map[string]string{"logs/app.log": strings.Repeat("x", 4096)})
+	if _, err := zipMembers(data[:len(data)/2]); err == nil {
+		t.Fatal("a truncated zip should not parse")
+	}
+	if !strings.Contains(errZipTooLarge.Error(), "download it") {
+		t.Errorf("the too-large message should tell the reader what to do instead: %q", errZipTooLarge)
+	}
+	if !strings.Contains(errZipTooLarge.Error(), "32 MB") {
+		t.Errorf("the too-large message should name the limit: %q", errZipTooLarge)
+	}
+}
+
+// The member reader follows the archive's own format, so a zip member is not
+// read with the tar reader (which would simply not find it).
+func TestArchiveMemberContentPicksTheFormat(t *testing.T) {
+	zipData := zipBytes(t, map[string]string{"a.txt": "from zip"})
+	out, _, err := archiveMemberContent("bundle.zip", zipData, "a.txt", memberPreviewCap)
+	if err != nil || string(out) != "from zip" {
+		t.Errorf("zip member = %q, err=%v; want \"from zip\"", out, err)
+	}
+
+	tarData := tarGzRaw(map[string]string{"a.txt": "from tar"})
+	out, _, err = archiveMemberContent("bundle.tar", tarData, "a.txt", memberPreviewCap)
+	if err != nil || string(out) != "from tar" {
+		t.Errorf("tar member = %q, err=%v; want \"from tar\"", out, err)
+	}
+}
+
+// tarGzRaw builds an uncompressed tar, which is what the archive browser holds
+// in memory after gunzipping.
+func tarGzRaw(files map[string]string) []byte {
+	var raw bytes.Buffer
+	tw := tar.NewWriter(&raw)
+	for name, content := range files {
+		_ = tw.WriteHeader(&tar.Header{Name: name, Typeflag: tar.TypeReg, Size: int64(len(content)), Mode: 0o644})
+		_, _ = tw.Write([]byte(content))
+	}
+	_ = tw.Close()
+	return raw.Bytes()
 }

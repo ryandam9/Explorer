@@ -76,7 +76,7 @@ func (m *Model) openArchiveMember() {
 		return
 	}
 	name := files[idx].Name
-	content, truncated, err := tarMemberContent(m.archiveData, name, memberPreviewCap)
+	content, truncated, err := archiveMemberContent(m.archiveKey, m.archiveData, name, memberPreviewCap)
 
 	m.previewKey = m.archiveKey + " › " + name
 	m.previewFromArchive = true
@@ -105,6 +105,15 @@ func (m *Model) openArchiveMember() {
 	m.showPreview = true
 	m.showCSV = false
 	m.initPreviewViewport(text, nil)
+}
+
+// archiveMemberContent extracts one member, reading the archive in whichever
+// format its key names.
+func archiveMemberContent(archiveKey string, data []byte, name string, maxOut int64) ([]byte, bool, error) {
+	if looksLikeZip(archiveKey) {
+		return zipMemberContent(data, name, maxOut)
+	}
+	return tarMemberContent(data, name, maxOut)
 }
 
 // closeArchive leaves the archive browser, freeing the in-memory archive.
