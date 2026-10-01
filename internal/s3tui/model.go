@@ -873,7 +873,12 @@ func (m *Model) openPreview(key string) tea.Cmd {
 			m.parquetRows = parquetDefaultRows
 		}
 		return m.fetchParquetPreview(key)
-	case looksLikeTar(key):
+	case looksLikePDF(key):
+		m.showPreview = true
+		m.previewLoading = true
+		m.previewErr = nil
+		return m.fetchPDFPreview(key)
+	case looksLikeTar(key), looksLikeZip(key):
 		m.showArchive = true
 		m.archiveKey = key
 		m.archiveLoading = true
@@ -935,6 +940,7 @@ func (m *Model) fetchArchive(key string) tea.Cmd {
 	bucket := m.bucket
 	client := m.client
 	gzipped := isGzipCompressed(key)
+	isZip := looksLikeZip(key)
 	return func() tea.Msg {
 		data, truncated, err := client.GetObjectRange(bucket, key, tarCompressedCap)
 		if err != nil {
@@ -944,6 +950,21 @@ func (m *Model) fetchArchive(key string) tea.Cmd {
 			// Zero-byte object: no archive to read. Report an empty member list
 			// instead of failing decompression/tar parsing on an empty stream.
 			return archiveLoadedMsg{key: key, members: nil, truncated: false}
+		}
+		if isZip {
+			// A zip is read from its central directory, which sits at the end
+			// of the file — so a prefix of a large zip is not a partial
+			// archive, it is an unreadable one. Say that, rather than letting
+			// the reader fail with "not a valid zip file" on a file that is
+			// perfectly valid and merely bigger than the preview window.
+			if truncated {
+				return archiveLoadedMsg{key: key, err: errZipTooLarge}
+			}
+			members, merr := zipMembers(data)
+			if merr != nil {
+				return archiveLoadedMsg{key: key, err: merr}
+			}
+			return archiveLoadedMsg{key: key, data: data, members: members}
 		}
 		raw := data
 		if gzipped {
@@ -959,6 +980,34 @@ func (m *Model) fetchArchive(key string) tea.Cmd {
 			return archiveLoadedMsg{key: key, err: merr}
 		}
 		return archiveLoadedMsg{key: key, data: raw, members: members, truncated: truncated}
+	}
+}
+
+// fetchPDFPreview downloads a PDF and extracts its text off the UI thread.
+//
+// The whole object is needed: a PDF is read from the xref table at the end of
+// the file, so a prefix of a large one is unreadable rather than partial — the
+// same shape of problem a zip has, and reported the same way instead of as a
+// parse error on a perfectly valid file.
+func (m *Model) fetchPDFPreview(key string) tea.Cmd {
+	bucket := m.bucket
+	client := m.client
+	return func() tea.Msg {
+		data, truncated, err := client.GetObjectRange(bucket, key, tarCompressedCap)
+		if err != nil {
+			return objectPreviewMsg{key: key, err: err}
+		}
+		if truncated {
+			return objectPreviewMsg{key: key, err: errPDFTruncated}
+		}
+		if len(data) == 0 {
+			return objectPreviewMsg{key: key, content: "Empty object."}
+		}
+		text, perr := pdfText(data)
+		if perr != nil {
+			return objectPreviewMsg{key: key, err: perr}
+		}
+		return objectPreviewMsg{key: key, content: text}
 	}
 }
 

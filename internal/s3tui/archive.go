@@ -2,9 +2,11 @@ package s3tui
 
 import (
 	"archive/tar"
+	"archive/zip"
 	"bytes"
 	"compress/gzip"
 	"errors"
+	"fmt"
 	"io"
 	"path"
 	"strconv"
@@ -89,6 +91,18 @@ func looksLikeGzip(key string) bool {
 		return false
 	}
 	return !isTarArchive(lower)
+}
+
+// errZipTooLarge explains why a big zip cannot be browsed. The cap could be
+// lifted by fetching the last few kilobytes to locate the central directory
+// and then ranged-reading only the members opened, which is how a zip is meant
+// to be read remotely; until then, say plainly what the limit is.
+var errZipTooLarge = fmt.Errorf("zip is larger than the %d MB preview window — download it to open the files inside",
+	tarCompressedCap>>20)
+
+// looksLikeZip reports whether key is a zip archive.
+func looksLikeZip(key string) bool {
+	return strings.HasSuffix(strings.ToLower(key), ".zip")
 }
 
 // looksLikeTar reports whether key is a tar archive, optionally gzip-compressed.
@@ -200,6 +214,55 @@ func tarMembers(data []byte) ([]archiveMember, error) {
 		}
 	}
 	return members, nil
+}
+
+// zipMembers lists the entries in a zip archive.
+//
+// Unlike tar, a zip cannot be read from a prefix of the file: the central
+// directory that names its entries lives at the *end*. A truncated download is
+// therefore not a partial archive but an unreadable one, and the caller is
+// expected to have checked for truncation before calling this — see
+// errZipTruncated for the message the UI shows instead.
+func zipMembers(data []byte) ([]archiveMember, error) {
+	zr, err := zip.NewReader(bytes.NewReader(data), int64(len(data)))
+	if err != nil {
+		return nil, err
+	}
+	members := make([]archiveMember, 0, len(zr.File))
+	for _, f := range zr.File {
+		if f.FileInfo().IsDir() {
+			members = append(members, archiveMember{Name: f.Name, Dir: true})
+			continue
+		}
+		members = append(members, archiveMember{
+			Name: f.Name,
+			//nolint:gosec // UncompressedSize64 is a size for display, bounded on read
+			Size: int64(f.UncompressedSize64),
+		})
+	}
+	return members, nil
+}
+
+// zipMemberContent extracts one member's content (up to maxOut bytes) from raw
+// zip bytes. An entry stored with a compression method Go does not implement —
+// or an encrypted one — fails here rather than silently showing nothing.
+func zipMemberContent(data []byte, name string, maxOut int64) (out []byte, truncated bool, err error) {
+	zr, err := zip.NewReader(bytes.NewReader(data), int64(len(data)))
+	if err != nil {
+		return nil, false, err
+	}
+	for _, f := range zr.File {
+		if f.Name != name || f.FileInfo().IsDir() {
+			continue
+		}
+		rc, oerr := f.Open()
+		if oerr != nil {
+			return nil, false, fmt.Errorf("cannot read %s: %w", name, oerr)
+		}
+		defer rc.Close()
+		return readCapped(rc, maxOut)
+	}
+	return nil, false, errors.New("member not found in archive")
 }
 
 // tarMemberContent extracts one member's content (up to maxOut bytes) from raw
