@@ -4,7 +4,10 @@ import (
 	"bytes"
 	"errors"
 	"fmt"
+	"math"
+	"sort"
 	"strings"
+	"unicode"
 
 	"github.com/ledongthuc/pdf"
 )
@@ -65,6 +68,233 @@ func looksLikePDFContent(data []byte) bool {
 	return bytes.Contains(data[:min(len(data), pdfMagicWindow)], []byte("%PDF-"))
 }
 
+// Layout reconstruction.
+//
+// The library's GetPlainText walks the content stream and concatenates every
+// string it draws, ignoring every operator that *moves* the cursor — Td, TD,
+// Tm. But a PDF is not obliged to contain a single space character: a
+// generator is free to place each word, or each line, at an absolute position
+// and draw it on its own. Such a document came back as one unbroken run
+// ("QuarterlycostreportEverywordhere…"), which is what the preview was
+// showing.
+//
+// Page.Content gives every glyph with the position and advance the content
+// stream actually computed, so the layout can be put back from the geometry:
+// a different baseline is a different line, a horizontal gap wider than a
+// fraction of the font size is a space, a much wider one is a column, and a
+// vertical gap well over the page's usual leading is a paragraph break.
+//
+// Where a font carries no width metrics every advance reads as zero and all
+// the glyphs of one string share an X. Gaps are then always zero, so no space
+// is invented and the document's own spaces carry the words — while the line
+// breaks, which come from Y alone, are still recovered. Under-space rather
+// than mis-space: a missing gap is a smaller lie than one in the middle of a
+// word.
+
+const (
+	// A space is about a quarter of an em in most fonts and inter-letter
+	// gaps are near zero, so a fifth of the font size sits between them.
+	pdfSpaceGapEm = 0.2
+	// A gap this wide is a table column, not a word break; two spaces keep
+	// the cells apart without pretending to align them.
+	pdfColumnGapEm = 1.5
+	// Baselines within this fraction of the font size are one line, which
+	// absorbs the small shifts of an inline font change.
+	pdfLineEpsilonEm = 0.25
+	// A vertical gap this much larger than the page's usual leading is a
+	// paragraph break rather than the next line.
+	pdfParagraphFactor = 1.5
+	// Used when a glyph reports no font size, so the thresholds above still
+	// mean something.
+	pdfFallbackFontSize = 12.0
+)
+
+// pdfLine accumulates the glyphs sharing one baseline.
+type pdfLine struct {
+	y    float64         // the baseline, in points, increasing up the page
+	size float64         // the largest font size on the line — its em measure
+	end  float64         // the right edge of the last glyph written
+	b    strings.Builder // the line's text so far
+	// endKnown is false once a glyph arrives with no width metric: its
+	// right edge is then only the position it *started* at, so every
+	// following gap is overstated by the width of a word. Gaps are still
+	// used — they are the only thing holding such a document's words apart
+	// — but they can no longer be trusted to tell a column from a space.
+	endKnown bool
+	// pending is the widest separator owed before the next visible glyph:
+	// 0 none, 1 a space, 2 a column gap. Holding it rather than writing it
+	// is what keeps a document that has both real spaces *and* positional
+	// gaps from coming back double-spaced.
+	pending int
+}
+
+// pdfPageText returns one page's text with its layout reconstructed.
+//
+// Content walks the content stream and panics on a malformed one — the
+// library's own text helpers recover for exactly that reason — so the panic is
+// turned into an error here: one bad page must not take down the preview of
+// the rest (CLAUDE.md §3).
+func pdfPageText(p pdf.Page) (text string, err error) {
+	defer func() {
+		if r := recover(); r != nil {
+			text, err = "", fmt.Errorf("unreadable content stream: %v", r)
+		}
+	}()
+	return pdfLayoutText(p.Content().Text), nil
+}
+
+// pdfLayoutText rebuilds reading order from positioned glyphs.
+func pdfLayoutText(glyphs []pdf.Text) string {
+	lines := pdfGroupLines(glyphs)
+	if len(lines) == 0 {
+		return ""
+	}
+	// Top of the page first. A stable sort keeps the drawing order of two
+	// runs that landed on the same baseline.
+	sort.SliceStable(lines, func(i, j int) bool { return lines[i].y > lines[j].y })
+
+	gap := pdfTypicalLeading(lines)
+	var b strings.Builder
+	for i, ln := range lines {
+		if i > 0 {
+			b.WriteString("\n")
+			if gap > 0 && lines[i-1].y-ln.y > gap*pdfParagraphFactor {
+				b.WriteString("\n") // a paragraph break
+			}
+		}
+		b.WriteString(strings.TrimRight(ln.b.String(), " "))
+	}
+	return b.String()
+}
+
+// pdfGroupLines buckets glyphs onto shared baselines, inserting the spaces the
+// document left to positioning. Buckets are keyed by the rounded baseline so a
+// generator that draws a table column at a time still lands its cells on the
+// row they belong to, rather than producing one line per cell.
+func pdfGroupLines(glyphs []pdf.Text) []*pdfLine {
+	var lines []*pdfLine
+	byY := map[int][]*pdfLine{}
+
+	for _, g := range glyphs {
+		s := pdfStripControl(g.S)
+		if s == "" {
+			continue
+		}
+		size := g.FontSize
+		if size <= 0 {
+			size = pdfFallbackFontSize
+		}
+		ln := pdfFindLine(byY, g.Y, size)
+		if ln == nil {
+			ln = &pdfLine{y: g.Y, size: size, end: g.X, endKnown: true}
+			lines = append(lines, ln)
+			key := int(math.Round(g.Y))
+			byY[key] = append(byY[key], ln)
+		}
+		if size > ln.size {
+			ln.size = size
+		}
+
+		// The gap between where the last glyph ended and where this one
+		// starts is what the document used instead of a space. A glyph
+		// drawn to the *left* of the cursor is out-of-order drawing, not a
+		// gap, so it counts as one separator rather than a negative one.
+		if ln.b.Len() > 0 || ln.pending > 0 {
+			switch gap := g.X - ln.end; {
+			case gap >= pdfColumnGapEm*size && ln.endKnown:
+				ln.pending = max(ln.pending, 2)
+			case gap >= pdfSpaceGapEm*size, gap < -pdfSpaceGapEm*size:
+				ln.pending = max(ln.pending, 1)
+			}
+		}
+
+		// A space the document *did* write is held as a pending separator
+		// too, so a real space and a positional gap in the same place
+		// collapse into one rather than stacking up.
+		if text := strings.TrimFunc(s, unicode.IsSpace); text == "" {
+			if ln.b.Len() > 0 {
+				ln.pending = max(ln.pending, 1)
+			}
+		} else {
+			if ln.b.Len() > 0 {
+				ln.b.WriteString(strings.Repeat(" ", ln.pending))
+			}
+			ln.b.WriteString(s)
+			ln.pending = 0
+		}
+
+		if g.W > 0 {
+			if end := g.X + g.W; end > ln.end {
+				ln.end = end
+			}
+		} else {
+			// No width metric: all that is known is where this glyph
+			// began, so the line's right edge becomes a lower bound.
+			if g.X > ln.end {
+				ln.end = g.X
+			}
+			ln.endKnown = false
+		}
+	}
+	return lines
+}
+
+// pdfFindLine returns the line this glyph belongs to, or nil for a new one.
+// Only the buckets within the epsilon are examined, so this stays O(1) per
+// glyph however long the page is.
+func pdfFindLine(byY map[int][]*pdfLine, y, size float64) *pdfLine {
+	eps := max(pdfLineEpsilonEm*size, 1.0)
+	key := int(math.Round(y))
+	span := int(math.Ceil(eps))
+
+	var best *pdfLine
+	bestDist := math.Inf(1)
+	for k := key - span; k <= key+span; k++ {
+		for _, ln := range byY[k] {
+			if d := math.Abs(ln.y - y); d <= eps && d < bestDist {
+				best, bestDist = ln, d
+			}
+		}
+	}
+	return best
+}
+
+// pdfTypicalLeading is the median distance between consecutive baselines — the
+// page's own line spacing, which is what a paragraph break has to be measured
+// against. A fixed multiple of the font size would call every line of
+// generously leaded text a new paragraph.
+func pdfTypicalLeading(lines []*pdfLine) float64 {
+	if len(lines) < 3 {
+		return 0 // too little to tell leading from a paragraph gap
+	}
+	gaps := make([]float64, 0, len(lines)-1)
+	for i := 1; i < len(lines); i++ {
+		if d := lines[i-1].y - lines[i].y; d > 0 {
+			gaps = append(gaps, d)
+		}
+	}
+	if len(gaps) == 0 {
+		return 0
+	}
+	sort.Float64s(gaps)
+	// The lower middle for an even count: leading is the common gap, so
+	// erring low keeps a page of a few lines from averaging a paragraph
+	// break into the threshold meant to detect it.
+	return gaps[(len(gaps)-1)/2]
+}
+
+// pdfStripControl drops the C0/C1 control characters, including the newline
+// the library synthesizes after every TJ array — the line breaks here come
+// from the geometry, not from characters in the stream.
+func pdfStripControl(s string) string {
+	return strings.Map(func(r rune) rune {
+		if r < 0x20 || (r >= 0x7f && r <= 0x9f) {
+			return -1
+		}
+		return r
+	}, s)
+}
+
 // pdfPreviewContent turns raw PDF bytes into preview text, or the reason they
 // could not be read. Every path that lands on a PDF — a .pdf object, a
 // .pdf.gz, an archive member — goes through here so the rule that a truncated
@@ -110,7 +340,16 @@ func pdfText(data []byte) (string, error) {
 			failed++
 			continue
 		}
-		text, perr := p.GetPlainText(nil)
+		text, perr := pdfPageText(p)
+		if perr != nil || strings.TrimSpace(text) == "" {
+			// Fall back to the library's flat walk. It loses the layout —
+			// that is what the positional pass is for — but it decodes
+			// some streams the positional pass cannot, and a page of
+			// run-together words beats a page of nothing.
+			if flat, ferr := p.GetPlainText(nil); ferr == nil && strings.TrimSpace(flat) != "" {
+				text, perr = flat, nil
+			}
+		}
 		if perr != nil {
 			failed++
 			fmt.Fprintf(&b, "── page %d ──\n(could not read this page: %v)\n\n", i, perr)
