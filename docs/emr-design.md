@@ -450,7 +450,7 @@ the tool's standing contract (every TUI has a CLI twin).
 ```bash
 aws_explorer emr clusters    [--all-regions] [--state RUNNING,WAITING] [-o table|json|csv]
 aws_explorer emr steps <id>  [--since 7d] [--limit 50] [--status FAILED] [-o …]
-aws_explorer emr instances <id>  [-o …]
+aws_explorer emr instances <id>  [--all-states] [-o …]
 aws_explorer emr apps <id>       [-o …]     # installed applications + versions
 ```
 

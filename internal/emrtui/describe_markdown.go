@@ -141,9 +141,9 @@ func clusterMarkdown(d ClusterDescription, now time.Time) string {
 		mdTable(&b, []string{"Role", "Name", "Instance type", "Market", "Running / requested", "vCPU", "Memory", "State", "EBS storage"}, rows)
 	}
 
-	b.WriteString("\n## EC2 instances\n\n")
+	b.WriteString("\n## EC2 instances (live)\n\n")
 	if len(d.Instances) == 0 {
-		b.WriteString("_No instances reported._\n")
+		b.WriteString("_No live instances. Terminated nodes are not listed._\n")
 	} else {
 		rows := make([][]string, 0, len(d.Instances))
 		for _, in := range d.Instances {

@@ -40,7 +40,10 @@ type ClusterDescription struct {
 	// Compute, storage & memory: one entry per instance group (or fleet).
 	Groups []NodeGroup
 
-	// Running EC2 instances (ListInstances).
+	// The cluster's live EC2 instances (ListInstances). Terminated nodes
+	// are excluded: they are the cluster's history, not what it is now, and
+	// on a cluster that has scaled they outnumber the live ones and make
+	// this section disagree with the running counts in Groups above.
 	Instances []Instance
 
 	// Networking (VPC, subnet, security groups, routes, NACL).
@@ -174,7 +177,8 @@ func (c *Client) Describe(ctx context.Context, region, clusterID string) (Cluste
 	d.Groups = c.loadGroups(ctx, region, clusterID, raw.InstanceCollectionType, &d.Notes)
 	c.resolveInstanceSpecs(ctx, region, d.Groups, &d.Notes)
 
-	// Running EC2 instances.
+	// Live EC2 instances — terminated nodes are not part of the cluster as
+	// it stands.
 	if instances, err := c.Instances(ctx, region, clusterID, 0); err != nil {
 		d.Notes = append(d.Notes, "EC2 instances unavailable (ListInstances denied/throttled)")
 	} else {

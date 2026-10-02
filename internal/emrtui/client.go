@@ -385,11 +385,46 @@ func (c *Client) Steps(ctx context.Context, region, clusterID string, limit int)
 	return steps, nil
 }
 
-// Instances fetches a cluster's EC2 instances (capped to limit).
+// liveInstanceStates are the EMR instance states that describe a node the
+// cluster still has.
+//
+// ListInstances returns the cluster's whole instance history by default, so a
+// long-lived cluster that has scaled or replaced nodes answers with dozens of
+// TERMINATED rows the cluster no longer owns. Those crowd out the nodes that
+// are actually there and make the instance count disagree with the running
+// count in the node groups beside it, so the live states are asked for
+// explicitly. The filter goes to the API rather than being applied after the
+// fetch, so a --limit is spent on rows that will be shown (CLAUDE.md §5).
+var liveInstanceStates = []emrtypes.InstanceState{
+	emrtypes.InstanceStateAwaitingFulfillment,
+	emrtypes.InstanceStateProvisioning,
+	emrtypes.InstanceStateBootstrapping,
+	emrtypes.InstanceStateRunning,
+}
+
+// Instances fetches a cluster's live EC2 instances (capped to limit),
+// excluding the terminated ones. AllInstanceStates includes those.
 func (c *Client) Instances(ctx context.Context, region, clusterID string, limit int) ([]Instance, error) {
+	return c.instances(ctx, region, clusterID, limit, liveInstanceStates)
+}
+
+// AllInstanceStates fetches a cluster's EC2 instances in every state,
+// terminated ones included — the instance history, for when what happened to a
+// cluster matters rather than what it is now.
+func (c *Client) AllInstanceStates(ctx context.Context, region, clusterID string, limit int) ([]Instance, error) {
+	return c.instances(ctx, region, clusterID, limit, nil)
+}
+
+// instances lists a cluster's EC2 instances, restricted to states when given.
+// A nil states leaves the request unfiltered, which is the API's own default of
+// every state.
+func (c *Client) instances(ctx context.Context, region, clusterID string, limit int, states []emrtypes.InstanceState) ([]Instance, error) {
 	cl := c.clientFor(region)
 	var out []Instance
-	pag := emr.NewListInstancesPaginator(cl, &emr.ListInstancesInput{ClusterId: aws.String(clusterID)})
+	pag := emr.NewListInstancesPaginator(cl, &emr.ListInstancesInput{
+		ClusterId:      aws.String(clusterID),
+		InstanceStates: states,
+	})
 	for pag.HasMorePages() {
 		page, err := pag.NextPage(ctx)
 		if err != nil {
