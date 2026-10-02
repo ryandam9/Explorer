@@ -231,7 +231,7 @@ func TestDescribeSectionsAndTriState(t *testing.T) {
 	for _, s := range secs {
 		titles[s.Title] = s.Body
 	}
-	for _, want := range []string{"Overview", "Configuration & OS", "Services", "Compute, memory & storage", "EC2 instances", "Networking", "Notes"} {
+	for _, want := range []string{"Overview", "Configuration & OS", "Services", "Compute, memory & storage", "EC2 instances (live)", "Networking", "Notes"} {
 		if _, ok := titles[want]; !ok {
 			t.Errorf("missing section %q", want)
 		}

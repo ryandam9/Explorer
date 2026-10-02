@@ -103,8 +103,14 @@ nothing is clipped. The panels are:
   instance type and market, running/requested counts, per-instance **memory**
   and **vCPU** (resolved from EC2), and the attached **EBS** volumes (type, size,
   IOPS).
-- **EC2 instances** — the cluster's running instances (EC2 id, type, state,
-  private DNS).
+- **EC2 instances (live)** — the cluster's current instances (EC2 id, type,
+  state, private DNS). **Terminated nodes are left out.** `ListInstances`
+  returns a cluster's whole instance history by default, so a long-running
+  cluster that has scaled or replaced nodes answers mostly with `TERMINATED`
+  rows it no longer owns — which bury the live ones and make this count
+  disagree with the running counts in the panel above. The filter is sent to
+  the API, so a `--limit` is spent on rows you will actually see, and an empty
+  panel says it is filtered rather than just "none".
 - **Networking** — the cluster's **VPC**, subnet (CIDR, AZ, public-IP-on-launch),
   the **security groups** EMR attached (managed primary/core-task, service
   access, and any additional) with their **inbound/outbound rules**, the
@@ -240,7 +246,7 @@ next-materialized time), colour-coded by status. See
 ```bash
 aws_explorer emr clusters       [--all-regions] [--state RUNNING,WAITING] [-o table|json|ndjson|csv]
 aws_explorer emr steps <id>     [-r us-east-1] [--limit 50] [--status FAILED] [-o …]
-aws_explorer emr instances <id> [-r us-east-1] [--limit N] [-o …]
+aws_explorer emr instances <id> [-r us-east-1] [--limit N] [--all-states] [-o …]   # live instances; --all-states adds the terminated ones
 aws_explorer emr apps <id>      [-r us-east-1] [-o …]
 aws_explorer emr describe <id>  [-r us-east-1] [-o table|json|ndjson]   # full describe (config, OS, compute, storage, networking)
 aws_explorer emr config <id>    [-r us-east-1] [--classification hdfs-site] [--effective] [-o …]   # config files (declared, or --effective = live merged /conf)

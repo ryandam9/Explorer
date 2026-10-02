@@ -163,7 +163,10 @@ var emrStepsCmd = &cobra.Command{
 	},
 }
 
-var emrInstancesLimit int
+var (
+	emrInstancesLimit     int
+	emrInstancesAllStates bool
+)
 
 // emrRegionForCommand resolves the region a per-cluster twin should query.
 func emrRegionForCommand(client *emrtui.Client) string {
@@ -175,8 +178,13 @@ func emrRegionForCommand(client *emrtui.Client) string {
 }
 
 var emrInstancesCmd = &cobra.Command{
-	Use:     "instances <cluster-id>",
-	Short:   "List an EMR cluster's EC2 instances",
+	Use:   "instances <cluster-id>",
+	Short: "List an EMR cluster's live EC2 instances",
+	Long: "List an EMR cluster's live EC2 instances.\n\n" +
+		"Terminated nodes are left out: on a cluster that has scaled or replaced\n" +
+		"instances they are the majority of what ListInstances returns, and they are\n" +
+		"the cluster's history rather than what it is running now. Pass --all-states\n" +
+		"to include them.",
 	Args:    cobra.ExactArgs(1),
 	Example: "  aws_explorer emr instances j-1A2B3C4D5 -r us-east-1 -o json",
 	RunE: func(cmd *cobra.Command, args []string) error {
@@ -190,7 +198,11 @@ var emrInstancesCmd = &cobra.Command{
 			return err
 		}
 		region := emrRegionForCommand(client)
-		instances, err := client.Instances(ctx, region, args[0], emrInstancesLimit)
+		fetch := client.Instances
+		if emrInstancesAllStates {
+			fetch = client.AllInstanceStates
+		}
+		instances, err := fetch(ctx, region, args[0], emrInstancesLimit)
 		if err != nil {
 			return fmt.Errorf("failed to get instances for cluster %q in %s: %w", args[0], region, err)
 		}
@@ -724,6 +736,8 @@ func init() {
 	emrStepsCmd.Flags().StringVar(&emrStepsStatus, "status", "", "only show steps in this state (e.g. FAILED, COMPLETED)")
 
 	emrInstancesCmd.Flags().IntVar(&emrInstancesLimit, "limit", 0, "maximum number of instances to fetch (0 = all)")
+	emrInstancesCmd.Flags().BoolVar(&emrInstancesAllStates, "all-states", false,
+		"include terminated instances (the cluster's instance history)")
 
 	emrHBaseCmd.Flags().StringVar(&emrHBaseCount, "count", "", "count rows in this table (full scan) instead of listing tables; takes a qualified name like ns:table")
 

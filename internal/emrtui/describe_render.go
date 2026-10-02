@@ -80,8 +80,8 @@ func (d ClusterDescription) sections() []descSection {
 	// Compute, memory & storage (per node group).
 	out = append(out, descSection{Title: "Compute, memory & storage", Body: groupsBody(d.Groups)})
 
-	// Running instances.
-	out = append(out, descSection{Title: "EC2 instances", Body: instancesBody(d.Instances)})
+	// Live instances (terminated nodes are not listed — see instancesBody).
+	out = append(out, descSection{Title: "EC2 instances (live)", Body: instancesBody(d.Instances)})
 
 	// Networking.
 	out = append(out, descSection{Title: "Networking", Body: networkBody(d.Network)})
@@ -214,10 +214,14 @@ func ebsLabel(vols []EBSVolume) string {
 	return strings.Join(parts, ", ")
 }
 
-// instancesBody lists the running EC2 instances grouped by their market/type.
+// instancesBody lists the cluster's live EC2 instances.
+//
+// The empty case says *why* it is empty: terminated nodes are filtered out, so
+// "none" here means the cluster has no live instances, not that the call found
+// nothing (CLAUDE.md §6a — a filter must not read as an absence).
 func instancesBody(instances []Instance) string {
 	if len(instances) == 0 {
-		return "  (no instances reported)"
+		return "  (no live instances — terminated nodes are not listed)"
 	}
 	var b strings.Builder
 	for i, in := range instances {
