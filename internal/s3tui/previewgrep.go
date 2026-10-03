@@ -67,6 +67,7 @@ func (m *Model) rebuildPreviewLines() {
 	if m.previewMatchIdx >= len(m.previewMatches) {
 		m.previewMatchIdx = 0
 	}
+	m.clampPreviewCursor()
 	m.refreshPreviewContent()
 }
 

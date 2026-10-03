@@ -275,8 +275,12 @@ type Model struct {
 	previewSearchTerm  string
 	previewLines       []string
 	previewPlain       []string
-	previewMatches     []int
-	previewMatchIdx    int
+	// previewCursor is the display line the reader is on — the highlighted
+	// bar. It indexes previewLines, so it moves with the grep filter and
+	// the wrap, like the search matches beside it.
+	previewCursor   int
+	previewMatches  []int
+	previewMatchIdx int
 
 	// Grep filter inside the preview overlay ("&"), mirroring the log
 	// viewer's grep (see previewgrep.go): when previewGrepRe is set only
@@ -1111,6 +1115,7 @@ func (m *Model) initPreviewViewport(content string, err error) {
 	m.previewPlain = nil
 	m.previewSrc = nil
 	m.previewSrcPlain = nil
+	m.previewCursor = 0
 	vpW, vpH := m.previewViewportSize()
 	m.previewViewport = verticalViewport(vpW, vpH)
 	if err == nil && content != "" {
@@ -2025,9 +2030,17 @@ func (m *Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.startLayoutPrompt()
 				return m, nil
 			}
-			// Forward all other keys to the preview viewport for scrolling.
+			// Navigation moves the line cursor, which drags the window
+			// with it (previewcursor.go) — the same keys the viewport
+			// bound, now with something to follow.
+			if m.handlePreviewCursorKey(msg.String()) {
+				return m, tea.Batch(cmds...)
+			}
+			// Forward anything else to the viewport, then pull the cursor
+			// back into view in case that key scrolled.
 			var vpCmd tea.Cmd
 			m.previewViewport, vpCmd = m.previewViewport.Update(msg)
+			m.syncPreviewCursorToView()
 			if vpCmd != nil {
 				cmds = append(cmds, vpCmd)
 			}
@@ -3713,8 +3726,10 @@ func (m *Model) helpView() string {
 		// (the state sections behind it don't apply while it is up).
 		title = "S3 Explorer Help — Object Preview"
 		sections = []string{
-			"Scrolling",
-			"  ↑/↓, PgUp/PgDn     Scroll the preview",
+			"Reading",
+			"  ↑/↓, k/j           Move the line cursor (the window follows it)",
+			"  PgUp/PgDn, b/f     Move a page; u/d move half a page",
+			"  g / G              First / last line",
 			"",
 			"Search & filter (work like the CloudWatch log page)",
 			"  /                  Find in the previewed text (highlights live as you type)",
@@ -3806,7 +3821,9 @@ func (m *Model) previewView() string {
 
 	width, height := m.previewPanelSize()
 	title := ui.PanelTitleStyle().Render("OBJECT PREVIEW: " + m.previewKey)
-	hint := "[↑/↓/PgUp/PgDn] Scroll  [/] Search  [&] Filter lines  [t] View as table  [L] Fixed-width layout  [Esc] Close"
+	// Kept no longer than the hint it replaced: the panel clips at its own
+	// height, so a hint that wraps to a second line loses its own tail (§9).
+	hint := "[↑/↓/PgUp/PgDn] Move line  [g/G] Top/bottom  [/] Search  [&] Filter  [t] Table  [L] Fixed-width  [Esc] Close"
 	if m.enteringLayout {
 		hint = layoutPromptLine(m.layoutInput.View(), m.layoutErr)
 	} else if m.previewNotTabular {
