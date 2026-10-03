@@ -59,7 +59,7 @@ func TestRenderPreviewContentGutterAndText(t *testing.T) {
 	plain := []string{"hello world", "no match here", "plain hello"}
 	matches := computePreviewMatches(plain, "hello") // lines 0 and 2
 
-	out := strings.Split(renderPreviewContent(lines, plain, "hello", matches, 1), "\n")
+	out := strings.Split(renderPreviewContent(lines, plain, "hello", matches, 1, -1, 40), "\n")
 	if len(out) != 3 {
 		t.Fatalf("rendered %d lines, want 3", len(out))
 	}
@@ -81,7 +81,7 @@ func TestRenderPreviewContentGutterAndText(t *testing.T) {
 		t.Errorf("matched line kept its original ANSI styling: %q", out[0])
 	}
 	// Without a term no line is marked.
-	for i, line := range strings.Split(renderPreviewContent(lines, plain, "", nil, 0), "\n") {
+	for i, line := range strings.Split(renderPreviewContent(lines, plain, "", nil, 0, -1, 40), "\n") {
 		if !strings.HasPrefix(ansi.Strip(line), "  ") {
 			t.Errorf("no-search line %d not gutter-padded: %q", i, ansi.Strip(line))
 		}

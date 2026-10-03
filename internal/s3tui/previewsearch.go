@@ -88,12 +88,17 @@ func highlightPreviewTerm(line, term string) string {
 }
 
 // renderPreviewContent rebuilds the viewport content: every line carries the
-// reserved gutter ("▸ " on the current match line, spaces elsewhere), and a
-// line containing the term is re-rendered from its plain text with the
-// occurrences highlighted — dropping that line's syntax colours — so the
-// highlight spans, computed on plain text, can never land inside an ANSI
-// escape sequence.
-func renderPreviewContent(lines, plain []string, term string, matches []int, matchIdx int) string {
+// reserved gutter ("▸ " on the current match line, spaces elsewhere), the
+// cursor line is drawn as a full-width highlighted bar, and a line containing
+// the term is re-rendered from its plain text with the occurrences
+// highlighted — dropping that line's syntax colours — so the highlight spans,
+// computed on plain text, can never land inside an ANSI escape sequence.
+//
+// The cursor wins over the term highlight on the line it is on: its own
+// renderer marks the term there by weight instead, since the search colours
+// would be invisible against the bar. Pass cursor < 0 for no cursor and width
+// for the body width (the viewport less the gutter).
+func renderPreviewContent(lines, plain []string, term string, matches []int, matchIdx, cursor, width int) string {
 	cur := -1
 	if term != "" && matchIdx < len(matches) {
 		cur = matches[matchIdx]
@@ -106,10 +111,16 @@ func renderPreviewContent(lines, plain []string, term string, matches []int, mat
 		if i == cur {
 			gutter = marker
 		}
-		body := line
-		if mi < len(matches) && matches[mi] == i {
-			body = highlightPreviewTerm(plain[i], term)
+		isMatch := mi < len(matches) && matches[mi] == i
+		if isMatch {
 			mi++
+		}
+		body := line
+		switch {
+		case i == cursor:
+			body = previewCursorLine(plain[i], term, width)
+		case isMatch:
+			body = highlightPreviewTerm(plain[i], term)
 		}
 		out[i] = gutter + body
 	}
@@ -128,7 +139,10 @@ func (m *Model) refreshPreviewContent() {
 		}
 		return
 	}
-	m.previewViewport.SetContent(renderPreviewContent(m.previewLines, m.previewPlain, m.previewSearchTerm, m.previewMatches, m.previewMatchIdx))
+	m.previewViewport.SetContent(renderPreviewContent(
+		m.previewLines, m.previewPlain, m.previewSearchTerm,
+		m.previewMatches, m.previewMatchIdx,
+		m.previewCursor, max(1, m.previewViewport.Width()-previewGutterWidth)))
 }
 
 // startPreviewSearch gives the Find input the keyboard ("/"). Any previous
@@ -198,11 +212,17 @@ func (m *Model) stepPreviewMatch(dir int) {
 }
 
 // centerPreviewMatch scrolls so the current match line sits roughly
-// mid-screen. SetYOffset clamps, so this never scrolls past either end.
+// mid-screen and leaves the cursor on it — jumping to a match and then
+// pressing ↓ should carry on from the match, not from wherever the cursor
+// happened to be. SetYOffset clamps, so this never scrolls past either end.
 func (m *Model) centerPreviewMatch() {
-	if m.previewMatchIdx < len(m.previewMatches) {
-		m.previewViewport.SetYOffset(m.previewMatches[m.previewMatchIdx] - m.previewViewport.Height()/2)
+	if m.previewMatchIdx >= len(m.previewMatches) {
+		return
 	}
+	line := m.previewMatches[m.previewMatchIdx]
+	m.previewViewport.SetYOffset(line - m.previewViewport.Height()/2)
+	m.previewCursor = line
+	m.refreshPreviewContent()
 }
 
 // previewFindLine renders the dedicated search line shown under the preview
