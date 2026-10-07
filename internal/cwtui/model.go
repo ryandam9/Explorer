@@ -358,6 +358,9 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case streamMatchMsg:
 		m.handleStreamMatchResult(msg, &cmds)
 
+	case matchedStreamMsg:
+		m.handleMatchedStream(msg, &cmds)
+
 	case viewerEventsMsg:
 		m.handleViewerEvents(msg, &cmds)
 

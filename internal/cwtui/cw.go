@@ -179,11 +179,16 @@ func (c *CWLogsClient) listLogGroupsInRegion(ctx context.Context, region, prefix
 	return groups, nil
 }
 
+// streamListLimit caps the [2] Log streams listing: one DescribeLogStreams
+// page of the most recently active streams. A group can hold far more, so the
+// list is a window onto the group, not the whole of it.
+const streamListLimit = 50
+
 // ListLogStreams fetches the most active log streams for a log group.
 func (c *CWLogsClient) ListLogStreams(ctx context.Context, region, logGroupName string, prefix string) ([]types.LogStream, error) {
 	input := &cloudwatchlogs.DescribeLogStreamsInput{
 		LogGroupName: aws.String(logGroupName),
-		Limit:        aws.Int32(50),
+		Limit:        aws.Int32(streamListLimit),
 	}
 	if prefix != "" {
 		// The API rejects OrderBy=LastEventTime combined with a name prefix,
@@ -202,6 +207,30 @@ func (c *CWLogsClient) ListLogStreams(ctx context.Context, region, logGroupName 
 	}
 
 	return resp.LogStreams, nil
+}
+
+// DescribeLogStream looks up one stream by its exact name — for a stream that
+// is known to exist (e.g. a group-wide search matched it) but sits outside the
+// capped listing. It returns (nil, nil) when no stream has that name.
+func (c *CWLogsClient) DescribeLogStream(ctx context.Context, region, logGroupName, logStreamName string) (*types.LogStream, error) {
+	ctxWithTimeout, cancel := context.WithTimeout(ctx, 15*time.Second)
+	defer cancel()
+	// A prefix query is ordered by name, and the exact name sorts before every
+	// longer name sharing it — so the first result is the stream if it exists.
+	resp, err := c.clientFor(region).DescribeLogStreams(ctxWithTimeout, &cloudwatchlogs.DescribeLogStreamsInput{
+		LogGroupName:        aws.String(logGroupName),
+		LogStreamNamePrefix: aws.String(logStreamName),
+		Limit:               aws.Int32(1),
+	})
+	if err != nil {
+		return nil, err
+	}
+	for i := range resp.LogStreams {
+		if aws.ToString(resp.LogStreams[i].LogStreamName) == logStreamName {
+			return &resp.LogStreams[i], nil
+		}
+	}
+	return nil, nil
 }
 
 // GetLogEvents retrieves the most recent events from a log group/stream,
