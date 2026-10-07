@@ -3,6 +3,7 @@ package cwtui
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"sort"
 	"strings"
 	"time"
@@ -312,14 +313,79 @@ func (m *model) openMatchedStream(cmds *[]tea.Cmd) {
 		}
 	}
 	if idx < 0 {
-		// The stream has events in the window but isn't in the listing (the
-		// stream list is itself capped) — say so instead of opening whatever
-		// happens to be selected.
-		m.setToast("Stream not in the loaded stream list: " + sel.Stream)
-		*cmds = append(*cmds, toastCmd(4*time.Second))
+		// The stream has events in the window but sits outside the capped
+		// listing (only the most recently active streams are loaded). Look it
+		// up by name and open it once it arrives, rather than refusing.
+		grp, ok := m.selectedGroup()
+		if !ok {
+			return
+		}
+		group, region, name := aws.ToString(grp.LogGroupName), grp.Region, sel.Stream
+		m.setToast("Loading stream " + name + "…")
+		*cmds = append(*cmds, toastCmd(4*time.Second), func() tea.Msg {
+			st, err := m.client.DescribeLogStream(m.ctx, region, group, name)
+			return matchedStreamMsg{group: group, region: region, name: name, last: sel.Last, stream: st, err: err}
+		})
 		return
 	}
+	m.openStreamAt(idx, cmds)
+}
 
+// matchedStreamMsg carries a stream looked up by name for a stream-search hit
+// that wasn't in the loaded stream list.
+type matchedStreamMsg struct {
+	group, region, name string
+	last                int64 // the stream's last match (ms), a floor for its last event
+	stream              *types.LogStream
+	err                 error
+}
+
+// handleMatchedStream adds the looked-up stream to the list and opens it.
+// The search already proved the stream exists, so a failed or empty lookup
+// still opens it by name — with the missing metadata noted, never hidden.
+func (m *model) handleMatchedStream(msg matchedStreamMsg, cmds *[]tea.Cmd) {
+	grp, ok := m.selectedGroup()
+	if !ok || msg.group != aws.ToString(grp.LogGroupName) || msg.region != grp.Region {
+		return
+	}
+	st := msg.stream
+	if st == nil {
+		if msg.err != nil {
+			slog.Warn("Describing matched log stream failed", "group", msg.group, "stream", msg.name, "error", msg.err.Error())
+			m.setToast("Couldn't read stream details (" + clipToastText(msg.err.Error()) + ") — opening it by name")
+		} else {
+			slog.Warn("Matched log stream not returned by DescribeLogStreams", "group", msg.group, "stream", msg.name)
+			m.setToast("Stream details unavailable — opening it by name")
+		}
+		*cmds = append(*cmds, toastCmd(4*time.Second))
+		// Its last match is the latest event we know of; that keeps the
+		// events window on the matched lines.
+		st = &types.LogStream{LogStreamName: aws.String(msg.name), LastEventTimestamp: aws.Int64(msg.last)}
+	}
+
+	idx := -1
+	for i, s := range m.streams {
+		if aws.ToString(s.LogStreamName) == msg.name {
+			idx = i
+			break
+		}
+	}
+	if idx < 0 {
+		m.streams = append(m.streams, *st)
+	}
+	m.streamSearch.SetValue("")
+	m.filterStreams()
+	for i, s := range m.filteredStreams {
+		if aws.ToString(s.LogStreamName) == msg.name {
+			m.openStreamAt(i, cmds)
+			return
+		}
+	}
+}
+
+// openStreamAt opens the stream at idx in the filtered list with the search
+// pattern applied.
+func (m *model) openStreamAt(idx int, cmds *[]tea.Cmd) {
 	m.selectedStreamIdx = idx
 	m.eventSearch.SetValue(m.streamMatch.pattern)
 	m.streamMatch.active = false // keep the pattern; drop the results overlay
@@ -426,8 +492,11 @@ func (m *model) renderStreamMatch(width int) string {
 	// "N of M" only when M is known — the stream list loads independently, and
 	// "12 of 0" would be worse than no denominator at all.
 	summary := fmt.Sprintf("  %d streams matched", len(s.matches))
-	if total := len(m.streams); total > 0 {
+	if total := len(m.streams); total > 0 && total < streamListLimit {
 		summary = fmt.Sprintf("  %d of %d streams matched", len(s.matches), total)
+	} else if total >= streamListLimit {
+		// The list is capped, so its length is not the group's stream count.
+		summary = fmt.Sprintf("  %d streams matched (the stream list shows only the %d most recently active)", len(s.matches), streamListLimit)
 	}
 	if s.truncated {
 		summary += warn.Render(fmt.Sprintf("  ! scan capped at %d events — counts are minimums, quiet streams may be missing", streamMatchMaxScan))

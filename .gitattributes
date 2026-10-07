@@ -1,0 +1,5 @@
+# PDFs are byte-exact: their xref table records byte offsets, so a checkout
+# that rewrites LF to CRLF (core.autocrlf on Windows) corrupts them. The test
+# fixtures under internal/s3tui/testdata are plain-ASCII PDFs, which git would
+# otherwise treat as text.
+*.pdf binary

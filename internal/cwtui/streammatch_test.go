@@ -1,6 +1,7 @@
 package cwtui
 
 import (
+	"errors"
 	"strings"
 	"testing"
 
@@ -227,5 +228,47 @@ func newStreamMatchTestModel() *model {
 		lookback:    defaultLookback,
 		eventSearch: textinput.New(),
 		streamMatch: streamMatchState{input: textinput.New()},
+	}
+}
+
+// A matched stream outside the capped listing is looked up by name, added to
+// the list and opened — not refused.
+func TestOpenMatchedStreamOutsideLoadedList(t *testing.T) {
+	m := newStreamMatchTestModel()
+	m.groups = []LogGroup{{LogGroup: types.LogGroup{LogGroupName: aws.String("g")}, Region: "us-east-1"}}
+	m.filteredGroups = m.groups
+	m.streams = []types.LogStream{{LogStreamName: aws.String("stream-a")}}
+	m.filteredStreams = m.streams
+	m.streamMatch.active = true
+	m.streamMatch.pattern = "ERROR"
+	m.streamMatch.matches = []StreamMatch{{Stream: "old-stream", Count: 1, Last: 1700000000000}}
+
+	var cmds []tea.Cmd
+	m.openMatchedStream(&cmds)
+	if len(cmds) == 0 {
+		t.Fatalf("no lookup queued for a stream outside the list")
+	}
+	if m.view == viewEvents {
+		t.Fatalf("opened before the lookup returned")
+	}
+
+	// The lookup failed: the stream still opens by name.
+	cmds = nil
+	m.handleMatchedStream(matchedStreamMsg{group: "g", region: "us-east-1", name: "old-stream", last: 1700000000000, err: errors.New("denied")}, &cmds)
+	if got := aws.ToString(m.filteredStreams[m.selectedStreamIdx].LogStreamName); got != "old-stream" {
+		t.Errorf("selected stream = %q, want old-stream", got)
+	}
+	if len(m.streams) != 2 {
+		t.Errorf("streams = %d, want the looked-up stream added", len(m.streams))
+	}
+	if m.view != viewEvents || m.eventSearch.Value() != "ERROR" {
+		t.Errorf("did not open the events panel with the pattern: view=%v pattern=%q", m.view, m.eventSearch.Value())
+	}
+
+	// A lookup answer for a group no longer selected is dropped.
+	before := len(m.streams)
+	m.handleMatchedStream(matchedStreamMsg{group: "other", region: "us-east-1", name: "x"}, &cmds)
+	if len(m.streams) != before {
+		t.Errorf("stale lookup changed the stream list")
 	}
 }
