@@ -209,3 +209,29 @@ func TestSanitizeThenHardWrapHasNoControlBleed(t *testing.T) {
 		}
 	}
 }
+
+// The preview shows the file's text, not the encoder's re-escaping of it: an
+// apostrophe must not turn into &#39; (in text or attributes), and entities
+// and CDATA keep the form the file wrote them in.
+func TestFormatXMLKeepsQuotesAndEntitiesVerbatim(t *testing.T) {
+	in := `<root><msg title="we've">we've said "hi" &amp; left</msg><raw><![CDATA[a < b]]></raw><esc>it&apos;s</esc></root>`
+	out, ok := formatXML(in)
+	if !ok {
+		t.Fatal("expected XML to format")
+	}
+	for _, want := range []string{
+		`<msg title="we've">we've said "hi" &amp; left</msg>`,
+		`<raw><![CDATA[a < b]]></raw>`,
+		`<esc>it&apos;s</esc>`,
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("output missing %q:\n%s", want, out)
+		}
+	}
+	if strings.Contains(out, "&#39;") || strings.Contains(out, "&#34;") {
+		t.Errorf("encoder escapes leaked into the preview:\n%s", out)
+	}
+	if !strings.Contains(out, "\n  <msg") {
+		t.Errorf("indentation lost:\n%s", out)
+	}
+}

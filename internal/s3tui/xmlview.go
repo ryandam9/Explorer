@@ -34,26 +34,46 @@ func looksLikeXMLContent(s string) bool {
 // the truncated tail of a preview (and of mildly malformed input): tokens are
 // re-emitted with indentation until the first decode error, then flushed. ok is
 // false when nothing parsed, so the caller can fall back to the raw text.
+//
+// The preview shows the file, not a re-serialization of it: xml.Encoder escapes
+// every quote it writes (`we've` → `we&#39;ve`), so text content is copied
+// verbatim from the source instead of re-encoded, and the quote escapes the
+// encoder adds inside tags are undone.
 func formatXML(s string) (string, bool) {
 	s = strings.TrimPrefix(s, xmlBOM)
 	dec := xml.NewDecoder(strings.NewReader(s))
 	dec.Strict = false
 
-	var buf bytes.Buffer
-	enc := xml.NewEncoder(&buf)
+	var out, encBuf bytes.Buffer
+	enc := xml.NewEncoder(&encBuf)
 	enc.Indent("", "  ")
 
 	any := false
+tokens:
 	for {
+		start := dec.InputOffset()
 		tok, err := dec.Token()
 		if err != nil {
-			break // EOF, or the truncated/malformed tail of a preview
+			break tokens // EOF, or the truncated/malformed tail of a preview
 		}
 		switch t := tok.(type) {
 		case xml.CharData:
 			// Drop layout-only whitespace so the encoder's own indentation
 			// controls the result instead of doubling up blank space.
 			if strings.TrimSpace(string(t)) == "" {
+				continue
+			}
+			// Copy the text exactly as written (entities, CDATA and quotes
+			// included). CharData doesn't move the encoder's indentation, so
+			// writing it beside the encoder keeps the layout intact.
+			if end := dec.InputOffset(); start >= 0 && end <= int64(len(s)) && start < end {
+				if err := enc.Flush(); err != nil {
+					break tokens
+				}
+				out.Write(encBuf.Bytes())
+				encBuf.Reset()
+				out.WriteString(s[start:end])
+				any = true
 				continue
 			}
 		case xml.StartElement:
@@ -78,7 +98,18 @@ func formatXML(s string) (string, bool) {
 					a.Name.Space = ""
 				}
 			}
-			tok = t
+			if err := enc.EncodeToken(t); err != nil {
+				break tokens
+			}
+			if err := enc.Flush(); err != nil {
+				break tokens
+			}
+			// Attribute values are double-quoted, so an apostrophe needs no
+			// escape there; show it as the file wrote it.
+			out.WriteString(strings.ReplaceAll(encBuf.String(), "&#39;", "'"))
+			encBuf.Reset()
+			any = true
+			continue
 		case xml.EndElement:
 			t.Name.Space = ""
 			tok = t
@@ -92,7 +123,8 @@ func formatXML(s string) (string, bool) {
 		return "", false
 	}
 	_ = enc.Flush()
-	return declarationOnOwnLine(buf.String()), true
+	out.Write(encBuf.Bytes())
+	return declarationOnOwnLine(out.String()), true
 }
 
 // declarationOnOwnLine puts the XML declaration (and any leading processing
