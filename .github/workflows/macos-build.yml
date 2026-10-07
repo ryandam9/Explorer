@@ -1,0 +1,78 @@
+name: macOS build
+
+# Every merge to master builds the Apple Silicon (darwin/arm64) binary and
+# publishes it to one rolling GitHub Release, "latest-master". Release assets
+# on a public repo download without a GitHub login (Actions artifacts always
+# need one), and the URL never changes:
+#   https://github.com/ryandam9/Explorer/releases/download/latest-master/aws_explorer_darwin_arm64.tar.gz
+#
+# The "latest-master" tag is moved by this workflow to each new build; nobody
+# tags anything by hand. It doesn't match release.yml's "v*" trigger, so it
+# never starts a versioned release.
+
+on:
+  push:
+    branches: [master]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+# Back-to-back merges: only the newest build needs to land.
+concurrency:
+  group: macos-build
+  cancel-in-progress: true
+
+env:
+  RELEASE_TAG: latest-master
+  ASSET: aws_explorer_darwin_arm64
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+
+      - name: Build darwin/arm64
+        env:
+          CGO_ENABLED: "0"
+          GOOS: darwin
+          GOARCH: arm64
+        run: |
+          short=$(git rev-parse --short HEAD)
+          now=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+          pkg=github.com/ryandam9/aws_explorer/cmd
+          mkdir -p "dist/$ASSET"
+          go build -trimpath \
+            -ldflags "-s -w -X $pkg.version=master-$short -X $pkg.commit=$short -X $pkg.date=$now" \
+            -o "dist/$ASSET/aws_explorer" .
+          cp README.md "dist/$ASSET/"
+          # tar keeps the executable bit, which a bare binary download would lose.
+          tar -C dist -czf "dist/$ASSET.tar.gz" "$ASSET"
+          (cd dist && sha256sum "$ASSET.tar.gz" > checksums.txt)
+
+      - name: Publish to the rolling release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          short=$(git rev-parse --short HEAD)
+          notes="Apple Silicon (M1 or later) macOS build of master at ${GITHUB_SHA}, built $(date -u '+%Y-%m-%d %H:%M UTC').
+
+          Install:
+              tar -xzf $ASSET.tar.gz
+              xattr -d com.apple.quarantine $ASSET/aws_explorer   # unsigned binary; clears Gatekeeper's block
+              ./$ASSET/aws_explorer --help"
+
+          # Point the tag at this commit (created on the first run).
+          git tag -f "$RELEASE_TAG"
+          git push -f origin "refs/tags/$RELEASE_TAG"
+
+          if gh release view "$RELEASE_TAG" >/dev/null 2>&1; then
+            gh release edit "$RELEASE_TAG" --title "Latest master ($short)" --notes "$notes" --prerelease
+          else
+            gh release create "$RELEASE_TAG" --title "Latest master ($short)" --notes "$notes" --prerelease --verify-tag
+          fi
+          gh release upload "$RELEASE_TAG" "dist/$ASSET.tar.gz" dist/checksums.txt --clobber
