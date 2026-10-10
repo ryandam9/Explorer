@@ -376,6 +376,11 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			cmds = append(cmds, m.viewerTickCmd())
 		}
 
+	case tea.PasteMsg:
+		// Bracketed paste arrives as its own message, not as key presses, so
+		// it has to be routed to the focused input explicitly.
+		m.handlePaste(msg, &cmds)
+
 	case tea.KeyPressMsg:
 		// Error screen: Enter/Esc clears the error and retries, q quits.
 		if m.err != nil {
@@ -697,6 +702,47 @@ func (m *model) navigateList(dir int) tea.Cmd {
 		}
 	}
 	return nil
+}
+
+// handlePaste feeds a bracketed paste to whichever text input currently has
+// the keyboard, mirroring the per-keystroke side effects of the key handlers
+// (live filtering, match recompute). With no input focused it is dropped, so
+// pasted text can never be replayed as navigation keys.
+func (m *model) handlePaste(msg tea.PasteMsg, cmds *[]tea.Cmd) {
+	if m.err != nil || m.showAbout || m.showHelp || m.recordActive {
+		return
+	}
+	var cmd tea.Cmd
+	switch v := &m.viewer; {
+	case v.active && v.searchActive:
+		v.search, cmd = v.search.Update(msg)
+		v.term = v.search.Value()
+		v.computeMatches()
+	case v.active && v.grepActive:
+		v.grepInput, cmd = v.grepInput.Update(msg)
+		v.setGrep(v.grepInput.Value())
+		if v.follow {
+			v.scrollToBottom(m.viewerBodyHeight())
+		} else {
+			v.clampOffsetFor(m.viewerBodyHeight())
+		}
+	case v.active:
+		return
+	case m.groupSearchActive && m.focus == focusGroups:
+		m.groupSearch, cmd = m.groupSearch.Update(msg)
+		m.filterGroups()
+	case m.streamSearchActive && m.focus == focusStreams:
+		m.streamSearch, cmd = m.streamSearch.Update(msg)
+		m.filterStreams()
+	case m.eventSearchActive && m.focus == focusEvents:
+		m.eventSearch, cmd = m.eventSearch.Update(msg)
+	case m.streamMatch.visible() && m.streamMatch.prompting && m.focus == focusStreams:
+		m.streamMatch.input, cmd = m.streamMatch.input.Update(msg)
+		m.streamMatch.errNote = ""
+	default:
+		return
+	}
+	*cmds = append(*cmds, cmd)
 }
 
 func (m *model) activateSearch() {

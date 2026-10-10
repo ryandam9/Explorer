@@ -667,3 +667,36 @@ func TestStreamsMsgDroppedForWrongRegion(t *testing.T) {
 			m3.streamsLoading, len(m3.streams))
 	}
 }
+
+// A bracketed paste arrives as tea.PasteMsg, not key presses; it must land in
+// the focused search input (and filter live) rather than being dropped.
+func TestPasteIntoStreamSearch(t *testing.T) {
+	sSearch := textinput.New()
+	sSearch.Focus()
+	m := &model{
+		view:               viewStreams,
+		focus:              focusStreams,
+		streamSearchActive: true,
+		streamSearch:       sSearch,
+		streams: []types.LogStream{
+			{LogStreamName: aws.String("2026/10/09/[$LATEST]3526077c")},
+			{LogStreamName: aws.String("2026/10/09/[$LATEST]e9bae5bf")},
+		},
+	}
+	m.filterStreams()
+
+	m.Update(tea.PasteMsg{Content: "e9bae5"})
+	if got := m.streamSearch.Value(); got != "e9bae5" {
+		t.Fatalf("stream search = %q, want pasted text", got)
+	}
+	if len(m.filteredStreams) != 1 {
+		t.Errorf("filtered streams = %d, want 1 after paste", len(m.filteredStreams))
+	}
+
+	// With no input focused, a paste is dropped rather than replayed as keys.
+	m.streamSearchActive = false
+	m.Update(tea.PasteMsg{Content: "q"})
+	if got := m.streamSearch.Value(); got != "e9bae5" {
+		t.Errorf("unfocused paste changed search to %q", got)
+	}
+}
