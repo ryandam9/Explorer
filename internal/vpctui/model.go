@@ -1981,7 +1981,7 @@ func (m *Model) viewString() string {
 			// on a normal terminal; min() keeps it inside narrow ones.
 			helpW = min(m.width-4, 98)
 		}
-		return lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center, ui.HelpView("VPC Explorer — help", m.helpText(), helpW))
+		return lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center, ui.HelpView(m.helpTitle(), m.helpText(), helpW))
 	}
 
 	if m.showAbout {
@@ -2853,51 +2853,73 @@ const vpcAboutText = "The VPC Explorer drills into a single VPC's networking and
 	"Press ? for the full list of keyboard shortcuts."
 
 func (m *Model) helpText() string {
-	lines := []string{
-		lipgloss.NewStyle().Foreground(lipgloss.Color(ui.ColorMuted())).Render("VPC list"),
-		"  Enter    Open resource browser for selected VPC",
-		"  /        Filter VPCs by name/ID",
-		"  < >      Scroll table columns left/right (when wider than screen)",
-		"  r        Refresh VPC list",
+	section := func(title string) string {
+		return lipgloss.NewStyle().Foreground(lipgloss.Color(ui.ColorMuted())).Render(title)
+	}
+	// Only the current screen's shortcuts are listed: the resource-browser
+	// keys (F, E, P, …) do nothing on the VPC list, so advertising them there
+	// would be misleading.
+	var lines []string
+	if m.state == stateResourceBrowser {
+		lines = []string{
+			section("Resource browser"),
+			"  ↑ ↓      Navigate category sidebar or resource table",
+			"  < >      Scroll table columns left/right (when wider than panel)",
+			"  Tab      Switch focus between sidebar and resource table",
+			"  Enter    Load resource type (sidebar) / open detail (table)",
+			"  /        Filter table rows (matches any column; Enter keep, Esc clear)",
+			"  s / R    Sort by next column / reverse sort order",
+			"  c, y     Copy resource ID to clipboard",
+			"  o        Open the resource in the AWS console (copies the URL)",
+			"  C        Export current table to CSV (~/.aws_explorer/exports)",
+			"  F        Run the VPC findings linter (security/routing/capacity issues)",
+			"  P        Public exposure: what is reachable from the internet",
+			"  A        AWS Reachability Analyzer: list analyses; n creates one (paid)",
+			"  D        Show the VPC's DNS configuration (resolution, hostnames, DHCP)",
+			"  w        What changed: baseline the VPC, then diff against it later (t attributes actors)",
+			"  E        Export a Markdown report (resources + findings) to a file",
+			"  t        Trace connectivity from the selected network interface",
+			"  x        Where used: SGs, subnets, route tables, ENIs, NAT/IGW, NACLs, endpoints, peering",
+			"  L        Open the CloudWatch Logs explorer for the selected Lambda/RDS resource",
+			"  e        Effective merged security rules (network interface)",
+			"  r        Refresh current resource list",
+			"  Esc      Go back to VPC list",
+			"",
+			section("Detail overlay"),
+			"  ↑ ↓      Scroll",
+			"  Esc      Close",
+		}
+	} else {
+		lines = []string{
+			section("VPC list"),
+			"  ↑ ↓      Navigate VPCs",
+			"  Enter    Open resource browser for selected VPC",
+			"  /        Filter VPCs by name/ID",
+			"  < >      Scroll table columns left/right (when wider than screen)",
+			"  r        Refresh VPC list",
+		}
+	}
+	lines = append(lines,
 		"",
-		lipgloss.NewStyle().Foreground(lipgloss.Color(ui.ColorMuted())).Render("Resource browser"),
-		"  ↑ ↓      Navigate category sidebar or resource table",
-		"  < >      Scroll table columns left/right (when wider than panel)",
-		"  Tab      Switch focus between sidebar and resource table",
-		"  Enter    Load resource type (sidebar) / open detail (table)",
-		"  /        Filter table rows (matches any column; Enter keep, Esc clear)",
-		"  s / R    Sort by next column / reverse sort order",
-		"  c, y     Copy resource ID to clipboard",
-		"  o        Open the resource in the AWS console (copies the URL)",
-		"  C        Export current table to CSV (~/.aws_explorer/exports)",
-		"  F        Run the VPC findings linter (security/routing/capacity issues)",
-		"  P        Public exposure: what is reachable from the internet",
-		"  A        AWS Reachability Analyzer: list analyses; n creates one (paid)",
-		"  D        Show the VPC's DNS configuration (resolution, hostnames, DHCP)",
-		"  w        What changed: baseline the VPC, then diff against it later (t attributes actors)",
-		"  E        Export a Markdown report (resources + findings) to a file",
-		"  t        Trace connectivity from the selected network interface",
-		"  x        Where used: SGs, subnets, route tables, ENIs, NAT/IGW, NACLs, endpoints, peering",
-		"  L        Open the CloudWatch Logs explorer for the selected Lambda/RDS resource",
-		"  e        Effective merged security rules (network interface)",
-		"  r        Refresh current resource list",
-		"  Esc      Go back to VPC list",
-		"",
-		lipgloss.NewStyle().Foreground(lipgloss.Color(ui.ColorMuted())).Render("Detail overlay"),
-		"  ↑ ↓      Scroll",
-		"  Esc      Close",
-		"",
-		lipgloss.NewStyle().Foreground(lipgloss.Color(ui.ColorMuted())).Render("Global"),
+		section("Global"),
 		"  S        Settings (theme & colors)",
 		"  ~        Debug: live view of what the tool is doing",
 		"  i        About this page (what it does)",
 		"  ?        Toggle help",
 		"  q        Quit",
-	}
+	)
 	// Order shortcuts within each section by key; section headers and blank
 	// lines stay put so the grouping is preserved.
 	lines = ui.SortHelpSections(lines)
 	return strings.Join(lines, "\n")
+}
+
+// helpTitle names the screen the help overlay describes.
+func (m *Model) helpTitle() string {
+	if m.state == stateResourceBrowser {
+		return "VPC Explorer — resource browser help"
+	}
+	return "VPC Explorer — VPC list help"
 }
 
 // clipLines truncates every line of s to at most w display columns, in an
