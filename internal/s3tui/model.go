@@ -1087,8 +1087,29 @@ func formatPreviewText(content, key string) string {
 // the bordered panel never collides with the feather rail or the status bar.
 func (m *Model) previewPanelSize() (panelW, panelH int) {
 	panelW = max(40, m.width-6)
-	panelH = max(10, m.height-10)
+	// The panel renders panelH+2 rows tall. m.height-9 fills the screen down to
+	// the one blank row pinStatusBar keeps above the status bar, so no row of
+	// the frame goes unused.
+	panelH = max(10, m.height-9)
 	return panelW, panelH
+}
+
+// previewHintText is the key hint at the foot of the text preview.
+const previewHintText = "[↑/↓/PgUp/PgDn] Move line  [g/G] Top/bottom  [/] Search  [&] Filter  [t] Table  [L] Fixed-width  [Esc] Close"
+
+// previewHintWidth is the text width inside the preview panel: the panel's
+// width less its border (2) and horizontal padding (4).
+func (m *Model) previewHintWidth() int {
+	panelW, _ := m.previewPanelSize()
+	return max(10, panelW-6)
+}
+
+// previewHintLines is how many rows the key hint takes once wrapped to the
+// panel — one on a wide terminal, more on a narrow one. The viewport is sized
+// around it (measured, not assumed — §9), so the panel has no blank rows left
+// over at the bottom.
+func (m *Model) previewHintLines() int {
+	return lipgloss.Height(lipgloss.NewStyle().Width(m.previewHintWidth()).Render(previewHintText))
 }
 
 // initPreviewViewport builds the scrollable text viewport for a (non-CSV)
@@ -1134,15 +1155,16 @@ func (m *Model) initPreviewViewport(content string, err error) {
 
 // previewViewportSize returns the inner viewport dimensions for the current
 // panel size: the width less border, padding and the scrollbar gutter; the
-// height less the title, Find line, blank lines, help text and border — and
-// one more line while the grep bar is visible (see previewGrepVisible), like
+// height is what is left of the panel's inner rows (panelH+2 less border and
+// vertical padding) after the title, Find line, two blank separators and the
+// wrapped key hint — and one more line while the grep bar is visible (see previewGrepVisible), like
 // the log viewer's viewerBodyHeight. Content wraps a further two columns
 // short of the width so the reserved "▸" match gutter can never push a
 // full-width line past the panel edge (see renderPreviewContent).
 func (m *Model) previewViewportSize() (w, h int) {
 	panelW, panelH := m.previewPanelSize()
 	w = max(10, panelW-8)
-	h = panelH - 9
+	h = panelH - 2 - 4 - m.previewHintLines()
 	if m.previewGrepVisible() {
 		h--
 	}
@@ -3821,13 +3843,18 @@ func (m *Model) previewView() string {
 
 	width, height := m.previewPanelSize()
 	title := ui.PanelTitleStyle().Render("OBJECT PREVIEW: " + m.previewKey)
-	// Kept no longer than the hint it replaced: the panel clips at its own
-	// height, so a hint that wraps to a second line loses its own tail (§9).
-	hint := "[↑/↓/PgUp/PgDn] Move line  [g/G] Top/bottom  [/] Search  [&] Filter  [t] Table  [L] Fixed-width  [Esc] Close"
+	hint := previewHintText
 	if m.enteringLayout {
 		hint = layoutPromptLine(m.layoutInput.View(), m.layoutErr)
 	} else if m.previewNotTabular {
 		hint += "   " + ui.ErrorStyle().Render("not delimited — staying in text")
+	}
+	// The viewport is sized around the plain hint's wrapped height. A longer
+	// variant (the layout prompt, the not-delimited note) is held to that many
+	// rows rather than pushing the panel past its height.
+	hintRows := strings.Split(lipgloss.NewStyle().Width(m.previewHintWidth()).Render(ui.MutedStyle().Render(hint)), "\n")
+	if n := m.previewHintLines(); len(hintRows) > n {
+		hintRows = hintRows[:n]
 	}
 	// The Find line is always present (like the log viewer's search line), so
 	// opening the search never reflows the preview body; the grep bar appears
@@ -3837,7 +3864,8 @@ func (m *Model) previewView() string {
 	if grep := m.previewGrepLine(); grep != "" {
 		rows = append(rows, grep)
 	}
-	rows = append(rows, "", body, "", ui.MutedStyle().Render(hint))
+	rows = append(rows, "", body, "")
+	rows = append(rows, hintRows...)
 	return lipgloss.NewStyle().
 		Width(width).
 		Height(height+2).
