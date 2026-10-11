@@ -246,3 +246,36 @@ func TestPreviewSearchResetOnNewPreview(t *testing.T) {
 		t.Errorf("input text leaked into a new preview: %q", got)
 	}
 }
+
+// The preview panel fills the frame: the viewport is sized around the key
+// hint's measured height, so the hint is the last row above the panel's bottom
+// padding (no blank rows left over inside), and the panel reaches down to the
+// single blank row kept above the status bar.
+func TestPreviewPanelLeavesNoWastedRows(t *testing.T) {
+	var src []string
+	for i := 0; i < 200; i++ {
+		src = append(src, "line")
+	}
+	for _, size := range []struct{ w, h int }{{200, 40}, {100, 30}, {80, 24}} {
+		m := previewModel(t, strings.Join(src, "\n"))
+		m.width, m.height = size.w, size.h
+		m.initPreviewViewport(m.previewContent, nil)
+
+		rows := strings.Split(m.viewString(), "\n")
+		if len(rows) != size.h {
+			t.Fatalf("%dx%d: frame has %d rows, want %d", size.w, size.h, len(rows), size.h)
+		}
+		row := func(fromEnd int) string { return strings.TrimSpace(ansi.Strip(rows[len(rows)-1-fromEnd])) }
+		// From the bottom: status bar, the one blank gap, the bottom border,
+		// the bottom padding row, then the hint's last row.
+		if row(1) != "" {
+			t.Errorf("%dx%d: no blank gap above the status bar: %q", size.w, size.h, row(1))
+		}
+		if !strings.HasPrefix(row(2), "╰") {
+			t.Errorf("%dx%d: panel doesn't reach the gap above the status bar; row is %q", size.w, size.h, row(2))
+		}
+		if !strings.Contains(row(4), "Close") {
+			t.Errorf("%dx%d: rows wasted between the hint and the panel's bottom: %q", size.w, size.h, row(4))
+		}
+	}
+}
