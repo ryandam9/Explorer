@@ -3060,10 +3060,12 @@ func (m tuiModel) renderDetail(r model.Resource, width int) string {
 			b.WriteString("  No datapoints in the last hour.\n")
 		} else {
 			vals := m.metricsData.Values
-			spark := lipgloss.NewStyle().Foreground(lipgloss.Color(ui.ColorAccent())).Render(sparkline.Render(vals))
 			stats, _ := sparkline.Summarize(vals)
-			b.WriteString(wrapDetail(spark+"  (1h, 5m avg)", width, 2) + "\n")
-			stat := fmt.Sprintf("now %s · max %s · min %s",
+			if chart := renderMetricChart(vals, width, 2); chart != "" {
+				b.WriteString(chart + "\n")
+			}
+			// The chart's y axis runs from 0 (or the min, if negative) to max.
+			stat := fmt.Sprintf("1h, 5m avg · now %s · max %s · min %s",
 				sparkline.FormatValue(stats.Now, unit),
 				sparkline.FormatValue(stats.Max, unit),
 				sparkline.FormatValue(stats.Min, unit))

@@ -1842,10 +1842,7 @@ func (m *Model) updateTableSizes() {
 	// Resource table: right panel = total - left panel - middle panel - borders.
 	// The panel adds 2 for borders; the content area has title + separator (2 lines)
 	// already accounted for in the same tableH base, so use tableH directly.
-	rightWidth := m.width - (vpcPanelInner + 4) - (catPanelInner + 4)
-	if rightWidth < 20 {
-		rightWidth = 20
-	}
+	rightWidth := m.resourcePanelWidth()
 	resourceH := tableH
 	if m.resourceFilterVisible() {
 		resourceH = max(resourceH-1, 1) // the filter bar takes one line
@@ -2192,6 +2189,19 @@ func (m *Model) viewCategoryPanel(height int) string {
 		}
 	}
 
+	// On a short terminal the list is taller than the panel. Show a window
+	// that keeps the selected item in view, with a scrollbar in place of the
+	// right padding column, so the panel never grows and pushes the status
+	// bar off the bottom.
+	padRight := 1
+	avail := max(1, height-2) // the title and a blank line sit above the list
+	if total := len(lines); total > avail {
+		offset := min(max(0, m.activeSidebarIdx-avail/2), total-avail)
+		list := lipgloss.JoinVertical(lipgloss.Left, lines[offset:offset+avail]...)
+		lines = []string{lipgloss.JoinHorizontal(lipgloss.Top, list, ui.VScrollbar(avail, total, avail, offset))}
+		padRight = 0
+	}
+
 	content := lipgloss.JoinVertical(lipgloss.Left, append([]string{title, ""}, lines...)...)
 
 	borderColor := ui.ColorBorder()
@@ -2203,15 +2213,20 @@ func (m *Model) viewCategoryPanel(height int) string {
 		Height(height+2).
 		BorderStyle(lipgloss.RoundedBorder()).
 		BorderForeground(lipgloss.Color(borderColor)).
-		Padding(0, 1).
+		Padding(0, padRight, 0, 1).
 		Render(content)
 }
 
+// resourcePanelWidth is the resource panel's width inside its border: the
+// table gets this minus 2 padding columns. The box adds 2 border columns
+// (lipgloss v2 counts the border inside Width), so the three panels together
+// are exactly m.width wide.
+func (m *Model) resourcePanelWidth() int {
+	return max(20, m.width-(vpcPanelInner+4)-(catPanelInner+4)-2)
+}
+
 func (m *Model) viewResourcePanel(height int) string {
-	rightWidth := m.width - (vpcPanelInner + 4) - (catPanelInner + 4)
-	if rightWidth < 20 {
-		rightWidth = 20
-	}
+	rightWidth := m.resourcePanelWidth()
 
 	// Name the page uniquely ("my-vpc › Subnets") so a screen is easy to
 	// refer to when several people look at the tool.
