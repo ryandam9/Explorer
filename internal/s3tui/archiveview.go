@@ -76,7 +76,8 @@ func (m *Model) openArchiveMember() {
 		return
 	}
 	name := files[idx].Name
-	content, truncated, err := archiveMemberContent(m.archiveKey, m.archiveData, name, memberPreviewCap)
+	content, truncated, repaired, err := archiveMemberContent(m.archiveKey, m.archiveData, name, memberPreviewCap)
+	m.previewRepaired = repaired
 
 	m.previewKey = m.archiveKey + " › " + name
 	m.previewFromArchive = true
@@ -141,12 +142,15 @@ func (m *Model) showArchivePDF(content []byte, truncated bool) {
 }
 
 // archiveMemberContent extracts one member, reading the archive in whichever
-// format its key names.
-func archiveMemberContent(archiveKey string, data []byte, name string, maxOut int64) ([]byte, bool, error) {
+// format its key names. The third result reports that a malformed zip index
+// had to be worked around to find the member (see ziprepair.go); a tar is read
+// from the front and has no such index, so it never reports one.
+func archiveMemberContent(archiveKey string, data []byte, name string, maxOut int64) (out []byte, truncated, repaired bool, err error) {
 	if looksLikeZip(archiveKey) {
 		return zipMemberContent(data, name, maxOut)
 	}
-	return tarMemberContent(data, name, maxOut)
+	out, truncated, err = tarMemberContent(data, name, maxOut)
+	return out, truncated, false, err
 }
 
 // closeArchive leaves the archive browser, freeing the in-memory archive.

@@ -261,6 +261,10 @@ type Model struct {
 	previewLoading    bool
 	previewErr        error
 	previewNotTabular bool // user pressed "t" but the text isn't table-shaped
+	// previewRepaired marks content recovered from an archive whose index
+	// was wrong (ziprepair.go). The reader is told, because "this came out
+	// of a malformed archive" is not the same claim as "this is the file".
+	previewRepaired bool
 
 	// Text search inside the preview overlay ("/"), mirroring the CloudWatch
 	// log viewer's in-page search (see previewsearch.go). previewLines holds
@@ -861,6 +865,7 @@ func (m *Model) fetchParquetPreview(key string) tea.Cmd {
 func (m *Model) openPreview(key string) tea.Cmd {
 	m.previewKey = key
 	m.previewFromArchive = false
+	m.previewRepaired = false
 	m.showCSV = false
 	m.showPreview = false
 	m.showArchive = false
@@ -3848,6 +3853,8 @@ func (m *Model) previewView() string {
 		hint = layoutPromptLine(m.layoutInput.View(), m.layoutErr)
 	} else if m.previewNotTabular {
 		hint += "   " + ui.ErrorStyle().Render("not delimited — staying in text")
+	} else if m.previewRepaired {
+		hint += "   " + ui.ErrorStyle().Render("archive index is wrong — member found by scanning")
 	}
 	// The viewport is sized around the plain hint's wrapped height. A longer
 	// variant (the layout prompt, the not-delimited note) is held to that many
