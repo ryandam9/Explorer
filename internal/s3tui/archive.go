@@ -246,23 +246,23 @@ func zipMembers(data []byte) ([]archiveMember, error) {
 // zipMemberContent extracts one member's content (up to maxOut bytes) from raw
 // zip bytes. An entry stored with a compression method Go does not implement —
 // or an encrypted one — fails here rather than silently showing nothing.
-func zipMemberContent(data []byte, name string, maxOut int64) (out []byte, truncated bool, err error) {
+//
+// repaired reports that the archive's central directory did not lead to the
+// member and it had to be located by scanning (see ziprepair.go), so the UI
+// can say the archive is malformed rather than present recovered content as
+// ordinary content.
+func zipMemberContent(data []byte, name string, maxOut int64) (out []byte, truncated, repaired bool, err error) {
 	zr, err := zip.NewReader(bytes.NewReader(data), int64(len(data)))
 	if err != nil {
-		return nil, false, err
+		return nil, false, false, err
 	}
 	for _, f := range zr.File {
 		if f.Name != name || f.FileInfo().IsDir() {
 			continue
 		}
-		rc, oerr := f.Open()
-		if oerr != nil {
-			return nil, false, fmt.Errorf("cannot read %s: %w", name, oerr)
-		}
-		defer rc.Close()
-		return readCapped(rc, maxOut)
+		return zipOpenMember(data, f, maxOut)
 	}
-	return nil, false, errors.New("member not found in archive")
+	return nil, false, false, errors.New("member not found in archive")
 }
 
 // tarMemberContent extracts one member's content (up to maxOut bytes) from raw

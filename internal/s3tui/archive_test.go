@@ -259,7 +259,7 @@ func TestZipMembersAndContent(t *testing.T) {
 		t.Errorf("uncompressed size = %d, want %d", sizes["logs/app.log"], len("hello from the zip"))
 	}
 
-	out, truncated, err := zipMemberContent(data, "logs/app.log", memberPreviewCap)
+	out, truncated, _, err := zipMemberContent(data, "logs/app.log", memberPreviewCap)
 	if err != nil {
 		t.Fatalf("zipMemberContent: %v", err)
 	}
@@ -271,7 +271,7 @@ func TestZipMembersAndContent(t *testing.T) {
 	// into memory whole. (readCapped keeps the byte it peeks to detect the
 	// overrun, so the result is the cap plus one — the same contract the tar
 	// path has always had.)
-	short, truncated, err := zipMemberContent(data, "logs/app.log", 5)
+	short, truncated, _, err := zipMemberContent(data, "logs/app.log", 5)
 	if err != nil {
 		t.Fatalf("capped read: %v", err)
 	}
@@ -284,10 +284,10 @@ func TestZipMembersAndContent(t *testing.T) {
 
 	// A name that isn't in the archive, and a folder entry, are both "not a
 	// file you can open" rather than an empty preview.
-	if _, _, err := zipMemberContent(data, "logs/missing.log", memberPreviewCap); err == nil {
+	if _, _, _, err := zipMemberContent(data, "logs/missing.log", memberPreviewCap); err == nil {
 		t.Error("expected an error for a member that is not in the archive")
 	}
-	if _, _, err := zipMemberContent(data, "logs/", memberPreviewCap); err == nil {
+	if _, _, _, err := zipMemberContent(data, "logs/", memberPreviewCap); err == nil {
 		t.Error("expected an error when opening a directory entry")
 	}
 }
@@ -313,13 +313,13 @@ func TestZipMembersRejectsATruncatedArchive(t *testing.T) {
 // read with the tar reader (which would simply not find it).
 func TestArchiveMemberContentPicksTheFormat(t *testing.T) {
 	zipData := zipBytes(t, map[string]string{"a.txt": "from zip"})
-	out, _, err := archiveMemberContent("bundle.zip", zipData, "a.txt", memberPreviewCap)
+	out, _, _, err := archiveMemberContent("bundle.zip", zipData, "a.txt", memberPreviewCap)
 	if err != nil || string(out) != "from zip" {
 		t.Errorf("zip member = %q, err=%v; want \"from zip\"", out, err)
 	}
 
 	tarData := tarGzRaw(map[string]string{"a.txt": "from tar"})
-	out, _, err = archiveMemberContent("bundle.tar", tarData, "a.txt", memberPreviewCap)
+	out, _, _, err = archiveMemberContent("bundle.tar", tarData, "a.txt", memberPreviewCap)
 	if err != nil || string(out) != "from tar" {
 		t.Errorf("tar member = %q, err=%v; want \"from tar\"", out, err)
 	}
