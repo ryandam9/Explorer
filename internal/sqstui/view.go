@@ -26,8 +26,11 @@ func (m *model) viewString() string {
 		sb.WriteString(badge + "\n")
 	}
 
+	// sidebarW and contentW are inner widths: each box adds 2 border
+	// columns (lipgloss v2 counts the border inside Width), and 2 columns
+	// separate the boxes, so the row is sidebarW+2 + 2 + contentW+2 wide.
 	sidebarW := 42
-	contentW := m.width - sidebarW - 4
+	contentW := m.width - sidebarW - 6
 	if contentW < 20 {
 		contentW = 20
 	}
@@ -63,7 +66,9 @@ func (m *model) viewString() string {
 	}
 	sb.WriteString(ui.StatusBar(m.width, statusText, m.getHelpHints()))
 
-	frame := m.applyToast(sb.String())
+	// Clip so a narrow or short terminal never wraps or over-fills: either
+	// would scroll the header off the top.
+	frame := ui.ClipToSize(m.applyToast(sb.String()), m.width, m.height)
 	switch {
 	case m.showAbout:
 		frame = ui.OverlayCenterBlank(ui.AboutView("About — SQS Queues", sqsAboutText, ui.AboutWidth(m.width)), m.width, m.height)

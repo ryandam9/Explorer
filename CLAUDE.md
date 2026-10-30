@@ -302,6 +302,16 @@ scroll), #188 (sidebar truncation).
   (ARNs).
 - Prefer the **shared table widget** (`internal/table`) over bespoke per-TUI
   layout — bespoke layout is where these bugs recur (#219).
+- In lipgloss v2, `Width`/`Height` **include** the border. A box styled
+  `Width(w+2)` around `w` columns of content is `w+2` wide, not `w+4`.
+  `ClipToSize` hides the overflow, so it shows only as a missing right border
+  (sqs and vpc panels were both 2 columns too wide after the v2 upgrade).
+- `table.SetHeight` budgets for the column header *as it is when called*.
+  Call it again after `SetColumns` (laketui laid out before its columns
+  existed, so the table was 2 rows too tall and the status bar was clipped).
+- Give each TUI a `TestRenderSizes` that calls `uitest.SweepSizes` (most
+  have one; cw, lambda, bill and tags do not yet). Run them after any layout
+  change.
 
 ---
 

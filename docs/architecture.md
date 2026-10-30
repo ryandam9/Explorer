@@ -107,5 +107,7 @@ aws_explorer/
 | [Lip Gloss v2](https://github.com/charmbracelet/lipgloss) (`charm.land/lipgloss/v2`) | Terminal styling |
 | [bubblezone v2](https://github.com/lrstanley/bubblezone) | Mouse hit-zones (dashboard sidebar and rows) |
 | `internal/table` (in-house) | Shared TUI table widget (built on the Bubbles viewport) |
+| `internal/brailleplot` (in-house) | Multi-row braille area charts (2×4 dots per cell; idea from [velo](https://github.com/bjarneo/velo)) |
+| `internal/uitest` (in-house, tests only) | `SweepSizes`: renders a TUI at many sizes and checks fit, panel borders and status bar |
 | [clipboard](https://github.com/atotto/clipboard) | Copy resource IDs to clipboard |
 | [golang.org/x/sync](https://pkg.go.dev/golang.org/x/sync) | Bounded goroutine pool (errgroup) |

@@ -330,6 +330,11 @@ func (m *Model) rebuild() {
 	}
 	table.ApplySortHeader(cols, tableSortCol, m.sortAsc, func(i int) bool { return i > 0 })
 	m.tbl.SetColumns(cols)
+	// SetHeight budgets for the column header as it is at call time. The
+	// first resize lands before the query result brings the columns, so lay
+	// out again now or the table is two rows too tall and the status bar is
+	// clipped off the bottom.
+	m.layoutTable()
 
 	rows := make([]table.Row, 0, len(m.visible))
 	for i, r := range m.visible {
