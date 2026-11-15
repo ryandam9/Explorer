@@ -84,6 +84,25 @@ func (c *S3Client) requestContext() (context.Context, context.CancelFunc) {
 	return context.WithTimeout(c.ctx, awsRequestTimeout)
 }
 
+// objectLockErrValue maps a GetObjectRetention / GetObjectLegalHold error to
+// what the detail pane shows. Object Lock not being configured on the bucket or
+// object is a real "Not set"; a denied call is "Access Denied"; anything else
+// (wrong region, throttling, network) is unknown, "—", and the caller records it
+// so the pane flags it rather than presenting "Not set" as fact (§6a).
+func objectLockErrValue(err error) string {
+	switch {
+	case hasAPIErrorCode(err, "ObjectLockConfigurationNotFoundError", "NoSuchObjectLockConfiguration"):
+		return "Not set"
+	case hasAPIErrorCode(err, "InvalidRequest") && strings.Contains(strings.ToLower(err.Error()), "object lock"):
+		// "Bucket is missing Object Lock Configuration".
+		return "Not set"
+	case hasAPIErrorCode(err, "AccessDenied"):
+		return "Access Denied"
+	default:
+		return "—"
+	}
+}
+
 func hasAPIErrorCode(err error, codes ...string) bool {
 	var apiErr smithy.APIError
 	if !errors.As(err, &apiErr) {
@@ -425,11 +444,9 @@ func (c *S3Client) GetObjectDetails(bucket, key string) (*ObjectDetails, error) 
 			Key:    aws.String(key),
 		})
 		if err != nil {
-			if hasAPIErrorCode(err, "ObjectLockConfigurationNotFoundError", "NoSuchObjectLockConfiguration") ||
-				strings.Contains(err.Error(), "lock") || strings.Contains(err.Error(), "Lock") {
-				retention = "Not set"
-			} else {
-				retention = "Not set"
+			retention = objectLockErrValue(err)
+			if retention == "—" {
+				rec("retention", err)
 			}
 		} else if retOut.Retention != nil {
 			mode := string(retOut.Retention.Mode)
@@ -450,7 +467,10 @@ func (c *S3Client) GetObjectDetails(bucket, key string) (*ObjectDetails, error) 
 			Key:    aws.String(key),
 		})
 		if err != nil {
-			legalHold = "Not set"
+			legalHold = objectLockErrValue(err)
+			if legalHold == "—" {
+				rec("legal hold", err)
+			}
 		} else if holdOut.LegalHold != nil {
 			legalHold = string(holdOut.LegalHold.Status)
 		} else {

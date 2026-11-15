@@ -43,7 +43,9 @@ func (mm *m) computeFindings() []findings.Finding {
 	}
 
 	for _, j := range mm.inv.Jobs {
-		gj := findings.GlueJob{Name: j.Name, ARN: j.ARN, RunsKnown: true}
+		// RunsKnown mirrors whether GetJobRuns succeeded, so a denied lookup
+		// can't fire "never run" (§8).
+		gj := findings.GlueJob{Name: j.Name, ARN: j.ARN, RunsKnown: j.RunsKnown}
 		if j.LastRunState != "" {
 			gj.Runs = []findings.GlueRun{{
 				State: j.LastRunState, Started: j.LastRunStarted, ExecSecs: j.LastRunSeconds,

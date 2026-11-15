@@ -66,7 +66,7 @@ func TestRenderRunsJSON(t *testing.T) {
 
 func TestRenderJobsTable(t *testing.T) {
 	jobs := []Job{{
-		Name: "etl", Region: "us-east-1", LastRunState: "FAILED",
+		Name: "etl", Region: "us-east-1", LastRunState: "FAILED", RunsKnown: true,
 		LastRunSeconds: 161, Worker: "G.1X ×10", GlueVersion: "4.0",
 	}}
 	var buf bytes.Buffer
@@ -90,5 +90,23 @@ func TestRenderCrawlersCSV(t *testing.T) {
 	out := buf.String()
 	if !strings.Contains(out, "Name,Region,State") || !strings.Contains(out, "c1,us-east-1,READY,SUCCEEDED,sales") {
 		t.Errorf("unexpected CSV:\n%s", out)
+	}
+}
+
+// A job whose run history couldn't be read must not look like "never run",
+// and must not fire the run-history findings.
+func TestJobRunsUnknown(t *testing.T) {
+	unknown := Job{Name: "etl", Region: "us-east-1"}
+	if got := jobStateLabel(unknown, false); got != "unknown" {
+		t.Errorf("jobStateLabel(unknown) = %q, want unknown", got)
+	}
+	if got := jobStateLabel(unknown, true); got != "…" {
+		t.Errorf("jobStateLabel(unknown, enriching) = %q, want …", got)
+	}
+	if got := jobStateLabel(Job{RunsKnown: true}, false); got != "—" {
+		t.Errorf("jobStateLabel(never run) = %q, want —", got)
+	}
+	if got := jobTextState(unknown); got != "unknown" {
+		t.Errorf("jobTextState(unknown) = %q, want unknown", got)
 	}
 }

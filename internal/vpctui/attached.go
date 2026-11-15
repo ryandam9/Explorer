@@ -1,9 +1,11 @@
 package vpctui
 
 import (
+	"errors"
 	"fmt"
 	"log/slog"
 	"strings"
+	"sync"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
 	awsec2 "github.com/aws/aws-sdk-go-v2/service/ec2"
@@ -23,16 +25,12 @@ import (
 // These power the exhaustive Markdown export: every workload service that runs
 // inside the VPC (ECS, EKS, ElastiCache, Redshift, EFS, EMR) plus the EC2-native
 // VPN / transit-gateway plumbing that connects it to other networks. Each
-// collector is best-effort: a missing-permission error is swallowed (returns an
-// empty slice) so one denied API never aborts the whole report.
+// collector is best-effort: it returns whatever it gathered plus an error, and
+// the caller (buildFullExport) records the failure on the report as partial
+// data instead of aborting. A denied call is an error too — returning an empty
+// slice would make "couldn't look" read as "nothing attached", which is the
+// wrong answer to give someone deciding whether a VPC is safe to delete (§6a).
 // ---------------------------------------------------------------------------
-
-// accessDenied reports whether err is one of the assorted access-denied codes
-// the various services return, so a collector can degrade to an empty result.
-func accessDenied(err error) bool {
-	return hasAPIErrorCode(err,
-		"AccessDenied", "AccessDeniedException", "UnauthorizedOperation", "AuthorizationError")
-}
 
 // ---------------------------------------------------------------------------
 // Data types
@@ -150,9 +148,6 @@ func (c *VPCClient) ListVPNGateways(vpcID string) ([]VPNGatewayInfo, error) {
 		},
 	})
 	if err != nil {
-		if accessDenied(err) {
-			return nil, nil
-		}
 		return nil, err
 	}
 	var gws []VPNGatewayInfo
@@ -193,9 +188,6 @@ func (c *VPCClient) ListVPNConnections(vgwIDs []string) ([]VPNConnectionInfo, er
 		},
 	})
 	if err != nil {
-		if accessDenied(err) {
-			return nil, nil
-		}
 		return nil, err
 	}
 	var conns []VPNConnectionInfo
@@ -227,9 +219,6 @@ func (c *VPCClient) ListCustomerGateways(cgwIDs []string) ([]CustomerGatewayInfo
 		CustomerGatewayIds: cgwIDs,
 	})
 	if err != nil {
-		if accessDenied(err) {
-			return nil, nil
-		}
 		return nil, err
 	}
 	var gws []CustomerGatewayInfo
@@ -261,9 +250,6 @@ func (c *VPCClient) ListTransitGatewayAttachments(vpcID string) ([]TransitGatewa
 	for paginator.HasMorePages() {
 		page, err := paginator.NextPage(ctx)
 		if err != nil {
-			if accessDenied(err) {
-				return nil, nil
-			}
 			return nil, err
 		}
 		for _, a := range page.TransitGatewayAttachments {
@@ -295,14 +281,12 @@ func (c *VPCClient) ListECSServices(vpcSubnets map[string]bool) ([]ECSServiceInf
 	defer cancel()
 
 	var out []ECSServiceInfo
+	var errs []error
 	clusterPaginator := ecs.NewListClustersPaginator(c.ecs, &ecs.ListClustersInput{})
 	for clusterPaginator.HasMorePages() {
 		cpage, err := clusterPaginator.NextPage(ctx)
 		if err != nil {
-			if accessDenied(err) {
-				return nil, nil
-			}
-			return nil, err
+			return out, errors.Join(append(errs, err)...)
 		}
 		for _, clusterArn := range cpage.ClusterArns {
 			svcPaginator := ecs.NewListServicesPaginator(c.ecs, &ecs.ListServicesInput{
@@ -311,6 +295,7 @@ func (c *VPCClient) ListECSServices(vpcSubnets map[string]bool) ([]ECSServiceInf
 			for svcPaginator.HasMorePages() {
 				spage, err := svcPaginator.NextPage(ctx)
 				if err != nil {
+					errs = append(errs, fmt.Errorf("list services in %s: %w", shortName(clusterArn), err))
 					break
 				}
 				for i := 0; i < len(spage.ServiceArns); i += 10 {
@@ -323,7 +308,11 @@ func (c *VPCClient) ListECSServices(vpcSubnets map[string]bool) ([]ECSServiceInf
 						Services: spage.ServiceArns[i:end],
 					})
 					if err != nil {
+						errs = append(errs, fmt.Errorf("describe services in %s: %w", shortName(clusterArn), err))
 						continue
+					}
+					for _, f := range desc.Failures {
+						errs = append(errs, fmt.Errorf("describe service %s: %s", shortName(aws.ToString(f.Arn)), aws.ToString(f.Reason)))
 					}
 					for _, svc := range desc.Services {
 						var subnets, sgs []string
@@ -349,33 +338,49 @@ func (c *VPCClient) ListECSServices(vpcSubnets map[string]bool) ([]ECSServiceInf
 			}
 		}
 	}
-	return out, nil
+	return out, errors.Join(errs...)
 }
+
+// eksDescribeParallel bounds concurrent DescribeCluster calls, so an account
+// with many clusters isn't swept one round-trip at a time under the single
+// request deadline (§7).
+const eksDescribeParallel = 10
 
 func (c *VPCClient) ListEKSClusters(vpcID string) ([]EKSClusterInfo, error) {
 	ctx, cancel := c.requestContext()
 	defer cancel()
 
-	var clusters []EKSClusterInfo
+	var names []string
 	paginator := eks.NewListClustersPaginator(c.eks, &eks.ListClustersInput{})
 	for paginator.HasMorePages() {
 		page, err := paginator.NextPage(ctx)
 		if err != nil {
-			if accessDenied(err) {
-				return nil, nil
-			}
 			return nil, err
 		}
-		for _, name := range page.Clusters {
+		names = append(names, page.Clusters...)
+	}
+
+	// Describe with bounded concurrency; each worker writes only its own index.
+	found := make([]*EKSClusterInfo, len(names))
+	errs := make([]error, len(names))
+	var wg sync.WaitGroup
+	sem := make(chan struct{}, eksDescribeParallel)
+	for i, name := range names {
+		wg.Add(1)
+		sem <- struct{}{}
+		go func() {
+			defer wg.Done()
+			defer func() { <-sem }()
 			desc, err := c.eks.DescribeCluster(ctx, &eks.DescribeClusterInput{Name: aws.String(name)})
 			if err != nil {
-				continue
+				errs[i] = fmt.Errorf("describe cluster %s: %w", name, err)
+				return
 			}
 			cl := desc.Cluster
 			if cl == nil || cl.ResourcesVpcConfig == nil || aws.ToString(cl.ResourcesVpcConfig.VpcId) != vpcID {
-				continue
+				return
 			}
-			clusters = append(clusters, EKSClusterInfo{
+			found[i] = &EKSClusterInfo{
 				Name:           aws.ToString(cl.Name),
 				Status:         string(cl.Status),
 				Version:        aws.ToString(cl.Version),
@@ -383,10 +388,18 @@ func (c *VPCClient) ListEKSClusters(vpcID string) ([]EKSClusterInfo, error) {
 				VPCID:          aws.ToString(cl.ResourcesVpcConfig.VpcId),
 				SubnetIDs:      cl.ResourcesVpcConfig.SubnetIds,
 				SecurityGroups: cl.ResourcesVpcConfig.SecurityGroupIds,
-			})
+			}
+		}()
+	}
+	wg.Wait()
+
+	var clusters []EKSClusterInfo
+	for _, f := range found {
+		if f != nil {
+			clusters = append(clusters, *f)
 		}
 	}
-	return clusters, nil
+	return clusters, errors.Join(errs...)
 }
 
 func (c *VPCClient) ListElastiCacheClusters(vpcID string) ([]ElastiCacheClusterInfo, error) {
@@ -401,9 +414,6 @@ func (c *VPCClient) ListElastiCacheClusters(vpcID string) ([]ElastiCacheClusterI
 	for {
 		out, err := c.elasticache.DescribeCacheSubnetGroups(ctx, &elasticache.DescribeCacheSubnetGroupsInput{Marker: sgMarker})
 		if err != nil {
-			if accessDenied(err) {
-				return nil, nil
-			}
 			return nil, err
 		}
 		for _, g := range out.CacheSubnetGroups {
@@ -420,9 +430,6 @@ func (c *VPCClient) ListElastiCacheClusters(vpcID string) ([]ElastiCacheClusterI
 	for {
 		out, err := c.elasticache.DescribeCacheClusters(ctx, &elasticache.DescribeCacheClustersInput{Marker: marker})
 		if err != nil {
-			if accessDenied(err) {
-				return nil, nil
-			}
 			return nil, err
 		}
 		for _, cl := range out.CacheClusters {
@@ -458,9 +465,6 @@ func (c *VPCClient) ListRedshiftClusters(vpcID string) ([]RedshiftClusterInfo, e
 	for {
 		out, err := c.redshift.DescribeClusters(ctx, &redshift.DescribeClustersInput{Marker: marker})
 		if err != nil {
-			if accessDenied(err) {
-				return nil, nil
-			}
 			return nil, err
 		}
 		for _, cl := range out.Clusters {
@@ -495,14 +499,12 @@ func (c *VPCClient) ListEFSFileSystems(vpcID string) ([]EFSFileSystemInfo, error
 	defer cancel()
 
 	var systems []EFSFileSystemInfo
+	var errs []error
 	var marker *string
 	for {
 		out, err := c.efs.DescribeFileSystems(ctx, &efs.DescribeFileSystemsInput{Marker: marker})
 		if err != nil {
-			if accessDenied(err) {
-				return nil, nil
-			}
-			return nil, err
+			return systems, errors.Join(append(errs, err)...)
 		}
 		for _, fs := range out.FileSystems {
 			// A filesystem can have mount targets across many pages; reading only
@@ -518,6 +520,9 @@ func (c *VPCClient) ListEFSFileSystems(vpcID string) ([]EFSFileSystemInfo, error
 				})
 				if err != nil {
 					slog.Warn("efs: describe mount targets failed", "filesystem", aws.ToString(fs.FileSystemId), "err", err)
+					// The filesystem can't be attributed to (or ruled out of)
+					// this VPC, so flag the listing as partial.
+					errs = append(errs, fmt.Errorf("describe mount targets of %s: %w", aws.ToString(fs.FileSystemId), err))
 					mtFailed = true
 					break
 				}
@@ -554,7 +559,7 @@ func (c *VPCClient) ListEFSFileSystems(vpcID string) ([]EFSFileSystemInfo, error
 		}
 		marker = out.NextMarker
 	}
-	return systems, nil
+	return systems, errors.Join(errs...)
 }
 
 // ListEMRClusters returns the active EMR clusters launched into one of the
@@ -567,6 +572,7 @@ func (c *VPCClient) ListEMRClusters(vpcSubnets map[string]bool) ([]EMRClusterInf
 	defer cancel()
 
 	var clusters []EMRClusterInfo
+	var errs []error
 	paginator := emr.NewListClustersPaginator(c.emr, &emr.ListClustersInput{
 		ClusterStates: []emrtypes.ClusterState{
 			emrtypes.ClusterStateStarting,
@@ -578,14 +584,16 @@ func (c *VPCClient) ListEMRClusters(vpcSubnets map[string]bool) ([]EMRClusterInf
 	for paginator.HasMorePages() {
 		page, err := paginator.NextPage(ctx)
 		if err != nil {
-			if accessDenied(err) {
-				return nil, nil
-			}
-			return nil, err
+			return clusters, errors.Join(append(errs, err)...)
 		}
 		for _, cs := range page.Clusters {
 			desc, err := c.emr.DescribeCluster(ctx, &emr.DescribeClusterInput{ClusterId: cs.Id})
-			if err != nil || desc.Cluster == nil {
+			if err != nil {
+				errs = append(errs, fmt.Errorf("describe cluster %s: %w", aws.ToString(cs.Id), err))
+				continue
+			}
+			if desc.Cluster == nil {
+				errs = append(errs, fmt.Errorf("describe cluster %s: empty response", aws.ToString(cs.Id)))
 				continue
 			}
 			cl := desc.Cluster
@@ -614,7 +622,7 @@ func (c *VPCClient) ListEMRClusters(vpcSubnets map[string]bool) ([]EMRClusterInf
 			})
 		}
 	}
-	return clusters, nil
+	return clusters, errors.Join(errs...)
 }
 
 // ---------------------------------------------------------------------------

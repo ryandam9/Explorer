@@ -3,6 +3,7 @@ package emrtui
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
 	"sort"
@@ -28,6 +29,12 @@ type HBaseTable struct {
 	Online    int      // regions with an assigned location
 	Families  []string // column families
 	State     string   // derived: ENABLED / DISABLED / PARTIAL / "—"
+
+	// RegionsKnown / FamiliesKnown are false when the per-table REST read
+	// failed, so a render can show "—" instead of presenting the zero values
+	// above as a real "0 regions, no families" (§6a, §11).
+	RegionsKnown  bool
+	FamiliesKnown bool
 
 	// Row count, populated only after an explicit, confirmed scan (the `c`
 	// action). Counted distinguishes "not counted yet" from "counted 0".
@@ -171,11 +178,16 @@ func FetchHBase(ctx context.Context, d *emrconn.Dialer, masterDNS string) ([]HBa
 	for _, ns := range namespaces {
 		tlBody, terr := d.GetRaw(ctx, emrconn.ServiceHBase, masterDNS, "/namespaces/"+ns+"/tables")
 		if terr != nil {
-			// A namespace listing failure is non-fatal; skip it.
+			// A namespace listing failure is non-fatal: skip it, but say so,
+			// or its tables would simply look absent.
+			slog.Warn("HBase namespace table listing failed; its tables are omitted",
+				"namespace", ns, "error", terr.Error())
 			continue
 		}
 		names, perr := parseTableList(tlBody)
 		if perr != nil {
+			slog.Warn("HBase namespace table listing unparseable; its tables are omitted",
+				"namespace", ns, "error", perr.Error())
 			continue
 		}
 		for _, name := range names {
@@ -195,11 +207,21 @@ func FetchHBase(ctx context.Context, d *emrconn.Dialer, masterDNS string) ([]HBa
 }
 
 // enrichHBaseTables fills each table's region counts, families and derived state
-// concurrently. Each goroutine writes its own slice index; a per-table failure
-// leaves that table with zero counts (best-effort).
+// concurrently. Each goroutine writes its own slice index. A per-table failure
+// is best-effort: it leaves that field unknown (RegionsKnown/FamiliesKnown
+// false) rather than zero, and all failures are logged as one summary line so
+// an unreachable REST server doesn't flood the log (§7).
 func enrichHBaseTables(ctx context.Context, d *emrconn.Dialer, host string, tables []HBaseTable) {
+	get := func(path string) ([]byte, error) { return d.GetRaw(ctx, emrconn.ServiceHBase, host, path) }
+	enrichHBaseTablesWith(get, tables)
+}
+
+// enrichHBaseTablesWith is enrichHBaseTables over an injectable fetch, so the
+// unknown-vs-zero handling is unit-testable without a REST server.
+func enrichHBaseTablesWith(get func(path string) ([]byte, error), tables []HBaseTable) {
 	var wg sync.WaitGroup
 	sem := make(chan struct{}, hbaseEnrichParallel)
+	errs := make([]error, len(tables))
 	for i := range tables {
 		wg.Add(1)
 		sem <- struct{}{}
@@ -207,16 +229,46 @@ func enrichHBaseTables(ctx context.Context, d *emrconn.Dialer, host string, tabl
 			defer wg.Done()
 			defer func() { <-sem }()
 			t := &tables[i]
-			if body, err := d.GetRaw(ctx, emrconn.ServiceHBase, host, "/"+t.Qualified+"/regions"); err == nil {
-				t.Regions, t.Online, _ = parseRegions(body)
+			var regErr, schemaErr error
+			if body, err := get("/" + t.Qualified + "/regions"); err != nil {
+				regErr = err
+			} else if total, online, err := parseRegions(body); err != nil {
+				regErr = err
+			} else {
+				t.Regions, t.Online, t.RegionsKnown = total, online, true
 			}
-			if body, err := d.GetRaw(ctx, emrconn.ServiceHBase, host, "/"+t.Qualified+"/schema"); err == nil {
-				t.Families, _ = parseSchema(body)
+			if body, err := get("/" + t.Qualified + "/schema"); err != nil {
+				schemaErr = err
+			} else if fams, err := parseSchema(body); err != nil {
+				schemaErr = err
+			} else {
+				t.Families, t.FamiliesKnown = fams, true
 			}
-			t.State = deriveTableState(t.Regions, t.Online)
+			t.State = "—"
+			if t.RegionsKnown {
+				t.State = deriveTableState(t.Regions, t.Online)
+			}
+			if regErr != nil || schemaErr != nil {
+				errs[i] = fmt.Errorf("%s: %w", t.Qualified, errors.Join(regErr, schemaErr))
+			}
 		}(i)
 	}
 	wg.Wait()
+
+	failed := 0
+	var first error
+	for _, err := range errs {
+		if err != nil {
+			if first == nil {
+				first = err
+			}
+			failed++
+		}
+	}
+	if failed > 0 {
+		slog.Warn("HBase table details could not be read for some tables; shown as —",
+			"failed", failed, "tables", len(tables), "firstError", first.Error())
+	}
 }
 
 // scannerBatch is how many rows each scanner page returns; scannerCap bounds a

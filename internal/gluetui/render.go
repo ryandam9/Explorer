@@ -31,6 +31,15 @@ func tableTime(t time.Time) string {
 	return t.UTC().Format("2006-01-02 15:04")
 }
 
+// jobTextState is the plain-text STATE cell: "unknown" when the run history
+// couldn't be read, "-" when the job has never run.
+func jobTextState(j Job) string {
+	if !j.RunsKnown {
+		return "unknown"
+	}
+	return dash(j.LastRunState)
+}
+
 func dash(s string) string {
 	if strings.TrimSpace(s) == "" {
 		return "-"
@@ -55,6 +64,9 @@ type jobJSON struct {
 	DurationSecs int32  `json:"lastRunDurationSeconds,omitempty"`
 	Worker       string `json:"worker,omitempty"`
 	GlueVersion  string `json:"glueVersion,omitempty"`
+	// RunsKnown is false when the run history couldn't be read; the lastRun*
+	// fields are then absent because they're unknown, not because it never ran.
+	RunsKnown bool `json:"runsKnown"`
 }
 
 func jobsToJSON(jobs []Job) []jobJSON {
@@ -64,6 +76,7 @@ func jobsToJSON(jobs []Job) []jobJSON {
 			Name: j.Name, Region: j.Region, ARN: j.ARN,
 			LastRunState: j.LastRunState, LastRun: isoOrEmpty(j.LastRunStarted),
 			DurationSecs: j.LastRunSeconds, Worker: j.Worker, GlueVersion: j.GlueVersion,
+			RunsKnown: j.RunsKnown,
 		})
 	}
 	return out
@@ -99,7 +112,7 @@ func RenderJobs(w io.Writer, jobs []Job, format string, noHeader bool) error {
 		}
 		for _, j := range jobs {
 			fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%s\t%s\t%s\n",
-				j.Name, j.Region, tableTime(j.LastRunStarted), dash(j.LastRunState),
+				j.Name, j.Region, tableTime(j.LastRunStarted), jobTextState(j),
 				formatDuration(j.LastRunSeconds), dash(j.Worker), dash(j.GlueVersion))
 		}
 		return tw.Flush()
