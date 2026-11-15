@@ -51,6 +51,19 @@ func stateGlyph(state string) string {
 
 // stateLabel pairs the glyph with the state text, e.g. "✓ SUCCEEDED". An empty
 // state (job never run) renders as a muted em dash.
+// jobStateLabel is stateLabel for a job's last run. Before the run history is
+// read it shows "…" while enrichment is still in flight, and "unknown" once
+// it has failed, so neither is mistaken for "never run" ("—").
+func jobStateLabel(j Job, enriching bool) string {
+	if !j.RunsKnown {
+		if enriching {
+			return "…"
+		}
+		return "unknown"
+	}
+	return stateLabel(j.LastRunState)
+}
+
 func stateLabel(state string) string {
 	if state == "" {
 		return "—"

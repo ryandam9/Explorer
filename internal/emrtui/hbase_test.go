@@ -2,6 +2,7 @@ package emrtui
 
 import (
 	"context"
+	"errors"
 	"reflect"
 	"strings"
 	"testing"
@@ -126,3 +127,36 @@ func TestCountRowsInBatch(t *testing.T) {
 }
 
 func contains(s, sub string) bool { return strings.Contains(s, sub) }
+
+// A table whose REST reads fail must come back unknown ("—"), not as a real
+// "0 regions, no families"; a table whose reads succeed is known.
+func TestEnrichHBaseTables_FailureIsUnknownNotZero(t *testing.T) {
+	get := func(path string) ([]byte, error) {
+		switch path {
+		case "/good/regions":
+			return []byte(`{"name":"good","Region":[{"name":"r1","location":"h:1"}]}`), nil
+		case "/good/schema":
+			return []byte(`{"name":"good","ColumnSchema":[{"name":"cf"}]}`), nil
+		case "/garbled/regions", "/garbled/schema":
+			return []byte(`not json`), nil
+		default:
+			return nil, errors.New("connection refused")
+		}
+	}
+	tables := []HBaseTable{{Qualified: "good"}, {Qualified: "down"}, {Qualified: "garbled"}}
+	enrichHBaseTablesWith(get, tables)
+
+	good := tables[0]
+	if !good.RegionsKnown || !good.FamiliesKnown || good.Regions != 1 || good.State != "ENABLED" {
+		t.Errorf("good table = %+v, want known, 1 region, ENABLED", good)
+	}
+	for _, tb := range tables[1:] {
+		if tb.RegionsKnown || tb.FamiliesKnown || tb.State != "—" {
+			t.Errorf("%s = %+v, want unknown with state —", tb.Qualified, tb)
+		}
+		row := hbaseRow(tb)
+		if row[3] != "—" || row[4] != "—" || row[6] != "—" {
+			t.Errorf("%s row = %v, want — for regions/online/families", tb.Qualified, row)
+		}
+	}
+}

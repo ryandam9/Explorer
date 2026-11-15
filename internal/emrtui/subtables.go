@@ -134,11 +134,29 @@ func hbaseRow(t HBaseTable) table.Row {
 		t.Namespace,
 		t.Name,
 		t.State,
-		itoa(t.Regions),
-		itoa(t.Online),
+		hbaseCount(t.Regions, t.RegionsKnown),
+		hbaseCount(t.Online, t.RegionsKnown),
 		hbaseRowsLabel(t),
-		strings.Join(t.Families, ","),
+		hbaseFamilies(t, ","),
 	}
+}
+
+// hbaseCount renders a region count, or "—" when it couldn't be read, so a
+// failed lookup never reads as a real 0.
+func hbaseCount(n int, known bool) string {
+	if !known {
+		return "—"
+	}
+	return itoa(n)
+}
+
+// hbaseFamilies renders the column families, or "—" when the schema couldn't
+// be read.
+func hbaseFamilies(t HBaseTable, sep string) string {
+	if !t.FamiliesKnown {
+		return "—"
+	}
+	return strings.Join(t.Families, sep)
 }
 
 // --- HDFS DataNodes ---------------------------------------------------------

@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"sync"
 	"testing"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
@@ -165,6 +166,38 @@ func TestStreamRun_PartialResultsKeptOnError(t *testing.T) {
 	}
 	if e.Service != "fake" || e.Region != "global" {
 		t.Errorf("unexpected error origin: %+v", e)
+	}
+}
+
+// panickingCollector streams one batch, then panics like a mapper hitting a
+// nil SDK pointer would.
+type panickingCollector struct{}
+
+func (panickingCollector) Name() string   { return "boomsvc" }
+func (panickingCollector) IsGlobal() bool { return true }
+func (panickingCollector) Collect(_ context.Context, in services.CollectInput) ([]model.Resource, error) {
+	in.Emit([]model.Resource{{ID: "streamed"}})
+	var p *struct{ X int }
+	_ = p.X // nil dereference
+	return nil, nil
+}
+
+func TestStreamRun_CollectorPanicBecomesPartialError(t *testing.T) {
+	eng := newFakeEngine(panickingCollector{})
+
+	resources, errs := collectChunks(eng)
+
+	if len(resources) != 1 || resources[0].ID != "streamed" {
+		t.Fatalf("expected the streamed resource to be kept, got %v", resources)
+	}
+	if len(errs) != 1 {
+		t.Fatalf("expected 1 error, got %d: %v", len(errs), errs)
+	}
+	if !errs[0].Partial || errs[0].Service != "boomsvc" {
+		t.Errorf("unexpected error: %+v", errs[0])
+	}
+	if !strings.Contains(errs[0].Message, "internal error") {
+		t.Errorf("Message = %q, want it to mention the internal error", errs[0].Message)
 	}
 }
 
@@ -460,5 +493,29 @@ func TestStreamRun_AccountConfigFailureSurfacedAndProgressCompletes(t *testing.T
 	}
 	if !strings.Contains(errs[0].Message, "acctA") {
 		t.Errorf("message should name the skipped account, got %q", errs[0].Message)
+	}
+}
+
+// Account credentials are resolved in the engine's bootstrap region, so a
+// GovCloud/China config never sends STS calls to us-east-1.
+func TestBuildSweeps_UsesBootstrapRegion(t *testing.T) {
+	var got []string
+	var mu sync.Mutex
+	orig := buildAccountConfig
+	buildAccountConfig = func(_ context.Context, _ *config.AWSConfig, region string) (aws.Config, error) {
+		mu.Lock()
+		got = append(got, region)
+		mu.Unlock()
+		return aws.Config{}, errors.New("stop here")
+	}
+	t.Cleanup(func() { buildAccountConfig = orig })
+
+	eng := newFakeEngine(&fakeCollector{name: "fake"})
+	eng.AWSConfig = aws.Config{Region: "us-gov-west-1"}
+	eng.Config.Accounts = []config.AccountConfig{{Name: "a", Profile: "p1"}, {Name: "b", Profile: "p2"}}
+	eng.buildSweeps(context.Background())
+
+	if len(got) != 2 || got[0] != "us-gov-west-1" || got[1] != "us-gov-west-1" {
+		t.Fatalf("buildAccountConfig regions = %v, want us-gov-west-1 for both accounts", got)
 	}
 }

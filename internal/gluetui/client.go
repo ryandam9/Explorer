@@ -33,8 +33,12 @@ type Job struct {
 	LastRunState   string
 	LastRunStarted time.Time
 	LastRunSeconds int32
-	Worker         string
-	GlueVersion    string
+	// RunsKnown is true once GetJobRuns succeeded (including "no runs"). When
+	// false the LastRun* fields are unknown, not "never run" — so the
+	// run-history checks stay silent and the table shows "unknown" (§8).
+	RunsKnown   bool
+	Worker      string
+	GlueVersion string
 }
 
 type Crawler struct {
@@ -467,11 +471,12 @@ func (c *Client) listJobs(ctx context.Context, cl *glue.Client, region string) (
 }
 
 // enrichJobs stamps each job with its latest run state via a bounded-concurrency
-// GetJobRuns pass (best-effort: a denied/empty lookup just leaves the run
-// columns blank).
+// GetJobRuns pass. Best-effort: a failed lookup leaves RunsKnown false (shown as
+// "unknown", not "never run"), and failures are logged as one summary line.
 func (c *Client) enrichJobs(ctx context.Context, cl *glue.Client, jobs []Job) {
 	var wg sync.WaitGroup
 	sem := make(chan struct{}, 8)
+	errs := make([]error, len(jobs))
 	for i := range jobs {
 		wg.Add(1)
 		sem <- struct{}{}
@@ -479,7 +484,12 @@ func (c *Client) enrichJobs(ctx context.Context, cl *glue.Client, jobs []Job) {
 			defer wg.Done()
 			defer func() { <-sem }()
 			out, err := cl.GetJobRuns(ctx, &glue.GetJobRunsInput{JobName: aws.String(jobs[i].Name), MaxResults: aws.Int32(1)})
-			if err != nil || len(out.JobRuns) == 0 {
+			if err != nil {
+				errs[i] = err
+				return
+			}
+			jobs[i].RunsKnown = true
+			if len(out.JobRuns) == 0 {
 				return
 			}
 			run := out.JobRuns[0]
@@ -491,6 +501,21 @@ func (c *Client) enrichJobs(ctx context.Context, cl *glue.Client, jobs []Job) {
 		}(i)
 	}
 	wg.Wait()
+
+	failed := 0
+	var first error
+	for _, err := range errs {
+		if err != nil {
+			if first == nil {
+				first = err
+			}
+			failed++
+		}
+	}
+	if failed > 0 {
+		slog.Warn("glue: GetJobRuns failed for some jobs; their last run is shown as unknown",
+			"failed", failed, "jobs", len(jobs), "firstError", first.Error())
+	}
 }
 
 // JobRuns fetches the most recent run history for a job (newest first).

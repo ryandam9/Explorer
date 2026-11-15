@@ -336,6 +336,10 @@ type hbaseJSON struct {
 	Regions   int      `json:"regions"`
 	Online    int      `json:"online"`
 	Families  []string `json:"families"`
+	// RegionsKnown / FamiliesKnown are false when that read failed; the
+	// matching fields above are then zero/empty, not real values.
+	RegionsKnown  bool `json:"regionsKnown"`
+	FamiliesKnown bool `json:"familiesKnown"`
 }
 
 func hbaseToJSON(tables []HBaseTable) []hbaseJSON {
@@ -344,6 +348,7 @@ func hbaseToJSON(tables []HBaseTable) []hbaseJSON {
 		out = append(out, hbaseJSON{
 			Namespace: t.Namespace, Table: t.Name, Qualified: t.Qualified, State: t.State,
 			Regions: t.Regions, Online: t.Online, Families: t.Families,
+			RegionsKnown: t.RegionsKnown, FamiliesKnown: t.FamiliesKnown,
 		})
 	}
 	return out
@@ -368,10 +373,16 @@ func RenderHBaseTables(w io.Writer, tables []HBaseTable, format string, noHeader
 			_ = cw.Write([]string{"Namespace", "Table", "State", "Regions", "Online", "Families"})
 		}
 		for _, t := range tables {
-			_ = cw.Write([]string{
-				t.Namespace, t.Name, t.State, strconv.Itoa(t.Regions), strconv.Itoa(t.Online),
-				strings.Join(t.Families, " "),
-			})
+			// Unknown counts are written as empty cells (not 0), keeping the
+			// column layout unchanged for scripts.
+			regions, online, fams := "", "", ""
+			if t.RegionsKnown {
+				regions, online = strconv.Itoa(t.Regions), strconv.Itoa(t.Online)
+			}
+			if t.FamiliesKnown {
+				fams = strings.Join(t.Families, " ")
+			}
+			_ = cw.Write([]string{t.Namespace, t.Name, t.State, regions, online, fams})
 		}
 		cw.Flush()
 		return cw.Error()
@@ -381,8 +392,10 @@ func RenderHBaseTables(w io.Writer, tables []HBaseTable, format string, noHeader
 			fmt.Fprintln(tw, "NAMESPACE\tTABLE\tSTATE\tREGIONS\tONLINE\tFAMILIES")
 		}
 		for _, t := range tables {
-			fmt.Fprintf(tw, "%s\t%s\t%s\t%d\t%d\t%s\n",
-				t.Namespace, t.Name, dash(t.State), t.Regions, t.Online, strings.Join(t.Families, ","))
+			fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%s\t%s\n",
+				t.Namespace, t.Name, dash(t.State),
+				hbaseCount(t.Regions, t.RegionsKnown), hbaseCount(t.Online, t.RegionsKnown),
+				hbaseFamilies(t, ","))
 		}
 		return tw.Flush()
 	}

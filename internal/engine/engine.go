@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"runtime/debug"
 	"strings"
 	"sync"
 	"time"
@@ -319,6 +320,15 @@ func (e *Engine) buildSweeps(ctx context.Context) []accountSweep {
 		}}
 	}
 
+	// Resolve each account's credentials in the same region the engine
+	// bootstrapped in, rather than a hardcoded us-east-1: that keeps STS calls
+	// in the configured partition (GovCloud, China), where us-east-1 doesn't
+	// exist.
+	bootstrap := e.AWSConfig.Region
+	if bootstrap == "" {
+		bootstrap = "us-east-1"
+	}
+
 	results := make([]*accountSweep, len(e.Config.Accounts))
 	var wg sync.WaitGroup
 	for i, acc := range e.Config.Accounts {
@@ -345,7 +355,7 @@ func (e *Engine) buildSweeps(ctx context.Context) []accountSweep {
 					}
 				}
 				var err error
-				accCfg, err = buildAccountConfig(ctx, spec, "us-east-1")
+				accCfg, err = buildAccountConfig(ctx, spec, bootstrap)
 				if err != nil {
 					// Record the failure as a schedulable sweep rather than
 					// dropping it silently: StreamRun emits it as a visible scan
@@ -540,7 +550,7 @@ func (e *Engine) StreamRun(ctx context.Context, chunks chan<- model.ResultChunk)
 						}
 					}
 
-					res, err := s.Collect(collectCtx, input)
+					res, err := safeCollect(collectCtx, s, input)
 					if acct != "" {
 						for i := range res {
 							res[i].AccountID = acct
@@ -616,6 +626,25 @@ func (e *Engine) StreamRun(ctx context.Context, chunks chan<- model.ResultChunk)
 	// is deliberately no error to propagate. If that convention ever changes,
 	// handle the returned error rather than dropping it.
 	_ = g.Wait()
+}
+
+// safeCollect runs one collector and converts a panic into an error. An
+// unrecovered panic in a collector goroutine would kill the whole process (and
+// leave a TUI's terminal in raw mode) because of one odd resource the SDK
+// returned; recovering here degrades only that service/region instead. Any
+// resources the collector streamed via Emit before panicking are kept by the
+// caller and the error is flagged partial.
+func safeCollect(ctx context.Context, s services.Collector, input services.CollectInput) (res []model.Resource, err error) {
+	defer func() {
+		if p := recover(); p != nil {
+			slog.Error("Collector panicked",
+				"service", s.Name(), "region", input.Region, "panic", fmt.Sprint(p),
+				"stack", string(debug.Stack()))
+			res = nil
+			err = fmt.Errorf("internal error in %s collector (please report): %v", s.Name(), p)
+		}
+	}()
+	return s.Collect(ctx, input)
 }
 
 func filterResources(resources []model.Resource, filters model.Filter) []model.Resource {

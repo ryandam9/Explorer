@@ -21,8 +21,8 @@ func newGlueTestModel(w, h int) *m {
 		runsTbl: newGlueTable(runColumns()),
 		inv: Inventory{
 			Jobs: []Job{
-				{Name: "nightly-orders-etl-production", Region: "us-east-1", LastRunState: "SUCCEEDED", LastRunSeconds: 842, Worker: "G.2X", GlueVersion: "4.0"},
-				{Name: "ingest", Region: "us-east-1", LastRunState: "FAILED", LastRunSeconds: 12, Worker: "G.1X", GlueVersion: "3.0"},
+				{Name: "nightly-orders-etl-production", Region: "us-east-1", LastRunState: "SUCCEEDED", RunsKnown: true, LastRunSeconds: 842, Worker: "G.2X", GlueVersion: "4.0"},
+				{Name: "ingest", Region: "us-east-1", LastRunState: "FAILED", RunsKnown: true, LastRunSeconds: 12, Worker: "G.1X", GlueVersion: "3.0"},
 			},
 			Crawlers: []Crawler{
 				{Name: "catalog-crawler", Region: "us-east-1", State: "READY", LastCrawlStatus: "SUCCEEDED", Database: "analytics", Schedule: "cron(0 1 * * ? *)"},
@@ -257,5 +257,18 @@ func TestGlueRunsView(t *testing.T) {
 	}
 	if !strings.Contains(out, "FAILED") || !strings.Contains(out, "OOM") {
 		t.Errorf("runs view missing content:\n%s", out)
+	}
+}
+
+// A job whose GetJobRuns failed (RunsKnown false) must not be reported as
+// "never run" — the run-history checks stay silent for it (§8).
+func TestGlueFindingsPanel_UnknownRunsDoNotFireNeverRun(t *testing.T) {
+	mm := newGlueTestModel(120, 24)
+	mm.inv.Jobs = []Job{{Name: "denied-job", Region: "us-east-1"}}
+	mm.openFindings()
+	for _, f := range mm.findingList {
+		if f.Resource == "denied-job" && f.ID == findings.CheckGlueJobStale {
+			t.Fatalf("unknown run history fired %s: %+v", f.ID, f)
+		}
 	}
 }

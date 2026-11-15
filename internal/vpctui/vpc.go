@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 	"sort"
 	"strings"
 	"sync"
@@ -89,14 +90,24 @@ func hasAPIErrorCode(err error, codes ...string) bool {
 	return false
 }
 
+// ListRegions returns the account's enabled regions, falling back to the
+// built-in list when discovery fails. The fallback is logged so a scan of the
+// wrong region set is diagnosable rather than silent (§6a). The call is bounded
+// by a timeout: callers pass a long-lived context.
 func ListRegions(ctx context.Context, awsCfg *config.AWSConfig) []string {
+	ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
+	defer cancel()
 	cfg, err := auth.BuildAWSConfig(ctx, awsCfg, "")
 	if err != nil {
+		slog.Warn("Region discovery failed building AWS config; using the built-in region list",
+			"regions", len(awsutil.FallbackRegions), "error", err.Error())
 		return awsutil.FallbackRegions
 	}
 	client := awsec2.NewFromConfig(cfg)
 	output, err := client.DescribeRegions(ctx, &awsec2.DescribeRegionsInput{})
 	if err != nil {
+		slog.Warn("ec2:DescribeRegions failed; using the built-in region list",
+			"regions", len(awsutil.FallbackRegions), "error", err.Error())
 		return awsutil.FallbackRegions
 	}
 	regions := make([]string, 0, len(output.Regions))
@@ -119,9 +130,9 @@ func ListVPCsInRegion(ctx context.Context, awsCfg *config.AWSConfig, region stri
 	}
 	vpcs, err := client.ListVPCs()
 	if err != nil {
-		if hasAPIErrorCode(err, "AccessDenied", "AccessDeniedException", "UnauthorizedOperation", "AuthorizationError") {
-			return nil, nil
-		}
+		// A denied region (e.g. an SCP region deny) is reported as a failure,
+		// not as "no VPCs": the scan counts it under "regions failed" so the
+		// user knows that region wasn't actually looked at (§2, §6a).
 		return nil, err
 	}
 	for i := range vpcs {
@@ -1018,6 +1029,25 @@ func (c *VPCClient) ListReachabilityAnalyses() ([]NetInsightsAnalysis, error) {
 	return out, nil
 }
 
+// cleanupInsightsPath deletes a Network Insights path whose analysis never
+// started, so a failed run leaves nothing behind, and returns cause. It uses a
+// context detached from cancellation (the failure may itself be a cancel). If
+// the delete fails too, that is logged and joined onto cause so the user knows
+// a path may be left in the account.
+func (c *VPCClient) cleanupInsightsPath(pathID string, cause error) error {
+	ctx, cancel := context.WithTimeout(context.WithoutCancel(c.ctx), 15*time.Second)
+	defer cancel()
+	_, err := c.ec2.DeleteNetworkInsightsPath(ctx, &awsec2.DeleteNetworkInsightsPathInput{
+		NetworkInsightsPathId: aws.String(pathID),
+	})
+	if err != nil {
+		slog.Warn("Could not delete Network Insights path after a failed analysis start",
+			"path", pathID, "error", err.Error())
+		return errors.Join(cause, fmt.Errorf("network insights path %s was left behind (delete failed: %w)", pathID, err))
+	}
+	return cause
+}
+
 // CreateStartWaitAnalysis creates a Network Insights path, starts an analysis,
 // and polls until it completes or the deadline passes. THIS CREATES REAL AWS
 // RESOURCES AND INCURS A PER-ANALYSIS CHARGE — callers must confirm first.
@@ -1050,12 +1080,11 @@ func (c *VPCClient) CreateStartWaitAnalysis(source, dest string, port int) (NetI
 	if err != nil {
 		// Don't leave the just-created path behind when the analysis never
 		// started. Use a fresh context: the failure may be a cancellation.
-		cleanupCtx, cleanupCancel := context.WithTimeout(context.Background(), 15*time.Second)
-		defer cleanupCancel()
-		_, _ = c.ec2.DeleteNetworkInsightsPath(cleanupCtx, &awsec2.DeleteNetworkInsightsPathInput{
-			NetworkInsightsPathId: aws.String(pathID),
-		})
-		return NetInsightsAnalysis{}, err
+		return NetInsightsAnalysis{}, c.cleanupInsightsPath(pathID, err)
+	}
+	if startOut.NetworkInsightsAnalysis == nil {
+		return NetInsightsAnalysis{}, c.cleanupInsightsPath(pathID,
+			fmt.Errorf("StartNetworkInsightsAnalysis returned no analysis"))
 	}
 	analysisID := aws.ToString(startOut.NetworkInsightsAnalysis.NetworkInsightsAnalysisId)
 

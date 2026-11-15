@@ -62,7 +62,7 @@ func (mm *m) tabRows(t tab) []rowT {
 		for i := range mm.inv.Jobs {
 			j := mm.inv.Jobs[i]
 			add(rowT{
-				cells: table.Row{j.Name, shortTime(j.LastRunStarted), stateLabel(j.LastRunState), formatDuration(j.LastRunSeconds), j.Worker, j.GlueVersion},
+				cells: table.Row{j.Name, shortTime(j.LastRunStarted), jobStateLabel(j, mm.enrichPending > 0), formatDuration(j.LastRunSeconds), j.Worker, j.GlueVersion},
 				name:  j.Name, region: j.Region, arn: j.ARN, typ: "job", job: &mm.inv.Jobs[i],
 			}, j.Region)
 		}
