@@ -181,6 +181,13 @@ func stripControl(s string) string {
 		switch r {
 		case '\n', '\t':
 			return r
+		case unitSep:
+			// Field/record separators are data, not terminal control: show
+			// them as their control pictures so the raw view keeps the
+			// columns apart instead of running the fields together.
+			return '␟'
+		case recordSep:
+			return '␞'
 		}
 		if r < 0x20 || r == 0x7f {
 			return -1 // drop other C0 controls and DEL
