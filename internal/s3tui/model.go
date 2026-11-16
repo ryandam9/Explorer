@@ -949,7 +949,7 @@ func (m *Model) fetchGzipPreview(key string) tea.Cmd {
 			}
 			return objectPreviewMsg{key: key, content: text}
 		}
-		return objectPreviewMsg{key: key, content: decompressedPreview(out, truncated, looksLikeCSV(innerName(key)))}
+		return objectPreviewMsg{key: key, content: decompressedPreview(out, truncated, looksDelimited(innerName(key), string(out)))}
 	}
 }
 
@@ -2698,6 +2698,13 @@ func (m *Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.previewErr = msg.err
 			m.previewContent = msg.content
 			m.previewTruncated = msg.truncated
+			// The view was routed by name before the bytes arrived; content
+			// that turns out to be unit-separated is a table whatever the key
+			// is called.
+			if msg.err == nil && !m.showCSV && looksUnitSeparated(msg.content) {
+				m.showCSV = true
+				m.showPreview = false
+			}
 			switch {
 			case m.showCSV && msg.err == nil && m.initCSV(msg.content):
 				// CSV parsed: the full-screen table is ready.

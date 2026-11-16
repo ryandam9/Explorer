@@ -169,9 +169,68 @@ func looksLikeCSV(key string) bool {
 	return false
 }
 
+// unitSep and recordSep are the ASCII unit (31) and record (30) separators.
+// They exist only to delimit data — they never occur in prose — so a file that
+// uses them is recognised from its content and parsed without CSV quoting.
+const (
+	unitSep   = '\x1f'
+	recordSep = '\x1e'
+)
+
+// unitSepRecords splits unit-separated content into its records: on the record
+// separator when the file uses one, on newlines otherwise. Blank records (the
+// trailing newline, a newline after each record separator) are dropped.
+func unitSepRecords(content string) []string {
+	sep := "\n"
+	if strings.ContainsRune(content, recordSep) {
+		sep = string(recordSep)
+	}
+	var out []string
+	for _, rec := range strings.Split(content, sep) {
+		rec = strings.Trim(rec, "\r\n")
+		if rec == "" {
+			continue
+		}
+		out = append(out, rec)
+	}
+	return out
+}
+
+// looksUnitSeparated reports whether content is a unit-separated table: most of
+// its leading records carry the separator. This is a content check, so a
+// delimited file is tabulated whatever its key is called (.txt, a dated
+// suffix, no extension at all) — an extension is a hint, not the format.
+func looksUnitSeparated(content string) bool {
+	if !strings.ContainsRune(content, unitSep) {
+		return false
+	}
+	recs := unitSepRecords(content)
+	if len(recs) > 20 {
+		recs = recs[:20]
+	}
+	with := 0
+	for _, rec := range recs {
+		if strings.ContainsRune(rec, unitSep) {
+			with++
+		}
+	}
+	return with > 0 && with*2 >= len(recs)
+}
+
+// looksDelimited reports whether an object should open in the table view: its
+// name says so, or its content is unit-separated.
+func looksDelimited(name, content string) bool {
+	return looksLikeCSV(name) || looksUnitSeparated(content)
+}
+
 // detectDelimiter picks the candidate that splits the sample into the most
-// columns most consistently, defaulting to comma when nothing stands out.
+// columns most consistently, defaulting to comma when nothing stands out. A
+// unit-separated file wins outright: scoring it against commas or pipes that
+// merely appear inside its text fields would pick the wrong one.
 func detectDelimiter(content string) rune {
+	if looksUnitSeparated(content) {
+		return unitSep
+	}
 	lines := firstLines(content, 20)
 	best, bestScore := ',', -1
 	for _, d := range csvDelimiters {
@@ -214,11 +273,30 @@ func firstLines(content string, n int) []string {
 	return out
 }
 
+// parseUnitSeparated splits unit-separated content literally: no quoting, so a
+// field that starts with a double quote is just text (encoding/csv would read
+// it as an opening quote and swallow the rows that follow). One record is
+// enough to be a table — the separator itself is the evidence.
+func parseUnitSeparated(content string) ([][]string, bool) {
+	var recs [][]string
+	for _, rec := range unitSepRecords(content) {
+		recs = append(recs, strings.Split(rec, string(unitSep)))
+	}
+	if len(recs) == 0 || maxCols(recs) < 2 {
+		return nil, false
+	}
+	return recs, true
+}
+
 // parseCSV parses content with the given delimiter, tolerating ragged rows and
 // a truncated/malformed tail (the preview is only the first chunk of the
 // object). It reports ok only when the result is table-shaped: at least a
-// header plus one data row, and at least two columns.
+// header plus one data row, and at least two columns. Unit-separated content
+// is split literally instead (see parseUnitSeparated).
 func parseCSV(content string, delim rune) ([][]string, bool) {
+	if delim == unitSep {
+		return parseUnitSeparated(content)
+	}
 	r := csv.NewReader(strings.NewReader(content))
 	r.Comma = delim
 	r.FieldsPerRecord = -1 // allow ragged rows
@@ -274,7 +352,11 @@ func (m *Model) initCSV(content string) bool {
 	}
 	m.previewIsParquet = false
 	m.csvAll = recs
-	m.csvHeaderRow = 1            // row 1 is the header by default (reset per file)
+	m.csvHeaderRow = 1 // row 1 is the header by default (reset per file)
+	if len(recs) == 1 {
+		// A single record is data, not a header with nothing under it.
+		m.csvHeaderRow = 0
+	}
 	m.csvColFilter = colFilterAll // show every column by default (reset per file)
 	m.csvNames = nil              // a names layout applies to one file only
 	m.csvRecordActive = false
